@@ -707,9 +707,11 @@ export type TaskDocumentComment = {
   editedAt: string | null; completedAt: string | null; completedBy: string | null;
   /** The words this comment is about (supabase/task-document-comment-quotes.sql). */
   quote: string | null;
-  /** The numbered pin on an image or page version (supabase/task-image-reviews.sql);
-   *  on a page, the element it sits on (supabase/task-page-reviews.sql). */
-  pin: { fileId: string; x: number; y: number; number: number; anchor: { node: number; nx: number; ny: number; width: number } | null } | null;
+  /** The numbered pin on a version (supabase/task-image-reviews.sql): a spot on an
+   *  image or page, with on a page the element it sits on
+   *  (supabase/task-page-reviews.sql), or on a video the moment it was left at,
+   *  in seconds, with no spot (supabase/task-video-comments.sql). */
+  pin: { fileId: string; x: number | null; y: number | null; t: number | null; number: number; anchor: { node: number; nx: number; ny: number; width: number } | null } | null;
   /** A file added with the comment. */
   attachmentFileId: string | null;
 };
@@ -721,7 +723,11 @@ export const fetchTaskDocumentComments = async (documentId: string): Promise<Tas
     id: r.id, body: r.body ?? "", authorId: r.author_id ?? null, authorLabel: r.author_label ?? "", fromClient: r.author_id === null,
     createdAt: r.created_at, editedAt: r.edited_at ?? null, completedAt: r.completed_at ?? null, completedBy: r.completed_by_label ?? null, quote: r.quote ?? null,
     pin: r.pin_file_id && r.pin_number ? {
-      fileId: r.pin_file_id, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number),
+      fileId: r.pin_file_id, number: Number(r.pin_number),
+      // Null, not 0: a video pin has no spot, and Number(null) would put one at the corner.
+      x: r.pin_x == null ? null : Number(r.pin_x),
+      y: r.pin_y == null ? null : Number(r.pin_y),
+      t: r.pin_t == null ? null : Number(r.pin_t),
       anchor: r.pin_node != null ? { node: Number(r.pin_node), nx: Number(r.pin_node_x), ny: Number(r.pin_node_y), width: Number(r.pin_width) } : null,
     } : null,
     attachmentFileId: r.attachment_file_id ?? null,

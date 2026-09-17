@@ -49,10 +49,10 @@ export const noDocumentYet = (kind: ReviewKind) => `This task has no ${IN_SENTEN
  *  HTML reviews "need to be the same as doc"). */
 export const commentHint = (kind: ReviewKind) => kind === "doc"
   ? "Write a comment, or select words in the document to comment on them…"
-  // A video review plays the video; catching the moment a comment was left at is
-  // the next slice, so until then its hint promises nothing about pausing.
+  // A video has no spot worth pointing at, so its comments mark a moment: pause,
+  // and the comment is pinned to that second.
   : kind === "video"
-    ? "Write a comment about the video…"
+    ? "Write a comment, or pause the video to comment on that moment…"
     : `Write a comment, or click a spot on the ${WHAT[kind]} to comment on it…`;
 
 /** The query string a team route reads the kind from ("" for the text document). */

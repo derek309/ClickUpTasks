@@ -6,6 +6,7 @@
 // (Derek, 2026-09-11: "remove the show and hide feature and change full to just
 // open we only need one screen").
 import { useEffect, useRef, useState } from "react";
+import { formatPinTime } from "@/lib/reviewPins";
 import { createPortal } from "react-dom";
 import { I } from "./ui";
 import { ActionMenu } from "./ActionMenu";
@@ -111,9 +112,10 @@ export type ThreadComment = {
   editedAt?: string | null; completedAt?: string | null; completedBy?: string | null;
   /** The words in the document this comment is about. */
   quote?: string | null;
-  /** The numbered pin on an image or page version this comment is about; on a page,
-   *  the element it sits on. */
-  pin?: { fileId: string; x: number; y: number; number: number; anchor?: { node: number; nx: number; ny: number; width: number } | null } | null;
+  /** The numbered pin this comment is about: a spot on an image or page version
+   *  (x and y, and on a page the element it sits on), or, on a video, the moment
+   *  it was left at (t, in seconds) with no spot at all. */
+  pin?: { fileId: string; x: number | null; y: number | null; t?: number | null; number: number; anchor?: { node: number; nx: number; ny: number; width: number } | null } | null;
   /** A file added with the comment. */
   attachmentFileId?: string | null;
 };
@@ -258,7 +260,17 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // the ones on the whole version (Derek, 2026-09-14: "group the changes by image",
   // then "separate groups ... so it's clean and clear").
   const groupOf = (c: ThreadComment) => (c.pin && pinLabel ? pinLabel(c.pin.fileId) : null);
-  const byPin = (a: ThreadComment, b: ThreadComment) => Number(!!a.completedAt) - Number(!!b.completedAt) || (a.pin?.number ?? 0) - (b.pin?.number ?? 0);
+  // Done last, then in the order the thing itself reads: down a video by the second
+  // each comment was left at, and by pin number on an image or page, where the
+  // numbers are the order they were dropped in.
+  const byPin = (a: ThreadComment, b: ThreadComment) => {
+    const done = Number(!!a.completedAt) - Number(!!b.completedAt);
+    if (done) return done;
+    const at = a.pin?.t ?? null;
+    const bt = b.pin?.t ?? null;
+    if (at !== null && bt !== null && at !== bt) return at - bt;
+    return (a.pin?.number ?? 0) - (b.pin?.number ?? 0);
+  };
   const groups = grouping
     ? pinGroups!.map((label) => ({ label, items: shown.filter((c) => groupOf(c) === label).sort(byPin) }))
     : null;
@@ -305,15 +317,21 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     const done = !!c.completedAt;
     const busy = busyId === c.id;
     const isEditing = editing?.id === c.id;
-    const place = c.pin && pinLabel ? pinLabel(c.pin.fileId) : null;
-    const chip = place && !grouped;
+    // What a pin is "on": the second on a video, the image or page name otherwise.
+    const moment = c.pin?.t == null ? null : formatPinTime(c.pin.t);
+    const place = moment ?? (c.pin && pinLabel ? pinLabel(c.pin.fileId) : null);
+    // A moment always shows: it is the whole point of the comment, and a video's
+    // pins are not grouped under headings the way a set's images are.
+    const chip = place && (!!moment || !grouped);
     return (
       <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
         onMouseEnter={onHover && c.pin ? () => onHover(c.id) : undefined} onMouseLeave={onHover && c.pin ? () => onHover(null) : undefined}
         className={`-mx-2 flex gap-3 rounded-lg px-2 py-3 transition-colors ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
         {c.pin ? (
-          <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick} title={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
-            aria-label={`Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`} className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
+          <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick}
+            title={moment ? `Jump to ${moment}` : `Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
+            aria-label={moment ? `Jump to ${moment}` : `Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
+            className={`h-8 shrink-0 ${done ? "opacity-50" : ""}`}>
             <PinNumber number={c.pin.number} color={pinColor} />
           </button>
         ) : (
@@ -608,18 +626,21 @@ export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, h
     onPlace({ x: clamp((e.clientX - r.left) / r.width), y: clamp((e.clientY - r.top) / r.height) });
   };
   const marker = "absolute flex h-9 min-w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-[3px] border-white px-1 text-[16px] font-bold leading-none text-white shadow-[0_2px_8px_rgba(0,0,0,0.35)]";
-  const pins = comments.filter((c) => c.pin && c.pin.fileId === fileId);
+  // Only pins that have a spot: a video's pins mark a moment and belong on the
+  // player's own bar, never on an image.
+  const pins = comments.flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
+    ? [{ c, spot: { x: c.pin.x, y: c.pin.y, number: c.pin.number } }] : []));
   return (
     <div className="relative mx-auto w-fit max-w-full select-none">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} onClick={place} draggable={false}
         className={`block h-auto max-w-full rounded-xl shadow-[0_1px_2px_rgba(20,24,40,0.06),0_10px_28px_rgba(20,24,40,0.14)] ${onPlace ? "cursor-crosshair" : ""}`} />
-      {pins.map((c) => (
-        <button key={c.id} onClick={() => onPinClick(c.id)} title={`Pin ${c.pin!.number}`} aria-label={`Pin ${c.pin!.number}`}
+      {pins.map(({ c, spot }) => (
+        <button key={c.id} onClick={() => onPinClick(c.id)} title={`Pin ${spot.number}`} aria-label={`Pin ${spot.number}`}
           onMouseEnter={onPinHover ? () => onPinHover(c.id) : undefined} onMouseLeave={onPinHover ? () => onPinHover(null) : undefined}
           className={`${marker} transition hover:scale-110 ${activeId === c.id || hoverId === c.id ? "z-10 scale-110 ring-4 ring-highlight/50" : ""} ${c.completedAt ? "opacity-60" : ""}`}
-          style={{ left: `${c.pin!.x * 100}%`, top: `${c.pin!.y * 100}%`, background: c.completedAt ? "#6b7280" : color }}>
-          {c.pin!.number}
+          style={{ left: `${spot.x * 100}%`, top: `${spot.y * 100}%`, background: c.completedAt ? "#6b7280" : color }}>
+          {spot.number}
         </button>
       ))}
       {pending && pending.fileId === fileId && (

@@ -29,6 +29,7 @@ import { commentHint, isFileKind, kindWhat, type ReviewKind } from "@/lib/review
 import { openClientComments } from "@/lib/reviewChanges";
 import { cleanEdit, countEdits, withPageEdit, type FrameMode, type PageEdit, type PageEditsByFile } from "@/lib/pageFrameProtocol";
 import { setFiles } from "@/lib/imageSet";
+import { formatPinTime } from "@/lib/reviewPins";
 import type { PinAnchor } from "@/lib/reviewPins";
 import {
   CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, ImageVersionPicker, commentsFor, nextPin,
@@ -47,7 +48,9 @@ type DocData = {
   versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
-type PinDraft = { fileId: string; x: number; y: number; anchor: PinAnchor | null; number: number };
+/** The comment being placed but not posted: a spot on an image or page (x and y),
+ *  or a moment in a video (t). Never both, the same rule as a stored pin. */
+type PinDraft = { fileId: string; x: number | null; y: number | null; anchor: PinAnchor | null; t: number | null; number: number };
 
 const NAVY = "#1b3a5c";
 const GREEN = "#15803d";
@@ -109,6 +112,8 @@ export default function DocReviewView({ token }: { token: string }) {
   const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
   const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
+  // A moment the player has been asked to jump to, from the comment rail.
+  const [videoSeek, setVideoSeek] = useState<{ t: number; nonce: number } | null>(null);
 
   const image = data?.kind === "image";
   const page = data?.kind === "page";
@@ -293,7 +298,10 @@ export default function DocReviewView({ token }: { token: string }) {
 
   // A comment shows at once; the 15 second refresh brings the team's replies.
   const postComment = async (body: string, quote?: string | null, attachmentFileId?: string | null) => {
-    const pin = versioned && pinDraft ? { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y, anchor: pinDraft.anchor } : null;
+    const pin = !versioned || !pinDraft ? null
+      : pinDraft.t !== null
+        ? { fileId: pinDraft.fileId, t: pinDraft.t }
+        : { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y, anchor: pinDraft.anchor };
     try {
       const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -366,6 +374,10 @@ export default function DocReviewView({ token }: { token: string }) {
   const versionFiles = data?.versionFiles ?? [];
   // Numbered as published, so a removed version leaves a gap and nothing renumbers.
   const versionOptions = versionFiles.map((v, i) => ({ fileId: v.body, label: i === versionFiles.length - 1 ? `Version ${v.number}, newest` : `Version ${v.number}` }));
+  // The draft as a spot, for the renderers that place things on an image or page.
+  // Null while the draft is a moment in a video, which they know nothing about.
+  const spotDraft = pinDraft && pinDraft.x !== null && pinDraft.y !== null
+    ? { ...pinDraft, x: pinDraft.x, y: pinDraft.y } : null;
   const shownFileId = versioned && data ? (viewingImage && versionFiles.some((v) => v.body === viewingImage) ? viewingImage : data.body) : null;
   // The images or pages of the version shown, and the label that tells a pin's one apart.
   const shownImages = versionFiles.find((v) => v.body === shownFileId)?.images ?? [];
@@ -405,6 +417,13 @@ export default function DocReviewView({ token }: { token: string }) {
   // A comment picked in the thread: shown on the image, or on the page at the width its pin was dropped at.
   const focusComment = (id: string) => {
     setFocusedComment(id);
+    // On a video, picking a comment takes the player to the second it was left at
+    // (Derek, 2026-09-17). The nonce lets the same comment be clicked twice.
+    if (video) {
+      const t = data?.comments.find((c) => c.id === id)?.pin?.t;
+      if (t != null) setVideoSeek((v) => ({ t, nonce: (v?.nonce ?? 0) + 1 }));
+      return;
+    }
     if (!page) return;
     const width = data?.comments.find((c) => c.id === id)?.pin?.anchor?.width;
     if (width) setPageDevice(deviceForWidth(width));
@@ -416,7 +435,7 @@ export default function DocReviewView({ token }: { token: string }) {
   const how = page
     ? "leave comments on any spot you click, change the wording with Edit text"
     : image ? "leave comments on any spot you click"
-      : video ? "leave a comment on anything you want changed"
+      : video ? "pause anywhere and comment on that moment"
         : "leave comments on any words you select, edit anything you like";
   const intro = `${video ? "Watch it through" : "Look it over"}, ${how}. If it all looks right, approve it. Any comment or edit turns that button into Submit changes.`;
   // One button at a time (Derek, 2026-09-15): Approve while there is nothing to
@@ -425,7 +444,7 @@ export default function DocReviewView({ token }: { token: string }) {
   const approveHint = image
     ? "Want something changed? Click a spot on the image to leave a comment."
     : page ? "Want something changed? Click a spot to comment, or use Edit text."
-      : video ? "Want something changed? Leave a comment saying what."
+      : video ? "Want something changed? Pause the video where it is wrong and leave a comment there."
         : "Want something changed? Select words to comment on them, or edit the text.";
   const changesHint = image || video ? "To approve instead, delete your comments." : "To approve instead, delete your comments and undo your edits.";
 
@@ -512,9 +531,9 @@ export default function DocReviewView({ token }: { token: string }) {
                         <section key={`${shownFileId}:${img.fileId}`} aria-label={img.label} data-image-anchor={img.fileId}>
                           {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{img.label}</h2>}
                           <ImagePinBoard src={fileHref(img.fileId)} alt={shownImages.length > 1 ? img.label : img.name}
-                            comments={data.comments ?? []} fileId={img.fileId} pending={pinDraft} activeId={focusedComment}
+                            comments={data.comments ?? []} fileId={img.fileId} pending={spotDraft} activeId={focusedComment}
                             onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
-                            onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: img.fileId, ...spot, anchor: null, number: nextPin(data.comments ?? [], img.fileId) })} />
+                            onPlace={data.closed || !onNewest ? undefined : (spot) => setPinDraft({ fileId: img.fileId, ...spot, anchor: null, t: null, number: nextPin(data.comments ?? [], img.fileId) })} />
                         </section>
                       ))}
                     </div>
@@ -526,7 +545,14 @@ export default function DocReviewView({ token }: { token: string }) {
                       {shownImages.map((v) => (
                         <section key={`${shownFileId}:${v.fileId}`} aria-label={v.label} data-image-anchor={v.fileId}>
                           {shownImages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{v.label}</h2>}
-                          <VideoVersion fileId={v.fileId} label={shownImages.length > 1 ? v.label : v.name} load={loadVideo} />
+                          <VideoVersion fileId={v.fileId} label={shownImages.length > 1 ? v.label : v.name} load={loadVideo}
+                            color={NAVY} seekTo={videoSeek}
+                            pins={(data.comments ?? []).flatMap((c) => (c.pin && c.pin.fileId === v.fileId && c.pin.t != null
+                              ? [{ id: c.id, number: c.pin.number, t: c.pin.t, done: !!c.completedAt, active: c.id === focusedComment }] : []))}
+                            onPinClick={setFocusedComment}
+                            canComment={!data.closed && onNewest}
+                            pending={pinDraft && pinDraft.fileId === v.fileId && pinDraft.t !== null ? { number: pinDraft.number, t: pinDraft.t } : null}
+                            onPlace={(t) => setPinDraft({ fileId: v.fileId, x: null, y: null, anchor: null, t, number: nextPin(data.comments ?? [], v.fileId) })} />
                         </section>
                       ))}
                     </div>
@@ -539,12 +565,12 @@ export default function DocReviewView({ token }: { token: string }) {
                       onLoadError={() => setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." })}
                       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
                       canEdit={!locked && onNewest} canComment={!data.closed && onNewest} color={NAVY}
-                      pinsFor={(fileId) => (data.comments ?? []).filter((c) => c.pin && c.pin.fileId === fileId).map((c) => ({
-                        id: c.id, number: c.pin!.number, x: c.pin!.x, y: c.pin!.y, anchor: c.pin!.anchor ?? null, done: !!c.completedAt, active: c.id === focusedComment,
-                      }))}
-                      pending={pinDraft}
+                      pinsFor={(fileId) => (data.comments ?? []).flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
+                        ? [{ id: c.id, number: c.pin.number, x: c.pin.x, y: c.pin.y, anchor: c.pin.anchor ?? null, done: !!c.completedAt, active: c.id === focusedComment }]
+                        : []))}
+                      pending={spotDraft}
                       focus={pageFocus} edits={onNewest ? newestEdits : {}}
-                      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, number: nextPin(data.comments ?? [], fileId) })}
+                      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, t: null, number: nextPin(data.comments ?? [], fileId) })}
                       onPinClick={setFocusedComment}
                       onEdit={(fileId, edit) => setPageEdits((s) => ({ body: data.body, edits: withPageEdit(s.body === data.body ? s.edits : {}, fileId, edit) }))} />
                   )}
@@ -625,7 +651,7 @@ export default function DocReviewView({ token }: { token: string }) {
                   alignGroup={versioned ? (label) => {
                     const img = shownImages.find((x) => x.label === label);
                     return img ? document.querySelector<HTMLElement>(`[data-image-anchor="${img.fileId}"], [data-page-anchor="${img.fileId}"]`) : null;
-                  } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
+                  } : undefined} pinDraftLabel={!versioned || !pinDraft ? null : pinDraft.t !== null ? formatPinTime(pinDraft.t) : imagePlace(pinDraft.fileId)}
                   pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
                   onPost={postComment} when={commentTime} viewer="client" buttonStyle={{ background: NAVY }}
                   isMine={(c) => c.fromClient} canDelete={(c) => c.fromClient}

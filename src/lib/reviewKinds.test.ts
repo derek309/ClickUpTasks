@@ -33,8 +33,8 @@ describe("reviewKinds", () => {
     expect(kindNoun("video")).toBe("video review");
     expect(kindTitle("video")).toBe("Video review");
     expect(noDocumentYet("video")).toBe("This task has no video review yet.");
-    // A video review has no spots to click yet, so its hint promises none.
-    expect(commentHint("video")).toBe("Write a comment about the video…");
+    // A video marks a moment rather than a spot.
+    expect(commentHint("video")).toBe("Write a comment, or pause the video to comment on that moment…");
   });
 
   it("builds the team route's query string", () => {

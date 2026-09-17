@@ -425,7 +425,7 @@ export type DocComment = {
   /** A file added with the comment; it is in the Files list too. */
   attachmentFileId: string | null;
 };
-const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote, pin_file_id, pin_x, pin_y, pin_number, pin_node, pin_node_x, pin_node_y, pin_width, attachment_file_id";
+const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote, pin_file_id, pin_x, pin_y, pin_t, pin_number, pin_node, pin_node_x, pin_node_y, pin_width, attachment_file_id";
 
 const MAX_QUOTE_CHARS = 500;
 /** The words a comment is about, as selected in the document: plain text, one
@@ -456,7 +456,11 @@ const toComment = (r: Record<string, unknown>): DocComment => ({
   quote: (r.quote as string | null) ?? null,
   pin: r.pin_file_id && r.pin_number
     ? {
-      fileId: r.pin_file_id as string, x: Number(r.pin_x), y: Number(r.pin_y), number: Number(r.pin_number),
+      fileId: r.pin_file_id as string, number: Number(r.pin_number),
+      // A spot or a moment: a video pin has no x and y, the rest have no t.
+      x: r.pin_x == null ? null : Number(r.pin_x),
+      y: r.pin_y == null ? null : Number(r.pin_y),
+      t: r.pin_t == null ? null : Number(r.pin_t),
       anchor: r.pin_node != null
         ? { node: Number(r.pin_node), nx: Number(r.pin_node_x), ny: Number(r.pin_node_y), width: Number(r.pin_width) }
         : null,
@@ -484,7 +488,8 @@ async function nextPinNumber(documentId: string, fileId: string): Promise<number
 export type CommentExtras = {
   /** The words selected in the document, when the comment is about them. */
   quote?: unknown;
-  /** A spot on a version file: { fileId, x, y } and, on a page, an anchor. */
+  /** A spot on a version file: { fileId, x, y } and, on a page, an anchor. On a
+   *  video, the moment instead: { fileId, t }. */
   pin?: unknown;
   /** A file already added to the document, carried by this comment. */
   attachmentFileId?: unknown;
@@ -508,12 +513,14 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
     const file = pin ? await docVersionFile(documentId, pin.fileId, null, !!extras.clientSide) : null;
     if (!pin || !file) return fail(400, "That version is no longer on the review.");
     if (file.purpose !== "page") pin = { ...pin, anchor: null };
+    // A moment belongs to a video and a spot to the rest, whatever was sent.
+    if (file.purpose === "video" ? pin.t === null : pin.t !== null) return fail(400, "That comment does not belong on this review.");
   }
 
   const base = {
     document_id: documentId, body: body ?? "", author_id: actor.id, author_label: actor.label,
     quote: pin ? null : cleanQuote(extras.quote), attachment_file_id: attachment,
-    pin_file_id: pin?.fileId ?? null, pin_x: pin?.x ?? null, pin_y: pin?.y ?? null,
+    pin_file_id: pin?.fileId ?? null, pin_x: pin?.x ?? null, pin_y: pin?.y ?? null, pin_t: pin?.t ?? null,
     pin_node: pin?.anchor?.node ?? null, pin_node_x: pin?.anchor?.nx ?? null, pin_node_y: pin?.anchor?.ny ?? null, pin_width: pin?.anchor?.width ?? null,
   };
   for (let attempt = 1; ; attempt++) {

@@ -31,7 +31,7 @@ import {
 } from "@/lib/db";
 import { diffDocText, diffText, summarizeDocChanges, summarizeTextChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
-import { publishedFiles, type PinAnchor } from "@/lib/reviewPins";
+import { formatPinTime, publishedFiles, type PinAnchor } from "@/lib/reviewPins";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
@@ -69,7 +69,9 @@ const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const PAGE_ACCEPT = ".html,.htm,text/html";
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v";
 
-type PinDraft = { fileId: string; x: number; y: number; anchor: PinAnchor | null; number: number };
+/** The comment being placed but not posted: a spot on an image or page (x and y),
+ *  or a moment in a video (t). Never both, the same rule as a stored pin. */
+type PinDraft = { fileId: string; x: number | null; y: number | null; anchor: PinAnchor | null; t: number | null; number: number };
 
 const docApi = (taskId: string, kind: TaskDocumentKind, path: string, init?: RequestInit) =>
   authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/document${path}${kindQuery(kind)}`, {
@@ -138,6 +140,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
   const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
+  // A moment the player has been asked to jump to, from the comment rail.
+  const [videoSeek, setVideoSeek] = useState<{ t: number; nonce: number } | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteDraft, setPasteDraft] = useState("");
   // The page pasted code replaces; null adds a page.
@@ -725,7 +729,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
 
   const postComment = async (body: string, quote?: string | null, attachmentFileId?: string | null) => {
-    const pin = versioned && pinDraft ? { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y, anchor: pinDraft.anchor } : null;
+    const pin = !versioned || !pinDraft ? null
+      : pinDraft.t !== null
+        ? { fileId: pinDraft.fileId, t: pinDraft.t }
+        : { fileId: pinDraft.fileId, x: pinDraft.x, y: pinDraft.y, anchor: pinDraft.anchor };
     const res = await api("/comments", { method: "POST", body: JSON.stringify({ body, quote: quote ?? null, pin, attachmentFileId: attachmentFileId ?? null }) });
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not post the comment."); return false; }
@@ -739,6 +746,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   // A comment picked in the thread: shown on the image, or on the page at the width its pin was dropped at.
   const focusComment = (id: string) => {
     setFocusedComment(id);
+    // On a video, picking a comment takes the player to the second it was left at
+    // (Derek, 2026-09-17). The nonce lets the same comment be clicked twice.
+    if (video) {
+      const t = comments.find((c) => c.id === id)?.pin?.t;
+      if (t != null) setVideoSeek((v) => ({ t, nonce: (v?.nonce ?? 0) + 1 }));
+      return;
+    }
     if (!page) return;
     const width = comments.find((c) => c.id === id)?.pin?.anchor?.width;
     if (width) setPageDevice(deviceForWidth(width));
@@ -846,6 +860,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   };
 
   // The images or pages of the version shown, and which of them tells a pin apart.
+  // The draft as a spot, for the renderers that place things on an image or page.
+  // Null while the draft is a moment in a video, which they know nothing about.
+  const spotDraft = pinDraft && pinDraft.x !== null && pinDraft.y !== null
+    ? { ...pinDraft, x: pinDraft.x, y: pinDraft.y } : null;
   const shownItems = versioned ? parseImageSet(shownFileId) : [];
   const shownIds = shownItems.map((item) => item.file);
   const editingSet = versioned && !locked && !!doc.body && shownFileId === doc.body;
@@ -1024,12 +1042,12 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       onLoadError={() => pushToast("Could not show the page.")}
       mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
       canEdit={!locked} canComment={!locked}
-      pinsFor={(fileId) => comments.filter((c) => c.pin && c.pin.fileId === fileId).map((c) => ({
-        id: c.id, number: c.pin!.number, x: c.pin!.x, y: c.pin!.y, anchor: c.pin!.anchor, done: !!c.completedAt, active: c.id === focusedComment,
-      }))}
-      pending={pinDraft}
+      pinsFor={(fileId) => comments.flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
+        ? [{ id: c.id, number: c.pin.number, x: c.pin.x, y: c.pin.y, anchor: c.pin.anchor, done: !!c.completedAt, active: c.id === focusedComment }]
+        : []))}
+      pending={spotDraft}
       focus={pageFocus} edits={shownEdits}
-      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, number: nextPin(comments, fileId) })}
+      onPlace={(fileId, place) => setPinDraft({ fileId, ...place, t: null, number: nextPin(comments, fileId) })}
       onPinClick={setFocusedComment}
       onEdit={(fileId, edit) => setPageEdits((st) => ({ body: shownFileId, edits: withPageEdit(st.body === shownFileId ? st.edits : {}, fileId, edit) }))}
       header={(_, i) => setItemHeader(shownItems[i], i)} />
@@ -1060,7 +1078,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
                 return (
                   <section key={`${shownFileId}:${item.file}`} aria-label={label} data-image-anchor={item.file} className="group">
                     {setItemHeader(item, i)}
-                    <VideoVersion fileId={item.file} label={f?.name ?? label} load={loadVideo} />
+                    <VideoVersion fileId={item.file} label={f?.name ?? label} load={loadVideo}
+                      seekTo={videoSeek}
+                      pins={comments.flatMap((c) => (c.pin && c.pin.fileId === item.file && c.pin.t != null
+                        ? [{ id: c.id, number: c.pin.number, t: c.pin.t, done: !!c.completedAt, active: c.id === focusedComment }] : []))}
+                      onPinClick={setFocusedComment}
+                      canComment={!locked}
+                      pending={pinDraft && pinDraft.fileId === item.file && pinDraft.t !== null ? { number: pinDraft.number, t: pinDraft.t } : null}
+                      onPlace={(t) => setPinDraft({ fileId: item.file, x: null, y: null, anchor: null, t, number: nextPin(comments, item.file) })} />
                   </section>
                 );
               })}
@@ -1077,8 +1102,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
                     {setItemHeader(item, i)}
                     {url ? (
                       <ImagePinBoard src={url} alt={f?.name ?? label} comments={comments} fileId={item.file}
-                        pending={pinDraft} activeId={focusedComment} onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
-                        onPlace={locked ? undefined : (spot) => setPinDraft({ fileId: item.file, ...spot, anchor: null, number: nextPin(comments, item.file) })} />
+                        pending={spotDraft} activeId={focusedComment} onPinClick={setFocusedComment} hoverId={hoveredComment} onPinHover={setHoveredComment}
+                        onPlace={locked ? undefined : (spot) => setPinDraft({ fileId: item.file, ...spot, anchor: null, t: null, number: nextPin(comments, item.file) })} />
                     ) : (
                       <p className="py-10 text-center text-[16px] text-muted">Loading the image…</p>
                     )}
@@ -1294,7 +1319,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           alignGroup={versioned ? (label) => {
             const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);
             return i < 0 ? null : document.querySelector<HTMLElement>(`[data-image-anchor="${shownItems[i].file}"], [data-page-anchor="${shownItems[i].file}"]`);
-          } : undefined} pinDraftLabel={versioned && pinDraft ? imagePlace(pinDraft.fileId) : null}
+          } : undefined} pinDraftLabel={!versioned || !pinDraft ? null : pinDraft.t !== null ? formatPinTime(pinDraft.t) : imagePlace(pinDraft.fileId)}
           pinTone={image ? "var(--highlight)" : undefined} hoverId={image ? hoveredComment : undefined} onHover={image ? setHoveredComment : undefined}
           isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
           canDelete={() => true}
