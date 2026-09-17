@@ -592,6 +592,14 @@ export const patchNextStepDb = (id: string, patch: { nextStep?: string; nextStep
     ...(patch.nextStepTime !== undefined ? { next_step_time: patch.nextStepTime } : {}),
     ...(patch.nextStepWatch !== undefined ? { next_step_watch: patch.nextStepWatch } : {}),
   }).eq("id", id));
+// Every step still open, across tasks, for My Work's Next steps tab. Only the
+// columns the list reads, and only open ones, which stays small because
+// finishing a step takes it out.
+export const fetchOpenNextSteps = async (): Promise<TaskAction[]> => {
+  const { data, error } = await supabase.from("task_actions").select("*").not("next_step", "is", null).is("next_step_done_at", null);
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToTaskAction);
+};
 // Loaded per task rather than all at once. Unlike tasks or clients this grows
 // without bound and only one task's worth is ever on screen, so pulling the
 // whole table into the client at boot would cost more every week.

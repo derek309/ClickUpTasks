@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -101,6 +101,8 @@ import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { CompletedLog } from "./cockpit/CompletedLog";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
+import { NextStepsBoard } from "./cockpit/NextStepsBoard";
+import { buildNextStepsToday, type NextStepRow } from "@/lib/nextStepsToday";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
 import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
@@ -220,7 +222,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // No "completed" any more — it moved to All Tasks. Anyone whose stored
   // value still says completed fails this guard and lands back on Work,
   // rather than on a tab that no longer has a button or a view.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "plan", "reviews", "drafts"].includes(v as string));
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "steps" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "plan", "steps", "reviews", "drafts"].includes(v as string));
+  // Your next steps due today or late, across every task, for the Next steps
+  // tab (Derek, 2026-09-16). Steps are read per task everywhere else, so the
+  // open ones are fetched when the tab is opened.
+  const [nextStepRows, setNextStepRows] = useState<NextStepRow[]>([]);
+  const [nextStepsLoading, setNextStepsLoading] = useState(false);
+  const loadNextSteps = async () => {
+    setNextStepsLoading(true);
+    try {
+      const steps = await fetchOpenNextSteps();
+      setNextStepRows(buildNextStepsToday(tasksRef.current, steps, me.id, todayIso()));
+    } catch {
+      // Best effort, like the other boards: an empty list rather than an error.
+    } finally {
+      setNextStepsLoading(false);
+    }
+  };
   // What is out with a client, for the Reviews tab. Loaded when that tab is
   // opened rather than at boot: a document is otherwise read one task at a
   // time (supabase/task-documents.sql), and the board is two small queries
@@ -281,6 +299,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // NotificationPrefsPanel defers its own load: the first thing it does is set
   // the loading flag, and writing state straight from an effect body is what
   // stops the compiler optimising the component around it.
+  useEffect(() => {
+    if (!myWork || dashboardView !== "steps") return;
+    const r = requestAnimationFrame(() => { void loadNextSteps(); });
+    return () => cancelAnimationFrame(r);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myWork, dashboardView]);
   useEffect(() => {
     if (!myWork || dashboardView !== "reviews") return;
     const r = requestAnimationFrame(() => { void loadOpenReviews(); });
@@ -1145,7 +1169,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!s.view && s.client === "all") setAllTasksScope(s.assignee ?? "mine");
     // Same reasoning as the assignee above: absent means the default half of
     // the view, not whatever this browser was last left on.
-    if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "reviews" ? s.sub : "work");
+    if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "steps" || s.sub === "reviews" ? s.sub : "work");
     if (!s.view && s.client === "all") setAllTasksCompleted(s.sub === "completed");
   };
   // The URL-writing effect below is inert until this flips, so nothing can
@@ -4461,6 +4485,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
+                <button onClick={() => setDashboardView("steps")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "steps" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Next steps</button>
                 <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
                 <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
               </div>
@@ -4603,6 +4628,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
+                <button onClick={() => setDashboardView("steps")} title="Your next steps due today or late, across every task" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "steps" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Next steps</button>
                 <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
                 <button onClick={() => setDashboardView("drafts")} title="Everything written and not sent yet" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "drafts" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Drafts</button>
               </div>
@@ -4704,6 +4730,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               openClientList(row.clientId, null);
               setClientTab("chat");
             }} />
+        ) : myWork && dashboardView === "steps" ? (
+          <NextStepsBoard rows={nextStepRows} loading={nextStepsLoading} onRefresh={loadNextSteps}
+            context={(row) => {
+              const t = tasks.find((x) => x.id === row.taskId);
+              return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
+            }}
+            // Ticking a step here does what ticking it on the task does: the step
+            // is done, and the follow up it carried is cleared.
+            onDone={(row) => {
+              if (row.stepId) setNextStepDoneDb(row.stepId, new Date().toISOString());
+              const t = tasks.find((x) => x.id === row.taskId);
+              if (t?.followUpAt && t.followUpAt <= row.due) patchTask(row.taskId, { followUpAt: null });
+            }}
+            onMove={(row, date) => {
+              if (row.stepId) patchNextStepDb(row.stepId, { nextStepDue: date });
+              patchTask(row.taskId, { followUpAt: date });
+              setNextStepRows((rs) => (date > todayIso() ? rs.filter((r) => r.key !== row.key) : rs.map((r) => (r.key === row.key ? { ...r, due: date, late: date < todayIso() } : r))));
+            }}
+            onOpenTask={setOpenTaskId} />
         ) : myWork && dashboardView === "reviews" ? (
           <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews}
             taskContext={(taskId) => {

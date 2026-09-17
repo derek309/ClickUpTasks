@@ -23,7 +23,7 @@
 // day" and "here is what we finished" could not be linked, bookmarked or sent
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
-export type NavSub = "plan" | "reviews" | "drafts" | "completed";
+export type NavSub = "plan" | "steps" | "reviews" | "drafts" | "completed";
 export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
@@ -70,7 +70,7 @@ export function parseSearch(search: string): NavState {
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     assignee: p.get("assignee"),
-    sub: sub === "plan" || sub === "reviews" || sub === "drafts" || sub === "completed" ? sub : null,
+    sub: sub === "plan" || sub === "steps" || sub === "reviews" || sub === "drafts" || sub === "completed" ? sub : null,
   };
 }
 
