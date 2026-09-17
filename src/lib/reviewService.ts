@@ -161,9 +161,9 @@ export async function pickReviewVersion(
   try {
     const data = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
     if (!data) return fail(409, locked(kind));
-    // Its first image or page gives a review still called "New image review" a name.
-    // A video is not named by AI yet (reviewAutoName.ts reads words and images only).
-    const named = kind === "video" ? null : await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
+    // Its first image, page or video gives a review still called "New image
+    // review" a name. A video is named from its file name (reviewAutoName.ts).
+    const named = await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
     return { ok: true, document: named ?? data };
   } catch (e) {
     return fail(400, e instanceof Error ? e.message : "Could not save.");

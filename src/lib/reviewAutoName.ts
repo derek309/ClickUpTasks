@@ -29,7 +29,7 @@ const MAX_NAME_CHARS = 60;
 
 export type NameSource =
   | { kind: "doc"; html: string }
-  | { kind: "image" | "page"; path: string; fileName: string };
+  | { kind: "image" | "page" | "video"; path: string; fileName: string };
 
 type Row = Record<string, unknown>;
 
@@ -65,7 +65,8 @@ const KIND_WORDS: Record<ReviewKind, string> = {
   doc: "a text document",
   image: "an image (a graphic, flyer, ad, social post, logo or photo)",
   page: "a web page or an HTML email",
-  video: "a video",
+  // Named from its file name and task alone, so the prompt leans on those.
+  video: "a video (go by the file name and the task, which is all there is here)",
 };
 
 export function buildNamePrompt(kind: ReviewKind, taskTitle: string, fileName: string | null, content: string | null): string {
@@ -87,13 +88,18 @@ const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg
 
 type Part = { text: string } | { inline_data: { mime_type: string; data: string } };
 
-/** What Gemini reads about the review: the words, the page's words and title, or the image itself. */
+/** What Gemini reads about the review: the words, the page's words and title, or
+ *  the image itself. A video is named from its file name and the task alone: the
+ *  file is hundreds of megabytes and pulling it into a function to look at one
+ *  frame would cost more than the name is worth. */
 async function contentParts(source: NameSource, taskTitle: string): Promise<Part[] | null> {
   if (source.kind === "doc") {
     const text = htmlToText(source.html).trim();
     if (text.split(/\s+/).filter(Boolean).length < NAME_MIN_WORDS) return null;
     return [{ text: buildNamePrompt("doc", taskTitle, null, text) }];
   }
+  // Before the download, deliberately.
+  if (source.kind === "video") return [{ text: buildNamePrompt("video", taskTitle, source.fileName, null) }];
   const { data: blob } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).download(source.path);
   if (source.kind === "page") {
     const html = blob ? await blob.text() : "";

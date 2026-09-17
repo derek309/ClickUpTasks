@@ -433,8 +433,14 @@ export function createServer(opts = {}) {
   const reply = (text) => ({ content: [{ type: "text", text }] });
   const services = opts.services;
   if (services) {
-    const KIND = z.enum(["doc", "image", "page"]).describe('"doc" the client document, "image" the image review, "page" the HTML review');
+    const KIND = z.enum(["doc", "image", "page", "video"]).describe('"doc" the client document, "image" the image review, "page" the HTML review, "video" the video review');
+    // The kinds a chat can supply the content for. A video is uploaded in the app
+    // (hundreds of megabytes, straight from a Mac to storage), so add_review_version
+    // cannot take one and the schema says so rather than failing at runtime.
     const FILE_KIND = z.enum(["image", "page"]).describe('"image" the image review, "page" the HTML review');
+    // The kinds whose versions are files, including video: a wrong version can be
+    // taken off from a chat even though it could not be put on from one.
+    const VERSIONED_KIND = z.enum(["image", "page", "video"]).describe('"image" the image review, "page" the HTML review, "video" the video review');
     const VERSION = z.union([z.number().int().positive(), z.literal("next")]).describe('a version number from get_review, or "next" for the working copy that has not been sent');
     const DOC_TEXT = "Plain text with simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, \"> \" quote, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. Merge fields like {{contact.first_name}} are kept as typed.";
 
@@ -520,8 +526,8 @@ export function createServer(opts = {}) {
       async ({ task_id, kind, version }) => reply(await services.useVersion(task_id, kind, version)));
 
     server.tool("remove_version",
-      "Take a wrong version off an image or HTML review. Its pins go with it; if the client was looking at it, they see the newest version left. On an image review, images this version shares with other versions stay.",
-      { task_id: z.string(), kind: FILE_KIND, version: VERSION },
+      "Take a wrong version off an image, HTML or video review. Its pins go with it; if the client was looking at it, they see the newest version left. On an image review, images this version shares with other versions stay.",
+      { task_id: z.string(), kind: VERSIONED_KIND, version: VERSION },
       async ({ task_id, kind, version }) => reply(await services.removeVersion(task_id, kind, version)));
 
     server.tool("send_for_review",

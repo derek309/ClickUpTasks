@@ -34,15 +34,17 @@ const HOW: Record<ReviewKind, string> = {
   doc: ", edit it",
   image: " on any spot",
   page: " on any spot, change the wording",
-  // A video review has no spots to comment on yet; that is the next slice.
-  video: "",
+  // A video is commented on by moment rather than by spot: pause, and the comment
+  // is pinned to that second.
+  video: " at any moment you pause",
 };
 
 export function buildReviewEmail(review: ReviewEmailInput): ReviewEmail {
   const what = kindWhat(review.kind);
   const link = review.url ? { url: review.url, label: `Open "${review.name}" to review` } : null;
   const name = escapeHtml(review.name);
-  const can = `look it over, leave comments${HOW[review.kind]}, send changes or approve it`;
+  // "Watch it through" on a video, the same verb its own page uses.
+  const can = `${review.kind === "video" ? "watch it through" : "look it over"}, leave comments${HOW[review.kind]}, send changes or approve it`;
   const intro = greetingHtml(review.greetName) + (review.changes
     ? `<p>We made some updates to "${name}". Take a look and approve it when it looks right:</p>`
     : `<p>"${name}" is ready for your review. You can ${can} here:</p>`);

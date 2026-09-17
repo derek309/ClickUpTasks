@@ -40,7 +40,7 @@ export type VersionImage = { imageUrl?: string; uploadId?: string; name?: string
  *  it goes (1 based) and what it is called. */
 export type VersionPage = { html: string; name?: string; label?: string; position?: number };
 export type ReviewStage = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
-const KINDS: ReviewKind[] = ["doc", "image", "page"];
+const KINDS: ReviewKind[] = ["doc", "image", "page", "video"];
 
 /** Save the task's draft email without replacing one already there (unless asked).
  *  updated_by null is what makes a task open in the app pick it up live. True when
@@ -201,10 +201,11 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         if (files.length && !shown.some((v) => v.body === working)) {
           out.push(`  - version "next": ${listImages(files.map((f, i) => ({ name: f.name, label: imageLabel(items, i, kind) })))} · working copy, not sent yet`);
         }
-        if (kind === "image") {
+        if (kind === "image" || kind === "video") {
           for (const [i, f] of files.entries()) {
             const { data } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).createSignedUrl(f.path, 3600);
-            if (data?.signedUrl) out.push(`${i === 0 ? "\n" : ""}Working image ${files.length > 1 ? `${i + 1} "${imageLabel(items, i)}" ` : ""}(this link works for an hour): ${data.signedUrl}`);
+            const word = kind === "video" ? "video" : "image";
+            if (data?.signedUrl) out.push(`${i === 0 ? "\n" : ""}Working ${word} ${files.length > 1 ? `${i + 1} "${imageLabel(items, i, kind)}" ` : ""}(this link works for an hour): ${data.signedUrl}`);
           }
         }
         if (kind === "page") {
@@ -250,9 +251,14 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       }
       if (!made.created) return `"${task.title}" already has a ${what(kind)}, so nothing new was made. get_review shows it.`;
       await event(task.id, `${await actor.label()} started the ${what(kind)}`);
-      // video is not in KINDS above, so a chat cannot reach it; the line is here so
-      // every kind has one.
-      const next = { doc: "write_document writes it", image: "add_review_version adds the image (image_url, or upload_id from start_image_upload)", page: "add_review_version adds the page's HTML", video: "the app uploads the video" }[kind];
+      const next = {
+        doc: "write_document writes it",
+        image: "add_review_version adds the image (image_url, or upload_id from start_image_upload)",
+        page: "add_review_version adds the page's HTML",
+        // A chat has no way to put a video in: it is hundreds of megabytes going
+        // straight from a Mac to storage.
+        video: "upload the video on the task in the app",
+      }[kind];
       return `Created the ${what(kind)} on "${task.title}". ${next}, then send_for_review sends it.`;
     },
 
