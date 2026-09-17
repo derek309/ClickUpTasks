@@ -687,6 +687,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     pushToast(done);
   };
 
+  /** Approve on the client's behalf, with a word about what that means for them:
+   *  their link stops taking changes and says we marked it approved. */
+  const approveMyself = async () => {
+    if (!doc || locked) return;
+    if (!window.confirm(`Mark this ${titleInSentence} approved yourself? The client's link will say you approved it for them and stop taking changes. You can reopen it anytime.`)) return;
+    await setStage("approved");
+  };
+
   const setStage = async (status: TaskDocumentStatus) => {
     if (!doc || status === doc.status) return;
     commit.flush();
@@ -994,6 +1002,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const uploadLabel = uploadShare === null ? "Uploading…" : `Uploading… ${Math.round(uploadShare * 100)}%`;
   const moreActions = shownFileId && !locked && (
     <ActionMenu label="⋯" title="More actions" items={[
+      // Closing a review out without sending anything (Derek, 2026-09-17: the
+      // client said yes on a call, and hitting Send just to move the status left a
+      // draft email to delete). The stage pill does the same thing; this is the
+      // one that says out loud what it means.
+      { label: "Approve it myself", onClick: () => void approveMyself() },
       { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null || !goingIds.length, onClick: () => void removeVersion(shownFileId, goingIds, removeMessage) },
     ]} />
   );
@@ -1254,7 +1267,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           <span className="min-w-0 flex-1">
             {completed
               ? `This ${what} is completed. Reopen it to make changes.`
-              : `The client approved ${approvedNumber ? `version ${approvedNumber}` : `this ${what}`}. Reopen it to make changes.`}
+              // Who approved it: this view has no roster, and "You" against "The team"
+              // is the distinction that actually matters when you are looking at it.
+              : `${doc.approvedBy ? `${doc.approvedBy === meId ? "You" : "The team"} approved` : "The client approved"} ${approvedNumber ? `version ${approvedNumber}` : `this ${what}`}${doc.approvedBy ? " on the client's say so" : ""}. Reopen it to make changes.`}
           </span>
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
         </div>

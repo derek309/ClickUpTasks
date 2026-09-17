@@ -39,7 +39,7 @@ import {
 type DocStatus = "draft" | "with_client" | "client_submitted" | "approved" | "completed";
 type DocFile = { id: string; name: string; size: number; kind: string; addedBy: string; fromClient: boolean; createdAt: string };
 type DocData = {
-  kind: ReviewKind; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null;
+  kind: ReviewKind; title: string; clientName: string; body: string; version: number; status: DocStatus; approvedAt: string | null; approvedByTeam?: boolean;
   closed: boolean; files: DocFile[]; comments: ThreadComment[];
   /** When the team last sent a version; the client's comments count as changes from then. */
   sharedAt: string | null;
@@ -485,8 +485,19 @@ export default function DocReviewView({ token }: { token: string }) {
               <div className="mt-5 flex items-start gap-4 rounded-2xl border-2 p-5" style={{ borderColor: GREEN, background: "#f0fdf4" }}>
                 <span aria-hidden className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[26px] text-white" style={{ background: GREEN }}>✓</span>
                 <div>
-                  <p className="text-[24px] font-bold" style={{ color: "#14532d" }}>Approved. Thank you!</p>
-                  {data.approvedAt && <p className="mt-0.5 text-[17px]" style={{ color: "#166534" }}>Approved on {longDate(data.approvedAt)}</p>}
+                  {/* Thank them only when they are the one who approved it. When we
+                      closed it out on their say so, say that plainly instead. */}
+                  <p className="text-[24px] font-bold" style={{ color: "#14532d" }}>
+                    {data.approvedByTeam ? "Approved." : "Approved. Thank you!"}
+                  </p>
+                  {data.approvedAt && (
+                    <p className="mt-0.5 text-[17px]" style={{ color: "#166534" }}>
+                      {data.approvedByTeam ? "We marked this approved on " : "Approved on "}{longDate(data.approvedAt)}
+                    </p>
+                  )}
+                  {data.approvedByTeam && (
+                    <p className="mt-1 text-[17px]" style={{ color: "#166534" }}>If that is not right, just tell us and we will reopen it.</p>
+                  )}
                 </div>
               </div>
             )}

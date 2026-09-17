@@ -67,14 +67,32 @@ describe("setReviewStage", () => {
     expect(server.liveDocument).not.toHaveBeenCalled();
   });
 
-  it("clears a client approval for any stage but Approved", async () => {
-    server.liveDocument.mockResolvedValue({ id: "tdoc_1" });
+  it("clears an approval for any stage but Approved", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, version: 3 });
     result = saved;
     await svc.setReviewStage("t_1", "doc", actor(), "with_client");
-    expect(calls[0].payload).toMatchObject({ status: "with_client", approved_at: null, approved_version: null, updated_by: "u_claude" });
-    calls.length = 0;
+    expect(calls[0].payload).toMatchObject({ status: "with_client", approved_at: null, approved_version: null, approved_by: null, updated_by: "u_claude" });
+  });
+
+  it("really approves when the team picks Approved, and says who did it", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, version: 3 });
+    result = saved;
     await svc.setReviewStage("t_1", "doc", actor(), "approved");
+    // Not the status alone: the client's page reads approved_at, so setting one
+    // without the other left the two sides disagreeing (Derek, 2026-09-17).
+    expect(calls[0].payload).toMatchObject({ status: "approved", approved_version: 3, approved_by: "u_claude" });
+    expect(typeof calls[0].payload.approved_at).toBe("string");
+  });
+
+  it("leaves the client's own approval alone when the team picks Approved after them", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: "2026-09-01T00:00:00Z", version: 3 });
+    result = saved;
+    await svc.setReviewStage("t_1", "doc", actor(), "approved");
+    // approved_by stays null: the client clicked Approve, and nothing should
+    // rewrite that into the team having done it.
     expect(calls[0].payload).not.toHaveProperty("approved_at");
+    expect(calls[0].payload).not.toHaveProperty("approved_by");
+    expect(calls[0].payload).toMatchObject({ status: "approved" });
   });
 });
 

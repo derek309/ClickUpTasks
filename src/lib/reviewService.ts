@@ -50,14 +50,24 @@ export async function reopenReview(taskId: string, kind: ReviewKind, actor: Revi
 }
 
 /** Pick a stage by hand. Completed locks it for the team and closes it for the
- *  client; any stage but Approved clears a client approval's lock, like Reopen.
- *  Sends and client actions still move the stage on their own. */
+ *  client; any stage but Approved clears an approval's lock, like Reopen.
+ *  Sends and client actions still move the stage on their own.
+ *
+ *  Approved here is the team closing a review out on the client's say so, so it
+ *  approves it properly: it records when, which version, and who, rather than
+ *  only moving the label. It used to set the status alone, which left the client's
+ *  page locked and thanking them while the team's side stayed open (Derek,
+ *  2026-09-17). approved_by is what keeps this honest: the client's own approval
+ *  leaves it null, so nobody is told they clicked a button they never clicked. */
 export async function setReviewStage(taskId: string, kind: ReviewKind, actor: ReviewActor, stage: unknown): Promise<ReviewOutcome<{ document: Row }>> {
   if (!(REVIEW_STAGES as readonly unknown[]).includes(stage)) return fail(400, "Unknown stage.");
-  const doc = await liveDocument(taskId, kind);
+  const doc = await liveDocument(taskId, kind, "id, approved_at, version");
   if (!doc) return fail(404, noDocumentYet(kind));
-  const unlock = stage === "approved" ? {} : { approved_at: null, approved_version: null };
-  return update(doc.id, { status: stage, ...unlock, ...stampOf(actor) });
+  const lock = stage === "approved"
+    // Already approved (the client got there first): keep their approval as it is.
+    ? (doc.approved_at ? {} : { approved_at: new Date().toISOString(), approved_version: (doc.version as number) ?? null, approved_by: actor.memberId })
+    : { approved_at: null, approved_version: null, approved_by: null };
+  return update(doc.id, { status: stage, ...lock, ...stampOf(actor) });
 }
 
 /** Allowed on an approved review too: the name is the team's label, not part of

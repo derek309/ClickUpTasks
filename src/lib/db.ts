@@ -621,6 +621,9 @@ export type TaskDocumentKind = ReviewKind;
 export type TaskDocument = {
   id: string; taskId: string; kind: TaskDocumentKind; title: string; body: string; draftDirty: boolean; version: number;
   status: TaskDocumentStatus; approvedAt: string | null; approvedVersion: number | null; updatedAt: string;
+  /** The team member who closed this out on the client's say so; null when the
+   *  client approved it themselves by clicking Approve. */
+  approvedBy: string | null;
   /** Last time the client's review page opened in a browser (supabase/task-document-followups.sql). */
   clientViewedAt: string | null;
 };
@@ -631,6 +634,7 @@ export type TaskDocumentVersion = {
 export const rowToTaskDocument = (r: any): TaskDocument => ({
   id: r.id, taskId: r.task_id, kind: parseKind(r.kind), title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
+  approvedBy: r.approved_by ?? null,
   clientViewedAt: r.client_viewed_at ?? null,
 });
 // The email a teammate is writing to a client outside any task (the Journal's

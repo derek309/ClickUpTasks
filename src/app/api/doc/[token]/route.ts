@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (!scope) return docNotFound();
   const [latest, { data: doc }, files, comments, versionFiles, sharedAt] = await Promise.all([
     latestPublished(scope.documentId, scope.kind),
-    supabaseAdmin.from("task_documents").select("status, approved_at, title").eq("id", scope.documentId).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("status, approved_at, approved_by, title").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
     isFileKind(scope.kind) ? sharedVersionFiles(scope.documentId) : Promise.resolve<SharedVersionFile[]>([]),
@@ -41,6 +41,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     version: latest.version,
     status: doc.status,
     approvedAt: (doc.approved_at as string | null) ?? null,
+    // Whether the team closed this out rather than the client clicking Approve, so
+    // the page never thanks someone for something they did not do. The name is not
+    // sent, only the fact: who on the team did it is the team's business.
+    approvedByTeam: doc.approved_by != null,
     closed: scope.taskStatus === "done" || doc.status === "completed",
     files,
     comments,
