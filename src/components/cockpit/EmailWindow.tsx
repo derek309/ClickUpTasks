@@ -33,11 +33,21 @@ export type OutgoingEmail = { subject: string; body: string; attachments: Attach
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
 
 /** The outbound email this draft became, once it went out. Send turns the link
- *  line into a button (draftLink.ts), so that is the version compared. */
+ *  line into a button (draftLink.ts), so that is the version compared.
+ *
+ *  Only a send from after the draft was written counts. The same email can
+ *  honestly be sent twice: a review's standard email is built word for word the
+ *  same every time, so once it has been sent, Email client makes a draft
+ *  identical to it. Matching on the words alone then read that draft as already
+ *  sent and deleted it the moment it appeared, which looked like the button
+ *  doing nothing but closing the review (Derek, 2026-09-18: "when it's in client
+ *  review and I click email client it just reloads back to the main task page"). */
 export function sentEmailFor(draft: EmailDraft, messages: Message[] | null | undefined): Message | null {
   const subject = normalize(draft.subject);
   const body = normalize(draftLinkAsButton(draft.body, draft.link));
+  const written = draft.createdAt ?? "";
   return (messages ?? []).find((m) => m.channel === "email" && m.direction === "outbound"
+    && (!written || m.at >= written)
     && normalize(m.subject ?? "") === subject && normalize(m.body) === body) ?? null;
 }
 
