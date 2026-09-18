@@ -212,8 +212,14 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
     const body = draft.trim();
     if ((!body && !attached) || posting) return;
     setPosting(true);
-    const ok = await onPost(body, quote ?? null, attached?.id ?? null);
-    setPosting(false);
+    // finally, so a post that throws rather than answering leaves the box usable
+    // instead of stuck on "posting" with the words still in it.
+    let ok = false;
+    try {
+      ok = await onPost(body, quote ?? null, attached?.id ?? null);
+    } finally {
+      setPosting(false);
+    }
     if (ok) {
       setDraft("");
       setAttached(null);

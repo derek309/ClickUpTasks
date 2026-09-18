@@ -46,5 +46,19 @@ export const supabase = createClient(url ?? "https://placeholder.supabase.co", k
 export async function authedFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token ?? "";
-  return fetch(input, { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${token}` } });
+  try {
+    return await fetch(input, { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${token}` } });
+  } catch {
+    // The server could not be reached at all: offline, asleep, or a dev server
+    // that has stopped. fetch throws for that rather than answering, and every
+    // caller here is written around reading res.ok, so throwing skipped all of
+    // their error handling at once. The screen then showed nothing: no message,
+    // and a button left spinning on work that had already failed (Derek,
+    // 2026-09-18, twice: comments posted against a stopped dev server just
+    // vanished). An answer nobody can mistake for success is the honest reply.
+    return new Response(
+      JSON.stringify({ error: "Could not reach the server. Check your connection and try again." }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  }
 }
