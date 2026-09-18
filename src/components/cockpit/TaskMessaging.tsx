@@ -8,7 +8,7 @@
 // — feedArea always scrolls with whatever's around it, composerFooter is a
 // pinned element that sits OUTSIDE that scroll area — so TaskDrawer places
 // the two pieces itself rather than this module dictating layout.
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
@@ -548,14 +548,83 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // The Changes tab lists every one, since reading them is why you went there.
   const foldedRows = view === "all" ? foldRuns(mergedFeedItems, isChange) : mergedFeedItems;
   // Like a chat: oldest at the top, newest just above the reply box. Changes
-  // stays newest first, it is a log. A long thread shows its latest entries
-  // with the rest one click away.
+  // stays newest first, it is a log.
   const chatOrder = view !== "changes";
-  const [earlierShown, setEarlierShown] = useState(false);
-  const RECENT = 20;
   const orderedRows = chatOrder ? [...foldedRows].reverse() : foldedRows;
-  const hiddenEarlier = chatOrder && !earlierShown && !q ? Math.max(0, orderedRows.length - RECENT) : 0;
-  const displayRows = hiddenEarlier ? orderedRows.slice(hiddenEarlier) : orderedRows;
+  // Older days fold to one line each, rather than the thread being cut to its
+  // newest N entries (Derek, 2026-09-18: "more manage on old threads, or by
+  // days folding them, otherwise it gets really long"). A count was the wrong
+  // unit: it could cut a day in half, and "20 earlier" said nothing about what
+  // opening it would show. A day says what is inside before you open it, and
+  // it is how you go looking ("what happened Tuesday").
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
+  // Searching reaches back through everything: hiding a match behind a fold is
+  // the one thing search must never do.
+  const foldOlderDays = chatOrder && !q;
+
+  // "Today", "Yesterday" or the date, between days in the conversation.
+  const dayKey = (iso: string) => new Date(iso).toDateString();
+  const dayName = (iso: string) => {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Today";
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) });
+  };
+  const rowAt = (item: (typeof orderedRows)[number]) => ("run" in item ? item.run[0].at : item.at);
+
+  // The thread as days, oldest first, each with what it holds.
+  type DayGroup = { key: string; at: string; rows: typeof orderedRows; messages: number; changes: number };
+  const dayGroups: DayGroup[] = [];
+  for (const item of orderedRows) {
+    const key = dayKey(rowAt(item));
+    const last = dayGroups[dayGroups.length - 1];
+    const group = last && last.key === key ? last : (dayGroups.push({ key, at: rowAt(item), rows: [], messages: 0, changes: 0 }), dayGroups[dayGroups.length - 1]);
+    group.rows.push(item);
+    // A folded run counts as the changes it holds, not as one line, or the
+    // header would undercount what opening the day actually shows.
+    if ("run" in item) group.changes += item.run.length;
+    else if (isChange(item)) group.changes += 1;
+    else group.messages += 1;
+  }
+  // Whether the newest entry is on screen. The feed is chat ordered, so the
+  // newest sits at the bottom of a task page that also carries the description,
+  // the next step, the deliverables and the checklist above it: on a long task
+  // the thing you came to read is a long way down (Derek, 2026-09-18: "we need
+  // to go to last conversation button, it starts to get really long").
+  //
+  // A button rather than scrolling there on open: anchoring this feed to its
+  // bottom was tried and reverted because short threads then looked broken (see
+  // the note further down). This changes nothing until it is clicked.
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  const [latestOnScreen, setLatestOnScreen] = useState(true);
+  const isRecentDay = (iso: string) => {
+    const name = dayName(iso);
+    return name === "Today" || name === "Yesterday";
+  };
+  // Today and yesterday are what you came back for, so they are never folded.
+  // Nor is the newest day, whenever it was: on a thread last touched a week ago
+  // every day would otherwise fold and the feed would be nothing but headers.
+  const newestDay = dayGroups.length ? dayGroups[dayGroups.length - 1].key : null;
+  const dayIsOpen = (g: DayGroup) =>
+    !foldOlderDays || g.key === newestDay || isRecentDay(g.at) || openDays.has(g.key);
+  const displayRows = dayGroups.filter(dayIsOpen).flatMap((g) => g.rows);
+  // Where each visible row sits in the visible list, which is what renderRow
+  // needs to tell a run of rows apart and to skip the gap under the last one.
+  const rowIndex = new Map(displayRows.map((item, i) => [item, i] as const));
+
+  useEffect(() => {
+    const end = feedEndRef.current;
+    if (!end) return;
+    const io = new IntersectionObserver((entries) => setLatestOnScreen(entries[0].isIntersecting), {
+      // A shade above the very bottom, so the button goes away once the last
+      // entry is genuinely readable rather than one pixel into view.
+      rootMargin: "0px 0px -48px 0px",
+    });
+    io.observe(end);
+    return () => io.disconnect();
+  }, [chatOrder, displayRows.length]);
 
   const unreadChannels = hasMessaging
     ? (["chat", "email", "sms"] as const).filter((ch) => (messages ?? []).some((m) => m.channel === ch && m.direction === "inbound" && !m.read))
@@ -1032,40 +1101,44 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           </div>
         );
   };
-  // "Today", "Yesterday" or the date, between days in the conversation.
-  const dayKey = (iso: string) => new Date(iso).toDateString();
-  const dayName = (iso: string) => {
-    const d = new Date(iso);
-    const today = new Date();
-    const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
-    if (d.toDateString() === today.toDateString()) return "Today";
-    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) });
-  };
-  const rowAt = (item: (typeof displayRows)[number]) => ("run" in item ? item.run[0].at : item.at);
-
   const commentsFeed = (
     <div className="relative">
       {!chatOrder && mergedFeedItems.length > 0 && <div className="absolute bottom-2 left-4 top-2 w-px bg-border" />}
       {chatOrder && mergedFeedItems.length > 0 && (
-        <div className="pb-3 text-center text-[16px] text-muted">
-          {hiddenEarlier > 0
-            ? <button onClick={() => setEarlierShown(true)} className="font-medium text-accent hover:underline">Show {hiddenEarlier} earlier</button>
-            : <>Start of your conversation with {client.name}</>}
-        </div>
+        <div className="pb-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}</div>
       )}
-      {displayRows.map((item, i) => {
-        const row = renderRow(item, i);
-        if (!chatOrder || (i > 0 && dayKey(rowAt(item)) === dayKey(rowAt(displayRows[i - 1])))) return row;
-        return (
-          <Fragment key={`day_${rowAt(item)}_${i}`}>
-            <div className="flex items-center gap-3 py-3 text-[16px] font-semibold text-muted" role="separator">
-              <span className="h-px flex-1 bg-border" />{dayName(rowAt(item))}<span className="h-px flex-1 bg-border" />
-            </div>
-            {row}
-          </Fragment>
-        );
-      })}
+      {/* Day by day. An open day prints its separator and its rows; a folded one
+          is a single line saying what it holds, which you click to open. */}
+      {chatOrder
+        ? dayGroups.map((g) => {
+          const open = dayIsOpen(g);
+          const held = [
+            g.messages ? `${g.messages} ${g.messages === 1 ? "message" : "messages"}` : null,
+            g.changes ? `${g.changes} ${g.changes === 1 ? "change" : "changes"}` : null,
+          ].filter(Boolean).join(", ");
+          return (
+            <Fragment key={`day_${g.key}`}>
+              {open ? (
+                <div className="flex items-center gap-3 py-3 text-[16px] font-semibold text-muted" role="separator">
+                  <span className="h-px flex-1 bg-border" />{dayName(g.at)}<span className="h-px flex-1 bg-border" />
+                </div>
+              ) : (
+                <button onClick={() => setOpenDays((d) => new Set(d).add(g.key))}
+                  aria-expanded={false}
+                  className="flex w-full items-center gap-3 py-2 text-[16px] text-muted hover:text-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  <span className="shrink-0"><span className="font-semibold">{dayName(g.at)}</span>{held && <span> · {held}</span>}</span>
+                  <span className="h-px flex-1 bg-border" />
+                </button>
+              )}
+              {open && g.rows.map((item) => {
+                const i = rowIndex.get(item) ?? 0;
+                return <Fragment key={`row_${rowAt(item)}_${i}`}>{renderRow(item, i)}</Fragment>;
+              })}
+            </Fragment>
+          );
+        })
+        : displayRows.map((item, i) => renderRow(item, i))}
       {/* C6: a short thread otherwise leaves a few hundred blank px below the
           last entry, which reads as a stuck load rather than a finished
           history. Top-anchored on purpose — bottom-anchoring was tried and
@@ -1073,6 +1146,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
       {!chatOrder && mergedFeedItems.length > 0 && (
         <div className="pt-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}</div>
       )}
+      {/* Marks the end of the thread, both for the jump button to scroll to and
+          for the observer that decides whether it needs to show at all. */}
+      {chatOrder && <div ref={feedEndRef} aria-hidden className="h-px" />}
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
@@ -1105,8 +1181,23 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // C1: a draft is what hasn't happened yet, never a peer of the sent
   // messages in the feed above — it lives here, in the composer region,
   // above whichever composer/CTA row is currently showing.
+  // Unread inbound messages: when there are any, the button says so and doubles
+  // as the sign that something came in while you were further up the thread.
+  const unreadInbound = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read).length;
+  const jumpToLatest = chatOrder && !latestOnScreen && mergedFeedItems.length > 0 && (
+    <div className="pointer-events-none flex justify-center pb-2">
+      <button
+        onClick={() => feedEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })}
+        className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border bg-surface px-3.5 py-1.5 text-[16px] font-semibold shadow-soft hover:bg-background"
+        style={unreadInbound ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}>
+        {unreadInbound ? `${unreadInbound} new` : "Latest"} <span aria-hidden>↓</span>
+      </button>
+    </div>
+  );
+
   const composerFooter = (
     <>
+      {jumpToLatest}
       {composingChannel
         ? (composingChannel === "activity" ? teamComposer : composingChannel === "email" ? null : channelComposer(composingChannel, closeComposers))
         : ctaRow}
