@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOpenReviews, openReviewCount, reviewName, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
+import { APPROVED_DAYS, buildOpenReviews, openReviewCount, reviewName, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
 import { daysSince, waitedFor } from "./elapsed";
 
 // The board answers one question: what is out with a client, and whose move is
@@ -105,5 +105,49 @@ describe("how a review reads", () => {
     expect(waitedFor(1)).toBe("1 day");
     expect(waitedFor(9)).toBe("9 days");
     expect(waitedFor(null)).toBe("not sent yet");
+  });
+});
+
+// Approval used to take a review off the board entirely, so "they approved it"
+// and "it disappeared" looked the same. This group is the difference.
+describe("what came back approved", () => {
+  const approved = (id: string, days: number, over: Partial<OpenReviewDoc> = {}) =>
+    doc({ id, status: "approved", approvedAt: ago(days), ...over });
+
+  it("lists what was approved lately, newest first, apart from what is still out", () => {
+    const g = buildOpenReviews(
+      [approved("old", 3), approved("new", 1), doc({ id: "out" })],
+      [sent("out", 2), sent("old", 9), sent("new", 4)],
+      NOW,
+    );
+    expect(g.approved.map((r) => r.id)).toEqual(["new", "old"]);
+    expect(g.withClient.map((r) => r.id)).toEqual(["out"]);
+  });
+
+  it("times an approved review from the approval, not from the send", () => {
+    // Sent nine days ago, approved yesterday: the board should say one day, or
+    // it reads as having sat there unanswered all that time.
+    const g = buildOpenReviews([approved("a", 1)], [sent("a", 9)], NOW);
+    expect(g.approved[0].days).toBe(1);
+  });
+
+  it("drops one approved longer ago than the window", () => {
+    const g = buildOpenReviews([approved("stale", APPROVED_DAYS + 1)], [], NOW);
+    expect(g.approved).toEqual([]);
+  });
+
+  it("keeps the count about what is waiting, so finishing work never raises it", () => {
+    const g = buildOpenReviews([approved("a", 1), doc({ id: "out" })], [sent("out", 2)], NOW);
+    expect(g.approved).toHaveLength(1);
+    expect(openReviewCount(g)).toBe(1);
+  });
+
+  it("remembers whether the client approved it or we did", () => {
+    const g = buildOpenReviews(
+      [approved("client", 1), approved("team", 1, { approvedByTeam: true })],
+      [], NOW,
+    );
+    expect(g.approved.find((r) => r.id === "client")!.approvedByTeam).toBeFalsy();
+    expect(g.approved.find((r) => r.id === "team")!.approvedByTeam).toBe(true);
   });
 });

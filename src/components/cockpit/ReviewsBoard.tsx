@@ -13,7 +13,7 @@
 // are waiting on reads OLDEST first, so the one going stale is at the top.
 import { I } from "./ui";
 import { kindTitle } from "@/lib/reviewKinds";
-import { type OpenReview, type OpenReviewGroups } from "@/lib/openReviews";
+import { APPROVED_DAYS, type OpenReview, type OpenReviewGroups } from "@/lib/openReviews";
 import { waitedFor } from "@/lib/elapsed";
 import { formatFileSize } from "@/lib/uploadTypes";
 
@@ -34,6 +34,11 @@ export type ReviewsBoardProps = {
 // takes. Same threshold the reminder cron uses to draft a nudge, so the board
 // and the nudge agree about what "too long" means.
 const STALE_DAYS = 3;
+
+/** When it was approved. waitedFor says how long something has been waiting,
+ *  which is the wrong sentence for work that is finished. */
+const approvedAgo = (days: number | null): string =>
+  (days === null ? "" : days <= 0 ? "Today" : days === 1 ? "Yesterday" : `${days} days ago`);
 
 function Row({ r, context, onOpen }: { r: OpenReview; context: { taskTitle: string; clientName: string } | null; onOpen: () => void }) {
   const stale = r.status === "with_client" && r.days !== null && r.days >= STALE_DAYS;
@@ -60,6 +65,15 @@ function Row({ r, context, onOpen }: { r: OpenReview; context: { taskTitle: stri
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
+        {/* Who approved it. The client clicking Approve is the news; the team
+            closing it out on their say so is worth telling apart, because it
+            means nobody at the client's end has actually looked. */}
+        {r.status === "approved" && (
+          <span className={`rounded px-2 py-0.5 text-[16px] font-medium ${r.approvedByTeam ? "bg-background text-muted" : "bg-emerald-50 text-emerald-700"}`}
+            title={r.approvedByTeam ? "Someone on the team marked this approved for the client" : "The client approved it themselves"}>
+            {r.approvedByTeam ? "We approved" : "Client approved"}
+          </span>
+        )}
         {r.status === "with_client" && (
           <span className={`rounded px-2 py-0.5 text-[16px] font-medium ${r.opened ? "bg-background text-muted" : "bg-amber-50 text-amber-700"}`}
             title={r.opened ? "The client has opened the link" : "The client has not opened the link yet"}>
@@ -67,7 +81,7 @@ function Row({ r, context, onOpen }: { r: OpenReview; context: { taskTitle: stri
           </span>
         )}
         <span className={`text-right text-[16px] ${stale ? "font-semibold text-amber-700" : "text-muted"}`}>
-          {waitedFor(r.days)}
+          {r.status === "approved" ? approvedAgo(r.days) : waitedFor(r.days)}
         </span>
       </span>
     </button>
@@ -119,6 +133,10 @@ export function ReviewsBoard({ groups, loading, taskContext, onOpenTask, onRefre
       <div className="flex flex-col gap-4">
         <Group title="Your move" help="The client sent changes back." rows={groups.yourMove} taskContext={taskContext} onOpenTask={onOpenTask} />
         <Group title="Waiting on the client" help="Longest wait first." rows={groups.withClient} taskContext={taskContext} onOpenTask={onOpenTask} />
+        {/* Nothing to do here, but before this an approved review just stopped
+            being listed, so coming back approved and never coming back looked
+            exactly the same (Derek, 2026-09-18). */}
+        <Group title="Approved" help={`Came back in the last ${APPROVED_DAYS} days. Newest first.`} rows={groups.approved} taskContext={taskContext} onOpenTask={onOpenTask} />
         {!loading && total === 0 && (
           <div className="rounded-xl border bg-surface py-16 text-center text-[16px] text-muted shadow-soft">
             Nothing is waiting on a client right now. Reviews appear here the moment one is sent.

@@ -11,10 +11,15 @@
 import { type ReviewKind, kindTitle } from "./reviewKinds";
 import { daysSince } from "./elapsed";
 
-/** A review's stage while it is still somebody's move. The other two stages,
- *  draft and approved, are not open: one has not been sent and the other is
- *  finished (supabase/task-documents.sql). */
-export type OpenReviewStatus = "with_client" | "client_submitted";
+/** A review's stage as the board reads it: still somebody's move, or approved
+ *  lately. draft is not here, because it has never been sent
+ *  (supabase/task-documents.sql). */
+export type OpenReviewStatus = "with_client" | "client_submitted" | "approved";
+
+/** How long an approved review stays on the board. The group answers "did it
+ *  come back?", which is a question about the last few days; after that it is
+ *  history and belongs in the task, not here. */
+export const APPROVED_DAYS = 7;
 
 /** One row of task_documents, as the board needs it. */
 export type OpenReviewDoc = {
@@ -28,6 +33,11 @@ export type OpenReviewDoc = {
   clientViewedAt: string | null;
   /** How many images or pages its working copy holds; 0 on a document. */
   parts?: number;
+  /** When it was approved, or null while it is still out. */
+  approvedAt?: string | null;
+  /** The team closed it out on the client's say so, rather than the client
+   *  clicking Approve (supabase/review-approved-by.sql). */
+  approvedByTeam?: boolean;
 };
 
 /** One row of task_document_versions: a send, a client's changes, an approval. */
@@ -54,6 +64,11 @@ export type OpenReviewGroups = {
   yourMove: OpenReview[];
   /** Sent, and we are waiting. */
   withClient: OpenReview[];
+  /** Approved in the last few days. Nothing to do, but it is the answer to
+   *  "did that come back?", which the board could not give before: an approved
+   *  review simply stopped being listed, so approval and disappearance looked
+   *  the same (Derek, 2026-09-18). */
+  approved: OpenReview[];
 };
 
 /** Its name on the board. An unnamed review would otherwise read as a blank
@@ -85,9 +100,14 @@ export function buildOpenReviews(docs: OpenReviewDoc[], versions: ReviewVersionR
   const rows = docs.map((doc): OpenReview => {
     // A sent review is timed from the send. One they have replied to is timed
     // from the reply, which is when it became ours.
-    const at = doc.status === "client_submitted"
-      ? latest(versions, doc.id, "client_submitted") ?? latest(versions, doc.id, "sent")
-      : latest(versions, doc.id, "sent");
+    // Each row is timed from the moment that matters for its group: a sent one
+    // from the send, one they replied to from the reply, an approved one from
+    // the approval.
+    const at = doc.status === "approved"
+      ? doc.approvedAt ?? latest(versions, doc.id, "client_approved") ?? latest(versions, doc.id, "sent")
+      : doc.status === "client_submitted"
+        ? latest(versions, doc.id, "client_submitted") ?? latest(versions, doc.id, "sent")
+        : latest(versions, doc.id, "sent");
     return { ...doc, name: reviewName(doc), at, days: daysSince(at, now), opened: !!doc.clientViewedAt };
   });
 
@@ -101,8 +121,15 @@ export function buildOpenReviews(docs: OpenReviewDoc[], versions: ReviewVersionR
   return {
     yourMove: rows.filter((r) => r.status === "client_submitted").sort((a, b) => byAge(a, b, false)),
     withClient: rows.filter((r) => r.status === "with_client").sort((a, b) => byAge(a, b, true)),
+    // Newest first, and only the last few days: this group is read for what has
+    // just landed, not for the whole history.
+    approved: rows
+      .filter((r) => r.status === "approved" && r.days !== null && r.days <= APPROVED_DAYS)
+      .sort((a, b) => byAge(a, b, false)),
   };
 }
 
-/** How many reviews are open in total, for the tab's own count. */
+/** How many reviews are open in total, for the tab's own count. An approved one
+ *  is not counted: the number means "waiting on somebody", and a badge that goes
+ *  up when work finishes would read as more to do rather than less. */
 export const openReviewCount = (g: OpenReviewGroups): number => g.yourMove.length + g.withClient.length;

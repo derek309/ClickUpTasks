@@ -5,6 +5,7 @@ import { supabase } from "./supabase";
 import type { EmailDraft } from "./data";
 import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
+import { APPROVED_DAYS } from "./openReviews";
 import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
 import type { ClientDraftInput } from "./pendingSends";
 import {
@@ -357,23 +358,35 @@ export async function fetchContacts(): Promise<Contact[]> {
  *  rows that say when each was sent or replied to. Versions come back for these
  *  documents only, which is a handful of rows per review. */
 export async function fetchOpenReviews(): Promise<{ docs: OpenReviewDoc[]; versions: ReviewVersionRow[] }> {
+  // Open reviews, plus the ones approved lately: the board shows those too, so
+  // approval stops looking like the review simply vanishing. The window is
+  // APPROVED_DAYS, the same constant the grouping applies, so the query and the
+  // rule cannot drift apart.
+  const approvedSince = new Date(Date.now() - APPROVED_DAYS * 86_400_000).toISOString();
   const { data: docRows, error } = await supabase
     .from("task_documents")
-    .select("id, task_id, kind, title, status, version, client_viewed_at, body")
+    .select("id, task_id, kind, title, status, version, client_viewed_at, body, approved_at, approved_by")
     .is("deleted_at", null)
-    .in("status", ["with_client", "client_submitted"]);
+    .or(`status.in.(with_client,client_submitted),approved_at.gte.${approvedSince}`);
   if (error || !docRows?.length) return { docs: [], versions: [] };
 
-  const docs: OpenReviewDoc[] = docRows.map((r) => ({
-    id: r.id as string,
-    taskId: r.task_id as string,
-    kind: parseKind(r.kind),
-    title: (r.title as string | null) ?? null,
-    status: r.status as OpenReviewStatus,
-    version: (r.version as number) ?? 0,
-    clientViewedAt: (r.client_viewed_at as string | null) ?? null,
-    parts: isFileKind(parseKind(r.kind)) ? setFiles(r.body).length : 0,
-  }));
+  const docs: OpenReviewDoc[] = docRows.map((r) => {
+    const open = r.status === "with_client" || r.status === "client_submitted";
+    return {
+      id: r.id as string,
+      taskId: r.task_id as string,
+      kind: parseKind(r.kind),
+      title: (r.title as string | null) ?? null,
+      // Approved and completed both read as approved here: the board's question
+      // is whether it came back, not what was done with it afterwards.
+      status: (open ? r.status : "approved") as OpenReviewStatus,
+      version: (r.version as number) ?? 0,
+      clientViewedAt: (r.client_viewed_at as string | null) ?? null,
+      parts: isFileKind(parseKind(r.kind)) ? setFiles(r.body).length : 0,
+      approvedAt: (r.approved_at as string | null) ?? null,
+      approvedByTeam: r.approved_by != null,
+    };
+  });
 
   const { data: versionRows } = await supabase
     .from("task_document_versions")

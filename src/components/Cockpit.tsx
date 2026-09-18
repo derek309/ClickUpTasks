@@ -243,7 +243,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // opened rather than at boot: a document is otherwise read one task at a
   // time (supabase/task-documents.sql), and the board is two small queries
   // that would be wasted on every other visit.
-  const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [] });
+  const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [], approved: [] });
   const [reviewsLoading, setReviewsLoading] = useState(false);
   // What video is costing in storage, loaded with the board that shows it.
   const [videoStorage, setVideoStorage] = useState<{ files: number; bytes: number } | null>(null);
