@@ -5,7 +5,7 @@ import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
   User, TODAY, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
-  Priority, PRIORITY_META, manualPriorityOptions, delegationTitle, type DelegateSpec, type ClientLink,
+  Priority, type DelegateSpec,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
 import { CHANNEL_TONE } from "./channelTone";
@@ -31,7 +31,7 @@ const ICON: Record<TaskActionKind, string> = {
 };
 
 export function ActionDock({
-  task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, clientLinks = [], taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
+  task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
   onSendMessage, reachable, replyTarget,
 }: {
   task: Task;
@@ -60,9 +60,7 @@ export function ActionDock({
   onSendDm?: (userId: string, body: string) => void;
   /** Hands the task over: the checklist item, the dates, the sizing, the
    *  stage and the ping, all written by whoever owns the task list. */
-  onDelegate?: (spec: DelegateSpec) => void;
-  /** The client's saved links, offered one tap at a time when delegating. */
-  clientLinks?: ClientLink[];
+  onDelegate?: (spec: DelegateSpec) => string | null;
   taskLink?: () => string;
   askNextStepFor?: { kind: TaskActionKind; body: string } | null;
   onAskNextStepHandled?: () => void;
@@ -84,11 +82,6 @@ export function ActionDock({
   const [delegateTitle, setDelegateTitle] = useState("");
   const [theirDue, setTheirDue] = useState<string | null>(null);
   const [delegatePriority, setDelegatePriority] = useState<Priority | null>(null);
-  const [links, setLinks] = useState<string[]>([]);
-  const [linkDraft, setLinkDraft] = useState("");
-  // The paste box is a chip until you want it. A permanently open input sat
-  // in the row looking like a field you had to fill in.
-  const [addingLink, setAddingLink] = useState(false);
   // The suggestion card is the default; "Change it" opens the fields. Editing
   // one field should not throw away the other three, so this is one flag over
   // the whole card rather than a mode per row.
@@ -196,7 +189,6 @@ export function ActionDock({
     // the whole point is deciding when THEY owe it.
     setDelegateTitle("");
     setTheirDue(null); setDelegatePriority(task.priority === "none" ? "normal" : task.priority);
-    setLinks([]); setLinkDraft(""); setAddingLink(false);
   };
   const openPanelRef = useRef(openPanel);
   useEffect(() => { openPanelRef.current = openPanel; });
@@ -378,17 +370,24 @@ export function ActionDock({
     // only a note that reads like one.
     if (kind === "delegate") {
       if (!teammate) { pushToast("Pick who you are handing it to."); return; }
-      if (!text) { pushToast("Say what they need to do."); return; }
+      // The brief is written on the handoff page this opens, so it is no longer
+      // asked for here; the name is, because without a brief there is nothing to
+      // derive one from (Derek, 2026-09-18).
+      if (!delegateTitle.trim()) { pushToast("Give the handoff a name."); return; }
       if (!theirDue) { pushToast("Give them a date to have it by."); return; }
       if (!onDelegate) { pushToast("Delegating is not available here."); return; }
       onDelegate({
-        toId: teammate, title: delegateTitle, instructions: text, theirDue, followUpAt: nextDue,
-        size: size ?? task.size ?? null, priority: delegatePriority ?? task.priority, links,
+        toId: teammate, title: delegateTitle, instructions: text, theirDue,
+        // Follow up when they owe it unless the page says otherwise. The box no
+        // longer asks, and silently having no follow up would quietly drop the
+        // thing that brings an unanswered handoff back to you.
+        followUpAt: nextDue ?? theirDue,
+        size: size ?? task.size ?? null, priority: delegatePriority ?? task.priority, links: [],
       });
       onLog({
         id: newId("ta_"), taskId: task.id, kind, authorId: me?.id ?? null,
         toId: teammate, parentId: null,
-        body: [text, ...links].filter(Boolean).join("\n"),
+        body: [text, delegateTitle.trim()].filter(Boolean).join("\n"),
         at: new Date().toISOString(),
         // The next step is theirs, and so is its date: what you are waiting
         // on is them, not your own follow-up. Your follow-up is on the task.
@@ -400,7 +399,7 @@ export function ActionDock({
       if (onSendDm) {
         const link = taskLink?.();
         const ref = [`Re: ${task.title}${client?.name ? ` · ${client.name}` : ""}`, link].filter(Boolean).join("\n");
-        onSendDm(teammate, [`Handing this to you, due ${formatDue(theirDue)}.`, text, ...links, ref].filter(Boolean).join("\n\n"));
+        onSendDm(teammate, [`Handing you "${delegateTitle.trim()}", due ${formatDue(theirDue)}. The handoff page has the details.`, text, ref].filter(Boolean).join("\n\n"));
       }
       pushToast(`Delegated to ${userById(teammate)?.name ?? "them"} · due ${formatDue(theirDue)}`);
       setView("closed");
@@ -899,87 +898,26 @@ export function ActionDock({
                 what to call a brief, and a guess is a poor thing to read on
                 a row every day (Derek: "add delegation title"). Left blank it
                 still falls back to the guess. */}
-            {block("Call it", (
+            {block(<>Call it{!delegateTitle.trim() && <span className="ml-1 font-medium normal-case tracking-normal text-danger">name it</span>}</>, (
               <input value={delegateTitle} onChange={(e) => setDelegateTitle(e.target.value)}
-                placeholder={body.trim() ? delegationTitle(body) : "Name this handoff"}
+                placeholder="Name this handoff"
                 className="w-full rounded-[9px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
             ))}
 
-            {block("What they need to do", bodyBox("Everything they need to know to do it."))}
-
-            {block("Links they will need", (
-              <>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {links.map((l) => (
-                    <button key={l} onClick={() => setLinks((ls) => ls.filter((x) => x !== l))} title={l}
-                      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent">
-                      <span className="truncate">🔗 {prettyLinkName(l)}</span> <span aria-hidden className="text-muted">×</span>
-                    </button>
-                  ))}
-                  {addingLink ? (
-                    <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)}
-                      onBlur={() => { if (!linkDraft.trim()) setAddingLink(false); }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") { setLinkDraft(""); setAddingLink(false); return; }
-                        if (e.key !== "Enter") return;
-                        e.preventDefault();
-                        const v = linkDraft.trim();
-                        if (v && !links.includes(v)) setLinks((ls) => [...ls, v]);
-                        setLinkDraft(""); setAddingLink(false);
-                      }}
-                      placeholder="Paste a link, then Enter"
-                      className="min-w-[200px] flex-1 rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent" />
-                  ) : (
-                    <button onClick={() => setAddingLink(true)}
-                      className="rounded-md border border-dashed px-2 py-1 text-[16px] font-medium text-muted hover:border-accent hover:text-accent">＋ Paste a link</button>
-                  )}
-                </div>
-                {/* One tap beats retyping a URL that is already saved, which
-                    is the reason nobody attaches them. */}
-                {clientLinks.some((l) => !links.includes(l.url)) && (
-                  <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
-                    <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {clientLinks.filter((l) => !links.includes(l.url)).map((l) => (
-                        <button key={l.url} onClick={() => setLinks((ls) => [...ls, l.url])} title={l.url}
-                          className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {l.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            ))}
-
-            {/* The two dates side by side, because the whole point is that
-                they are different dates doing different jobs. */}
-            <div className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
+            {/* Only when they owe it. What they need to do, the links, the
+                follow up date, how long it takes and the priority all live on
+                the handoff page, which this opens (Derek, 2026-09-18: "now that
+                we have a delegate page can we just leave it with what to call it
+                and when it's due and then open it"). Size and priority carry
+                over from the task rather than being dropped. */}
+            <div className="mt-3 border-t pt-3">
               {block(<>They owe it{!theirDue && <span className="ml-1 font-medium normal-case tracking-normal text-danger">pick a date</span>}</>,
                 dateChips(theirDue, setTheirDue, null), "mb-0")}
-              {block("You follow up", dateChips(nextDue, setNextDue, theirDue), "mb-0")}
-            </div>
-
-            <div className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
-              {block("Takes", (
-                <div className="flex flex-wrap gap-1.5">
-                  {SIZE_ORDER.map((sz) => (
-                    <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-                      className={`rounded-md border px-2 py-1.5 text-[16px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
-                  ))}
-                </div>
-              ), "mb-0")}
-              {block("Priority", (
-                <div className="flex flex-wrap gap-1.5">
-                  {manualPriorityOptions(delegatePriority ?? task.priority).map((pr) => (
-                    <button key={pr} onClick={() => setDelegatePriority(pr)}
-                      className={`rounded-md border px-2 py-1.5 text-[16px] ${(delegatePriority ?? task.priority) === pr ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{PRIORITY_META[pr].label}</button>
-                  ))}
-                </div>
-              ), "mb-0")}
             </div>
 
             <div className="mt-3.5 flex flex-wrap items-center gap-3 border-t pt-3">
-              <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">Delegate</button>
-              <span className="text-[16px] text-muted">Moves the task to the Delegated stage.</span>
+              <button onClick={() => commit("delegate")} className="rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white hover:opacity-90">Delegate and open</button>
+              <span className="text-[16px] text-muted">Moves the task to the Delegated stage and opens the handoff to fill in.</span>
             </div>
           </div>
         )}

@@ -75,7 +75,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onSendDm?: (userId: string, body: string) => void;
   /** Hands the task to a teammate: writes the assigned checklist item, the
    *  dates, the sizing and the hidden Delegated stage, and pings them. */
-  onDelegate?: (spec: DelegateSpec) => void;
+  /** Returns the new handoff's id, so its page can be opened to finish the brief. */
+  onDelegate?: (spec: DelegateSpec) => string | null;
   clientLinks?: ClientLink[];
   taskLink?: () => string;
 }) {
@@ -1614,7 +1615,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {(() => {
           const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && !!x.assigneeId) : null;
           return hs ? (
-            <HandoffPage task={task} sub={hs} meId={meId} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
+            <HandoffPage task={task} sub={hs} meId={meId} clientLinks={clientLinks} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
               onPatchSub={onPatchSub} onToggleSub={onToggleSub} onClose={() => setOpenHandoff(null)}
               onOpenFile={(att) => { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); else void openPreview(att); }}
               onSendDm={onSendDm} pushToast={pushToast}
@@ -1629,7 +1630,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // Same gate the composer already uses: onSendTaskMessage is only
           // passed when this person may message this client.
           canMessageClient={mayContactClient}
-          onSendDm={onSendDm} onDelegate={onDelegate} clientLinks={clientLinks} taskLink={taskLink}
+          onSendDm={onSendDm}
+          // The delegate box takes only who, what to call it and when it is
+          // due; everything else about the handoff is written on its own page,
+          // so delegating opens it rather than asking for it all up front.
+          onDelegate={onDelegate ? (spec) => { const id = onDelegate(spec); if (id) setOpenHandoff(id); return id; } : undefined}
+          taskLink={taskLink}
           askNextStepFor={pendingNextStep}
           onSendMessage={onSendTaskMessage ? (channel, body, replyToId) => {
             onSendTaskMessage(channel, "", body, undefined, undefined, undefined, replyToId);

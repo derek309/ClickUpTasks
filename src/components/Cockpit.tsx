@@ -3327,9 +3327,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const delegateTask = (taskId: string, spec: {
     toId: string; title: string; instructions: string; theirDue: string; followUpAt: string | null;
     size: TaskSize | null; priority: Priority; links: string[];
-  }, opts?: { skipEmail?: boolean }) => {
+  }, opts?: { skipEmail?: boolean }): string | null => {
     const t = tasksRef.current.find((x) => x.id === taskId);
-    if (!t) return;
+    if (!t) return null;
     // Whatever they called it, or a name derived from the brief when they
     // left it blank: see delegationTitle.
     const title = spec.title.trim() || delegationTitle(spec.instructions);
@@ -3352,6 +3352,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
     update(taskId, patch);
     if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId, { skipEmail: opts?.skipEmail });
+    // The handoff's own id, so the caller can open its page: the brief is
+    // written there now rather than in the delegate box (Derek, 2026-09-18).
+    return sub.id;
   };
 
   // The same handoff, applied to everything selected. Nine tasks to one person

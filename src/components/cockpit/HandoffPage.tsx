@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  handoffOf, handoffProgress, formatDue, timeAgo, userById, prettyLinkName,
+  handoffOf, handoffProgress, formatDue, timeAgo, userById, prettyLinkName, type ClientLink,
   type Attachment, type Handoff, type HandoffDeliverable, type Subtask, type Task,
 } from "@/lib/data";
 import { fetchTaskDocument, type TaskDocument } from "@/lib/db";
@@ -31,7 +31,7 @@ const STAGE: Record<string, { label: string; tone: string }> = {
   completed: { label: "Completed", tone: "bg-emerald-50 text-emerald-700" },
 };
 
-export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, onClose, onOpenFile, onSendDm, onOpenDeliverables, pushToast }: {
+export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, onClose, onOpenFile, onSendDm, onOpenDeliverables, clientLinks = [], pushToast }: {
   task: Task;
   sub: Subtask;
   meId?: string | null;
@@ -44,6 +44,9 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
   onSendDm?: (memberId: string, body: string) => void;
   /** Close the page and show the task's reviews. */
   onOpenDeliverables: () => void;
+  /** The client's saved links, offered one tap at a time. Retyping a URL that
+   *  is already saved is the reason nobody attaches them. */
+  clientLinks?: ClientLink[];
   pushToast: (msg: string) => void;
 }) {
   useEscapeToClose(onClose);
@@ -187,6 +190,19 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                   <input value={stepDraft} onChange={(e) => setStepDraft(e.target.value)} placeholder="Add a step, then Enter" aria-label="New step" className={input} />
                   <button type="submit" className="shrink-0 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white">Add</button>
                 </form>
+              )}
+              {/* The links already saved against this client, one tap each. */}
+              {editing && clientLinks.some((c) => !h.links.some((l) => l.url === c.url)) && (
+                <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
+                  <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {clientLinks.filter((c) => !h.links.some((l) => l.url === c.url)).map((c) => (
+                      <button key={c.url} title={c.url}
+                        onClick={() => save({ links: [...h.links, { id: newId("hl_"), label: c.label, url: c.url }] })}
+                        className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {c.label}</button>
+                    ))}
+                  </div>
+                </div>
               )}
               {!editing && !total && <p className="text-[16px] text-muted">No steps yet.</p>}
             </>
