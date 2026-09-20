@@ -31,7 +31,7 @@ import {
   mentionsUser,
   viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf, delegatedItemFor,
   isSnoozed,
-  isCompletionEvent, finishKindOf, handoffDoneEvent, type FinishKind,
+  isCompletionEvent, finishKindOf, handoffDoneEvent,
   CLIENT_STATUS_META,
   clientStatusMeta,
   type ClientStatus,
@@ -98,7 +98,7 @@ import { ClientJournal } from "./cockpit/ClientJournal";
 import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
-import { CompletedLog } from "./cockpit/CompletedLog";
+import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { NextStepsBoard } from "./cockpit/NextStepsBoard";
@@ -2006,15 +2006,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const showCompletedLog = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && allTasksCompleted;
   const completionLog = useMemo(() => {
     if (!showCompletedLog) return [];
-    const rows: { id: string; taskId: string; taskTitle: string; clientId: string; clientName: string; authorId: string; authorName: string; authorColor: string; authorInitials: string; at: string }[] = [];
+    const rows: CompletionRow[] = [];
     for (const t of tasks) {
       if (t.clientId === PERSONAL_CLIENT_ID) continue; // personal to-dos aren't client work to review
+      const clientName = clientById(t.clientId)?.name ?? "—";
       for (const c of t.comments) {
-        if (c.kind !== "event" || !isCompletionEvent(c.body)) continue;
-        const author = userById(c.authorId);
+        if (c.kind !== "event") continue;
+        const kind = finishKindOf(c.body, c.authorId);
+        if (!kind) continue;
+        // The client is not on the roster, so an approval of theirs is credited
+        // to the client itself. Their own name is what makes the row readable:
+        // "Brian Goodell" beside "Client approved" says the whole thing.
+        const client = kind === "client_approved";
+        const author = client ? null : userById(c.authorId);
         rows.push({
-          id: c.id, taskId: t.id, taskTitle: t.title, clientId: t.clientId, clientName: clientById(t.clientId)?.name ?? "—",
-          authorId: c.authorId, authorName: author?.name ?? "Unknown", authorColor: author?.color ?? "#94a3b8", authorInitials: author?.initials ?? "?",
+          id: c.id, taskId: t.id, taskTitle: t.title, clientId: t.clientId, clientName,
+          authorId: client ? `client:${t.clientId}` : c.authorId,
+          authorName: client ? clientName : author?.name ?? "Unknown",
+          authorColor: (client ? clientById(t.clientId)?.color : author?.color) ?? "#94a3b8",
+          authorInitials: client ? initialsOf(clientName) : author?.initials ?? "?",
+          ownerId: t.assigneeId ?? null,
+          kind,
           at: c.at,
         });
       }
@@ -4091,8 +4103,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     <div className="flex items-center gap-2">
       {scopeControl}
       <button onClick={() => setAllTasksCompleted((v) => !v)}
-        title={allTasksCompleted ? "Back to open tasks" : "Show what has been completed"}
-        className={`rounded-md border px-2.5 py-1.5 text-[13px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Completed</button>
+        title={allTasksCompleted ? "Back to open tasks" : "Show what has finished: tasks done, reviews approved, handoffs finished"}
+        className={`rounded-md border px-2.5 py-1.5 text-[16px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Finished</button>
     </div>
   );
   // Following moved out of the filter popover into its own header avatar
@@ -4779,12 +4791,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSize={(taskId, patch) => patchTask(taskId, patch)} dayStart={dayStart} onDayStart={setDayStart} unsizedCount={planUnsized}
             includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
         ) : showCompletedLog ? (
-          // Now an All Tasks mode rather than a My Work tab — same
-          // completionLog data, day-grouped feed of who finished what and
-          // when. Whose is the header dropdown's answer, so the log's own
-          // author picker would be the same question asked twice.
-          <CompletedLog rows={completionLog} authorId={allTasksScope === "all" ? null : allTasksScope === "mine" ? me.id : allTasksScope}
-            onOpenTask={(_clientId, taskId) => setOpenTaskId(taskId)} />
+          // Now an All Tasks mode rather than a My Work tab — day-grouped feed
+          // of what finished and when. The header's scope answers WHOSE work,
+          // by the task's owner, exactly as it does for the list behind this;
+          // the feed's own picker answers who finished it, which is a different
+          // question once a client can be the one who did.
+          <FinishedFeed rows={completionLog} ownerId={allTasksScope === "all" ? null : allTasksScope === "mine" ? me.id : allTasksScope}
+            onOpenTask={(_clientId: string, taskId: string) => setOpenTaskId(taskId)} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
