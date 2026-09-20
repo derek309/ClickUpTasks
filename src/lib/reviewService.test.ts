@@ -30,7 +30,7 @@ function builder(table: string) {
 }
 
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
-const server = vi.hoisted(() => ({ liveDocument: vi.fn(), linkState: vi.fn(), mintDocLink: vi.fn(), setWorkingFile: vi.fn(), teamSend: vi.fn() }));
+const server = vi.hoisted(() => ({ liveDocument: vi.fn(), linkState: vi.fn(), mintDocLink: vi.fn(), setWorkingFile: vi.fn(), teamSend: vi.fn(), appendTaskEvent: vi.fn() }));
 vi.mock("./taskDocumentServer", () => server);
 const files = vi.hoisted(() => ({ docVersionFile: vi.fn(), recordCheckpoint: vi.fn(), removeVersionFile: vi.fn(), sharedVersionFiles: vi.fn() }));
 vi.mock("./taskDocumentFiles", () => files);
@@ -82,6 +82,8 @@ describe("setReviewStage", () => {
     // without the other left the two sides disagreeing (Derek, 2026-09-17).
     expect(calls[0].payload).toMatchObject({ status: "approved", approved_version: 3, approved_by: "u_claude" });
     expect(typeof calls[0].payload.approved_at).toBe("string");
+    // And on the task's own record, so the Finished feed can find it later.
+    expect(server.appendTaskEvent).toHaveBeenCalledWith("t_1", "approved the client document for the client (version 3)", "u_claude");
   });
 
   it("leaves the client's own approval alone when the team picks Approved after them", async () => {

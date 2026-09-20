@@ -31,7 +31,7 @@ import {
   mentionsUser,
   viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf, delegatedItemFor,
   isSnoozed,
-  isCompletionEvent,
+  isCompletionEvent, finishKindOf, handoffDoneEvent, type FinishKind,
   CLIENT_STATUS_META,
   clientStatusMeta,
   type ClientStatus,
@@ -3273,6 +3273,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // the one that actually happens.
     if (t.status === "delegated" && !delegateeOf({ assigneeId: t.assigneeId, subtasks })) patch.status = "in_progress";
     update(taskId, patch);
+    // A finished handoff goes on the task's record, so the Finished feed can
+    // show it. Until now it left no trace but a bell: nothing said when it was
+    // done or by whom, so it could not appear anywhere after the fact. The same
+    // test deleteSub uses for a delegation: an item given to someone other than
+    // the task's owner, not the owner ticking their own checklist.
+    const handoff = !!s?.assigneeId && s.assigneeId !== t.assigneeId;
+    if (nowDone && handoff && s) {
+      const ev = { id: newId("cm_"), authorId: me.id, kind: "event" as const, at: new Date().toISOString(), body: handoffDoneEvent(s.title) };
+      setTasks((prev) => prev.map((x) => (x.id === taskId ? { ...x, comments: [...x.comments, ev] } : x)));
+      void appendCommentDb(taskId, ev);
+    }
     // Completing a delegated item pings the task owner so they know it's handled.
     // Bell only — a checked-off checklist row is progress on work the owner is
     // already watching, not something that needs to interrupt their inbox.

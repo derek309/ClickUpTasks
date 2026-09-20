@@ -1012,6 +1012,36 @@ export function isCompletionEvent(body: string): boolean {
   return d?.field === "status" && d.to === STATUS_META.done.label;
 }
 
+// What the Finished feed collects: every way a piece of work comes to an end,
+// read from the same event lines the task's own activity shows (Derek,
+// 2026-09-18: "I'm finding it hard to go find what's being completed or
+// approved"). Each is written in exactly one place, and the sentence here must
+// match it:
+//   a task marked done        describeFieldChange, "changed status from X to Done"
+//   a client approving        taskDocumentServer.ts clientPublish, author "client"
+//   the team approving for    reviewService.ts setReviewStage, reviewApprovedByTeamEvent
+//     the client
+//   a handoff finished        Cockpit.tsx toggleSub, handoffDoneEvent
+export type FinishKind = "completed" | "client_approved" | "team_approved" | "handoff";
+
+/** The line the team writes when it approves a review for the client. */
+export const reviewApprovedByTeamEvent = (noun: string, version: number) =>
+  `approved the ${noun} for the client (version ${version})`;
+/** The line written when a delegated item is ticked off. */
+export const handoffDoneEvent = (title: string) => `finished the handoff "${title}"`;
+
+/** Which kind of finish an event line records, or null for any other line. */
+export function finishKindOf(body: string, authorId: string | null | undefined): FinishKind | null {
+  if (isCompletionEvent(body)) return "completed";
+  if (/^finished the handoff ".*"$/.test(body)) return "handoff";
+  if (/^approved the .+ for the client \(version \d+\)$/.test(body)) return "team_approved";
+  // The client's own line is "<their name> approved the <kind> (version N)", and
+  // only the client writes as "client", so the author is what tells it apart
+  // from a teammate who happens to type something similar in a note.
+  if (authorId === "client" && / approved the .+ \(version \d+\)$/.test(body)) return "client_approved";
+  return null;
+}
+
 /** What an activity event is about, so a run of them can fold into one line
  *  that names its topics ("3 changes · status, follow up"). */
 export function eventTopic(body: string): string {

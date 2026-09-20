@@ -182,11 +182,19 @@ async function claimSubmitEmail(documentId: string): Promise<boolean> {
 }
 
 /** A line in the task's activity for something the client did. */
-async function appendClientEvent(taskId: string, body: string): Promise<void> {
+/** Add one activity line to a task, as whoever did the thing. append_comment
+ *  stamps updated_by with that author, and the team's app ignores a realtime
+ *  event from the viewer themselves, so the line arrives live for everyone but
+ *  its author (their own app already knows what they did). */
+export async function appendTaskEvent(taskId: string, body: string, authorId: string): Promise<void> {
   await supabaseAdmin.rpc("append_comment", {
     task_id: taskId,
-    comment: { id: "cm_" + randomUUID(), authorId: "client", kind: "event", at: new Date().toISOString(), body },
+    comment: { id: "cm_" + randomUUID(), authorId, kind: "event", at: new Date().toISOString(), body },
   });
+}
+
+async function appendClientEvent(taskId: string, body: string): Promise<void> {
+  await appendTaskEvent(taskId, body, "client");
 }
 
 /** Log a client action on the task and touch the task, in the order clientPublish

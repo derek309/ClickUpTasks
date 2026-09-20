@@ -5,10 +5,11 @@
 // task and kind, the approval lock, versions, the 30 day restore and sending.
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
-import { liveDocument, linkState, mintDocLink, setWorkingFile, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
+import { appendTaskEvent, liveDocument, linkState, mintDocLink, setWorkingFile, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
+import { reviewApprovedByTeamEvent } from "./data";
 import { docVersionFile, recordCheckpoint, removeVersionFile, sharedVersionFiles } from "./taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_HTML_CHARS } from "./docHtml";
-import { filePurpose, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
+import { filePurpose, kindNoun, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
 import { nameReviewIfDefault } from "./reviewAutoName";
 import { cleanImageSet, formatImageSet, parseImageSet, setFiles } from "./imageSet";
 
@@ -63,11 +64,19 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
   if (!(REVIEW_STAGES as readonly unknown[]).includes(stage)) return fail(400, "Unknown stage.");
   const doc = await liveDocument(taskId, kind, "id, approved_at, version");
   if (!doc) return fail(404, noDocumentYet(kind));
+  const approving = stage === "approved" && !doc.approved_at;
   const lock = stage === "approved"
     // Already approved (the client got there first): keep their approval as it is.
     ? (doc.approved_at ? {} : { approved_at: new Date().toISOString(), approved_version: (doc.version as number) ?? null, approved_by: actor.memberId })
     : { approved_at: null, approved_version: null, approved_by: null };
-  return update(doc.id, { status: stage, ...lock, ...stampOf(actor) });
+  const done = await update(doc.id, { status: stage, ...lock, ...stampOf(actor) });
+  // On the task's record, like the client's own approval is, so it can be found
+  // afterwards: the Finished feed reads these lines, and a team approval used to
+  // leave none. Only on the approval itself, not on a re-pick of Approved.
+  if (done.ok && approving && actor.memberId) {
+    await appendTaskEvent(taskId, reviewApprovedByTeamEvent(kindNoun(kind), (doc.version as number) ?? 0), actor.memberId);
+  }
+  return done;
 }
 
 /** Allowed on an approved review too: the name is the team's label, not part of

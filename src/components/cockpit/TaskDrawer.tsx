@@ -1379,12 +1379,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the "N of M" pager (onPrev/onNext below) already does the same job of
   // moving between tasks in this list, without duplicating a whole list
   // view inside the drawer.
-  // A task with no linked contact (so SMS/Email can never appear) and no
-  // comments yet has nothing the messaging feed could show — that's a
-  // ~400px column of dead space next to a document with room to spare. Fold it into the document column instead of reserving a wide
-  // empty rail for it; the moment it has a linked contact or a first
-  // comment, it's no longer "light" and gets the full two-column layout.
-  const isLightTask = !hasMessaging && task.comments.length === 0;
+  // Every task has the same two columns. There used to be a "light" one for a
+  // task with no linked contact and no comments, on the grounds that it had
+  // nothing the messaging feed could show and so did not deserve a ~400px rail
+  // (Derek, 2026-09-20: "the layout is different than a client task"). Two
+  // things were wrong with that. The rail is not only messaging: it carries the
+  // client, Links and files, and the client, project and contact selects, and
+  // the parts that do need a contact already hide themselves. And the test read
+  // task.comments.length, so writing the first note flipped the task into the
+  // other layout under you, moving Client and list from the bottom of the page
+  // into the rail with no warning.
 
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
     <section className="mt-10" id={title === "Deliverables" ? "task-deliverables" : undefined}>
@@ -1418,9 +1422,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {reviewBlocks}
           {draftEmailBlock}
           {/* Links and files live in the client rail, under the contact card
-              (Derek, 2026-09-14). A task with no rail keeps them here. */}
-          {isLightTask && attachmentsBlock}
-          {!hasDeliverables && !(isLightTask && showAttachments) && (
+              (Derek, 2026-09-14). */}
+          {!hasDeliverables && (
             <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. Drop a file anywhere on the task to attach it.</p>
           )}
         </>
@@ -1520,7 +1523,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* --dock-right keeps the floating dock over the task column, clear of
           the client rail. Zero below 1100px, where the rail stacks under. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
-        className={`[--dock-right:0px] ${isLightTask ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
+        className={`[--dock-right:0px] min-[1100px]:[--dock-right:340px] ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-[16px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
@@ -1597,10 +1600,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <div className="min-w-0 flex-1 px-2 pb-32 pt-3 sm:px-5 sm:pt-5">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-10 sm:py-9">
               {mainColumn}
-              {isLightTask && section("Client and list", detailsBlock)}
             </div>
           </div>
-          {!isLightTask && clientRail}
+          {clientRail}
         </div>
         {/* Shown over the whole drawer while a file is being dragged in, so
             the target is obvious and it is clear the drop will land here
