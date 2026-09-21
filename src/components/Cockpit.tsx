@@ -75,7 +75,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -1145,6 +1145,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
   useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
 
+  // When this person last looked at Finished. finishedSeenAt is what the count
+  // is measured against and only moves when they look again; markerAt is frozen
+  // for the visit, so the "new since you last looked" line stays where it was
+  // instead of vanishing as the view opens.
+  const [finishedSeenAt, setFinishedSeenAt] = useState<string | null>(null);
+  const [finishedMarkerAt, setFinishedMarkerAt] = useState<string | null>(null);
+  useEffect(() => {
+    void fetchFeedSeen(me.id, "finished").then(setFinishedSeenAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me.id]);
+  // Opening it is looking at it: freeze the marker where it is, then move the
+  // stored mark to now so the count is clear next time. Done where the opening
+  // happens rather than in an effect watching for it: it is one action by a
+  // person, and an effect would be a second, later guess at when that was.
+  const openFinished = () => {
+    setFinishedMarkerAt(finishedSeenAt);
+    const now = new Date().toISOString();
+    setFinishedSeenAt(now);
+    markFeedSeenDb(me.id, "finished", now);
+  };
+
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
     view: settingsView ? "settings" : dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
@@ -1173,7 +1194,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Same reasoning as the assignee above: absent means the default half of
     // the view, not whatever this browser was last left on.
     if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "steps" || s.sub === "reviews" ? s.sub : "work");
-    if (!s.view && s.client === "all") setAllTasksCompleted(s.sub === "completed");
+    if (!s.view && s.client === "all") {
+      // A link straight into Finished is looking at it, the same as the button.
+      if (s.sub === "completed" && !allTasksCompleted) openFinished();
+      setAllTasksCompleted(s.sub === "completed");
+    }
   };
   // The URL-writing effect below is inert until this flips, so nothing can
   // clobber the deep link before we read it here.
@@ -2004,6 +2029,23 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // task's comments is real work at this app's task volume, no reason to
   // pay for it on every render of every other view.
   const showCompletedLog = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && allTasksCompleted;
+  // How much has finished since they last looked, for the button's own count.
+  // Runs whatever view is open, unlike the log below, so it has to stay cheap:
+  // the time comparison comes first and settles almost every comment before
+  // finishKindOf ever runs a regex over it.
+  const newFinishedCount = useMemo(() => {
+    if (!finishedSeenAt) return 0;
+    let n = 0;
+    for (const t of tasks) {
+      if (t.clientId === PERSONAL_CLIENT_ID) continue;
+      for (const c of t.comments) {
+        if (c.kind !== "event" || c.at <= finishedSeenAt) continue;
+        if (finishKindOf(c.body, c.authorId)) n += 1;
+      }
+    }
+    return n;
+  }, [tasks, finishedSeenAt]);
+
   const completionLog = useMemo(() => {
     if (!showCompletedLog) return [];
     const rows: CompletionRow[] = [];
@@ -4102,9 +4144,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const scopeControls = (
     <div className="flex items-center gap-2">
       {scopeControl}
-      <button onClick={() => setAllTasksCompleted((v) => !v)}
+      <button onClick={() => { if (!allTasksCompleted) openFinished(); setAllTasksCompleted((v) => !v); }}
         title={allTasksCompleted ? "Back to open tasks" : "Show what has finished: tasks done, reviews approved, handoffs finished"}
-        className={`rounded-md border px-2.5 py-1.5 text-[16px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Finished</button>
+        className={`rounded-md border px-2.5 py-1.5 text-[16px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>
+        Finished{!allTasksCompleted && newFinishedCount > 0 && (
+          <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[16px] font-semibold text-white">{newFinishedCount}</span>
+        )}
+      </button>
     </div>
   );
   // Following moved out of the filter popover into its own header avatar
@@ -4797,6 +4843,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // the feed's own picker answers who finished it, which is a different
           // question once a client can be the one who did.
           <FinishedFeed rows={completionLog} ownerId={allTasksScope === "all" ? null : allTasksScope === "mine" ? me.id : allTasksScope}
+            seenAt={finishedMarkerAt}
             onOpenTask={(_clientId: string, taskId: string) => setOpenTaskId(taskId)} />
         ) : myWork ? (
           <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}

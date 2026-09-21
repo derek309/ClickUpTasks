@@ -563,6 +563,20 @@ export const fetchDmReads = async (memberId: string): Promise<Record<string, str
   for (const r of data ?? []) out[r.conversation_id as string] = r.last_read_at as string;
   return out;
 };
+// When this person last looked at a feed (supabase/feed-reads.sql). Read state
+// follows the person rather than the browser, the same reasoning that moved DM
+// reads out of localStorage. Null covers both "never looked" and "the table is
+// not there yet", and the caller treats those the same: no marker, no count,
+// nothing broken.
+export const fetchFeedSeen = async (memberId: string, feed: string): Promise<string | null> => {
+  const { data, error } = await supabase.from("feed_reads")
+    .select("last_seen_at").eq("member_id", memberId).eq("feed", feed).maybeSingle();
+  if (error) { logErr({ error }); return null; }
+  return (data?.last_seen_at as string | undefined) ?? null;
+};
+export const markFeedSeenDb = (memberId: string, feed: string, at: string) =>
+  save(() => supabase.from("feed_reads").upsert({ member_id: memberId, feed, last_seen_at: at }, { onConflict: "member_id,feed" }));
+
 export const markDmReadDb = (memberId: string, conversationId: string, at: string) =>
   save(() => supabase.from("dm_reads").upsert({ member_id: memberId, conversation_id: conversationId, last_read_at: at }, { onConflict: "member_id,conversation_id" }));
 

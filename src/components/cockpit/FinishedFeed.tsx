@@ -14,7 +14,7 @@
 // header's scope answers WHOSE WORK, by the task's owner, the same as it does
 // on the list behind this. The picker here answers WHO FINISHED IT, which on a
 // client approval is the client, not anyone on the team.
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { timeAgo, type FinishKind } from "@/lib/data";
 import { I } from "./ui";
 
@@ -42,9 +42,21 @@ const KIND_LABEL: Record<FinishKind, { label: string; tone: string }> = {
 // question a second time.
 const LOADED_ON = new Date();
 
-export function FinishedFeed({ rows, ownerId = null, onOpenTask }: { rows: CompletionRow[]; ownerId?: string | null; onOpenTask?: (clientId: string, taskId: string) => void }) {
+export function FinishedFeed({ rows, ownerId = null, seenAt = null, onOpenTask }: {
+  rows: CompletionRow[];
+  ownerId?: string | null;
+  /** When this person last looked, frozen for the visit. Anything newer gets
+   *  the line above it. Null on a first ever visit, when everything is new and
+   *  a line saying so would be noise. */
+  seenAt?: string | null;
+  onOpenTask?: (clientId: string, taskId: string) => void;
+}) {
   const [q, setQ] = useState("");
   const [finishedBy, setFinishedBy] = useState<string>("all");
+
+  // Newer than the moment they last looked. Unknown rows are not new: the
+  // marker should never claim something arrived when nothing says it did.
+  const isNew = (r: CompletionRow | undefined) => !!seenAt && !!r && r.at > seenAt;
 
   const query = q.trim().toLowerCase();
   const matches = (r: CompletionRow) => !query || r.taskTitle.toLowerCase().includes(query) || r.clientName.toLowerCase().includes(query);
@@ -104,8 +116,20 @@ export function FinishedFeed({ rows, ownerId = null, onOpenTask }: { rows: Compl
                 <span className="text-[16px] font-bold">{dayLabel(key)}</span>
                 <span className="rounded-[5px] bg-border px-1.5 text-[16px] font-semibold text-foreground">{dayRows.length}</span>
               </div>
-              {dayRows.map((r) => (
-                <div key={r.id} onClick={() => onOpenTask?.(r.clientId, r.taskId)}
+              {dayRows.map((r, i) => (
+                <Fragment key={r.id}>
+                {/* Rows read newest first, so the line sits under the last one
+                    that is new: everything above it arrived since you looked.
+                    Only on the boundary, and only when there is something on
+                    both sides of it. */}
+                {isNew(r) && !isNew(dayRows[i + 1]) && i + 1 < dayRows.length && (
+                  <div className="flex items-center gap-3 px-4 py-2" role="separator">
+                    <span className="h-px flex-1 bg-accent/40" />
+                    <span className="shrink-0 text-[16px] font-semibold text-accent">New since you last looked</span>
+                    <span className="h-px flex-1 bg-accent/40" />
+                  </div>
+                )}
+                <div onClick={() => onOpenTask?.(r.clientId, r.taskId)}
                   className="flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent-soft/50">
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: r.authorColor }} title={r.authorName}>{r.authorInitials}</span>
                   <span className="min-w-0 flex-1">
@@ -117,6 +141,7 @@ export function FinishedFeed({ rows, ownerId = null, onOpenTask }: { rows: Compl
                     {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
                   </span>
                 </div>
+                </Fragment>
               ))}
             </div>
           ))}
