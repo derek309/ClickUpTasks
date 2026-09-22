@@ -2,6 +2,7 @@
 // inbound webhook (messages, calls) and the appointment sync poll. Server-only.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { titleCase, conversationSignalRank, todayPacific, toPacificDate } from "./data";
+import { resolveNotifyRecipient } from "./waitingNotify";
 
 // PostgREST PARSES the `.or()` string below — a value carrying its own filter
 // syntax (comma, dot, parens) widens the match to arbitrary rows rather than
@@ -210,8 +211,12 @@ export async function upsertConversationTask(
     if (projErr) { console.error("[ghlConversationTask] upsertConversationTask: fallback project insert failed", projErr); return null; }
   }
 
-  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
+  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id, assigned_to").eq("id", contact.client_id).maybeSingle();
   const ghlUrl = client?.ghl_location_id ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
+  // Owned from the start, by the client's first follower or else an admin: the
+  // same rule inboundIngest.ts uses for the other way a reply task is made. An
+  // unowned task is on nobody's list in All Tasks (Derek, 2026-09-22).
+  const owner = await resolveNotifyRecipient(client?.assigned_to as string[] | null);
 
   const newTaskId = "t_" + crypto.randomUUID();
   const { error: taskErr } = await supabaseAdmin.from("tasks").insert({
@@ -222,6 +227,7 @@ export async function upsertConversationTask(
     priority: "conversation",
     contact_id: contact.id,
     due,
+    assignee_id: owner,
     last_activity_at: new Date().toISOString(),
     created_by: null,
     // Seed the history with the signal that created the task, so the feed

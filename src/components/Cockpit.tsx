@@ -2374,8 +2374,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Memoized — the main task list's hot path. With activeFolder set this
   // was O(scopedTasks × projects) every render (projectById is a linear
   // scan), and it feeds displayedGroups/vaultItems/Journal counts below.
+  // Every task but a personal to do. It used to keep only clients whose id
+  // starts "cl_", added to keep personal to dos out; the two GoHighLevel sub
+  // accounts, "Agency" (c_agency) and "Directory" (c_directory), do not start
+  // "cl_" either, so every task on them, which is every reply from someone not
+  // yet a client, was missing from All Tasks whatever the scope (Derek,
+  // 2026-09-22: "I'm not seeing the reply to message tasks"). The Clients list
+  // and project pickers keep the "cl_" rule: a sub account is not a client
+  // there. This is a list of work, and those are.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId.startsWith("cl_") && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope))),
+    () => scopedTasks.filter((t) => t.clientId !== PERSONAL_CLIENT_ID && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
   );

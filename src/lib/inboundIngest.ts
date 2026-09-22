@@ -10,6 +10,7 @@ import { titleCase, todayPacific } from "@/lib/data";
 import { SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
+import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -102,12 +103,19 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
     const { error: projErr } = await supabaseAdmin.from("projects").insert({ id: projectId, client_id: contact.client_id, name: "Tasks", description: "" });
     if (projErr) return null;
   }
-  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id).maybeSingle();
+  const { data: client } = await supabaseAdmin.from("clients").select("ghl_location_id, assigned_to").eq("id", contact.client_id).maybeSingle();
   const ghlUrl = client?.ghl_location_id && ghlContactId ? `https://app.gohighlevel.com/v2/location/${client.ghl_location_id}/contacts/detail/${ghlContactId}` : null;
+  // Someone owns the reply from the moment it exists: the client's first
+  // follower, else an admin, which is the same person notifyInbound tells first.
+  // It used to be created with nobody on it, and All Tasks shows each person
+  // their own work, so an unowned reply was on nobody's list at all (Derek,
+  // 2026-09-22: "I'm not seeing the reply to message tasks").
+  const owner = await resolveNotifyRecipient(client?.assigned_to as string[] | null);
   const newTaskId = "t_" + crypto.randomUUID();
   const { error: taskErr } = await supabaseAdmin.from("tasks").insert({
     id: newTaskId, project_id: projectId, client_id: contact.client_id,
     title: `Reply to ${titleCase(contact.name)}`, priority: "conversation", contact_id: contact.id, due: today,
+    assignee_id: owner,
     attachments: ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : [],
     created_by: null,
   });
