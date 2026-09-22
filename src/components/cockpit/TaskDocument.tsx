@@ -32,6 +32,7 @@ import {
 import { diffDocText, diffText, summarizeDocChanges, summarizeTextChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatPinTime, publishedFiles, type PinAnchor } from "@/lib/reviewPins";
+import { MAX_REMINDERS, reminderRound } from "@/lib/reviewReminders";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
@@ -1205,6 +1206,27 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   // One bar for the whole image or HTML review (Derek, 2026-09-14 redesign): which
   // version, where it stands, and the few actions that belong to all its images or pages.
   const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
+  // Reminder emails while it sits with the client (reviewReminders.ts). The round
+  // is worked out the same way the cron works it out, so this line never says
+  // one number while the cron acts on another.
+  const round = lastSent ? reminderRound({
+    sentAt: lastSent.createdAt, roundAt: doc.reminderRoundAt,
+    lastReminderAt: doc.lastReminderAt, remindersSent: doc.remindersSent,
+  }) : null;
+  const reminderLine = doc.reminderEveryDays <= 0 ? "Reminder emails are off for this review."
+    : !round || round.sent === 0 ? `The client gets a reminder email ${doc.reminderEveryDays === 1 ? "every business day" : `every ${doc.reminderEveryDays} business days`} until they answer, ${MAX_REMINDERS} at most.`
+      : round.capped ? `${MAX_REMINDERS} reminders sent and no answer yet. They have stopped.`
+        : `${round.sent} of ${MAX_REMINDERS} reminders sent.`;
+  // The light path, like setStage: save it and take the row back. patchDoc also
+  // remounts the editor and jumps back to the newest version, which Reopen
+  // needs and a dropdown does not.
+  const setReminders = async (reminders: "restart" | { every: number }, done: string) => {
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ reminders }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not change the reminders."); return; }
+    setDoc(rowToTaskDocument(j.document));
+    pushToast(done);
+  };
   const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const barStatus = needsSend
     ? (doc.version ? "Changes not sent" : "Not sent yet")
@@ -1276,6 +1298,28 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
               : `${doc.approvedBy ? `${doc.approvedBy === meId ? "You" : "The team"} approved` : "The client approved"} ${approvedNumber ? `version ${approvedNumber}` : `this ${what}`}${doc.approvedBy ? " on the client's say so" : ""}. Reopen it to make changes.`}
           </span>
           <button onClick={() => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.")} className={quiet}>Reopen for changes</button>
+        </div>
+      )}
+      {/* While it waits on the client: how often they are reminded, how many have
+          gone, and Restart for another round once it has run out (Derek,
+          2026-09-21: "allow us to be able to log in and redo it"). */}
+      {doc.status === "with_client" && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border bg-surface px-4 py-2.5 text-[16px]">
+          <span className="min-w-0 flex-1 text-muted">{reminderLine}</span>
+          <select value={doc.reminderEveryDays} aria-label="How often to remind the client"
+            onChange={(e) => {
+              const every = Number(e.target.value);
+              void setReminders({ every }, every === 0 ? "Reminders are off." : "Reminder frequency saved.");
+            }}
+            className="cursor-pointer rounded-lg border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent">
+            <option value={1}>Every business day</option>
+            <option value={2}>Every 2 business days</option>
+            <option value={0}>Off</option>
+          </select>
+          {doc.reminderEveryDays > 0 && round && round.sent > 0 && (
+            <button onClick={() => void setReminders("restart", `Reminders restarted. The next goes out the next business morning, up to ${MAX_REMINDERS} more.`)}
+              className={quiet}>Restart reminders</button>
+          )}
         </div>
       )}
 

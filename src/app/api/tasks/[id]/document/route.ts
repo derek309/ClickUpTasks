@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess, teamActor, kindOf, NO_STORE } from "@/lib/taskDocumentServer";
 import {
-  createReview, deleteReview, pickReviewVersion, removeReviewVersion, renameReview, reopenReview, setReviewStage, writeDocBody,
+  createReview, deleteReview, pickReviewVersion, removeReviewVersion, renameReview, reopenReview, setReviewReminders, setReviewStage, writeDocBody,
   type ReviewOutcome,
 } from "@/lib/reviewService";
 import { DOC_MAX_RAW_CHARS } from "@/lib/docHtml";
@@ -37,12 +37,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; file?: unknown; images?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown };
+  let payload: { body?: unknown; file?: unknown; images?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown; reminders?: unknown };
   try { payload = JSON.parse(text) ?? {}; } catch { return json({ error: "Invalid request." }, 400); }
 
   if (payload.reopen === true) return answer(await reopenReview(id, kind, actor));
   if (typeof payload.status === "string") return answer(await setReviewStage(id, kind, actor, payload.status));
   if (typeof payload.title === "string") return answer(await renameReview(id, kind, actor, payload.title));
+  if (payload.reminders !== undefined) return answer(await setReviewReminders(id, kind, actor, payload.reminders));
   if (isFileKind(kind)) {
     if (payload.removeVersion !== undefined) return answer(await removeReviewVersion(id, kind, actor, payload.removeVersion));
     return answer(await pickReviewVersion(id, kind, actor, payload));

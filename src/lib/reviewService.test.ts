@@ -231,3 +231,36 @@ describe("sendReview", () => {
     expect(server.mintDocLink).toHaveBeenCalledWith("tdoc_1", TASK, expect.objectContaining({ memberId: "u_claude" }), "https://app");
   });
 });
+
+describe("setReviewReminders", () => {
+  it("restarts a round: the count goes back to nothing and the round begins now", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1" });
+    result = saved;
+    await svc.setReviewReminders("t_1", "image", actor(), "restart");
+    expect(calls[0].payload).toMatchObject({ reminders_sent: 0, updated_by: "u_claude" });
+    expect(typeof calls[0].payload.reminder_round_at).toBe("string");
+  });
+
+  it("sets how many business days apart, and 0 turns them off", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1" });
+    result = saved;
+    await svc.setReviewReminders("t_1", "image", actor(), { every: 2 });
+    expect(calls[0].payload).toMatchObject({ reminder_every_days: 2 });
+    calls.length = 0;
+    await svc.setReviewReminders("t_1", "image", actor(), { every: 0 });
+    expect(calls[0].payload).toMatchObject({ reminder_every_days: 0 });
+  });
+
+  it.each([
+    ["a fraction", { every: 1.5 }],
+    ["a negative", { every: -1 }],
+    ["past the widest gap", { every: 11 }],
+    ["not a number", { every: "2" }],
+    ["nothing at all", null],
+  ])("refuses %s", async (_label, input) => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1" });
+    const r = await svc.setReviewReminders("t_1", "image", actor(), input);
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect(calls).toHaveLength(0);
+  });
+});

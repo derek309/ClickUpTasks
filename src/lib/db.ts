@@ -651,6 +651,13 @@ export type TaskDocument = {
   /** The team member who closed this out on the client's say so; null when the
    *  client approved it themselves by clicking Approve. */
   approvedBy: string | null;
+  /** Reminder emails while it waits on the client (supabase/review-reminders.sql):
+   *  business days apart, 0 off; how many in this round; when the last went;
+   *  when someone last pressed Restart. */
+  reminderEveryDays: number;
+  remindersSent: number;
+  lastReminderAt: string | null;
+  reminderRoundAt: string | null;
   /** Last time the client's review page opened in a browser (supabase/task-document-followups.sql). */
   clientViewedAt: string | null;
 };
@@ -662,6 +669,12 @@ export const rowToTaskDocument = (r: any): TaskDocument => ({
   id: r.id, taskId: r.task_id, kind: parseKind(r.kind), title: r.title ?? "", body: r.body ?? "", draftDirty: !!r.draft_dirty, version: r.version ?? 0,
   status: r.status, approvedAt: r.approved_at ?? null, approvedVersion: r.approved_version ?? null, updatedAt: r.updated_at,
   approvedBy: r.approved_by ?? null,
+  // Before the SQL is run these columns are absent, so the defaults stand in:
+  // every business day, none sent.
+  reminderEveryDays: r.reminder_every_days ?? 1,
+  remindersSent: r.reminders_sent ?? 0,
+  lastReminderAt: r.last_reminder_at ?? null,
+  reminderRoundAt: r.reminder_round_at ?? null,
   clientViewedAt: r.client_viewed_at ?? null,
 });
 // The email a teammate is writing to a client outside any task (the Journal's

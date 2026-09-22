@@ -4,22 +4,30 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { linkState } from "@/lib/taskDocumentServer";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
-import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
-import type { EmailDraft } from "@/lib/data";
+import { resolveContact } from "@/lib/sendMessageServer";
+import { draftLinkAsButton, draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { APP_URL } from "@/lib/appUrl";
-import { kindWhat, parseKind } from "@/lib/reviewKinds";
+import { isBusinessDay, reminderDue, MAX_REMINDERS } from "@/lib/reviewReminders";
 
-// Daily: a client document sent for review with no answer after three days gets
-// a "just checking in" draft email staged on its task, and the task owner a bell
-// (Derek, 2026-09-11). Nothing sends; a person reviews the draft and clicks Send.
-// Once per send: a new version sent to the client starts the clock again.
-// Skipped when the task already has a draft email (never overwritten), the task
-// is done, private or deleted, or the document has no live link.
-// Same cron auth as purge-trash and send-scheduled. Scheduled in vercel.json.
+// Every business morning, a review that is with the client and unanswered gets
+// a reminder email (supabase/review-reminders.sql). The rules are all in
+// reviewReminders.ts: every N business days, three at most in a round, a round
+// starting at each send or Restart and stopping when the client answers.
+//
+// It used to stage a draft on the task for a person to send, once, after three
+// days (Derek, 2026-09-11). Derek, 2026-09-21, wanted it to actually go out,
+// every business day, and stop after three. The send goes through the scheduled
+// message queue rather than a sender of its own: that queue already retries a
+// Gmail or GoHighLevel hiccup, signs the email as its author, and puts it in
+// the task's conversation like anything else that was sent.
+//
+// Each reminder is sent as the task's owner. They did not click Send on it, so
+// the bell after the last one of a round says it went in their name.
+//
+// Same cron auth as the others. Scheduled in vercel.json for 15:00 UTC, which is
+// 8 AM in California in summer and 7 AM in winter.
 
 export const maxDuration = 60;
-
-const WAIT_MS = 3 * 86_400_000;
 
 export async function GET(req: NextRequest) {
   return run(req);
@@ -30,65 +38,104 @@ export async function POST(req: NextRequest) {
 
 async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
-
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Waiting on the client: with_client and not approved. A stage picked by hand
-  // is checked against the versions below, so only a real send counts.
+  const now = new Date().toISOString();
+  // A cron that fires on a Saturday in UTC can still be Friday in California,
+  // and the other way round, so this asks the same question the rules do.
+  if (!isBusinessDay(now)) return NextResponse.json({ ok: true, skipped: "not a business day" });
+
   const { data: docs, error } = await supabaseAdmin.from("task_documents")
-    .select("id, task_id, title, kind, reminder_drafted_at")
-    .is("deleted_at", null).is("approved_at", null).eq("status", "with_client")
+    .select("id, task_id, title, kind, reminder_every_days, reminder_round_at, reminders_sent, last_reminder_at")
+    .is("deleted_at", null).is("approved_at", null).eq("status", "with_client").gt("reminder_every_days", 0)
     .limit(300);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  const now = Date.now();
-  let drafted = 0;
+  const tally = { checked: (docs ?? []).length, sent: 0, noContact: 0, unsure: 0 };
   for (const doc of docs ?? []) {
+    // Only a review the team sent and the client has not answered: once they
+    // submit changes, the newest version is theirs, not a send.
     const { data: latest } = await supabaseAdmin.from("task_document_versions")
       .select("kind, created_at").eq("document_id", doc.id).order("version", { ascending: false }).limit(1).maybeSingle();
     if (!latest || latest.kind !== "sent") continue;
-    const sentAt = new Date(latest.created_at as string).getTime();
-    if (now - sentAt < WAIT_MS) continue;
-    if (doc.reminder_drafted_at && new Date(doc.reminder_drafted_at as string).getTime() > sentAt) continue;
 
     const { data: task } = await supabaseAdmin.from("tasks")
-      .select("id, title, status, is_private, deleted_at, draft_email, assignee_id, client_id, project_id").eq("id", doc.task_id).maybeSingle();
-    if (!task || task.deleted_at || task.is_private || task.status === "done" || task.draft_email) continue;
+      .select("id, title, status, is_private, deleted_at, assignee_id, client_id, project_id").eq("id", doc.task_id).maybeSingle();
+    if (!task || task.deleted_at || task.is_private || task.status === "done") continue;
+
+    const clientRepliedAt = await lastClientWord(task.id as string, doc.id as string);
+    if (clientRepliedAt === undefined) { tally.unsure += 1; continue; }
+    const decision = reminderDue({
+      sentAt: latest.created_at as string,
+      roundAt: (doc.reminder_round_at as string | null) ?? null,
+      lastReminderAt: (doc.last_reminder_at as string | null) ?? null,
+      remindersSent: Number(doc.reminders_sent ?? 0),
+      everyDays: Number(doc.reminder_every_days ?? 0),
+      clientRepliedAt,
+      now,
+    });
+    if (!decision.due) continue;
+
     const link = await linkState(doc.id as string, APP_URL);
     if (!link.live || !link.url) continue;
+    // Checked here rather than left to the send queue, which would try three
+    // times and then tell the author it failed, every morning. An email address
+    // specifically: resolveContact finds a contact with no email just as happily,
+    // and a reminder is an email.
+    const contact = await resolveContact(task.client_id as string);
+    if (!contact?.email) { tally.noContact += 1; continue; }
+
+    let owner = task.assignee_id as string | null;
+    if (!owner) {
+      const { data: client } = await supabaseAdmin.from("clients").select("assigned_to").eq("id", task.client_id).maybeSingle();
+      owner = await resolveNotifyRecipient(client?.assigned_to as string[] | null);
+    }
+    if (!owner) continue;
 
     const name = ((doc.title as string | null) ?? "").trim() || (task.title as string);
-    const days = Math.floor((now - sentAt) / 86_400_000);
     const button = { url: link.url, label: `Open "${name}" to review` };
-    const at = new Date(now).toISOString();
-    const draft: EmailDraft = {
-      subject: `Checking in: ${name}`,
-      body: `<p>Hi,</p><p>Just checking in on "${escapeHtml(name)}". When you have a moment, take a look, send any changes you would like or approve it.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
-      link: button,
-      aiContext: `A friendly check in. We sent the client the ${kindWhat(parseKind(doc.kind))} "${name}" to review ${days} days ago and have not heard back. Ask them to take a look, send any changes or approve it.`,
-      createdAt: at, updatedAt: at,
-    };
-    // Only onto a task with no draft email, checked again in the write itself.
-    // updated_by null is what makes an open drawer pick the draft up live.
-    const { data: staged } = await supabaseAdmin.from("tasks")
-      .update({ draft_email: draft, updated_by: null }).eq("id", task.id).is("draft_email", null).select("id");
-    if (!staged?.length) continue;
-    await supabaseAdmin.from("task_documents").update({ reminder_drafted_at: at }).eq("id", doc.id);
+    const body = draftLinkAsButton(
+      `<p>Hi,</p><p>Just checking in on "${escapeHtml(name)}". When you have a moment, take a look, send any changes you would like or approve it.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
+      button,
+    );
+    const { error: queueError } = await supabaseAdmin.from("scheduled_messages").insert({
+      id: "sm_" + randomUUID(), client_id: task.client_id, task_id: task.id, channel: "email",
+      subject: `Checking in: ${name}`, body, scheduled_at: now, status: "pending", created_by: owner,
+    });
+    if (queueError) continue;
 
-    let recipient = task.assignee_id as string | null;
-    if (!recipient) {
-      const { data: client } = await supabaseAdmin.from("clients").select("assigned_to").eq("id", task.client_id).maybeSingle();
-      recipient = await resolveNotifyRecipient(client?.assigned_to as string[] | null);
-    }
-    if (recipient) {
+    const count = decision.sentThisRound + 1;
+    await supabaseAdmin.from("task_documents").update({ reminders_sent: count, last_reminder_at: now }).eq("id", doc.id);
+    tally.sent += 1;
+
+    // The last of a round: say so, and say it went in their name, because they
+    // never clicked Send on any of these.
+    if (count >= MAX_REMINDERS) {
       await supabaseAdmin.from("notifications").insert({
-        id: "n_" + randomUUID(), recipient_id: recipient,
-        text: `No approval yet on "${name}" after ${days} days. A check in email is ready to review on the task.`,
+        id: "n_" + randomUUID(), recipient_id: owner,
+        text: `${MAX_REMINDERS} reminders have gone to the client about "${name}", in your name, and it is still not approved. Restart the reminders on the review if you want another round.`,
         task_id: task.id, actor_id: null, client_id: task.client_id, project_id: task.project_id,
-        at, read: false, kind: "activity",
+        at: now, read: false, kind: "activity",
       });
     }
-    drafted++;
   }
-  return NextResponse.json({ ok: true, checked: (docs ?? []).length, drafted });
+  return NextResponse.json({ ok: true, ...tally });
+}
+
+/** The last time the client said anything about this: a message on the task, or
+ *  a comment on the review itself. Either means someone is looking at it.
+ *  undefined when it could not be found out, which the caller treats as a reason
+ *  not to send: not knowing whether they answered is not the same as knowing
+ *  they did not, and the costly mistake here is nagging someone who replied. */
+async function lastClientWord(taskId: string, documentId: string): Promise<string | null | undefined> {
+  const [messages, comments] = await Promise.all([
+    supabaseAdmin.from("messages").select("created_at").eq("task_id", taskId).eq("direction", "inbound")
+      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabaseAdmin.from("task_document_comments").select("created_at").eq("document_id", documentId).is("author_id", null)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (messages.error || comments.error) return undefined;
+  const times = [messages.data?.created_at as string | undefined, comments.data?.created_at as string | undefined]
+    .filter((t): t is string => !!t);
+  return times.length ? times.sort().at(-1)! : null;
 }

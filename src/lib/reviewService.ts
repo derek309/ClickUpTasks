@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { appendTaskEvent, liveDocument, linkState, mintDocLink, setWorkingFile, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
 import { reviewApprovedByTeamEvent } from "./data";
+import { MAX_REMINDER_EVERY } from "./reviewReminders";
 import { docVersionFile, recordCheckpoint, removeVersionFile, sharedVersionFiles } from "./taskDocumentFiles";
 import { sanitizeDocHtml, DOC_MAX_HTML_CHARS } from "./docHtml";
 import { filePurpose, kindNoun, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
@@ -77,6 +78,24 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
     await appendTaskEvent(taskId, reviewApprovedByTeamEvent(kindNoun(kind), (doc.version as number) ?? 0), actor.memberId);
   }
   return done;
+}
+
+/** The reminder emails a review sends while it waits on the client
+ *  (supabase/review-reminders.sql, rules in reviewReminders.ts). "restart"
+ *  begins a fresh round of three, the way to push again once a round has run
+ *  out (Derek, 2026-09-21: "allow us to be able to log in and redo it").
+ *  { every } sets how many business days apart they go; 0 turns them off. */
+export async function setReviewReminders(taskId: string, kind: ReviewKind, actor: ReviewActor, input: unknown): Promise<ReviewOutcome<{ document: Row }>> {
+  const doc = await liveDocument(taskId, kind);
+  if (!doc) return fail(404, noDocumentYet(kind));
+  if (input === "restart") {
+    return update(doc.id, { reminder_round_at: new Date().toISOString(), reminders_sent: 0, ...stampOf(actor) });
+  }
+  const every = input && typeof input === "object" ? (input as { every?: unknown }).every : undefined;
+  if (typeof every !== "number" || !Number.isInteger(every) || every < 0 || every > MAX_REMINDER_EVERY) {
+    return fail(400, "Pick how often, in business days, or off.");
+  }
+  return update(doc.id, { reminder_every_days: every, ...stampOf(actor) });
 }
 
 /** Allowed on an approved review too: the name is the team's label, not part of
