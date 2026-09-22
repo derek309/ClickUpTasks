@@ -8,7 +8,7 @@ import {
   users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedItemFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
-  addDaysIso, dateQuickPicks,
+  addDaysIso, dateQuickPicks, stepDateLabel,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
@@ -311,6 +311,26 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
   // column already says, and an empty ring on every row read as an unticked
   // box waiting to be dealt with. Done is a stage: pick it from Stage, or
   // from the drawer.
+  // Waiting beats the date: "waiting on Amanda" is the answer to the question
+  // the date would otherwise raise. A date with no "late" or "today" in it is
+  // just a date, so it stays quiet.
+  const phoneDue = (() => {
+    if (isDone) return null;
+    if (task.waitingOnClient) return { text: `Waiting on ${client?.name?.split(" ")[0] ?? "the client"}`, tone: "bg-amber-50 text-amber-700" };
+    const iso = lensDue ?? task.due;
+    if (!iso) return null;
+    const { label, tone } = stepDateLabel(iso);
+    const text = label.split(",")[0];
+    if (tone === "late") return { text, tone: "bg-danger-soft text-danger" };
+    if (tone === "soon") return { text, tone: "bg-highlight-soft text-highlight" };
+    return { text, tone: "bg-background text-foreground" };
+  })();
+  // Who has it, when anyone does. Always shown, as on a desktop row (Derek,
+  // 2026-08-24): hiding your own face left most rows with no face at all.
+  const phoneWho = (mineByDelegation ? delegatedTo : delegatedTo ?? task.assigneeId) || null;
+  // 16px sentences on a phone, dense uppercase tags on a desktop row.
+  const badgeClass = (tone: string) =>
+    `shrink-0 rounded px-1.5 py-0.5 text-[16px] font-semibold leading-tight sm:text-[11px] sm:uppercase sm:tracking-wide ${tone}`;
   const cell = (key: string) => {
     if (key === "status") return (
       <InlineStatus value={effectiveStatus(task)} onChange={setStatus} />
@@ -320,7 +340,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     if (key === "followUp") return (
       <InlineDate value={task.followUpAt ?? null} onChange={(d) => onPatch(task.id, { followUpAt: d })}
         onClear={() => onPatch(task.id, { followUpAt: null })}
-        className={`text-[13px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
+        className={`text-[16px] sm:text-[13px] ${isSnoozed(task) ? "font-medium text-amber-700" : "text-muted"}`} emptyLabel="—" />
     );
     // The Due date column shows the date itself, month and day (Derek:
     // "just make due date the month and day it's due"). The countdown reads
@@ -329,12 +349,12 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     // The delegatee's own date when this is their list: grouping them under a
     // date the row then contradicts is worse than no date at all.
     if (key === "due") return lensDue
-      ? <span className="text-[13px] font-medium text-accent" title="The date you were given">{formatDue(lensDue)}</span>
-      : <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} showCountdown={false} formatValue={formatDue} showSnooze={false} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
+      ? <span className="text-[16px] font-medium text-accent sm:text-[13px]" title="The date you were given">{formatDue(lensDue)}</span>
+      : <InlineDue value={task.due} overdue={overdue && !isSnoozed(task)} showCountdown={false} textClass="text-[16px] sm:text-[13px]" formatValue={formatDue} showSnooze={false} followUpAt={task.followUpAt ?? null} recurrence={task.recurrence} onChange={(d) => onPatch(task.id, { due: d })} onRecurrenceChange={(r) => onPatch(task.id, { recurrence: r })} />;
     if (key === "created") return (
-      <span className="truncate text-[13px] text-muted" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
+      <span className="truncate text-[16px] text-muted sm:text-[13px]" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
     );
-    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[13px] text-muted">{ct?.name ?? "—"}</span>; }
+    if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[16px] text-muted sm:text-[13px]">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;
   };
@@ -360,28 +380,26 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               for people who know it, but this is the discoverable way. */}
           {onToggleSelect && (
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
-              className={`mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
+              className={`mr-1 hidden h-4 w-4 shrink-0 items-center justify-center rounded border transition sm:flex ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
               {selected && <I.check />}
             </button>
           )}
           {/* Only when the Stage column is off, so there is never two of
               them on one row. */}
-          {!cols.some((c) => c.key === "status") && (
-            <span className="mr-1"><StatusDot value={effectiveStatus(task)} onChange={setStatus} /></span>
-          )}
-          <button onClick={onToggleExpand} className={`shrink-0 rounded p-0.5 text-muted hover:text-foreground ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
+          <span className={`mr-1 ${cols.some((c) => c.key === "status") ? "sm:hidden" : ""}`}><StatusDot value={effectiveStatus(task)} onChange={setStatus} /></span>
+          <button onClick={onToggleExpand} className={`hidden shrink-0 rounded p-0.5 text-muted hover:text-foreground sm:block ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
               assignee was you left most rows on a client's own list with no
               assignee shown at all, since most tasks are assigned to the
               admin viewing the list. */}
-          {mineByDelegation && <Avatar id={delegatedTo!} size={20} />}
-          <InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} size={30} />
+          {mineByDelegation && <span className="hidden sm:block"><Avatar id={delegatedTo!} size={20} /></span>}
+          <span className="hidden sm:block"><InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} size={30} /></span>
           {/* Owner first, then who it is with. One avatar said "Derek" on a
               task sitting on Michaella's list, which reads as hers being his
               (Derek: "it's assigning to me... make it clear it's
               delegated"). The arrow is the whole sentence. */}
           {delegatedTo && !mineByDelegation && (
-            <span className="mr-1 flex shrink-0 items-center gap-0.5" title={`Delegated to ${userById(delegatedTo)?.name ?? "a teammate"}`}>
+            <span className="mr-1 hidden shrink-0 items-center gap-0.5 sm:flex" title={`Delegated to ${userById(delegatedTo)?.name ?? "a teammate"}`}>
               <span aria-hidden className="text-[13px] text-muted">→</span>
               <Avatar id={delegatedTo} size={20} />
             </span>
@@ -404,20 +422,13 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 Name column used to squeeze the title to "Crea te..." while a
                 chip beside it kept its full width. Context belongs below the
                 thing it describes, not in front of it. */}
-            <span className="flex min-w-0 items-center gap-1.5">
-              {mineByDelegation && <span className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">From {userById(task.assigneeId)?.name?.split(" ")[0] ?? "the owner"}</span>}
-              {!mineByDelegation && delegatedTo && <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent">With {userById(delegatedTo)?.name?.split(" ")[0] ?? "them"}</span>}
-              {/* Waiting reads like a handoff to the client: the owner keeps
-                  the row, and this says who has the next move. */}
-              {task.waitingOnClient && <span className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700" title={client ? `Waiting on ${client.name}` : "Waiting on the client"}>Waiting on {client?.name?.split(" ")[0] ?? "client"}</span>}
-              {/* Wraps to a second line rather than pushing the table wider
-                  than the window (Derek: "go ahead and wordwrap the titles if
-                  you have to" — a sideways scrollbar that hides the Name
-                  column is worse than a taller row). Clamped at two lines so
-                  one essay of a title cannot own the screen; the full text is
-                  in the title attribute and the task is one click away. */}
-              <span className={`line-clamp-2 min-w-0 flex-1 break-words text-[15px] font-medium leading-snug ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{shownTitle}</span>
-            </span>
+            {/* Wraps to a second line rather than pushing the table wider
+                than the window (Derek: "go ahead and wordwrap the titles if
+                you have to" — a sideways scrollbar that hides the Name
+                column is worse than a taller row). Clamped at two lines so
+                one essay of a title cannot own the screen; the full text is
+                in the title attribute and the task is one click away. */}
+            <span className={`line-clamp-2 min-w-0 break-words text-[16px] font-medium leading-snug sm:text-[15px] ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{shownTitle}</span>
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
                 on tasks list view"). A repeat arrow, a paperclip, a comment
                 bubble and a subtask count on every row is four pieces of
@@ -425,8 +436,31 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 you do next. All of it is in the task, one click away. The
                 project crumb stays: it says which list you are looking at,
                 which the row otherwise cannot tell you. */}
-            {subline && (
-              <span className="min-w-0 truncate text-[11px] leading-tight text-muted">{subline}</span>
+            {/* Badges sit under the title, never beside it. On a phone a chip
+                keeping its full width left the title as "Provide electric..."
+                on a row with nothing else on it (Derek, 2026-09-22). They read
+                as sentences there and shrink to uppercase tags on a desktop
+                row, where the density is the point. */}
+            {/* A phone gets pills under the title instead of the desktop's
+                columns: the row's controls are hidden there, so the date, who
+                has it and which list it is on have nowhere else to go. The
+                date says how late it is, rather than leaving you to work it
+                out from a bare "Sep 18" (Derek, 2026-09-22). */}
+            <span className="mt-1.5 flex flex-wrap items-center gap-1.5 sm:hidden">
+              {phoneDue && <span className={`rounded-full px-2.5 py-1 text-[16px] font-semibold ${phoneDue.tone}`}>{phoneDue.text}</span>}
+              {showClient && client && <span className="truncate text-[16px] text-muted">{client.name}</span>}
+              {crumb && <span className="truncate text-[16px] text-muted">{crumb}</span>}
+              {phoneWho && <Avatar id={phoneWho} size={24} />}
+            </span>
+            {(mineByDelegation || delegatedTo || task.waitingOnClient || subline) && (
+              <span className="mt-1 hidden min-w-0 flex-wrap items-center gap-1.5 sm:mt-0 sm:flex">
+                {mineByDelegation && <span className={badgeClass("bg-accent text-white")}>From {userById(task.assigneeId)?.name?.split(" ")[0] ?? "the owner"}</span>}
+                {!mineByDelegation && delegatedTo && <span className={badgeClass("bg-accent-soft text-accent")}>With {userById(delegatedTo)?.name?.split(" ")[0] ?? "them"}</span>}
+                {/* Waiting reads like a handoff to the client: the owner keeps
+                    the row, and this says who has the next move. */}
+                {task.waitingOnClient && <span className={badgeClass("bg-amber-50 text-amber-700")} title={client ? `Waiting on ${client.name}` : "Waiting on the client"}>Waiting on {client?.name?.split(" ")[0] ?? "client"}</span>}
+                {subline && <span className="min-w-0 truncate text-[16px] leading-tight text-muted sm:text-[11px]">{subline}</span>}
+              </span>
             )}
           </div>
         </div>
@@ -437,7 +471,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
               content: one long client name would otherwise widen the column
               for every row and eat the title. */}
           {showClient && (
-            <td className="inline-flex items-center py-0.5 pr-3 align-middle sm:table-cell sm:max-w-[190px] sm:py-1 sm:pr-4">
+            <td className="hidden items-center py-0.5 pr-3 align-middle sm:table-cell sm:max-w-[190px] sm:py-1 sm:pr-4">
             <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: client?.color }} />
               {onOpenClient && client ? (
@@ -452,8 +486,11 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
           )}
           {/* whitespace-nowrap is what makes the column size to its widest
               value instead of wrapping to fit a number somebody guessed. */}
+          {/* Stacked on a phone, the cells lose the header row that says which
+              date is which, so each one carries its own name there (Derek,
+              2026-09-22: two bare dates and an × told you nothing). */}
           {cols.map((c) => (
-            <td key={c.key} className={`inline-flex items-center whitespace-nowrap py-0.5 pr-3 align-middle sm:table-cell sm:py-1 sm:pr-4 `}>{cell(c.key)}</td>
+            <td key={c.key} className={`hidden items-center whitespace-nowrap py-0.5 pr-3 align-middle sm:table-cell sm:py-1 sm:pr-4 `}>{cell(c.key)}</td>
           ))}
       </tr>
       {expanded && (
