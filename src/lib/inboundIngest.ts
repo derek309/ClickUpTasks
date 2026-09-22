@@ -187,6 +187,16 @@ export async function sendInboundReplyEmail(opts: {
   recipientIds: string[];
 }): Promise<void> {
   if (!googleConfigured || opts.recipientIds.length === 0) return;
+  // A reply by email is already in their inbox: it was sent from this domain,
+  // so the reply lands there, and a second email saying it arrived is noise
+  // (Derek, 2026-09-22: "the person is already getting the email so we don't
+  // need a notification on top of that"). The in-app notification is untouched,
+  // so the reply is still on their bell and in the task.
+  //
+  // A text is different, and is why this reads the channel rather than stopping
+  // altogether: nothing about an SMS reaches anyone's inbox, so this email is
+  // the only way they hear about it away from the app.
+  if (opts.channel === "email") return;
   try {
     const { data: client } = await supabaseAdmin
       .from("clients").select("name, last_inbound_notified_at").eq("id", opts.clientId).maybeSingle();
