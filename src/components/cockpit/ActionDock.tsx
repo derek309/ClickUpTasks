@@ -729,7 +729,7 @@ export function ActionDock({
               <div className="flex items-end gap-2.5">
                 <div className={`min-w-0 flex-1 rounded-2xl p-1.5 transition ${tone.surface}`}>
                   {(canChat || canText || canEmail) && (
-                    <div role="group" aria-label="Send as" className="flex gap-4 px-2 pb-1.5 pt-0.5">
+                    <div role="group" aria-label="Send as" className="flex flex-wrap gap-4 px-2 pb-1.5 pt-0.5">
                       <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
                       {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
                       {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
@@ -737,24 +737,28 @@ export function ActionDock({
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
                     </div>
                   )}
-                  <div className="flex items-end gap-1">
+                  <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">
                     <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
                       placeholder={noting ? "Note for your team, the client never sees it" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
                       aria-label={noting ? "Note for your team" : `Message ${firstName}`}
                       title="Enter sends, Shift+Enter for a new line"
                       className="block max-h-40 min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[16px] leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
+                    <div className="flex items-center gap-1 sm:contents">
+                    <button onClick={() => openPanel("menu")} title="Log action" aria-label="Log action"
+                      className="h-10 w-10 shrink-0 rounded-lg text-[20px] text-muted hover:bg-background hover:text-foreground sm:hidden">＋</button>
                     {!noting && onOpenCompose && (
                       // Attachments, scheduling and AI writing live in the full box.
                       <button onClick={() => { onOpenCompose(channel, quickNote); setQuickNote(""); }} title="More: attach, schedule, write with AI" aria-label="More options"
                         className="h-10 w-10 shrink-0 rounded-lg text-muted hover:bg-background hover:text-foreground">⋯</button>
                     )}
                     <button onClick={sendQuick} disabled={!quickNote.trim()} title={`${sendLabel} (Enter)`} aria-label={sendLabel}
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[18px] font-bold text-white transition hover:opacity-90 disabled:opacity-30 ${tone.send}`}>↑</button>
+                      className={`ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[18px] font-bold text-white transition hover:opacity-90 disabled:opacity-30 sm:ml-0 ${tone.send}`}>↑</button>
+                    </div>
                   </div>
                 </div>
                 <button onClick={() => openPanel("menu")}
-                  className="h-11 shrink-0 rounded-xl bg-background px-4 text-[16px] font-semibold text-foreground hover:bg-accent-soft">
+                  className="hidden h-11 shrink-0 rounded-xl bg-background px-4 text-[16px] font-semibold text-foreground hover:bg-accent-soft sm:block">
                   ＋ Log action
                 </button>
               </div>
