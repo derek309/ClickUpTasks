@@ -1544,18 +1544,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
 
   const iconButton = "rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
-  return (
-    <>
-      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
-      {/* Docked mode spans everything from the sidebar's right edge to the
-          window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
-          follows the sidebar; below md the sidebar is an overlay, so the
-          drawer is full width. */}
-      {/* --dock-right keeps the floating dock over the task column, clear of
-          the client rail. Zero below 1100px, where the rail stacks under. */}
-      <aside onPaste={handlePaste} {...drawerDropProps}
-        className={`[--dock-right:0px] ${isPersonal ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
-        {hiddenFileInput}
+  const headerBar = (
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-[16px] text-muted">
           <span className="flex min-w-0 items-center gap-2">
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
@@ -1620,6 +1609,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <button onClick={onClose} title="Close" aria-label="Close" className={iconButton}><I.close /></button>
           </div>
         </div>
+  );
+  return (
+    <>
+      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
+      {/* Docked mode spans everything from the sidebar's right edge to the
+          window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
+          follows the sidebar; below md the sidebar is an overlay, so the
+          drawer is full width. */}
+      {/* --dock-right keeps the floating dock over the task column, clear of
+          the client rail. Zero below 1100px, where the rail stacks under. */}
+      <aside onPaste={handlePaste} {...drawerDropProps}
+        className={`[--dock-right:0px] ${isPersonal ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
+        {hiddenFileInput}
+        <div className="hidden sm:block">{headerBar}</div>
 
         {/* One scroll container. The client rail is sticky inside it at
             1100px and up, and stacks under the task below that. A task with
@@ -1628,10 +1631,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="flex flex-1 flex-col overflow-y-auto bg-surface min-[1100px]:flex-row min-[1100px]:items-start">
           {/* All white, no boxed in sheet (Derek, 2026-09-16: "I don't like it
               boxed in so just make it all white"). */}
-          <div className="min-w-0 flex-1 px-2 pb-32 pt-3 sm:px-5 sm:pt-5">
+          <div className="min-w-0 flex-1 pb-32 sm:px-5 sm:pt-5">
+            <div className="sm:hidden">{headerBar}</div>
+            <div className="px-2 pt-3 sm:px-0 sm:pt-0">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-10 sm:py-9">
               {mainColumn}
               {isPersonal && section("List", detailsBlock)}
+            </div>
             </div>
           </div>
           {!isPersonal && clientRail}

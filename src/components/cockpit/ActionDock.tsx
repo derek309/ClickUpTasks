@@ -699,9 +699,9 @@ export function ActionDock({
     // Lined up with the task's own column above it: the same side padding and
     // the same 5xl width, so its edges meet the title and sections (Derek,
     // 2026-09-16: "make it the same width as the top content box").
-    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-4 sm:px-5"
+    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"
       style={{ right: "var(--dock-right, 0px)" }}>
-      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-3 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
+      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
 
         {view === "closed" && (() => {
           const canChat = canMessageClient && !!onSendMessage && (reachable?.chat ?? false);
@@ -727,9 +727,9 @@ export function ActionDock({
                   across its top, the words and the send arrow inside it, and Log
                   action on its own beside it (Derek, 2026-09-16, option B). */}
               <div className="flex items-end gap-2.5">
-                <div className={`min-w-0 flex-1 rounded-2xl p-1.5 transition ${tone.surface}`}>
+                <div className={`min-w-0 flex-1 rounded-2xl p-1 transition sm:p-1.5 ${tone.surface}`}>
                   {(canChat || canText || canEmail) && (
-                    <div role="group" aria-label="Send as" className="flex flex-wrap gap-4 px-2 pb-1.5 pt-0.5">
+                    <div role="group" aria-label="Send as" className="flex flex-wrap gap-4 px-2 pb-1 pt-0 sm:pb-1.5 sm:pt-0.5">
                       <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
                       {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
                       {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
@@ -740,20 +740,20 @@ export function ActionDock({
                   <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">
                     <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
-                      placeholder={noting ? "Note for your team, the client never sees it" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
+                      placeholder={noting ? "Private note, your team only" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
                       aria-label={noting ? "Note for your team" : `Message ${firstName}`}
                       title="Enter sends, Shift+Enter for a new line"
-                      className="block max-h-40 min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-2.5 py-2 text-[16px] leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
+                      className="block max-h-40 min-h-[36px] min-w-0 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-[16px] sm:min-h-[40px] sm:py-2 leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
                     <div className="flex items-center gap-1 sm:contents">
                     <button onClick={() => openPanel("menu")} title="Log action" aria-label="Log action"
-                      className="h-10 w-10 shrink-0 rounded-lg text-[20px] text-muted hover:bg-background hover:text-foreground sm:hidden">＋</button>
+                      className="h-9 w-9 shrink-0 rounded-lg text-[20px] text-muted hover:bg-background hover:text-foreground sm:hidden">＋</button>
                     {!noting && onOpenCompose && (
                       // Attachments, scheduling and AI writing live in the full box.
                       <button onClick={() => { onOpenCompose(channel, quickNote); setQuickNote(""); }} title="More: attach, schedule, write with AI" aria-label="More options"
-                        className="h-10 w-10 shrink-0 rounded-lg text-muted hover:bg-background hover:text-foreground">⋯</button>
+                        className="h-9 w-9 shrink-0 rounded-lg text-muted hover:bg-background hover:text-foreground sm:h-10 sm:w-10">⋯</button>
                     )}
                     <button onClick={sendQuick} disabled={!quickNote.trim()} title={`${sendLabel} (Enter)`} aria-label={sendLabel}
-                      className={`ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[18px] font-bold text-white transition hover:opacity-90 disabled:opacity-30 sm:ml-0 ${tone.send}`}>↑</button>
+                      className={`ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[18px] sm:h-10 sm:w-10 font-bold text-white transition hover:opacity-90 disabled:opacity-30 sm:ml-0 ${tone.send}`}>↑</button>
                     </div>
                   </div>
                 </div>
