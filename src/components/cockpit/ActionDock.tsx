@@ -110,6 +110,13 @@ export function ActionDock({
   // and press Enter; a client message only goes out once Chat or Text is picked
   // on purpose, or Reply is clicked on the client's message.
   const [channel, setChannel] = useState<"note" | "chat" | "sms">("note");
+  const [barOpen, setBarOpen] = useState(false);
+  const openBar = (c: "note" | "chat" | "sms") => {
+    setChannel(c);
+    if (c === "note") setReplyTo(null);
+    setBarOpen(true);
+    requestAnimationFrame(() => quickRef.current?.focus());
+  };
   const [replyTo, setReplyTo] = useState<{ id: string; preview: string } | null>(null);
   const quickRef = useRef<HTMLTextAreaElement>(null);
   const seenReply = useRef(0);
@@ -146,6 +153,7 @@ export function ActionDock({
     const links = attachmentsFrom(text);
     if (links) onPatch(links);
     setQuickNote("");
+    setBarOpen(false);
     pushToast(links ? "Note added · link attached" : "Note added");
   };
   const sendQuick = () => {
@@ -155,6 +163,7 @@ export function ActionDock({
     onSendMessage(channel, text, replyTo?.id ?? null);
     setQuickNote("");
     setReplyTo(null);
+    setBarOpen(false);
   };
   const [wantNext, setWantNext] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -202,6 +211,7 @@ export function ActionDock({
     // A nudge arrives already written, for a person to read before sending.
     if (replyTarget.text) setQuickNote(replyTarget.text); // eslint-disable-line react-hooks/set-state-in-effect
     setView("closed");
+    setBarOpen(true);
     requestAnimationFrame(() => quickRef.current?.focus());
   }, [replyTarget]);
 
@@ -723,16 +733,26 @@ export function ActionDock({
                   <button onClick={() => setReplyTo(null)} title="Stop replying" aria-label="Stop replying" className="shrink-0 rounded px-1 hover:text-foreground">✕</button>
                 </div>
               )}
+              {!barOpen && (
+                <div className="flex items-center gap-1.5 sm:hidden">
+                  <button onClick={() => openPanel("menu")} title="Log action" aria-label="Log action"
+                    className="h-10 w-10 shrink-0 rounded-xl text-[20px] text-muted hover:bg-background hover:text-foreground">＋</button>
+                  <button onClick={() => openBar("note")} className={`min-w-0 flex-1 truncate rounded-xl py-2.5 text-[16px] font-semibold ${CHANNEL_TONE.note.surface} ${CHANNEL_TONE.note.tab}`}>🔒 Note</button>
+                  {canChat && <button onClick={() => openBar("chat")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Chat</button>}
+                  {canText && <button onClick={() => openBar("sms")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Text</button>}
+                  {canEmail && <button onClick={() => onOpenCompose?.("email")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Email</button>}
+                </div>
+              )}
               {/* One chat field, like iMessage or Slack: who it goes to as tabs
                   across its top, the words and the send arrow inside it, and Log
                   action on its own beside it (Derek, 2026-09-16, option B). */}
-              <div className="flex items-end gap-2.5">
+              <div className={`${barOpen ? "flex" : "hidden sm:flex"} items-end gap-2.5`}>
                 <div className={`min-w-0 flex-1 rounded-2xl p-1 transition sm:p-1.5 ${tone.surface}`}>
                   {(canChat || canText || canEmail) && (
                     <div role="group" aria-label="Send as" className="flex flex-wrap gap-4 px-2 pb-1 pt-0 sm:pb-1.5 sm:pt-0.5">
-                      <button onClick={() => { setChannel("note"); setReplyTo(null); }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
-                      {canChat && <button onClick={() => setChannel("chat")} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
-                      {canText && <button onClick={() => setChannel("sms")} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
+                      <button onClick={() => { if (noting) setBarOpen(false); else { setChannel("note"); setReplyTo(null); } }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
+                      {canChat && <button onClick={() => { if (channel === "chat") setBarOpen(false); else setChannel("chat"); }} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
+                      {canText && <button onClick={() => { if (channel === "sms") setBarOpen(false); else setChannel("sms"); }} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
                       {/* Email is a letter, so it opens the full email window. */}
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
                     </div>
