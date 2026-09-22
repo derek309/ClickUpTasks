@@ -750,14 +750,38 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const dateTone = { late: "bg-danger-soft text-danger", soon: "bg-highlight-soft text-highlight", later: "bg-background text-foreground", none: "bg-background text-muted" }[stepDate.tone];
   const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
+  // The card wears its state as a solid band across the top: colour for how
+  // urgent it is, and the state in words on the right, so a long drawer still
+  // has one thing the eye lands on (2026-09-22 mockup, Derek picked "banner").
+  // "Waiting on Brandon to approve the emails" is a sentence for the chip; the
+  // band only has room for who it is waiting on.
+  const waitingOn = openStep && watchState && !watchState.met
+    ? watchState.waiting.replace(/^Ticks when (.+?) marks .*$/, "Waiting on $1").replace(/ to (reply|approve).*$/, "")
+    : null;
+  const barTone = asking ? "bg-success text-white"
+    : !openStep && !followUp ? "bg-background text-muted"
+    : stepDate.tone === "late" ? "bg-danger text-white"
+    : stepDate.tone === "soon" ? "bg-highlight text-white"
+    : waitingOn ? "bg-sky-600 text-white"
+    : "bg-accent text-white";
+  const barState = asking ? "Just finished"
+    : !openStep && !followUp ? "Nothing set"
+    : stepDate.tone === "late" || stepDate.tone === "soon" ? stepDate.label.split(",")[0]
+    : waitingOn ? waitingOn
+    : stepDate.tone === "none" ? "No date yet"
+    : stepDate.label;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
-    <div className={`mt-7 flex items-start gap-3.5 rounded-2xl px-4 py-4 sm:px-5 ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "border-2 border-dashed"}`}>
+    <div className={`mt-7 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
+      <div className={`flex items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
+        <span className="text-[16px] font-bold tracking-wide">NEXT STEP</span>
+        <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
+      </div>
+      <div className="flex items-start gap-3.5 px-4 py-4 sm:px-5">
       <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
         className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-default disabled:border-dashed disabled:opacity-50 ${asking ? "border-success bg-success text-white" : "border-accent bg-surface text-transparent hover:bg-accent-soft hover:text-accent"}`}>
         <I.check className="h-4 w-4" />
       </button>
       <div className="min-w-0 flex-1">
-        <div className="text-[16px] font-bold tracking-wide text-muted">NEXT STEP</div>
         {asking ? (
           // Done: what happens next, with the quick dates as the way to save it.
           <div className="mt-2 rounded-xl bg-background p-3">
@@ -868,6 +892,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             )}
           </>
         )}
+      </div>
       </div>
     </div>
   );
