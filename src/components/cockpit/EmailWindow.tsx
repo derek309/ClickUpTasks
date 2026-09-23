@@ -140,6 +140,40 @@ export function EmailWindow({
   // 2026-09-11). The send routes add it (emailSignature.ts); the window always
   // sends as the person using it, so their own signature is the right one.
   const [signature, setSignature] = useState("");
+  // A phone shows the writing and the address; the AI bar and the formatting
+  // toolbar are a tap away rather than 150px of permanent furniture above the
+  // words (Derek, 2026-09-22). Both are always open on a desktop.
+  const [showAi, setShowAi] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  // The signature is edited where you read it, and saving keeps it for every
+  // future email, not just this one (Derek, 2026-09-22: "click the signature
+  // and update it inline and save for future"). Same endpoint the Settings
+  // panel writes, so there is one copy of the truth.
+  const [sigEditing, setSigEditing] = useState(false);
+  const [sigDraft, setSigDraft] = useState("");
+  const [sigSaving, setSigSaving] = useState(false);
+  const [sigNonce, setSigNonce] = useState(0);
+  const openSignature = () => {
+    const raw = signature.trim();
+    setSigDraft(raw && !looksLikeHtml(raw) ? plainTextToHtml(raw) : raw);
+    setSigNonce((n) => n + 1);
+    setSigEditing(true);
+  };
+  const saveSignature = async () => {
+    setSigSaving(true);
+    try {
+      const res = await authedFetch("/api/signature", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signature: sigDraft }) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Could not save the signature.");
+      setSignature(sigDraft);
+      setSigEditing(false);
+      pushToast("Signature saved. It goes on every email you send.");
+    } catch (e) {
+      pushToast(e instanceof Error ? e.message : "Could not save the signature.");
+    } finally {
+      setSigSaving(false);
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     void authedFetch("/api/signature").then((r) => (r.ok ? r.json() : null))
@@ -298,7 +332,7 @@ export function EmailWindow({
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0">
             {onAiDraft && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft/40 px-3 py-2">
+              <div className={`mb-3 flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft/40 px-3 py-2 sm:flex ${showAi ? "flex" : "hidden"}`}>
                 <span aria-hidden className="text-[18px]">✨</span>
                 <input value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void writeWithAi(aiInstruction.trim()); } }}
@@ -317,13 +351,13 @@ export function EmailWindow({
                   (Derek, 2026-09-22: "move cc and bcc below the email"). */}
               <div className="border-b px-4 py-2.5 text-[16px] sm:px-6">
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="w-16 shrink-0 font-semibold text-muted">To</span>
+                  <span className="w-12 shrink-0 font-semibold text-muted sm:w-16">To</span>
                   {toEmail
                     ? <span className="min-w-0 flex-1 break-all">{toEmail}</span>
                     : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
                 </div>
                 {!showCopies && (
-                  <button onClick={() => setShowCopies(true)} className="mt-1.5 ml-[76px] font-medium text-accent hover:underline">Cc / Bcc</button>
+                  <button onClick={() => setShowCopies(true)} className="ml-[60px] mt-1.5 font-medium text-accent hover:underline sm:ml-[76px]">Cc / Bcc</button>
                 )}
               </div>
               {showCopies && (
@@ -333,24 +367,55 @@ export function EmailWindow({
                 </div>
               )}
               <label className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 sm:px-6">
-                <span className="w-16 shrink-0 text-[16px] font-semibold text-muted">Subject</span>
+                <span className="w-12 shrink-0 text-[16px] font-semibold text-muted sm:w-16">Subject</span>
                 <input value={subject} onChange={(e) => setSubject(e.target.value)}
                   placeholder={subjectFallback || "Subject"} className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold outline-none" />
               </label>
-              <div className="p-4 sm:p-6" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}>
+              <div className={`p-4 sm:p-6 ${showTools ? "" : "[&_.rte-toolbar]:hidden sm:[&_.rte-toolbar]:flex"}`}
+                onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}>
                 <RichTextEditor key={`email-${editorNonce}`} value={draft.body} variant="doc"
                   placeholder="Write your email…" onChange={(html) => keep({ body: html })} />
               </div>
-              {signature.trim() && (
-                <div className="border-t px-4 py-3 text-[16px] text-muted sm:px-6" title="Added when it sends. Change it in Settings.">
-                  <div className="rte-content" dangerouslySetInnerHTML={{ __html: safeMessageHtml(looksLikeHtml(signature) ? signature : plainTextToHtml(signature)) }} />
+              {sigEditing ? (
+                <div className="border-t px-4 py-3 sm:px-6">
+                  <div className="rounded-xl border border-accent bg-surface px-3 py-2">
+                    <RichTextEditor key={`sig-${sigNonce}`} value={sigDraft} placeholder="Your name, your company, a phone number"
+                      onChange={setSigDraft} />
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
+                    <button onClick={() => void saveSignature()} disabled={sigSaving}
+                      className="rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white disabled:opacity-50">{sigSaving ? "Saving…" : "Save"}</button>
+                    <button onClick={() => setSigEditing(false)} className={quiet}>Cancel</button>
+                    <span className="text-[16px] text-muted">Goes on every email you send</span>
+                  </div>
+                </div>
+              ) : (
+                // A div, not a button: a signature usually holds a link, and a
+                // link inside a button is neither valid nor clickable.
+                <div role="button" tabIndex={0} onClick={openSignature}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSignature(); } }}
+                  title="Click to change your signature. It is saved for every email you send."
+                  className="flex w-full cursor-pointer items-start gap-3 border-t px-4 py-3 text-left text-[16px] text-muted hover:bg-background sm:px-6">
+                  <span className="min-w-0 flex-1">
+                    {signature.trim()
+                      ? <span className="rte-content" dangerouslySetInnerHTML={{ __html: safeMessageHtml(looksLikeHtml(signature) ? signature : plainTextToHtml(signature)) }} />
+                      : "No signature yet. Click to write one."}
+                  </span>
+                  <span className="shrink-0 font-semibold text-accent">Edit</span>
                 </div>
               )}
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center gap-2.5 sm:gap-3">
               <button onClick={send} disabled={!!cannotSend} title={cannotSend}
                 className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">Send</button>
+              {/* What a phone took off the top of the window, as two buttons. */}
+              {onAiDraft && (
+                <button onClick={() => setShowAi((v) => !v)} aria-pressed={showAi} title="Write with AI" aria-label="Write with AI"
+                  className={`h-11 w-11 rounded-lg border text-[18px] sm:hidden ${showAi ? "border-accent bg-accent-soft text-accent" : "text-muted"}`}>✨</button>
+              )}
+              <button onClick={() => setShowTools((v) => !v)} aria-pressed={showTools} title="Bold, italic and the rest" aria-label="Formatting"
+                className={`h-11 w-11 rounded-lg border text-[16px] font-semibold sm:hidden ${showTools ? "border-accent bg-accent-soft text-accent" : "text-muted"}`}>Aa</button>
               {onSchedule && toEmail && <SchedulePopover onSchedule={schedule} />}
               <span className="text-[16px] text-muted">{saveLabel}</span>
               <button onClick={discard} className={`ml-auto ${quiet} hover:text-danger`}>Discard</button>

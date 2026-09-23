@@ -168,9 +168,11 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
   };
 
   const toolbar = !editable ? null : (
+    // rte-toolbar is how a caller hides the bar for its own reasons, e.g. the
+    // email window keeps it out of the way on a phone until you ask for it.
     <div ref={toolbarRef} className={doc
-      ? "sticky top-0 z-10 mb-3 flex items-center gap-1 overflow-x-auto border-b bg-surface pb-2 pt-1"
-      : "mb-1 flex flex-wrap items-center gap-0.5 border-b pb-1.5"}>
+      ? "rte-toolbar sticky top-0 z-10 mb-3 flex items-center gap-1 overflow-x-auto border-b bg-surface pb-2 pt-1"
+      : "rte-toolbar mb-1 flex flex-wrap items-center gap-0.5 border-b pb-1.5"}>
       <select value={blockValue} onChange={(e) => setBlock(e.target.value)}
         className={doc
           ? "mr-1 min-h-[44px] shrink-0 rounded-md bg-transparent px-2 text-[16px] text-muted outline-none hover:bg-background"
