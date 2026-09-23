@@ -235,7 +235,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
+                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -257,8 +257,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
+function TaskRow({ task, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -325,9 +325,10 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
     if (tone === "soon") return { text, tone: "bg-highlight-soft text-highlight" };
     return { text, tone: "bg-background text-foreground" };
   })();
-  // Who has it, when anyone does. Always shown, as on a desktop row (Derek,
-  // 2026-08-24): hiding your own face left most rows with no face at all.
-  const phoneWho = (mineByDelegation ? delegatedTo : delegatedTo ?? task.assigneeId) || null;
+  // Only a face that says something: yours on your own list does not, and it
+  // was appearing on every row.
+  const phoneWho = (mineByDelegation ? delegatedTo : delegatedTo ?? (task.assigneeId !== meId ? task.assigneeId : null)) || null;
+  const phoneMeta = [showClient && client?.name, crumb].filter(Boolean).join(" · ");
   // 16px sentences on a phone, dense uppercase tags on a desktop row.
   const badgeClass = (tone: string) =>
     `shrink-0 rounded px-1.5 py-0.5 text-[16px] font-semibold leading-tight sm:text-[11px] sm:uppercase sm:tracking-wide ${tone}`;
@@ -370,7 +371,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
         className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${mineByDelegation ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
         style={{ borderLeftColor: mineByDelegation ? undefined : priorityBarColor }}>
         <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:max-w-0 sm:pl-4">
-        <div className="flex min-w-0 items-center gap-0.5">
+        <div className="flex min-w-0 items-start gap-0.5 sm:items-center">
           {/* Bulk select, back as a permanent fixture at the leading edge
               (Derek, 2026-08-26: "we have to bring back the check box because
               most people aren't going to know about that"). It was briefly
@@ -386,7 +387,7 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
           )}
           {/* Only when the Stage column is off, so there is never two of
               them on one row. */}
-          <span className={`mr-1 ${cols.some((c) => c.key === "status") ? "sm:hidden" : ""}`}><StatusDot value={effectiveStatus(task)} onChange={setStatus} /></span>
+          <span className={`mr-1 mt-0.5 sm:mt-0 ${cols.some((c) => c.key === "status") ? "sm:hidden" : ""}`}><StatusDot value={effectiveStatus(task)} onChange={setStatus} /></span>
           <button onClick={onToggleExpand} className={`hidden shrink-0 rounded p-0.5 text-muted hover:text-foreground sm:block ${task.subtasks.length ? "" : "opacity-0 group-hover/tr:opacity-40"}`} title="Subtasks"><I.chevron className={`transition ${expanded ? "-rotate-90" : "rotate-180"}`} /></button>
           {/* Always visible (Derek, 2026-08-24): hiding it whenever the
               assignee was you left most rows on a client's own list with no
@@ -436,22 +437,19 @@ function TaskRow({ task, colCount, cols, showClient, showCrumb, onOpenClient, cl
                 you do next. All of it is in the task, one click away. The
                 project crumb stays: it says which list you are looking at,
                 which the row otherwise cannot tell you. */}
-            {/* Badges sit under the title, never beside it. On a phone a chip
-                keeping its full width left the title as "Provide electric..."
-                on a row with nothing else on it (Derek, 2026-09-22). They read
-                as sentences there and shrink to uppercase tags on a desktop
-                row, where the density is the point. */}
-            {/* A phone gets pills under the title instead of the desktop's
-                columns: the row's controls are hidden there, so the date, who
-                has it and which list it is on have nowhere else to go. The
-                date says how late it is, rather than leaving you to work it
-                out from a bare "Sep 18" (Derek, 2026-09-22). */}
-            <span className="mt-1.5 flex flex-wrap items-center gap-1.5 sm:hidden">
-              {phoneDue && <span className={`rounded-full px-2.5 py-1 text-[16px] font-semibold ${phoneDue.tone}`}>{phoneDue.text}</span>}
-              {showClient && client && <span className="truncate text-[16px] text-muted">{client.name}</span>}
-              {crumb && <span className="truncate text-[16px] text-muted">{crumb}</span>}
-              {phoneWho && <Avatar id={phoneWho} size={24} />}
+            {/* A phone has no columns and no controls on the row, so the date,
+                where the task lives and who has it go on one line under the
+                title. One line, truncating: three wrapped lines of pills read
+                worse than the columns did (Derek, 2026-09-22, twice). The date
+                says how late it is rather than leaving a bare "Sep 18" to be
+                worked out. */}
+            <span className="mt-1 flex min-w-0 items-center gap-2 sm:hidden">
+              {phoneDue && <span className={`shrink-0 rounded-full px-2 py-0.5 text-[16px] font-semibold ${phoneDue.tone}`}>{phoneDue.text}</span>}
+              {phoneMeta && <span className="min-w-0 flex-1 truncate text-[16px] text-muted">{phoneMeta}</span>}
+              {phoneWho && <span className="shrink-0"><Avatar id={phoneWho} size={22} /></span>}
             </span>
+            {/* The desktop's own badges, under the title rather than beside
+                it: a chip keeping its full width used to squeeze the title. */}
             {(mineByDelegation || delegatedTo || task.waitingOnClient || subline) && (
               <span className="mt-1 hidden min-w-0 flex-wrap items-center gap-1.5 sm:mt-0 sm:flex">
                 {mineByDelegation && <span className={badgeClass("bg-accent text-white")}>From {userById(task.assigneeId)?.name?.split(" ")[0] ?? "the owner"}</span>}
