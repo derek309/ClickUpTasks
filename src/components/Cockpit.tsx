@@ -4150,11 +4150,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // One switch, not a third tab: All Tasks is either what is still open or
   // what got finished, for whoever the dropdown beside it names.
   const scopeControls = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       {scopeControl}
       <button onClick={() => { if (!allTasksCompleted) openFinished(); setAllTasksCompleted((v) => !v); }}
         title={allTasksCompleted ? "Back to open tasks" : "Show what has finished: tasks done, reviews approved, handoffs finished"}
-        className={`rounded-md border px-2.5 py-1.5 text-[16px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>
+        className={`shrink-0 whitespace-nowrap rounded-md border px-2.5 py-1.5 text-[16px] font-medium ${allTasksCompleted ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>
         Finished{!allTasksCompleted && newFinishedCount > 0 && (
           <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[16px] font-semibold text-white">{newFinishedCount}</span>
         )}
@@ -4533,7 +4533,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           pinned and shrinking the list's scroll area). Views with their own
           internal scroll (Journal, Vault, directories) are flex-1 min-h-0, so
           they still scroll inside and this overflow never engages for them. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-background">
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background">
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}
@@ -4574,14 +4574,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             </div>
           ) : showFilterControl ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {activeClient === "all" && !myWork && canAdmin && (<>
-                {scopeControls}
-                <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact All Tasks view — same assignee, opens for anyone signed in"
-                  className="rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
-              </>)}
-              <div className="hidden flex-1 sm:block" />
-              <div className="ml-auto flex items-center gap-1.5">
+            // Two rows by construction rather than by wrapping: who the list is
+            // for on its own line, the icons on theirs. Seven controls sharing
+            // one line ran off a 375px screen (Derek, 2026-09-22, twice).
+            <div className="flex flex-col gap-2">
+              {activeClient === "all" && !myWork && canAdmin && (
+                <div className="flex min-w-0 items-center gap-2">
+                  {scopeControls}
+                  <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact All Tasks view — same assignee, opens for anyone signed in"
+                    className="shrink-0 rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
+                </div>
+              )}
+              <div className="flex items-center justify-end gap-1.5">
                 {followingControl}
                 {groupSortControl}
                 {filterMenuControl}
