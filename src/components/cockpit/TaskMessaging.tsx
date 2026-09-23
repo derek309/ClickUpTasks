@@ -324,6 +324,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
 
   // Admin-only correction for a message that already sent wrong.
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [toolsFor, setToolsFor] = useState<string | null>(null);
   // C4: Reply/Edit/Delete used to be 3 always-visible buttons crammed into
   // the card header alongside the channel badge, direction label, avatar,
   // and timestamp — broke badly at ~500px. One overflow trigger, keyed per
@@ -856,6 +857,20 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const email = m.channel === "email";
     const clientInitials = client.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
     const hoverTool = "flex h-8 w-8 items-center justify-center rounded-lg bg-background text-muted hover:bg-accent-soft hover:text-foreground";
+    const msgTools = (
+      <>
+        {replyableChannel(m.channel) && onSendTaskMessage && (
+          <button onClick={() => { setToolsFor(null); openReply(m.id, replyableChannel(m.channel)!, m.subject, (cleanText || m.subject || "").slice(0, 120)); }} title="Reply" aria-label="Reply" className={hoverTool}>↩</button>
+        )}
+        {canAdmin && onEditMessage && (
+          <button onClick={() => { setToolsFor(null); startEditMessage(m); }} title="Edit (this doesn't unsend anything already delivered)" aria-label="Edit" className={hoverTool}><I.pencil className="h-3.5 w-3.5" /></button>
+        )}
+        {canAdmin && onDeleteMessage && (
+          <button onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page. It does not unsend a real email or text already delivered.")) { setToolsFor(null); onDeleteMessage(m.id); } }}
+            title="Delete" aria-label="Delete" className={`${hoverTool} hover:!bg-danger-soft hover:!text-danger`}><I.trash className="h-3.5 w-3.5" /></button>
+        )}
+      </>
+    );
     return (
       <div key={m.id} className={`group relative ${gap}`}>
         {/* Two sides, like a text thread: the client on the left, us on the
@@ -869,7 +884,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           </div>
           {/* Tinted by channel, the same colour the reply box turns when that
               channel is picked; which side it sits on says who wrote it. */}
-          <div className={`min-w-0 ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].surface} ${email ? "w-full max-w-[640px] rounded-2xl p-3.5" : `max-w-[min(620px,85%)] rounded-2xl px-3.5 py-2.5 ${mine ? "rounded-br-md" : "rounded-bl-md"}`}`}>
+          <div className={`min-w-0 ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].surface} ${email ? "w-full max-w-[640px] rounded-2xl p-3.5" : `max-w-full rounded-2xl px-3.5 py-2.5 sm:max-w-[min(620px,85%)] ${mine ? "rounded-br-md" : "rounded-bl-md"}`}`}>
             <div className={`flex flex-wrap items-center gap-x-2 text-[16px] text-muted ${continued && !email ? "hidden" : ""}`}>
               {email && <span className={`font-semibold ${CHANNEL_TONE.email.label}`}>Email</span>}
               <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
@@ -883,7 +898,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
+              {editingMsgId !== m.id && (
+                <button onClick={() => setToolsFor((x) => (x === m.id ? null : m.id))}
+                  title="Reply, edit or delete" aria-label="Message actions" aria-expanded={toolsFor === m.id}
+                  className="ml-auto shrink-0 rounded px-1 text-[19px] leading-none hover:text-foreground sm:hidden">⋯</button>
+              )}
             </div>
+            {toolsFor === m.id && editingMsgId !== m.id && (
+              <div className="mt-2 flex gap-1 sm:hidden">{msgTools}</div>
+            )}
             {m.subject && <div className="mt-1 text-[16px] font-medium">{m.subject}</div>}
             {((m.cc && m.cc.length > 0) || (m.bcc && m.bcc.length > 0)) && (
               <div className="mt-0.5 text-[16px] text-muted">
@@ -978,20 +1001,14 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               </div>
             )}
           </div>
-          {/* Reply, Edit and Delete beside the bubble on hover, always shown on
-              a touch screen, instead of a ⋯ menu to open first. */}
+          {/* Beside the bubble on hover on a desktop. On a phone that column
+              cost the bubble a third of its width whether you wanted the
+              actions or not, so there they live under the message and the ⋯ in
+              its header opens them (Derek, 2026-09-22). One set of buttons,
+              drawn in whichever place fits. */}
           {editingMsgId !== m.id && (
-            <div className="flex shrink-0 gap-1 self-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-              {replyableChannel(m.channel) && onSendTaskMessage && (
-                <button onClick={() => openReply(m.id, replyableChannel(m.channel)!, m.subject, (cleanText || m.subject || "").slice(0, 120))} title="Reply" aria-label="Reply" className={hoverTool}>↩</button>
-              )}
-              {canAdmin && onEditMessage && (
-                <button onClick={() => startEditMessage(m)} title="Edit (this doesn't unsend anything already delivered)" aria-label="Edit" className={hoverTool}><I.pencil className="h-3.5 w-3.5" /></button>
-              )}
-              {canAdmin && onDeleteMessage && (
-                <button onClick={() => { if (window.confirm("Delete this message? This only removes it from ClickUpTasks and the client's waiting page. It does not unsend a real email or text already delivered.")) onDeleteMessage(m.id); }}
-                  title="Delete" aria-label="Delete" className={`${hoverTool} hover:!bg-danger-soft hover:!text-danger`}><I.trash className="h-3.5 w-3.5" /></button>
-              )}
+            <div className="hidden shrink-0 gap-1 self-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 sm:flex [@media(hover:none)]:opacity-100">
+              {msgTools}
             </div>
           )}
         </div>
