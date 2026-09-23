@@ -4141,7 +4141,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const scopeControl = (
     <select value={allTasksScope} onChange={(e) => setAllTasksScope(e.target.value)}
       title="VAs only ever see their own tasks here regardless of this setting"
-      className="rounded-md border bg-background px-2 py-1.5 text-[13px] font-medium outline-none">
+      className="min-w-0 max-w-[124px] rounded-md border bg-background px-2 py-1.5 text-[13px] font-medium outline-none sm:max-w-none">
       <option value="mine">Mine</option>
       <option value="all">Everyone</option>
       {users.filter((u) => u.id !== me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -4537,7 +4537,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}
-        <header className="relative z-10 flex flex-col gap-2 border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
+        <header className="relative z-10 flex flex-col gap-2 overflow-x-hidden border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
@@ -4574,17 +4574,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </div>
             </div>
           ) : showFilterControl ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {activeClient === "all" && !myWork && canAdmin && (<>
                 {scopeControls}
                 <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact All Tasks view — same assignee, opens for anyone signed in"
                   className="rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
               </>)}
-              <div className="flex-1" />
-              {followingControl}
-              {groupSortControl}
-              {filterMenuControl}
-              {columnsControl}
+              <div className="hidden flex-1 sm:block" />
+              <div className="ml-auto flex items-center gap-1.5">
+                {followingControl}
+                {groupSortControl}
+                {filterMenuControl}
+                {columnsControl}
+              </div>
             </div>
           ) : null}
         </header>

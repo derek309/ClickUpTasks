@@ -312,12 +312,19 @@ export function EmailWindow({
               </div>
             )}
             <div className="overflow-hidden rounded-2xl border bg-surface shadow-sm">
-              <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-[16px] sm:px-6">
-                <span className="w-16 shrink-0 font-semibold text-muted">To</span>
-                {toEmail
-                  ? <span className="min-w-0 flex-1 break-all">{toEmail}</span>
-                  : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
-                {!showCopies && <button onClick={() => setShowCopies(true)} className="shrink-0 font-medium text-accent hover:underline">Cc / Bcc</button>}
+              {/* Cc / Bcc goes under the address, not beside it: on a phone it
+                  held its own width and wrapped the address across two lines
+                  (Derek, 2026-09-22: "move cc and bcc below the email"). */}
+              <div className="border-b px-4 py-2.5 text-[16px] sm:px-6">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="w-16 shrink-0 font-semibold text-muted">To</span>
+                  {toEmail
+                    ? <span className="min-w-0 flex-1 break-all">{toEmail}</span>
+                    : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
+                </div>
+                {!showCopies && (
+                  <button onClick={() => setShowCopies(true)} className="mt-1.5 ml-[76px] font-medium text-accent hover:underline">Cc / Bcc</button>
+                )}
               </div>
               {showCopies && (
                 <div className="flex flex-col gap-2 border-b px-4 py-2.5 sm:px-6">
