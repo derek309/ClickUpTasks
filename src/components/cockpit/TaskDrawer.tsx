@@ -1108,9 +1108,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div key={s.id} className="group/deleg rounded-xl border px-3 py-2"
           style={{ borderColor: STATUS_META.delegated.dot, background: STATUS_META.delegated.chip }}>
           <div className="flex items-start gap-2.5">
-            <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen" : "Mark done"}
-              className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "bg-surface hover:border-accent"}`}>
-              {s.done && <I.check className="h-3 w-3" />}
+            <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen this delegation" : "Mark this delegation done"}
+              aria-label={s.done ? "Reopen this delegation" : "Mark this delegation done"} aria-pressed={s.done}
+              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition ${s.done ? "border-accent bg-accent text-white" : "border-border bg-surface hover:border-accent hover:bg-accent-soft"}`}>
+              {s.done && <I.check className="h-4 w-4" />}
             </button>
             <Avatar id={s.assigneeId!} size={22} />
             <div className="min-w-0 flex-1">
@@ -1161,9 +1162,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     </span>
                   </div>
                 )}
+                {total > 0 && done === total && !s.done && (
+                  <div className="text-[16px] font-medium text-accent">All steps done. Mark it finished.</div>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   {facts.map((f) => <span key={f} className="rounded-[5px] bg-surface px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
-                  <span className="ml-auto flex gap-2">
+                  <span className="ml-auto flex flex-wrap gap-2">
+                    <button onClick={() => onToggleSub(s.id)}
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[16px] font-semibold shadow-soft ${s.done ? "bg-surface text-muted hover:bg-background" : "bg-success text-white hover:opacity-90"}`}>
+                      {s.done ? "Reopen" : <><I.check className="h-4 w-4" /> Mark done</>}
+                    </button>
                     <button onClick={() => { const url = handoffLink(taskLink?.() ?? `?task=${task.id}`, s.id); navigator.clipboard?.writeText(url).then(() => pushToast("Handoff link copied"), () => pushToast(`Share this link: ${url}`)); }}
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-surface px-3 text-[16px] font-medium shadow-soft hover:bg-background"><I.link /> Copy link</button>
                     <button onClick={() => setOpenHandoff(s.id)}
