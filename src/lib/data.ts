@@ -2031,6 +2031,44 @@ export function recurrenceResetFields(previousDue: string | null, now: string = 
   return { createdAt: previousDue ? `${previousDue}T00:00:00.000Z` : now, followUpAt: null };
 }
 
+/** The next occurrence of a recurring task, built from the one just finished.
+ *
+ *  The finished occurrence is left exactly as it is: it keeps its delegation,
+ *  its handoff thread, its conversation and its description, and it is the
+ *  history of that cycle (Derek, 2026-09-28: "keep the one that's marked done
+ *  and then just duplicate it, so that we keep the history").
+ *
+ *  What the new one does NOT carry:
+ *    delegation  a delegation is an assigned checklist item, so cloning the
+ *                subtask whole handed the new cycle to the same person, with
+ *                last cycle's handoff, steps, messages and their own due date,
+ *                before anyone had decided any of that. The step's words stay;
+ *                who it is for does not (Derek, 2026-09-28).
+ *    description last cycle's brief. "Brian approved both emails, build and
+ *                send them" is about the emails that already went out.
+ *    comments    the conversation belongs to the cycle it happened in.
+ *    draftEmail  written for the send that has already happened.
+ *    ghlTaskId   the new occurrence is not the GoHighLevel task the old one was.
+ *
+ *  Attachments carry over: they are usually the templates and brand files the
+ *  job needs every time, not a record of one cycle.
+ */
+export function nextOccurrence(prev: Task, nextDue: string | null, newId: (prefix: string) => string, now?: string): Task {
+  return {
+    ...prev,
+    id: newId("t_"),
+    status: "todo",
+    due: nextDue,
+    ...recurrenceResetFields(prev.due, now),
+    description: "",
+    subtasks: prev.subtasks.map((s) => ({ id: newId("s_"), title: s.title, done: false })),
+    comments: [],
+    attachments: [...prev.attachments],
+    ghlTaskId: null,
+    draftEmail: null,
+  };
+}
+
 // A readable name for a link when we have nothing better. Used as the
 // immediate label while the title fetch is in flight, and as the permanent
 // one when that fetch finds nothing.

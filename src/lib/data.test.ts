@@ -48,6 +48,7 @@ import {
   TASK_ACTION_ORDER,
   CLIENT_FACING_ACTIONS,
   recurrenceResetFields,
+  nextOccurrence,
   startSignal,
   dueCountdown,
   dueOneLine,
@@ -666,6 +667,58 @@ describe("a new occurrence of a recurring task", () => {
   });
   it("falls back to now when there was no due date to advance from", () => {
     expect(recurrenceResetFields(null, "2026-09-01T12:00:00.000Z").createdAt).toBe("2026-09-01T12:00:00.000Z");
+  });
+
+  // Derek, 2026-09-28, on a fortnightly newsletter that arrived already
+  // delegated to Michaella, carrying last cycle's brief about emails that had
+  // already gone out.
+  describe("what it carries from the cycle before", () => {
+    let n = 0;
+    const ids = (prefix: string) => `${prefix}new${++n}`;
+    const finished = {
+      id: "t_old", projectId: "p1", clientId: "cl_1", title: "Stores Newsletter",
+      description: "Michaella, Brian approved both emails. Build and send them in GHL.",
+      status: "done", priority: "urgent", assigneeId: "u_derek", due: "2026-10-02",
+      createdAt: "2026-09-18T00:00:00.000Z", recurrence: "biweekly",
+      subtasks: [{ id: "s_1", title: "Send Store Newsletters", done: true, assigneeId: "u_mich", due: "2026-09-17",
+        note: "Build them in GHL", handoff: { steps: [{ id: "h1", text: "Build in GHL", done: true }], thread: [{ id: "m1", authorId: "u_mich", body: "done", at: "2026-09-18T00:00:00.000Z" }] } }],
+      comments: [{ id: "c1", kind: "note", body: "sent", at: "2026-09-18T00:00:00.000Z", authorId: "u_derek" }],
+      attachments: [{ id: "a1", name: "brand.pdf", kind: "file" }],
+      ghlTaskId: "ghl_1", draftEmail: { subject: "Newsletter", body: "<p>hi</p>", createdAt: "2026-09-17T00:00:00.000Z" },
+    } as unknown as Parameters<typeof nextOccurrence>[0];
+    const fresh = nextOccurrence(finished, "2026-10-16", ids);
+
+    it("is nobody's until it is handed off again, keeping the step's words", () => {
+      expect(fresh.subtasks).toHaveLength(1);
+      expect(fresh.subtasks[0].title).toBe("Send Store Newsletters");
+      expect(fresh.subtasks[0].assigneeId).toBeUndefined();
+      expect(fresh.subtasks[0].handoff).toBeUndefined();
+      expect(fresh.subtasks[0].note).toBeUndefined();
+      expect(fresh.subtasks[0].due).toBeUndefined();
+      expect(fresh.subtasks[0].done).toBe(false);
+      expect(fresh.subtasks[0].id).not.toBe("s_1");
+    });
+    it("drops last cycle's brief, conversation and draft email", () => {
+      expect(fresh.description).toBe("");
+      expect(fresh.comments).toEqual([]);
+      expect(fresh.draftEmail).toBeNull();
+      expect(fresh.ghlTaskId).toBeNull();
+    });
+    it("keeps the files the job needs every time", () => {
+      expect(fresh.attachments).toHaveLength(1);
+    });
+    it("is a new, open task on the next date", () => {
+      expect(fresh.id).not.toBe("t_old");
+      expect(fresh.status).toBe("todo");
+      expect(fresh.due).toBe("2026-10-16");
+      expect(fresh.title).toBe("Stores Newsletter");
+      expect(fresh.recurrence).toBe("biweekly");
+    });
+    it("leaves the finished occurrence alone, because it is the history", () => {
+      expect(finished.subtasks[0].assigneeId).toBe("u_mich");
+      expect(finished.description).toContain("Brian approved both emails");
+      expect(finished.comments).toHaveLength(1);
+    });
   });
 });
 

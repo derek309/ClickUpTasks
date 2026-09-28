@@ -14,7 +14,7 @@ import {
   buildPlan,
   isPersonalTask,
   htmlToText,
-  recurrenceResetFields,
+  nextOccurrence,
   plainTextToHtml,
   TODAY,
   todayIso,
@@ -2680,14 +2680,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // recurring task into a done-flagged Kanban stage went through here, not
     // patchTask, so it was marking the task done with no next occurrence
     // ever created (Derek: "check recurring tasks... are recreated
-    // according to settings and not just marked done"). Same clone shape as
-    // patchTask's own version below — kept in sync manually since this path
-    // deliberately skips the event-comment logging patchTask also does.
+    // according to settings and not just marked done"). Both paths build the
+    // occurrence through nextOccurrence, so there is one answer to what a new
+    // cycle carries; this one deliberately skips the event-comment logging
+    // patchTask also does.
     let clone: Task | null = null;
     if (cur && synced.status === "done" && cur.status !== "done" && cur.recurrence !== "none") {
       const nextDue = nextDueAhead(cur.due, cur.recurrence, cur.recurrenceInterval, cur.recurrenceUnit, cur.recurrenceDaysOfMonth, cur.recurrenceNth, cur.recurrenceWeekday);
       if (!hasFreshClone(tasksRef.current, cur, nextDue)) {
-        clone = { ...cur, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(cur.due), subtasks: cur.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...cur.attachments], ghlTaskId: null, draftEmail: null };
+        clone = nextOccurrence(cur, nextDue, newId);
         pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
       }
     }
@@ -2801,7 +2802,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = nextDueAhead(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit, before.recurrenceDaysOfMonth, before.recurrenceNth, before.recurrenceWeekday);
       if (!hasFreshClone(tasksRef.current, before, nextDue)) {
-        clone = { ...before, id: newId("t_"), status: "todo", due: nextDue, ...recurrenceResetFields(before.due), subtasks: before.subtasks.map((s) => ({ ...s, id: newId("s_"), done: false })), comments: [], attachments: [...before.attachments], ghlTaskId: null, draftEmail: null };
+        clone = nextOccurrence(before, nextDue, newId);
         pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
       }
     }
