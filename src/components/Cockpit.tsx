@@ -4004,7 +4004,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
-  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
@@ -4324,7 +4324,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             want to chat with someone specifically they can use the @") but
             not deleted, just admin-toggled off by default. */}
         <nav className="shrink-0 space-y-0.5 px-2">
-          <SideItem active={myWork} title="My Work (press 1)" onClick={() => goToView("dashboard")}><I.grid className="text-muted" /> <span>My Work</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
+          {/* One Clients item, not two (Derek, 2026-09-28). This is the board
+              of your own clients and projects by urgency, which is what you
+              open all day; the directory of every client is still there, one
+              click back through a client's breadcrumb, and adding a client now
+              happens here so there was nothing left to come to it for. */}
+          <SideItem active={myWork} title="Clients (press 1)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
               shortcut at first, to avoid shifting every row below it down one
@@ -4335,13 +4340,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 2)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>All Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
+          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 2)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
-          <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
             <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
@@ -4446,6 +4450,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
                 <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
               </div>
+              {/* The desktop header's Add client, which a phone would otherwise
+                  have no way to reach now that the directory is off the nav. */}
+              {dashboardView === "work" && canAdmin && (
+                <button onClick={() => setAddClientOpen(true)}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border bg-background px-3 py-2 text-[16px] font-semibold text-foreground">
+                  <I.plus /> Add client
+                </button>
+              )}
             </div>
           ) : showFilterControl ? (
             // Two rows by construction rather than by wrapping: who the list is
@@ -4455,7 +4467,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {activeClient === "all" && !myWork && canAdmin && (
                 <div className="flex min-w-0 items-center gap-2">
                   {scopeControls}
-                  <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact All Tasks view — same assignee, opens for anyone signed in"
+                  <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact Tasks view — same assignee, opens for anyone signed in"
                     className="shrink-0 rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
                 </div>
               )}
@@ -4475,7 +4487,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">My Work</button>
+                <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
@@ -4486,7 +4498,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "Clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "My Work" : activeClient === "all" ? "All Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
                 {/* Same star as the Clients directory row — pinning to the
                     sidebar shouldn't require leaving the client's own page
@@ -4500,9 +4512,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {/* Breadcrumb back to the Clients directory — only meaningful
                     when a specific client is the thing being viewed. */}
                 {clientView && (<>
-                  <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">My Work</button>
+                  <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
                   <span>›</span>
-                  <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
+                  <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">All clients</button>
                   <span>›</span>
                 </>)}
                 <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private — only the two of you can see this" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
@@ -4521,10 +4533,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.plus /> New task
             </button>
           )}
+          {/* Adding a client happens here now that this page is Clients (Derek,
+              2026-09-28: "just make it so we can add clients from that page").
+              It opens the new client straight away, as it always has. */}
+          {myWork && dashboardView === "work" && canAdmin && (
+            <button onClick={() => setAddClientOpen(true)} title="Add a client"
+              className="inline-flex items-center gap-1 rounded-md border bg-background px-2.5 py-1.5 text-[13px] font-semibold text-foreground hover:bg-accent-soft">
+              <I.plus /> Add client
+            </button>
+          )}
           {/* This is the "All Tasks" scope toggle — it belongs there only. */}
           {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && canAdmin && (<>
             {scopeControls}
-            <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact All Tasks view — same assignee, opens for anyone signed in"
+            <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact Tasks view — same assignee, opens for anyone signed in"
               className="rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
           </>)}
           {/* The Tasks/Journal toggle is gone from the bar — Journal is in
