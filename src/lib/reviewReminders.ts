@@ -17,6 +17,9 @@ const DAY_MS = 86_400_000;
 /** Reminders in one round. After this many the team is told instead, so a
  *  review nobody is watching never turns into weeks of daily emails. */
 export const MAX_REMINDERS = 3;
+/** Scheduled message ids for reminders start with this, so the send queue can
+ *  tell one apart when it fails and say that it still counted. */
+export const REMINDER_MESSAGE_PREFIX = "sm_rm_";
 /** The default frequency: every business day, the "24 hours" Derek asked for. */
 export const DEFAULT_REMINDER_EVERY = 1;
 /** The widest gap allowed, matching the database check. */

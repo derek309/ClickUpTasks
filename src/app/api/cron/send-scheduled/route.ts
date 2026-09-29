@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
+import { MAX_REMINDERS, REMINDER_MESSAGE_PREFIX } from "@/lib/reviewReminders";
 
 // Fires due scheduled sends (supabase/scheduled-messages.sql). Runs for
 // Vercel's cron or an admin session, see cronAuth.ts.
@@ -107,7 +108,11 @@ async function run(req: NextRequest) {
         .eq("id", row.id);
       // Back to pending with a due time already in the past, so the next run
       // picks it up. Only a message that is really not going tells its author.
-      if (tryAgain) { retried++; } else { failed++; await tellAuthor(row, `didn't send: ${result.error}`); }
+      // A review reminder is counted when it is queued, so a failed one still
+      // uses up one of the round; say so, or the author would wait for it.
+      const reminderNote = row.id.startsWith(REMINDER_MESSAGE_PREFIX)
+        ? ` It was an automatic review reminder and still counts as one of the ${MAX_REMINDERS}.` : "";
+      if (tryAgain) { retried++; } else { failed++; await tellAuthor(row, `didn't send: ${result.error}${reminderNote}`); }
     }
   }
   return NextResponse.json({ ok: true, sent, failed, retried, stuck: stuck?.length ?? 0, checked: (due ?? []).length });

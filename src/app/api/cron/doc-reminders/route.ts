@@ -7,7 +7,7 @@ import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveContact } from "@/lib/sendMessageServer";
 import { draftLinkAsButton, draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { APP_URL } from "@/lib/appUrl";
-import { isBusinessDay, reminderDue, MAX_REMINDERS } from "@/lib/reviewReminders";
+import { isBusinessDay, reminderDue, MAX_REMINDERS, REMINDER_MESSAGE_PREFIX } from "@/lib/reviewReminders";
 
 // Every business morning, a review that is with the client and unanswered gets
 // a reminder email (supabase/review-reminders.sql). The rules are all in
@@ -98,14 +98,26 @@ async function run(req: NextRequest) {
       `<p>Hi,</p><p>Just checking in on "${escapeHtml(name)}". When you have a moment, take a look, send any changes you would like or approve it.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
       button,
     );
+    // Claim the reminder before queueing it: the update only matches while the
+    // row still holds what this run read, so a second run at the same time (an
+    // admin pressing the route while the cron runs) matches nothing and queues
+    // nothing.
+    const count = decision.sentThisRound + 1;
+    const previous = { reminders_sent: Number(doc.reminders_sent ?? 0), last_reminder_at: (doc.last_reminder_at as string | null) ?? null };
+    const claim = supabaseAdmin.from("task_documents").update({ reminders_sent: count, last_reminder_at: now })
+      .eq("id", doc.id).eq("reminders_sent", previous.reminders_sent);
+    const { data: claimed } = await (previous.last_reminder_at ? claim.eq("last_reminder_at", previous.last_reminder_at) : claim.is("last_reminder_at", null)).select("id");
+    if (!claimed?.length) continue;
+
     const { error: queueError } = await supabaseAdmin.from("scheduled_messages").insert({
-      id: "sm_" + randomUUID(), client_id: task.client_id, task_id: task.id, channel: "email",
+      id: REMINDER_MESSAGE_PREFIX + randomUUID(), client_id: task.client_id, task_id: task.id, channel: "email",
       subject: `Checking in: ${name}`, body, scheduled_at: now, status: "pending", created_by: owner,
     });
-    if (queueError) continue;
-
-    const count = decision.sentThisRound + 1;
-    await supabaseAdmin.from("task_documents").update({ reminders_sent: count, last_reminder_at: now }).eq("id", doc.id);
+    if (queueError) {
+      // Nothing was queued, so hand the claim back; tomorrow tries again.
+      await supabaseAdmin.from("task_documents").update(previous).eq("id", doc.id).eq("last_reminder_at", now);
+      continue;
+    }
     tally.sent += 1;
 
     // The last of a round: say so, and say it went in their name, because they
