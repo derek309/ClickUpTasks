@@ -2965,10 +2965,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // on their account"). A second copy of every task, living in a system
   // nobody actually worked it in, just meant two records drifting apart.
   //
-  // The PULL direction stays: api/ghl/import-tasks still reads a contact's
-  // GHL-native tasks in, and Task.ghlTaskId stays on the model because that
-  // import dedupes against it. Drop the field and a second import would
-  // duplicate every task ever imported.
+  // The pull direction went too (api/ghl/import-tasks, deleted 2026-09-29).
+  // Task.ghlTaskId stays on the model: tasks imported before then still carry
+  // it, and the GoHighLevel webhook and the MCP status tool match on it.
   // --- GoHighLevel messages (email now, sms later) -------------------------
   // Same target-resolution shape as ghlTargetFor above, but keyed directly off
   // a Contact rather than a Task, since a message belongs to the person, not
