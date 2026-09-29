@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { formatDue, isOverdue, type Client, type Task, type User } from "@/lib/data";
 import { I, DIR_ROW } from "./ui";
 
-type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
+import type { ClientSort } from "./usePins";
 type GroupBy = "flat" | "team";
 
 export function ClientsDirectory({

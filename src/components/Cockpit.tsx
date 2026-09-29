@@ -69,13 +69,15 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchMessagesFor, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchMessagesFor, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, trashedSince, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
+import { usePins } from "./cockpit/usePins";
+import { useBoards } from "./cockpit/useBoards";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
@@ -96,8 +98,6 @@ import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
-import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
-import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
 import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
@@ -211,82 +211,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // at all"). Anyone whose remembered tab or deep link still says one of them
   // lands on Work rather than a blank screen.
   const [dashboardView, setDashboardView] = usePersisted<"work" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "reviews", "drafts"].includes(v as string));
-  // Your next steps due today or late, across every task, for the Next steps
-  // tab (Derek, 2026-09-16). Steps are read per task everywhere else, so the
-  // open ones are fetched when the tab is opened.
-  // What is out with a client, for the Reviews tab. Loaded when that tab is
-  // opened rather than at boot: a document is otherwise read one task at a
-  // time (supabase/task-documents.sql), and the board is two small queries
-  // that would be wasted on every other visit.
-  const [openReviews, setOpenReviews] = useState<OpenReviewGroups>({ yourMove: [], withClient: [], approved: [] });
-  const [reviewsLoading, setReviewsLoading] = useState(false);
-  // What video is costing in storage, loaded with the board that shows it.
-  const [videoStorage, setVideoStorage] = useState<{ files: number; bytes: number } | null>(null);
-  const loadOpenReviews = async () => {
-    setReviewsLoading(true);
-    void fetchVideoStorage().then(setVideoStorage).catch(() => {});
-    try {
-      const { docs, versions } = await fetchOpenReviews();
-      // Only reviews on a task that is still here. Row level security scopes
-      // task_documents by the task's own rule, which says nothing about the
-      // trash, so a review on a task someone binned stays "out with the
-      // client" until the purge takes it thirty days later. The loaded tasks
-      // are the live ones, so being among them is the test.
-      const live = new Set(tasksRef.current.map((t) => t.id));
-      setOpenReviews(buildOpenReviews(docs.filter((d) => live.has(d.taskId)), versions));
-    } catch {
-      // Best effort, same as the other on-demand loads: the board says nothing
-      // is out rather than showing an error nobody can act on.
-    } finally {
-      setReviewsLoading(false);
-    }
-  };
-  // Everything written and not sent, for the Drafts tab. Task drafts are
-  // already in memory on the tasks themselves; the client drafts and the
-  // scheduled queue are fetched when the tab is opened.
-  const [pendingSends, setPendingSends] = useState<PendingSendGroups>({ scheduled: [], drafts: [] });
-  const [draftsLoading, setDraftsLoading] = useState(false);
-  const loadPendingSends = async () => {
-    setDraftsLoading(true);
-    try {
-      const [clientDrafts, scheduledRes] = await Promise.all([
-        fetchClientEmailDrafts(),
-        authedFetch("/api/messages/schedule").then((r) => (r.ok ? r.json() : { scheduled: [] })).catch(() => ({ scheduled: [] })),
-      ]);
-      const taskDrafts = tasksRef.current
-        .filter((t) => t.draftEmail)
-        .map((t) => ({ taskId: t.id, clientId: t.clientId, draft: t.draftEmail! }));
-      const queued = (scheduledRes.scheduled ?? []).map(rowToScheduledMessage) as ScheduledMessage[];
-      setPendingSends(buildPendingSends(taskDrafts, clientDrafts, queued));
-    } catch {
-      // Best effort, like the other on-demand loads.
-    } finally {
-      setDraftsLoading(false);
-    }
-  };
-  // Deferred a frame for the same reason as the reviews load below.
-  useEffect(() => {
-    if (!myWork || dashboardView !== "drafts") return;
-    const r = requestAnimationFrame(() => { void loadPendingSends(); });
-    return () => cancelAnimationFrame(r);
-  }, [myWork, dashboardView]);
-  // Re-read every time the tab is opened rather than once. It is two small
-  // queries, and a board of what is waiting is worth nothing if it is showing
-  // what was waiting an hour ago. Deferred a frame, the same way
-  // NotificationPrefsPanel defers its own load: the first thing it does is set
-  // the loading flag, and writing state straight from an effect body is what
-  // stops the compiler optimising the component around it.
-  useEffect(() => {
-    if (!myWork || dashboardView !== "reviews") return;
-    const r = requestAnimationFrame(() => { void loadOpenReviews(); });
-    return () => cancelAnimationFrame(r);
-  }, [myWork, dashboardView]);
-  // Hours in YOUR working day. Deliberately local rather than a workspace
-  // setting: how long your day is is a personal fact, and app_settings only
-  // stores booleans anyway. Read after mount so the server and the first
-  // client render agree.
-  // Nine to five by default. The plan needs one clock fact to turn "three
-  // hours" into "you are on this at half ten".
+  // The Reviews and Drafts boards and the Finished marker (cockpit/useBoards).
+  const {
+    openReviews, reviewsLoading, videoStorage, loadOpenReviews,
+    pendingSends, draftsLoading, loadPendingSends,
+    finishedMarkerAt, openFinished, newFinishedCount,
+  } = useBoards({ tasks, tasksRef, showingBoard: myWork ? dashboardView : null, meId: me.id });
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   // All Tasks can show the completed log instead of the open list. It moved
@@ -494,12 +424,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // pre-chosen second side (b) when opened from a "possible duplicate" hint.
   const [mergeClientState, setMergeClientState] = useState<{ a: Client; b?: Client } | null>(null);
 
-  // Client ordering: star to pin, sort mode (used by the Clients directory).
-  // Personal preferences → persisted per-browser (localStorage), not the DB.
-  type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mine";
-  // Clients directory opens A-Z by default (Derek's preference); a saved
-  // "cut_clientSort" still overrides this on load.
-  const [clientSort, setClientSort] = useState<ClientSort>("az");
+  // Pins, client sort, manual order and "recently used" (cockpit/usePins).
+  const { clientSort, saveClientSort, clientUsed, starred, starredLists, manualOrder, toggleStar, toggleStarList, pinDrag } = usePins(activeClient);
   // Sidebar Clients list defaults to just what you actually have to work on
   // (open task assigned to you, or explicitly followed) instead of every
   // client you can see — same "mine vs. all" idea as allTasksScope, just
@@ -512,17 +438,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ("completed" used to live here too; moved under My Work — Derek: "makes
   // more sense there.")
   const [clientsGroupBy, setClientsGroupBy] = useState<"flat" | "team">("flat");
-  // Recently-used ordering: clientId → last-opened epoch, persisted locally.
-  // Opening a client stamps it (see the effect below), floating it to the top
-  // when the "Recently used" sort is active.
-  const [clientUsed, setClientUsed] = useState<Record<string, number>>({});
-  const [starred, setStarred] = useState<Set<string>>(new Set());
-  // Per-user pinned lists (projects), mirroring `starred` for clients — a
-  // starred list gets its own quick-access row in the sidebar's Pinned section.
-  const [starredLists, setStarredLists] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [bulkDelegateOpen, setBulkDelegateOpen] = useState(false);
-  const [manualOrder, setManualOrder] = useState<string[]>([]);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const [copiedForClaude, setCopiedForClaude] = useState(false);
   // New Client settings sheet (item 7) — replaces the three standing toggles
@@ -971,100 +888,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       setRefreshingMessages(false);
     }
   };
-  useEffect(() => {
-    let localStarred: string[] = [];
-    let localStarredLists: string[] = [];
-    try {
-      const s = localStorage.getItem("cut_clientSort"); if (s) setClientSort(s as ClientSort);
-      const st = localStorage.getItem("cut_starred"); if (st) { localStarred = JSON.parse(st); setStarred(new Set(localStarred)); }
-      const stl = localStorage.getItem("cut_starredLists"); if (stl) { localStarredLists = JSON.parse(stl); setStarredLists(new Set(localStarredLists)); }
-      const mo = localStorage.getItem("cut_clientOrder"); if (mo) setManualOrder(JSON.parse(mo));
-      const cu = localStorage.getItem("cut_clientUsed"); if (cu) setClientUsed(JSON.parse(cu));
-    } catch { /* fresh browser */ }
-    // Pinned clients/lists used to live only in localStorage — invisible
-    // from a cross-origin iframe (the app loaded as a GHL custom menu link
-    // gets its own partitioned storage, even though the same login/session
-    // works fine there). DB-backed now (see supabase/pins.sql); this is the
-    // one-time migration off localStorage, run from whichever context still
-    // has the old values, so nobody's existing pins just vanish.
-    (async () => {
-      try {
-        const res = await authedFetch("/api/pins");
-        if (!res.ok) return;
-        const j = await res.json();
-        const dbStarred: string[] = j.starredClientIds ?? [];
-        const dbStarredLists: string[] = j.starredListIds ?? [];
-        if (dbStarred.length || dbStarredLists.length) {
-          setStarred(new Set(dbStarred));
-          setStarredLists(new Set(dbStarredLists));
-        } else if (localStarred.length || localStarredLists.length) {
-          authedFetch("/api/pins", {
-            method: "PATCH", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ starredClientIds: localStarred, starredListIds: localStarredLists }),
-          }).catch(() => {});
-        }
-      } catch { /* pins fetch is best-effort; localStorage values (if any) stay as the local fallback */ }
-    })();
-  }, []);
-  // Stamp a client's last-opened time whenever it becomes the active client,
-  // by any path (sidebar, ⌘K, board, deep link) — so "Recently used" ordering
-  // reflects real use without threading a call through every open site.
-  useEffect(() => {
-    if (!activeClient.startsWith("cl_")) return;
-    // Deferred a frame: stamping the time is bookkeeping, not something the
-    // render that triggered it needs to see, and writing state straight out of
-    // an effect body is what makes the compiler give up on this component.
-    const r = requestAnimationFrame(() => {
-      setClientUsed((m) => { const n = { ...m, [activeClient]: Date.now() }; try { localStorage.setItem("cut_clientUsed", JSON.stringify(n)); } catch {} return n; });
-    });
-    return () => cancelAnimationFrame(r);
-  }, [activeClient]);
   const toggleHideEmpty = () => setHideEmpty(!hideEmpty);
   const toggleHideDone = () => setHideDone(!hideDone);
-  const saveClientSort = (v: ClientSort) => { setClientSort(v); try { localStorage.setItem("cut_clientSort", v); } catch {} };
-  // localStorage write kept alongside the DB one — harmless, and it's what
-  // still seeds `starred` synchronously on the very next mount before the
-  // /api/pins fetch above resolves.
-  const toggleStar = (id: string) => setStarred((prev) => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
-    try { localStorage.setItem("cut_starred", JSON.stringify([...n])); } catch {}
-    authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ starredClientIds: [...n] }) }).catch(() => {});
-    return n;
-  });
-  const toggleStarList = (id: string) => setStarredLists((prev) => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id);
-    try { localStorage.setItem("cut_starredLists", JSON.stringify([...n])); } catch {}
-    authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ starredListIds: [...n] }) }).catch(() => {});
-    return n;
-  });
-  // Which pin is being dragged, and which row it is currently over. Clients
-  // and lists reorder within their own group, which is how they are stored
-  // (Derek, 2026-09-28: "can you make it so we can sort the pinned").
-  const [dragPin, setDragPin] = useState<string | null>(null);
-  const [overPin, setOverPin] = useState<string | null>(null);
-  const movePin = (kind: "client" | "list", dragId: string, overId: string) => {
-    const setter = kind === "client" ? setStarred : setStarredLists;
-    const key = kind === "client" ? "cut_starred" : "cut_starredLists";
-    const field = kind === "client" ? "starredClientIds" : "starredListIds";
-    setter((prev) => {
-      const ids = [...prev];
-      const from = ids.indexOf(dragId), to = ids.indexOf(overId);
-      if (from < 0 || to < 0 || from === to) return prev;
-      ids.splice(to, 0, ids.splice(from, 1)[0]);
-      try { localStorage.setItem(key, JSON.stringify(ids)); } catch {}
-      authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: ids }) }).catch(() => {});
-      return new Set(ids);
-    });
-  };
-  const pinDrag = (kind: "client" | "list", id: string) => ({
-    draggable: true,
-    onDragStart: () => setDragPin(id),
-    onDragEnd: () => { setDragPin(null); setOverPin(null); },
-    onDragOver: (e: React.DragEvent) => { if (dragPin && dragPin !== id) { e.preventDefault(); setOverPin(id); } },
-    onDrop: (e: React.DragEvent) => { e.preventDefault(); if (dragPin) movePin(kind, dragPin, id); setDragPin(null); setOverPin(null); },
-    dragging: dragPin === id,
-    over: overPin === id && dragPin !== id,
-  });
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => afterFirstFrame(() => setDrawerFull(localStorage.getItem("cut_drawerFull") === "1")), []);
   // Drop the project filter whenever we leave its client (or enter My Work).
@@ -1078,26 +903,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => { setSelectedTaskIds(new Set()); }, [activeClient, activeProject, myWork, personalView, inboxView]);
   // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
   useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
-
-  // When this person last looked at Finished. finishedSeenAt is what the count
-  // is measured against and only moves when they look again; markerAt is frozen
-  // for the visit, so the "new since you last looked" line stays where it was
-  // instead of vanishing as the view opens.
-  const [finishedSeenAt, setFinishedSeenAt] = useState<string | null>(null);
-  const [finishedMarkerAt, setFinishedMarkerAt] = useState<string | null>(null);
-  useEffect(() => {
-    void fetchFeedSeen(me.id, "finished").then(setFinishedSeenAt);
-  }, [me.id]);
-  // Opening it is looking at it: freeze the marker where it is, then move the
-  // stored mark to now so the count is clear next time. Done where the opening
-  // happens rather than in an effect watching for it: it is one action by a
-  // person, and an effect would be a second, later guess at when that was.
-  const openFinished = () => {
-    setFinishedMarkerAt(finishedSeenAt);
-    const now = new Date().toISOString();
-    setFinishedSeenAt(now);
-    markFeedSeenDb(me.id, "finished", now);
-  };
 
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
@@ -1970,23 +1775,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // task's comments is real work at this app's task volume, no reason to
   // pay for it on every render of every other view.
   const showCompletedLog = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient === "all" && allTasksCompleted;
-  // How much has finished since they last looked, for the button's own count.
-  // Runs whatever view is open, unlike the log below, so it has to stay cheap:
-  // the time comparison comes first and settles almost every comment before
-  // finishKindOf ever runs a regex over it.
-  const newFinishedCount = useMemo(() => {
-    if (!finishedSeenAt) return 0;
-    let n = 0;
-    for (const t of tasks) {
-      if (t.clientId === PERSONAL_CLIENT_ID) continue;
-      for (const c of t.comments) {
-        if (c.kind !== "event" || c.at <= finishedSeenAt) continue;
-        if (finishKindOf(c.body, c.authorId)) n += 1;
-      }
-    }
-    return n;
-  }, [tasks, finishedSeenAt]);
-
   const completionLog = useMemo(() => {
     if (!showCompletedLog) return [];
     const rows: CompletionRow[] = [];
