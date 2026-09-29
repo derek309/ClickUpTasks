@@ -2490,8 +2490,16 @@ export function dmConversationId(a: string, b: string): string {
 export const userById = (id: string | null) => users.find((u) => u.id === id) ?? null;
 export const labelById = (id: string) => labels.find((l) => l.id === id) ?? null;
 
-// Whether a recurring task's next occurrence already exists, so completing it
-// twice (or through two paths) does not create two.
+// Guards the recurrence-clone step in update()/patchTask() against creating
+// two next-occurrence clones for one completion. Caught in production
+// 2026-09-09: a single checkbox click on a "weekday" recurring task left two
+// identical "Find images for Lincoln business listings" clones five seconds
+// apart, and every other recurring task completed in the same session that
+// day cloned exactly once — so this is a rare double-fire on one click, not
+// a systemic issue, but it leaves a silent stray duplicate every time it
+// happens (Derek: "I keep tryin to delete it... it clears out then
+// reappears" — the surviving twin, not the one he deleted).
+//
 // Matches on the fields that make two clones indistinguishable as work — a
 // legitimate second task that merely shares a title would also share the
 // project and due date, which recurring siblings from separate templates

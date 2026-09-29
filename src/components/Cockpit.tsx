@@ -9,7 +9,6 @@ import {
   formatDue,
   effectivePriority,
   effectiveStatus,
-  plainTextToHtml,
   TODAY,
   addDaysIso,
   DUE_BUCKETS,
@@ -17,7 +16,6 @@ import {
   TRIAL_DAYS, trialState,
   STATUS_META,
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
-  applyWaitingStatusSync,
   viewerDueDate, isOnPlateOf,
   isCompletionEvent, finishKindOf,
   CLIENT_STATUS_META,
@@ -40,7 +38,6 @@ import {
   type ClientLink,
   type ClientNote,
   type Message,
-  type MessageChannel,
   type Me,
   type TaskTemplate,
   type VaultFolder,
@@ -56,13 +53,15 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, upsertProject, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientNote, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, upsertProject, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 import { usePins } from "./cockpit/usePins";
+import { useAiHelpers } from "./cockpit/useAiHelpers";
+import { useComposer } from "./cockpit/useComposer";
 import { useTaskEdits } from "./cockpit/useTaskEdits";
 import { useClientRecords } from "./cockpit/useClientRecords";
 import { useClientAdmin } from "./cockpit/useClientAdmin";
@@ -102,26 +101,7 @@ import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 import { isInboxNotification } from "@/lib/extensionInbox";
 
-// A dumped task's description: what the AI summarised, then the client's own
-// wording underneath as a blockquote so it stays visibly theirs. The verbatim
-// half is escaped and line-broken but never reworded, which is the whole
-// point of carrying it in its own field (see api/ai/parse-tasks).
-function describeDumpRow(r: { description: string; verbatim: string }): string {
-  const parts: string[] = [];
-  if (r.description.trim()) parts.push(plainTextToHtml(r.description.trim()));
-  if (r.verbatim.trim()) parts.push(`<blockquote>${plainTextToHtml(r.verbatim)}</blockquote>`);
-  return parts.join("");
-}
 
-// Guards the recurrence-clone step in update()/patchTask() against creating
-// two next-occurrence clones for one completion. Caught in production
-// 2026-09-09: a single checkbox click on a "weekday" recurring task left two
-// identical "Find images for Lincoln business listings" clones five seconds
-// apart, and every other recurring task completed in the same session that
-// day cloned exactly once — so this is a rare double-fire on one click, not
-// a systemic issue, but it leaves a silent stray duplicate every time it
-// happens (Derek: "I keep tryin to delete it... it clears out then
-// reappears" — the surviving twin, not the one he deleted).
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -672,175 +652,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return null;
   };
 
-  // One shared list resolution for the whole batch, so 12 tasks can't race
-  // each other into creating 12 copies of a missing "Tasks" list.
-  //
-  // This is the single creation path for the composer, whichever plus opened
-  // it: the group it was opened on decides the list, and (under a status or
-  // priority grouping) the status or priority too, the same way the inline
-  // quick-add used to.
-  const createTasksFromDump = (rows: ParsedRow[], files: { file: File; row: number }[]) => {
-    if (!rows.length || !dumpGroup) return;
-    const { key: groupKey, personal } = dumpGroup;
-    // The client the composer was opened for, which differs from the one on
-    // screen only when it was opened from Tasks and picked inside.
-    const targetClient = dumpGroup.clientId ?? activeClient;
-    const now = new Date().toISOString();
-
-    if (personal) {
-      const made: Task[] = rows.map((r) => ({
-        id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID,
-        title: r.title.trim(), description: describeDumpRow(r),
-        status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-        priority: r.priority, assigneeId: me.id, contactId: null,
-        due: r.due, followUpAt: r.followUpAt, size: r.size,
-        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto, private: true,
-        subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
-      } as Task));
-      setTasks((ts) => [...ts, ...made]);
-      made.forEach((t) => pinJustAdded(t.id));
-      bulkUpsertTasks(made, me.id);
-      attachDumpFiles(made, files);
-      setDumpGroup(null);
-      pushToast(`Created ${made.length} task${made.length === 1 ? "" : "s"}`);
-      return;
-    }
-
-    if (!targetClient.startsWith("cl_")) return;
-    let projectId: string;
-    // tasks.project_id is a foreign key, so a task inserted in the same tick
-    // as the project it belongs to can reach Postgres first and fail the
-    // constraint. When we create the list here, hold its write and chain the
-    // inserts behind it.
-    let projectWrite: PromiseLike<unknown> | null = null;
-    // The group and activeProject only apply while the target IS the client on
-    // screen: a task for another client must never land in this one's list.
-    const sameClient = targetClient === activeClient;
-    if (groupKey && groupBy === "project" && sameClient) projectId = groupKey;
-    else if (activeProject && sameClient) projectId = activeProject;
-    else {
-      const existing = projects.find((pr) => pr.clientId === targetClient);
-      if (existing) projectId = existing.id;
-      else { const pr: Project = { id: newId("p_"), clientId: targetClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, pr]); projectWrite = upsertProject(pr); projectId = pr.id; }
-    }
-    const made: Task[] = rows.map((r) => {
-      const waiting = r.assignee === "client";
-      const member = r.assignee && r.assignee !== "client" ? users.find((u) => u.name === r.assignee) : null;
-      return {
-        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: describeDumpRow(r),
-        status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
-        // isManuallyAssignable guards Conversation (auto-created-only, see
-        // data.ts): a dump into that group still lands as the row's own
-        // priority rather than manually assigning the reserved tier.
-        priority: groupKey && groupBy === "priority" && isManuallyAssignable(groupKey as Priority) ? (groupKey as Priority) : r.priority,
-        // Assignee defaults to whoever is dumping (Derek: "they're always
-        // going to be defaulted to the person who is creating them") — the AI
-        // only overrides it when the notes name someone else outright. A task
-        // waiting on the client still has that owner (see applyWaitingStatusSync).
-        assigneeId: member?.id ?? me.id, waitingOnClient: waiting,
-        contactId: targetClient.slice(3),
-        due: r.due, followUpAt: r.followUpAt, size: r.size,
-        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto,
-        private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
-      } as Task;
-    });
-    // waiting/status must move together — the one rule that owns that lives in
-    // applyWaitingStatusSync, so route each one through it rather than hand
-    // rolling it here.
-    const synced = made.map((t) => ({ ...t, ...applyWaitingStatusSync({ status: t.status, waitingOnClient: t.waitingOnClient }, { waitingOnClient: t.waitingOnClient }) }));
-    setTasks((ts) => [...ts, ...synced]);
-    // Pinned so a task created into a group the current sort or filter would
-    // hide does not vanish the moment it is made.
-    synced.forEach((t) => pinJustAdded(t.id));
-    const write = () => { bulkUpsertTasks(synced, me.id); attachDumpFiles(synced, files); };
-    if (projectWrite) projectWrite.then(write); else write();
-    setDumpGroup(null);
-    pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
-    synced.forEach((t) => { if (t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} assigned you \u201C${t.title}\u201D`, t.id); });
-  };
-
-  // A pasted file is uploaded after its task exists, because an attachment
-  // needs a row to hang on. The modal already decided which task each one
-  // belongs to.
-  const attachDumpFiles = (made: Task[], files: { file: File; row: number }[]) => {
-    files.forEach((f) => { const t = made[f.row]; if (t) void addFiles(t.id, [f.file]); });
-  };
-
-  const regenerateAiSummary = async (clientId: string) => {
-    setAiSummaryBusyId(clientId);
-    try {
-      const res = await authedFetch("/api/ai/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error ?? "AI summary failed.");
-      setClients((cs) => cs.map((x) => (x.id === clientId ? { ...x, aiSummary: j.summary, aiSummaryAt: j.generatedAt } : x)));
-      // Log it into the Chat journal too, not just the AI tab's single
-      // overwritable field — this is what makes the journal an actual
-      // history instead of losing every prior summary on regenerate.
-      addNote(clientId, "ai_summary", j.summary);
-    } catch (e) {
-      pushToast(e instanceof Error ? e.message : "AI summary failed.");
-    } finally {
-      setAiSummaryBusyId(null);
-    }
-  };
-  // Drafts a client-facing status update via Gemini — fills the composer's
-  // subject/body, never sends. Send is independently gated by
-  // canMessageClient regardless of what this returns.
-  const [draftingMessage, setDraftingMessage] = useState(false);
-  const draftMessage = async (clientId: string, channel: MessageChannel, prompt?: string, projectId?: string | null, context?: string): Promise<{ subject?: string; body: string } | null> => {
-    setDraftingMessage(true);
-    try {
-      const res = await authedFetch("/api/ai/draft-message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, channel, prompt, projectId: projectId ?? undefined, context }) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { pushToast(j.error || "Failed to draft message."); return null; }
-      return { subject: j.subject, body: j.body };
-    } catch {
-      pushToast("Failed to draft message.");
-      return null;
-    } finally {
-      setDraftingMessage(false);
-    }
-  };
-  // Same pattern for the task description — Gemini drafts, never saves.
-  const [draftingDescription, setDraftingDescription] = useState(false);
-  const draftDescription = async (title: string, description: string, prompt?: string): Promise<string | null> => {
-    setDraftingDescription(true);
-    try {
-      const res = await authedFetch("/api/ai/draft-description", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: openTask?.clientId, title, description, prompt }) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { pushToast(j.error || "Failed to draft description."); return null; }
-      return j.body ?? null;
-    } catch {
-      pushToast("Failed to draft description.");
-      return null;
-    } finally {
-      setDraftingDescription(false);
-    }
-  };
-  // Re-pulls one contact's info from GHL on demand — the bulk sync re-syncs
-  // a whole sub-account (~30 sequential API calls for a big location), way
-  // more than needed to check if one person's phone number changed.
-  const [refreshingContact, setRefreshingContact] = useState(false);
-  const refreshContact = async (contact: Contact) => {
-    if (!contact.ghlContactId) { pushToast("This contact isn't linked to GoHighLevel."); return; }
-    setRefreshingContact(true);
-    try {
-      // No locationId needed — the route tries every connected sub-account's
-      // token itself, since a client's own ghlLocationId field is
-      // unreliable for this (often empty, or repurposed as a company-name
-      // label — see the route's comment). This is read-only, so trying
-      // several tokens is safe.
-      const res = await authedFetch("/api/ghl/contact", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, ghlContactId: contact.ghlContactId }) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { pushToast(j.error || "Failed to refresh contact."); return; }
-      setContacts((cs) => cs.map((c) => (c.id === contact.id ? j.contact : c)));
-      pushToast("Contact info refreshed.");
-    } catch {
-      pushToast("Failed to refresh contact.");
-    } finally {
-      setRefreshingContact(false);
-    }
-  };
   const toggleHideEmpty = () => setHideEmpty(!hideEmpty);
   const toggleHideDone = () => setHideDone(!hideDone);
   const [drawerFull, setDrawerFull] = useState(false);
@@ -2138,6 +1949,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { saveTemplate, deleteTemplate, useTemplateAsTask, applyTemplate } = useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks });
   const { createStage, addProject, renameProject, deleteProject, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
   const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
+  const { createTasksFromDump } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles });
+  const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary, draftDescription, draftingDescription } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
