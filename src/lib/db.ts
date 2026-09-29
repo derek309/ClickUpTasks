@@ -50,7 +50,7 @@ export { titleCase };
 // can_request_new_tasks IS included, and that's the same trade in reverse:
 // it's an ordinary admin-editable setting, so it belongs on the normal edit
 // path — which makes supabase/client-request-new-tasks.sql a migrate-before-
-// deploy, exactly like can_message was. in_trial/trial_ends_at/does_a2p
+// deploy, exactly like can_message was. in_trial/trial_ends_at
 // (supabase/client-trial-and-a2p.sql) are on that same normal edit path for
 // the same reason, so that migration is also migrate-before-deploy.
 const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks === true, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null,  portal_shows_all_tasks: c.portalShowsAllTasks === true });

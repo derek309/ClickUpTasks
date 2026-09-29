@@ -39,7 +39,7 @@ const task = (id: string, extra: Record<string, unknown>) => ({
 beforeEach(() => resetTables({
   clients: [{
     id: "cl_acme", name: "Acme", share_token: TOKEN, assigned_to: [], linked_contact_id: "c_acme",
-    can_request_new_tasks: true, show_growth_plan: false, portal_shows_all_tasks: true, deleted_at: null,
+    can_request_new_tasks: true, portal_shows_all_tasks: true, deleted_at: null,
   }],
   projects: [
     { id: "p_old", client_id: "cl_acme", name: "Old list", position: 0, deleted_at: TRASHED },

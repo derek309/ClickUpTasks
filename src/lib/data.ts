@@ -404,8 +404,7 @@ export interface Client {
   // doesA2P and showGrowthPlan used to live here. Both gated the Playbook,
   // which was removed (commit "Remove Playbook"): nothing has read either
   // since, so they were two switches that could only ever change a number in
-  // a column. The clients.does_a2p and clients.show_growth_plan columns are
-  // still there and are safe to drop whenever someone is in the schema.
+  // a column. supabase/drop-dead-columns.sql drops both columns.
   /** Portal shows every non-private task on the account, not just the ones
    *  waiting on the client. Off by default — see supabase/portal-all-tasks.sql. */
   portalShowsAllTasks?: boolean;

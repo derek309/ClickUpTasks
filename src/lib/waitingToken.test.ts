@@ -18,7 +18,7 @@ function seed(o: { clientDeleted?: boolean; projectDeleted?: boolean }) {
   resetTables({
     clients: [{
       id: "cl_acme", name: "Acme", share_token: CLIENT_TOKEN, assigned_to: [], linked_contact_id: null,
-      can_request_new_tasks: true, show_growth_plan: true, portal_shows_all_tasks: false,
+      can_request_new_tasks: true, portal_shows_all_tasks: false,
       deleted_at: o.clientDeleted ? TRASHED : null,
     }],
     projects: [{ id: "p_site", client_id: "cl_acme", share_token: PROJECT_TOKEN, deleted_at: o.projectDeleted ? TRASHED : null }],
