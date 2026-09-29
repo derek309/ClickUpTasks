@@ -263,7 +263,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!myWork || dashboardView !== "drafts") return;
     const r = requestAnimationFrame(() => { void loadPendingSends(); });
     return () => cancelAnimationFrame(r);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myWork, dashboardView]);
   // Re-read every time the tab is opened rather than once. It is two small
   // queries, and a board of what is waiting is worth nothing if it is showing
@@ -275,7 +274,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!myWork || dashboardView !== "reviews") return;
     const r = requestAnimationFrame(() => { void loadOpenReviews(); });
     return () => cancelAnimationFrame(r);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myWork, dashboardView]);
   // Hours in YOUR working day. Deliberately local rather than a workspace
   // setting: how long your day is is a personal fact, and app_settings only
@@ -1083,7 +1081,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [finishedMarkerAt, setFinishedMarkerAt] = useState<string | null>(null);
   useEffect(() => {
     void fetchFeedSeen(me.id, "finished").then(setFinishedSeenAt);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id]);
   // Opening it is looking at it: freeze the marker where it is, then move the
   // stored mark to now so the count is clear next time. Done where the opening
@@ -1100,7 +1097,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const currentNav = (): NavState => ({
     view: settingsView ? "settings" : dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
     client: activeClient, project: activeProject, task: openTaskId,
-    clientTab, vaultFolder: null, // vaultFolder is write-only (via copyFolderLink) — not mirrored into the live URL as you browse
+    clientTab, vaultFolder: null, // read from an old folder link on load, never written as you browse
     dm: inboxView ? dmUserId : null,
     assignee: activeClient === "all" ? allTasksScope : null,
     sub: myWork ? (dashboardView === "work" ? null : dashboardView) : (showCompletedLog ? "completed" : null),
@@ -1362,7 +1359,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A folder link is just the current client/project link with tab=chat
   // and folder=<id> layered on — built fresh at click time, not mirrored
   // into the live URL bar as you browse (see currentNav's vaultFolder note).
-  const copyFolderLink = (folderId: string) => copyLink({ ...currentNav(), view: null, clientTab: "chat", vaultFolder: folderId });
   // Public "here's what we need from you" link for this client — see
   // supabase/client-share-token.sql. Unlike copyLink above, this is a share
   // link, not an app deep-link: it needs to keep working (and copy to the
@@ -2315,11 +2311,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     upsertVaultFolder(f);
     return f;
   };
-  const renameVaultFolder = (folder: VaultFolder, name: string) => {
-    const nf = { ...folder, name };
-    setVaultFolders((fs) => fs.map((f) => (f.id === folder.id ? nf : f)));
-    upsertVaultFolder(nf);
-  };
   // Deleting a folder doesn't touch the attachments that referenced it —
   // their folderId just stops matching anything and they fall back to
   // "Unfiled." No cascade needed; JSONB isn't relationally enforced anyway.
@@ -2793,10 +2784,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
 
   const deleteTask = (id: string) => {
-    // Owner Growth Plan/Sales checklist steps are a fixed template every
-    // business gets — defense in depth alongside the hidden delete button in
-    // TaskDrawer, in case some other path ever calls this directly.
-    const lockedStep = tasksRef.current.find((x) => x.id === id);
     setConfirmDialog({
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
       onConfirm: () => {
@@ -4728,9 +4715,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             whatsNextBusy={aiSummaryBusyId === activeClient}
             folders={activeVaultFolders}
             onCreateFolder={(name) => createVaultFolder(activeClient, name)}
-            onRenameFolder={(id, name) => { const f = vaultFolders.find((x) => x.id === id); if (f) renameVaultFolder(f, name); }}
             onDeleteFolder={deleteVaultFolder}
-            onCopyFolderLink={copyFolderLink}
             onSetNoteAttachmentFolder={setNoteAttachmentFolder}
             initialFolderFilter={initialVaultFolder}
           />

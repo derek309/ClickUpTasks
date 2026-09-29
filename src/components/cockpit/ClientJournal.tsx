@@ -74,7 +74,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, onComposeEmail, scheduled, onLoadScheduled, onCancelScheduled, toContact, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onRenameFolder, onDeleteFolder, onCopyFolderLink, onSetNoteAttachmentFolder, initialFolderFilter }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, onComposeEmail, scheduled, onLoadScheduled, onCancelScheduled, toContact, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onDeleteFolder, onSetNoteAttachmentFolder, initialFolderFilter }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -122,9 +122,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // either — see Cockpit.tsx's old vaultItems comment).
   folders?: VaultFolder[];
   onCreateFolder?: (name: string) => void;
-  onRenameFolder?: (folderId: string, name: string) => void;
   onDeleteFolder?: (folderId: string) => void;
-  onCopyFolderLink?: (folderId: string) => void;
   onSetNoteAttachmentFolder?: (note: ClientNote, attachmentId: string, folderId: string | null) => void;
   // From a deep link's ?folder= param — read once as the initial folder
   // filter, not a live-controlled prop (this component owns it after that).

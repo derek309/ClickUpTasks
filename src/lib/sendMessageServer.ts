@@ -16,7 +16,6 @@ import { ghlReplyFields } from "./ghlReply";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
-const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
