@@ -317,32 +317,77 @@ export async function fetchMessagesFor(scope: { taskId: string } | { contactId: 
   return (data ?? []).map(rowToMessage);
 }
 
-export async function fetchAll() {
+/** Finished tasks from this many days back load at start (Derek, 2026-09-29);
+ *  older ones load when a view that shows them opens (fetchOlderDoneTasks). */
+export const TASK_START_DAYS = 30;
+
+/** The tables the focus refetch asks only for changes to: the newest
+ *  updated_at it has seen in each (supabase/updated-at.sql). */
+export type SyncTable = "tasks" | "clients" | "messages" | "client_notes" | "notifications";
+export type SyncMarks = Partial<Record<SyncTable, string>>;
+
+/** Finished tasks the start load left out: older than the window, for one
+ *  client or for everyone. */
+export async function fetchOlderDoneTasks(scope: { clientId: string } | null): Promise<Task[]> {
+  const before = daysAgoIso(TASK_START_DAYS);
+  const { data, error } = await fetchAllRows("tasks", "created_at", true, true, (q) => {
+    const older = q.eq("status", "done").lt("updated_at", before);
+    return scope ? older.eq("client_id", scope.clientId) : older;
+  });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToTask);
+}
+
+/** One task by id, for a link or a notification that opens a task the start
+ *  load left out. null when it is gone or not visible. */
+export async function fetchTaskById(id: string): Promise<Task | null> {
+  const { data } = await supabase.from("tasks").select("*").eq("id", id).is("deleted_at", null).maybeSingle();
+  return data ? rowToTask(data) : null;
+}
+
+/** Everything the app loads. With `since`, the five tables that carry
+ *  updated_at return only the rows changed after the marks, for the focus
+ *  refetch; the rest are small and still come whole. */
+export async function fetchAll(since?: SyncMarks) {
   const messagesSince = daysAgoIso(MESSAGE_START_DAYS);
+  const tasksSince = daysAgoIso(TASK_START_DAYS);
+  // A minute of overlap: now() is when a write's transaction began, so one
+  // that commits a moment after this read can carry a time just before the
+  // mark. Merging is by id, so reading a row twice costs nothing.
+  const changed = (table: SyncTable): Narrow | null => {
+    const at = since?.[table];
+    return at ? (q) => q.gt("updated_at", new Date(Date.parse(at) - 60_000).toISOString()) : null;
+  };
   const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, sg, dm] = await Promise.all([
-    fetchAllRows("clients", "created_at", true, true),
+    fetchAllRows("clients", "created_at", true, true, changed("clients") ?? undefined),
     fetchAllRows("contacts"),
     fetchAllRows("projects", undefined, true, true),
-    fetchAllRows("tasks", "created_at", true, true),
+    // Open tasks, and finished ones from the last 30 days: 1,980 rows at start
+    // when about 120 were open.
+    fetchAllRows("tasks", "created_at", true, true, changed("tasks") ?? ((q) => q.or(`status.neq.done,updated_at.gte.${tasksSince}`))),
     // Every unread notification, and the newest read ones: 2,673 rows loaded
     // at start and on every return to the tab when about half were read.
-    eitherOf(
-      fetchAllRows("notifications", "created_at", false, false, (q) => q.eq("read", false)),
-      supabase.from("notifications").select("*").eq("read", true)
-        .order("created_at", { ascending: false }).order("id").limit(READ_NOTIFICATION_START)
-        .then((r) => ({ data: r.data, error: r.error })),
-    ),
+    changed("notifications")
+      ? fetchAllRows("notifications", "created_at", false, false, changed("notifications")!)
+      : eitherOf(
+        fetchAllRows("notifications", "created_at", false, false, (q) => q.eq("read", false)),
+        supabase.from("notifications").select("*").eq("read", true)
+          .order("created_at", { ascending: false }).order("id").limit(READ_NOTIFICATION_START)
+          .then((r) => ({ data: r.data, error: r.error })),
+      ),
     // Fetched separately from the hard-fail set below: these tables ship via a
     // manually-run migration (client-links-notes.sql / messages.sql),
     // so a not-yet-run migration must degrade to "nothing yet", not break the app.
     fetchAllRows("client_links", "position"),
-    fetchAllRows("client_notes", "created_at", false),
+    fetchAllRows("client_notes", "created_at", false, false, changed("client_notes") ?? undefined),
     // The last 60 days, and anything unread whatever its age so the unread
     // markers stay right. Every message for every client was 4 MB.
-    eitherOf(
-      fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince)),
-      fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false)),
-    ),
+    changed("messages")
+      ? fetchAllRows("messages", "created_at", true, false, changed("messages")!)
+      : eitherOf(
+        fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince)),
+        fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false)),
+      ),
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
@@ -362,7 +407,16 @@ export async function fetchAll() {
   if (fd.error) console.warn("[db] folders unavailable — run supabase/folders.sql", fd.error.message);
   if (sg.error) console.warn("[db] stages unavailable — run supabase/stages.sql", sg.error.message);
   if (dm.error) console.warn("[db] dm_messages unavailable — run supabase/dm-chat.sql", dm.error.message);
+  // The newest change seen in each table, from the database's own clock, so
+  // a browser whose clock is off cannot make the next refetch miss rows.
+  const mark = (table: SyncTable, rows: { updated_at?: string }[] | null) =>
+    (rows ?? []).reduce<string | undefined>((max, r) => (r.updated_at && (!max || r.updated_at > max) ? r.updated_at : max), since?.[table]);
+  const marks: SyncMarks = {
+    tasks: mark("tasks", t.data), clients: mark("clients", c.data), notifications: mark("notifications", n.data),
+    client_notes: cn.error ? since?.client_notes : mark("client_notes", cn.data), messages: m.error ? since?.messages : mark("messages", m.data),
+  };
   return {
+    marks,
     clients: (c.data ?? []).map(rowToClient),
     contacts: (ct.data ?? []).map(rowToContact),
     projects: (p.data ?? []).map(rowToProject),
