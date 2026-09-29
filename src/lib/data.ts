@@ -2489,3 +2489,13 @@ export function dmConversationId(a: string, b: string): string {
 
 export const userById = (id: string | null) => users.find((u) => u.id === id) ?? null;
 export const labelById = (id: string) => labels.find((l) => l.id === id) ?? null;
+
+// Whether a recurring task's next occurrence already exists, so completing it
+// twice (or through two paths) does not create two.
+// Matches on the fields that make two clones indistinguishable as work — a
+// legitimate second task that merely shares a title would also share the
+// project and due date, which recurring siblings from separate templates
+// essentially never do in practice.
+export function hasFreshClone(pool: Task[], src: Task, nextDue: string | null): boolean {
+  return pool.some((t) => t.id !== src.id && t.clientId === src.clientId && t.projectId === src.projectId && t.title === src.title && t.due === nextDue && t.status !== "done");
+}
