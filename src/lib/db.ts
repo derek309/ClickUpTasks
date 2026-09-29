@@ -441,6 +441,9 @@ export async function fetchAll(since?: SyncMarks) {
 // tables on every single page load to build two arrays nobody renders.
 
 export const upsertContact = (c: Contact) => save(() => supabase.from("contacts").upsert(contactToRow(c)));
+/** A SaaS link kept on the contact alone, for a contact not in GoHighLevel. */
+export const saveContactSaasUrl = (contactId: string, url: string) =>
+  save(() => supabase.from("contacts").update({ saas_url: url || null }).eq("id", contactId));
 
 export async function fetchContacts(): Promise<Contact[]> {
   const { data, error } = await fetchAllRows("contacts");

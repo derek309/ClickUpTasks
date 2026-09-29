@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import {
   users,
@@ -2215,8 +2215,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // entering it everywhere (Derek, 2026-09-29: "we only want to enter it
   // once"). The drawer writes it to GoHighLevel and the contacts row; this
   // catches the app's own copy up, which every other task reads from.
-  const noteSaasUrl = (contactId: string, url: string) =>
-    setContacts((cs) => cs.map((c) => (c.id === contactId ? { ...c, saasUrl: url } : c)));
+  // Stable, so the drawer's GoHighLevel check can list it as a dependency.
+  const noteSaasUrl = useCallback((contactId: string, url: string) =>
+    setContacts((cs) => cs.map((c) => (c.id === contactId ? { ...c, saasUrl: url } : c))), []);
   const contactForClient = (clientId: string): Contact | null => {
     const c = clientById(clientId);
     if (c?.linkedContactId) return contactById(c.linkedContactId);

@@ -3,6 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
 import { isGhlContactVisible } from "@/lib/extensionApi";
+import { normalizeSaasUrl } from "@/lib/saasUrl";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,11 +42,23 @@ async function saasFieldId(locationId: string, token: string): Promise<string | 
 }
 
 // A Private Integration token is scoped to one location and GET /contacts/{id}
-// takes no location, so the only way to find a contact's home is to try each
-// configured token until one returns it. Read-only, so trying several is
-// harmless — the same reasoning as ../contact/route.ts.
+// takes no location, so a contact's home is found by trying the configured
+// tokens until one returns it. Read-only, so trying several is harmless (the
+// same reasoning as ../contact/route.ts). The sub-account the contact is
+// synced under goes first: that is nearly always the answer, and it used to
+// be one request per location on every drawer open.
+async function homeLocation(ghlContactId: string): Promise<string | null> {
+  const { data: row } = await supabaseAdmin.from("contacts").select("client_id").eq("ghl_contact_id", ghlContactId).limit(1).maybeSingle();
+  if (!row?.client_id) return null;
+  const { data: sub } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", row.client_id).maybeSingle();
+  return (sub?.ghl_location_id as string | null) || null;
+}
+
 async function findContact(ghlContactId: string): Promise<{ locationId: string; token: string; contact: any } | null> {
-  for (const locationId of await configuredLocations()) {
+  const home = await homeLocation(ghlContactId);
+  const all = await configuredLocations();
+  const ordered = home && all.includes(home) ? [home, ...all.filter((l) => l !== home)] : all;
+  for (const locationId of ordered) {
     const token = await tokenForLocation(locationId);
     if (!token) continue;
     try {
@@ -110,11 +123,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This sub-account has no SaaS field in GoHighLevel yet, so there's nowhere to save it." }, { status: 501 });
   }
 
-  // Normalized on the way in rather than on display: a bare "acme.com" typed
-  // into the box should be a working link everywhere it is shown, including
-  // inside GoHighLevel where we do not control the rendering.
-  const raw = (b.url as string).trim();
-  const url = raw && !/^https?:\/\//i.test(raw) ? `https://${raw}` : raw;
+  // Normalized on the way in rather than on display (lib/saasUrl).
+  const url = normalizeSaasUrl(b.url as string);
 
   const res = await fetch(`https://services.leadconnectorhq.com/contacts/${ghlContactId}`, {
     method: "PUT",

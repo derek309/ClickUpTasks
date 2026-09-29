@@ -13,7 +13,8 @@ import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon }
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument } from "@/lib/db";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl } from "@/lib/db";
+import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
@@ -40,6 +41,10 @@ const REVIEW_LINES: { kind: FileKind; label: string }[] = [
 ];
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
+
+/** Contacts whose SaaS link was checked against GoHighLevel this session,
+ *  and whether their sub-account has the field to edit. */
+const saasChecked = new Map<string, boolean>();
 
 export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
   task: Task;
@@ -236,11 +241,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const setSaasUrl = (url: string) => setSaasFor({ id: linkedContactInfo?.id ?? "", url });
   const [saasEditing, setSaasEditing] = useState(false);
   const [saasSaving, setSaasSaving] = useState(false);
-  const [saasEditable, setSaasEditable] = useState(true);
+  const [saasEditable, setSaasEditable] = useState(() => saasChecked.get(linkedContactInfo?.id ?? "") ?? true);
   useEffect(() => {
     const ghlId = linkedContactInfo?.ghlContactId;
     const contactRowId = linkedContactInfo?.id ?? "";
-    if (!ghlId) return;
+    // Once per contact per session: every open of every task for a client
+    // used to ask GoHighLevel again. A save keeps the app's copy current.
+    if (!ghlId || saasChecked.has(contactRowId)) return;
     let live = true;
     // Seeding happens in the same async path as the confirm, so nothing sets
     // state synchronously in the effect body. The mirrored value renders
@@ -255,6 +262,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // forever.
       .then((j) => {
         if (!live || typeof j?.url !== "string") return;
+        saasChecked.set(contactRowId, j.editable !== false);
         setSaasFor({ id: contactRowId, url: j.url });
         setSaasEditable(j.editable !== false);
         // GoHighLevel is the source of truth here, so a value it hands back
@@ -263,11 +271,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       })
       .catch(() => { /* keep the mirrored value */ });
     return () => { live = false; };
-  }, [linkedContactInfo?.ghlContactId, linkedContactInfo?.id, linkedContactInfo?.saasUrl]);
+  }, [linkedContactInfo?.ghlContactId, linkedContactInfo?.id, linkedContactInfo?.saasUrl, onSaasSaved]);
 
   const saveSaas = async (value: string) => {
     const ghlId = linkedContactInfo?.ghlContactId;
-    if (!ghlId) return;
+    const contactRowId = linkedContactInfo?.id;
+    if (!contactRowId) return;
+    // A contact that is not in GoHighLevel has nowhere else to keep it, so it
+    // is kept on the contact here and says so (it used to be unsaveable).
+    if (!ghlId) {
+      const url = normalizeSaasUrl(value);
+      setSaasSaving(true);
+      const res = await saveContactSaasUrl(contactRowId, url);
+      setSaasSaving(false);
+      if (!res || res.error) { pushToast("Couldn't save the SaaS link."); return; }
+      setSaasUrl(url);
+      onSaasSaved?.(contactRowId, url);
+      setSaasEditing(false);
+      pushToast(url ? "Saved here only, this contact is not in GoHighLevel" : "SaaS link cleared");
+      return;
+    }
     setSaasSaving(true);
     try {
       const res = await authedFetch("/api/ghl/saas", {
