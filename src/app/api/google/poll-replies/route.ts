@@ -4,6 +4,7 @@ import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest";
+import { taskForMentionThread, commentFromMentionReply } from "@/lib/mentionReply";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -58,7 +59,7 @@ async function run(req: NextRequest) {
   // newsletters + notifications live) out of what we scan.
   const query = "in:inbox category:primary newer_than:2d -from:me";
   const sentQuery = "in:sent newer_than:2d";
-  let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0;
+  let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
   let sentScanned = 0, sentMatched = 0, sentIngested = 0;
   const errors: string[] = [];
   const unmatchedRows: any[] = [];
@@ -73,6 +74,24 @@ async function run(req: NextRequest) {
     }
     for (const em of emails) {
       scanned++;
+      // A teammate answering a mention email, checked before anything else:
+      // they are not a contact, so the lookup below would read their reply as
+      // mail from a stranger and park it in the Inbox rather than putting it
+      // on the task. Gmail gives a reply the same thread id as the mention we
+      // sent, which is the whole of the matching (see lib/mentionReply).
+      const mention = await taskForMentionThread(em.threadId);
+      if (mention) {
+        try {
+          const added = await commentFromMentionReply({
+            taskId: mention.taskId, fromEmail: em.fromEmail, body: em.body,
+            gmailMessageId: em.gmailId, at: em.internalDate,
+          });
+          if (added) mentionReplies++;
+        } catch (e) {
+          errors.push(`mention ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+        }
+        continue;
+      }
       const contact = byEmail.get(em.fromEmail);
       if (contact) {
         // In the system → log it on the client's Journal (+ bump task, ring bell).
@@ -144,7 +163,7 @@ async function run(req: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto,
+    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto, mentionReplies,
     sentScanned, sentMatched, sentIngested,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });

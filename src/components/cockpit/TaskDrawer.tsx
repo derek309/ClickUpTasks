@@ -3,7 +3,7 @@
 // The task detail window (sidebar or full-page "document" view).
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, clientStatusMeta, PERSONAL_CLIENT_ID,
+  users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, formatStepTime, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
@@ -1516,11 +1516,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <aside aria-label="Client" className="w-full border-t bg-surface px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:h-screen min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
+        {/* The name alone. "Active Client" under every single client said the
+            same thing every time and answered a question nobody was asking
+            (Derek, 2026-09-29). The status still lives in the Clients list,
+            where it is worth comparing one against another. */}
         <div className="min-w-0">
           <div className="truncate text-[18px] font-semibold">{client.name}</div>
-          <div className="flex items-center gap-1.5 text-[16px] text-muted">
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(client.status).dot }} />{clientStatusMeta(client.status).label}
-          </div>
         </div>
       </div>
       {hasMessaging && (
