@@ -69,7 +69,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchMessagesFor, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
@@ -2378,6 +2378,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Memoized — a linear scan of the full tasks table every render, even
   // when no task is open.
   const openTask = useMemo(() => tasks.find((t) => t.id === openTaskId) ?? null, [tasks, openTaskId]);
+  // The start load holds the last 60 days of messages (db.ts fetchAll). A
+  // conversation's older ones load when it opens: the task drawer, a client's
+  // Journal, the client email composer. Once per conversation per session.
+  const loadedConversations = useRef(new Set<string>());
+  const conversationContact = (activeClient !== "all" && clientTab === "chat" && !activeProject ? activeClient : null) ?? clientEmail?.clientId ?? null;
+  const conversationContactId = conversationContact ? contactForClient(conversationContact)?.id ?? null : null;
+  useEffect(() => {
+    const scopes: ({ taskId: string } | { contactId: string })[] = [];
+    if (openTaskId) scopes.push({ taskId: openTaskId });
+    if (conversationContactId) scopes.push({ contactId: conversationContactId });
+    for (const scope of scopes) {
+      const key = "taskId" in scope ? `t:${scope.taskId}` : `c:${scope.contactId}`;
+      if (loadedConversations.current.has(key)) continue;
+      loadedConversations.current.add(key);
+      void fetchMessagesFor(scope).then((older) => {
+        if (!older.length) return;
+        setMessages((prev) => {
+          const merged = mergeFetched(prev, older);
+          return merged.length === prev.length ? merged : merged.sort((a, b) => a.at.localeCompare(b.at));
+        });
+      });
+    }
+  }, [openTaskId, conversationContactId]);
   // Opening an Interaction task auto-pulls any reply sent directly in GHL's
   // own UI (not through this app) — the whole point being nobody wastes time
   // re-replying to something a teammate already answered elsewhere. Scoped
@@ -3508,7 +3531,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       try {
         const d = await fetchAll();
         setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks);
-        setMessages(d.messages); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
+        setMessages(d.messages); loadedConversations.current.clear(); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
         setFolders(d.folders); setVaultFolders(d.vaultFolders); setNotifications(d.notifications);
       } catch { /* leave optimistic state; a reload will reconcile */ }
       return;

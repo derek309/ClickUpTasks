@@ -222,7 +222,11 @@ function withSlot<T>(run: () => PromiseLike<T>): Promise<T> {
 // Soft-deleted rows (see soft-delete.sql) stay in clients/projects/tasks for
 // 30 days so Trash can restore them — the live app must never see them,
 // so every fetch of those three tables passes excludeDeleted.
-async function fetchAllRows(table: string, orderCol?: string, ascending = true, excludeDeleted = false) {
+/** Narrows a whole-table read to the rows wanted, applied to the count and
+ *  every page alike. */
+type Query = ReturnType<ReturnType<typeof supabase.from>["select"]>;
+type Narrow = (q: Query) => Query;
+async function fetchAllRows(table: string, orderCol?: string, ascending = true, excludeDeleted = false, narrow: Narrow = (q) => q) {
   const PAGE_SIZE = 1000;
   // Paging without a deterministic total order is how you silently drop or
   // duplicate rows: Postgres makes no ordering promise between the separate
@@ -230,7 +234,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
   // explicit orderCol isn't enough on its own either — created_at ties are
   // common — so always break ties on the primary key.
   const fetchPage = (from: number) => {
-    let q = supabase.from(table).select("*").range(from, from + PAGE_SIZE - 1);
+    let q = narrow(supabase.from(table).select("*")).range(from, from + PAGE_SIZE - 1);
     if (excludeDeleted) q = q.is("deleted_at", null);
     if (orderCol) q = q.order(orderCol, { ascending });
     return q.order("id", { ascending: true });
@@ -256,7 +260,7 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
   // existing safety-tail loop below keep going until a short page — instead
   // of failing the whole table.
   const { count, error: countError } = await withSlot(() => {
-    let q = supabase.from(table).select("*", { count: "exact", head: true });
+    let q = narrow(supabase.from(table).select("*", { count: "exact", head: true }));
     if (excludeDeleted) q = q.is("deleted_at", null);
     return q;
   });
@@ -284,19 +288,61 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
   return { data: all, error: null as null | { message: string } };
 }
 
+/** Messages from this many days back load at start; older ones load for a
+ *  task or a client when its conversation opens (fetchMessagesFor). */
+export const MESSAGE_START_DAYS = 60;
+/** Read notifications kept at start, newest first; every unread one loads. */
+export const READ_NOTIFICATION_START = 200;
+
+/** Two reads of one table, as one result: rows in either, once each. The
+ *  start load asks for "recent OR still unread" this way. */
+type Rows = { data: any[] | null; error: { message: string } | null };
+async function eitherOf(a: PromiseLike<Rows>, b: PromiseLike<Rows>): Promise<Rows> {
+  const [x, y] = await Promise.all([a, b]);
+  if (x.error || y.error) return { data: null, error: x.error ?? y.error };
+  const byId = new Map<string, unknown>();
+  for (const r of [...(x.data ?? []), ...(y.data ?? [])]) byId.set((r as { id: string }).id, r);
+  return { data: [...byId.values()], error: null };
+}
+
+const daysAgoIso = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+
+/** The whole conversation for one task or one client's contact, for when it
+ *  opens and the start load only brought its last 60 days. */
+export async function fetchMessagesFor(scope: { taskId: string } | { contactId: string }): Promise<Message[]> {
+  const { data, error } = "taskId" in scope
+    ? await fetchAllRows("messages", "created_at", true, false, (q) => q.eq("task_id", scope.taskId))
+    : await fetchAllRows("messages", "created_at", true, false, (q) => q.eq("contact_id", scope.contactId));
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map(rowToMessage);
+}
+
 export async function fetchAll() {
+  const messagesSince = daysAgoIso(MESSAGE_START_DAYS);
   const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, sg, dm] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true),
     fetchAllRows("contacts"),
     fetchAllRows("projects", undefined, true, true),
     fetchAllRows("tasks", "created_at", true, true),
-    fetchAllRows("notifications", "created_at", false),
+    // Every unread notification, and the newest read ones: 2,673 rows loaded
+    // at start and on every return to the tab when about half were read.
+    eitherOf(
+      fetchAllRows("notifications", "created_at", false, false, (q) => q.eq("read", false)),
+      supabase.from("notifications").select("*").eq("read", true)
+        .order("created_at", { ascending: false }).order("id").limit(READ_NOTIFICATION_START)
+        .then((r) => ({ data: r.data, error: r.error })),
+    ),
     // Fetched separately from the hard-fail set below: these tables ship via a
     // manually-run migration (client-links-notes.sql / messages.sql),
     // so a not-yet-run migration must degrade to "nothing yet", not break the app.
     fetchAllRows("client_links", "position"),
     fetchAllRows("client_notes", "created_at", false),
-    fetchAllRows("messages", "created_at"),
+    // The last 60 days, and anything unread whatever its age so the unread
+    // markers stay right. Every message for every client was 4 MB.
+    eitherOf(
+      fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince)),
+      fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false)),
+    ),
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),
     fetchAllRows("folders", "position"),
