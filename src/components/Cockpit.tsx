@@ -37,7 +37,6 @@ import {
   type Task,
   type TaskStatus,
   type Priority,
-  type Subtask,
   type Client,
   type Project,
   type Contact,
@@ -65,13 +64,14 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, upsertContact, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, upsertContact, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 import { usePins } from "./cockpit/usePins";
+import { useTemplates } from "./cockpit/useTemplates";
 import { useChecklist } from "./cockpit/useChecklist";
 import { useLists } from "./cockpit/useLists";
 import { useTaskFiles } from "./cockpit/useTaskFiles";
@@ -2550,52 +2550,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (j.company) { const up: Client = { ...c, ghlLocationId: j.company }; setClients((cs) => cs.map((x) => (x.id === id ? up : x))); markOwnClientWrite(up.id); upsertClient(up); }
     } catch { /* business name is optional */ }
   };
-  const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: string[] }) => {
-    const t: TaskTemplate = { id: id ?? newId("tmpl_"), ...spec };
-    setTaskTemplates((ts) => (id ? ts.map((x) => (x.id === id ? t : x)) : [...ts, t]));
-    upsertTaskTemplate(t);
-  };
-  const deleteTemplate = (id: string) => {
-    const t = taskTemplates.find((x) => x.id === id);
-    setConfirmDialog({
-      title: `Delete template “${t?.name ?? "this template"}”?`,
-      message: "Tasks already created from it are not affected. This can't be undone.",
-      confirmLabel: "Delete",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        setTaskTemplates((ts) => ts.filter((x) => x.id !== id));
-        deleteTaskTemplateDb(id);
-      },
-    });
-  };
-  // Appends a template's checklist items onto an existing task as new,
-  // unchecked subtasks — one patch, not a loop of addSub calls, so it's a
-  // single upsert instead of one per item.
-  const applyTemplate = (taskId: string, templateId: string) => {
-    const tpl = taskTemplates.find((t) => t.id === templateId);
-    const t = tasks.find((x) => x.id === taskId);
-    if (!tpl || !t) return;
-    const added: Subtask[] = tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false }));
-    update(taskId, { subtasks: [...t.subtasks, ...added] }, { append: added });
-    pushToast(`Added ${added.length} checklist item${added.length === 1 ? "" : "s"} from "${tpl.name}"`);
-  };
-  // Creates a brand-new task from a template — title defaults to the
-  // template name, checklist pre-filled — to quickly populate a project.
-  const useTemplateAsTask = (templateId: string, clientId: string, projectId: string) => {
-    const tpl = taskTemplates.find((t) => t.id === templateId);
-    if (!tpl) return;
-    const t: Task = {
-      id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
-      status: "todo", priority: "normal", assigneeId: me.id,
-      contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
-      subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
-      attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
-    };
-    setTasks((ts) => [...ts, t]);
-    upsertTask(t, me.id);
-    pushToast(`Created "${t.title}" from template`);
-  };
+  const { saveTemplate, deleteTemplate, useTemplateAsTask, applyTemplate } = useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks });
   const renameClient = (id: string) => {
     const c = clientById(id);
     if (!c) return;
