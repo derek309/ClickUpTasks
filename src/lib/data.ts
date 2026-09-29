@@ -372,9 +372,6 @@ export interface Client {
    * /api/ghl/message. Optional (unlike assignedTo) so existing clientsSeed
    * literals don't need editing; treat as `?? []` everywhere it's read. */
   canMessage?: string[];
-  /** yyyy-mm-dd of the last time this client was reviewed — powers the
-   * weekly/monthly Review tier reset (see clientUrgencyKey). */
-  reviewedAt?: string | null;
   /** Unguessable token backing this client's public "what we're waiting on
    * you for" page (/waiting/[token], see supabase/client-share-token.sql) —
    * lazily generated the first time "Copy client link" is clicked, then
@@ -659,8 +656,6 @@ export interface Project {
    * "My Work" tab's assigned-or-following filter; not an RLS/visibility
    * change (a project's own client-level following already covers that). */
   assignedTo?: string[];
-  /** Last-reviewed date (yyyy-mm-dd) for the weekly Review tier. */
-  reviewedAt?: string | null;
   /** Public share token for this ONE list — see supabase/project-share-token.sql.
    * Unlike Client.shareToken's ?project= param (a starting view you can navigate
    * away from), a project token scopes every /api/waiting/[token]/* query to
