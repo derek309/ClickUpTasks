@@ -106,8 +106,22 @@ export function kindFromName(name: string): Attachment["kind"] {
 
 // --- small building blocks --------------------------------------------------
 
-export function SideItem({ active, onClick, children, title }: { active: boolean; onClick: () => void; children: React.ReactNode; title?: string }) {
-  return (<button onClick={onClick} title={title} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"}`}>{children}</button>);
+export function SideItem({ active, onClick, children, title, drag }: {
+  active: boolean; onClick: () => void; children: React.ReactNode; title?: string;
+  /** Pinned rows are draggable so they can be put in the order you want
+   *  (Derek, 2026-09-28). Passed straight through to the button, so a row
+   *  without it behaves exactly as it always did. */
+  drag?: { draggable: boolean; onDragStart: () => void; onDragEnd: () => void; onDragOver: (e: React.DragEvent) => void; onDrop: (e: React.DragEvent) => void; dragging?: boolean; over?: boolean };
+}) {
+  return (
+    <button onClick={onClick} title={title}
+      draggable={drag?.draggable}
+      onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}
+      onDragOver={drag?.onDragOver} onDrop={drag?.onDrop}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${drag?.dragging ? "opacity-40" : ""} ${drag?.over ? "ring-2 ring-accent" : ""}`}>
+      {children}
+    </button>
+  );
 }
 // Small on/off switch, shared by NotificationPrefsPanel's per-user email
 // toggles and any admin-facing app-wide toggle (e.g. the sidebar's DMs switch).

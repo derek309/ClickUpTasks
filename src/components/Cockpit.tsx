@@ -1083,6 +1083,34 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ starredListIds: [...n] }) }).catch(() => {});
     return n;
   });
+  // Which pin is being dragged, and which row it is currently over. Clients
+  // and lists reorder within their own group, which is how they are stored
+  // (Derek, 2026-09-28: "can you make it so we can sort the pinned").
+  const [dragPin, setDragPin] = useState<string | null>(null);
+  const [overPin, setOverPin] = useState<string | null>(null);
+  const movePin = (kind: "client" | "list", dragId: string, overId: string) => {
+    const setter = kind === "client" ? setStarred : setStarredLists;
+    const key = kind === "client" ? "cut_starred" : "cut_starredLists";
+    const field = kind === "client" ? "starredClientIds" : "starredListIds";
+    setter((prev) => {
+      const ids = [...prev];
+      const from = ids.indexOf(dragId), to = ids.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return prev;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      try { localStorage.setItem(key, JSON.stringify(ids)); } catch {}
+      authedFetch("/api/pins", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: ids }) }).catch(() => {});
+      return new Set(ids);
+    });
+  };
+  const pinDrag = (kind: "client" | "list", id: string) => ({
+    draggable: true,
+    onDragStart: () => setDragPin(id),
+    onDragEnd: () => { setDragPin(null); setOverPin(null); },
+    onDragOver: (e: React.DragEvent) => { if (dragPin && dragPin !== id) { e.preventDefault(); setOverPin(id); } },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); if (dragPin) movePin(kind, dragPin, id); setDragPin(null); setOverPin(null); },
+    dragging: dragPin === id,
+    over: overPin === id && dragPin !== id,
+  });
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
   // Drop the project filter whenever we leave its client (or enter My Work).
@@ -4377,7 +4405,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
-                  <SideItem key={c.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={c.id} active={active} drag={pinDrag("client", c.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -4391,7 +4419,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 // subtitle for the same ambiguity.
                 const clientName = clientById(p.clientId)?.name;
                 return (
-                  <SideItem key={p.id} active={active} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={p.id} active={active} drag={pinDrag("list", p.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <I.list className="shrink-0 text-muted" />
                     <span className="min-w-0 flex-1 text-left">
                       {clientName && <span className="block truncate text-[11px] leading-tight text-muted">{clientName}</span>}
