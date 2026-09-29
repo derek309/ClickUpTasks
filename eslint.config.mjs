@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Plain-Node local helper scripts, not tuned for eslint-config-next's rules.
     "desktop-helper/**",
+    // Worktree checkouts of this repo; they are linted in their own checkout.
+    ".claude/**",
   ]),
 ]);
 
