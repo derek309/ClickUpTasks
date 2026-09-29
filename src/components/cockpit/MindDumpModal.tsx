@@ -233,7 +233,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
           contributes nothing to an auto height and the panel would snap back
           to full screen. */}
       <div className="fixed inset-x-3 top-3 z-50 mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-[1180px] flex-col rounded-2xl border bg-surface shadow-xl sm:inset-x-8 sm:top-1/2 sm:max-h-[calc(100vh-3rem)] sm:-translate-y-1/2">
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b px-6 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3 sm:px-6 sm:py-4">
           <div className="min-w-0">
             <h2 className="text-[19px] font-semibold">{rows === null ? "What needs doing?" : `${rows.length} task${rows.length === 1 ? "" : "s"} found`}</h2>
             <p className="mt-0.5 truncate text-[14px] text-muted">
@@ -247,7 +247,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
         {rows === null ? (
           <>
-            <div className="flex min-h-0 flex-col px-6 py-4">
+            <div className="flex min-h-0 flex-col px-4 py-3 sm:px-6 sm:py-4">
               {/* field-sizing:content makes the box track what is typed.
                   `rows` does NOT survive as a minimum next to it (Chrome
                   sizes to the placeholder instead, which measured 3 lines),
@@ -284,11 +284,11 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
               )}
 
               {needsClient && (
-                <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+                <div className="mt-3 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1">
                   {fieldLabel("Client")}
                   <SearchableSelect value={clientId} options={clientOptions} onChange={(v) => { setClientId(v); onPickClient?.(v); }}
                     placeholder="Pick a client" searchPlaceholder="Search clients…"
-                    className="min-w-[220px] rounded-md border bg-surface px-2.5 py-1 text-[16px]" />
+                    className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] sm:w-auto sm:min-w-[220px] sm:py-1" />
                   {!clientId && <span className="text-[16px] text-muted">Pick who this is for and it is remembered next time.</span>}
                 </div>
               )}
@@ -338,29 +338,41 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 have click different buttons to process quick add, AI add,
                 multi"). The left of each pair is the one that touches
                 nothing, and it is the one styled as the answer. */}
-            <div className="shrink-0 space-y-2.5 border-t px-6 py-3.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="w-[76px] shrink-0 text-[16px] font-semibold text-muted">One task</span>
-                <button onClick={addAsTyped} disabled={blocked} title="Created exactly as you typed it. No AI, nothing rewritten."
-                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white disabled:opacity-40 sm:flex-none">
-                  Add as typed
-                </button>
-                <button onClick={aiAdd} disabled={blocked} title="AI tidies the wording and reads a date, an owner and a priority out of it"
-                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
-                  {pending === "quick" ? "Asking…" : "✨ Ask AI"}
-                </button>
+            <div className="shrink-0 space-y-2 border-t px-4 py-3 sm:space-y-2.5 sm:px-6 sm:py-3.5">
+              {/* On a phone the label goes above its pair: 48px of padding, a
+                  76px label and the gaps left each button about 117px, and
+                  "Ask AI to split" needs half as much again, so it wrapped
+                  inside itself and pushed Cancel to a line of its own. The
+                  long AI labels shorten there too; the pair they sit in is
+                  what says what they split. */}
+              <div className="sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+                <span className="block pb-1 text-[16px] font-semibold text-muted sm:w-[76px] sm:shrink-0 sm:pb-0">One task</span>
+                <div className="flex gap-2">
+                  <button onClick={addAsTyped} disabled={blocked} title="Created exactly as you typed it. No AI, nothing rewritten."
+                    className="flex-1 rounded-lg bg-accent px-4 py-2.5 text-[16px] font-semibold text-white disabled:opacity-40 sm:flex-none sm:py-2">
+                    Add as typed
+                  </button>
+                  <button onClick={aiAdd} disabled={blocked} title="AI tidies the wording and reads a date, an owner and a priority out of it"
+                    className="shrink-0 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:py-2">
+                    {pending === "quick" ? "Asking…" : <><span aria-hidden>✨</span> <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span></>}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="w-[76px] shrink-0 text-[16px] font-semibold text-muted">A list</span>
-                <button onClick={splitByLine} disabled={blocked} title="One task per line, worded exactly as you wrote them. No AI."
-                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
-                  One per line
-                </button>
-                <button onClick={read} disabled={blocked} title="AI reads the whole thing for every distinct action, then you review before anything is created"
-                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
-                  {pending === "split" ? "Reading…" : "✨ Ask AI to split"}
-                </button>
-                <button onClick={onCancel} className="ml-auto rounded-lg px-3.5 py-2 text-[16px] font-medium text-muted hover:bg-background">Cancel</button>
+              <div className="sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+                <span className="block pb-1 pt-1 text-[16px] font-semibold text-muted sm:w-[76px] sm:shrink-0 sm:py-0">A list</span>
+                <div className="flex gap-2">
+                  <button onClick={splitByLine} disabled={blocked} title="One task per line, worded exactly as you wrote them. No AI."
+                    className="flex-1 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none sm:py-2">
+                    One per line
+                  </button>
+                  <button onClick={read} disabled={blocked} title="AI reads the whole thing for every distinct action, then you review before anything is created"
+                    className="shrink-0 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:py-2">
+                    {pending === "split" ? "Reading…" : <><span aria-hidden>✨</span> <span className="sm:hidden">AI split</span><span className="hidden sm:inline">Ask AI to split</span></>}
+                  </button>
+                </div>
+                {/* The panel's own ✕ is right there on a phone, so a second
+                    way out would only cost a line. */}
+                <button onClick={onCancel} className="ml-auto hidden rounded-lg px-3.5 py-2 text-[16px] font-medium text-muted hover:bg-background sm:block">Cancel</button>
               </div>
             </div>
           </>
