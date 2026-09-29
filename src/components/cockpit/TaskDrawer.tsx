@@ -41,7 +41,7 @@ const REVIEW_LINES: { kind: FileKind; label: string }[] = [
 
 const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, doc: 2, sheet: 3, link: 4 };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment }: {
   task: Task;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
@@ -56,6 +56,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // today) just never shows the dot.
   onMarkChannelRead?: (channel: MessageChannel) => void;
   linkedContactInfo?: Contact | null; // authoritative send target (matches what onSendTaskMessage actually resolves) — shown as "Sending to" in the SMS/Email composer
+  /** The SaaS link is the contact's, not the task's, so a save here has to
+   *  reach the app's own copy of the contact or every other task keeps showing
+   *  "Add one" until a reload (Derek, 2026-09-29: "we only want to enter it
+   *  once"). */
+  onSaasSaved?: (contactId: string, url: string) => void;
   ccContacts?: Contact[]; // searchable contacts for the email Cc/Bcc pickers
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
@@ -248,7 +253,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // setSaasFor directly rather than the setSaasUrl wrapper: the wrapper is
       // rebuilt every render, so depending on it would re-run this effect
       // forever.
-      .then((j) => { if (live && typeof j?.url === "string") { setSaasFor({ id: contactRowId, url: j.url }); setSaasEditable(j.editable !== false); } })
+      .then((j) => {
+        if (!live || typeof j?.url !== "string") return;
+        setSaasFor({ id: contactRowId, url: j.url });
+        setSaasEditable(j.editable !== false);
+        // GoHighLevel is the source of truth here, so a value it hands back
+        // that the app has not caught up with is worth keeping.
+        if (contactRowId && j.url !== (linkedContactInfo?.saasUrl ?? "")) onSaasSaved?.(contactRowId, j.url);
+      })
       .catch(() => { /* keep the mirrored value */ });
     return () => { live = false; };
   }, [linkedContactInfo?.ghlContactId, linkedContactInfo?.id, linkedContactInfo?.saasUrl]);
@@ -265,6 +277,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const j = await res.json();
       if (!res.ok) { pushToast(j?.error ?? "Couldn't save to GoHighLevel."); return; }
       setSaasUrl(j.url ?? "");
+      // Tell the app, not just this drawer: the link lives on the contact, so
+      // every other task for this client should show it straight away rather
+      // than saying "Add one" until a reload (Derek, 2026-09-29).
+      if (linkedContactInfo?.id) onSaasSaved?.(linkedContactInfo.id, j.url ?? "");
       setSaasEditing(false);
       pushToast(j.url ? "SaaS link saved to GoHighLevel" : "SaaS link cleared");
     } catch { pushToast("Couldn't reach GoHighLevel."); }
