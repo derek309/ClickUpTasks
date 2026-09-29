@@ -32,23 +32,16 @@ import {
   users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
   SIZE_META, SIZE_ORDER, type Priority, type TaskSize,
 } from "@/lib/data";
-import { I, DateChip } from "./ui";
+import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow } from "@/lib/quickAddRow";
+import { I, DateChip, SearchableSelect } from "./ui";
 import { useEscapeToClose } from "./useEscapeToClose";
 
-export type ParsedRow = {
-  title: string;
-  description: string;
-  // The client's own words, straight from the dump. Held apart from
-  // description so it can be shown as locked and written into the task as a
-  // blockquote rather than blended into prose the AI wrote.
-  verbatim: string;
-  assignee: string | null;
-  due: string | null;
-  followUpAt: string | null;
-  size: TaskSize | null;
-  priority: Priority;
-  keep: boolean;
-};
+/** A row on its way to a task. Lives in lib/quickAddRow so the two no-AI
+ *  paths can build one without importing a React component; re-exported here
+ *  because every caller already knows it by this name. The `verbatim` field is
+ *  the client's own words, held apart from description so it can be shown
+ *  locked and written in as a blockquote rather than blended into AI prose. */
+export type ParsedRow = TaskRow;
 
 // A dump with no date in it still has to land somewhere real. Three business
 // days out to do it, and the follow-up is TODAY: whatever you just dumped is
@@ -60,9 +53,16 @@ export const DEFAULT_FOLLOW_UP = () => TODAY;
 
 type PastedFile = { file: File; url: string; row: number };
 
-export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, onParse, onQuickAdd, onCreate, onCancel }: {
+export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, needsClient, clients, companyFor, defaultClientId, onPickClient, onParse, onAiAdd, onCreate, onCancel }: {
   clientName: string;
   listName: string;
+  /** True when the composer was opened with no client on screen (the header on
+   *  Tasks). Nothing can be created until one is picked. */
+  needsClient?: boolean;
+  clients?: { id: string; name: string }[];
+  companyFor?: (id: string) => string | undefined;
+  defaultClientId?: string | null;
+  onPickClient?: (id: string) => void;
   // Named so the header can say where these land without this component
   // knowing anything about groups, clients or lists.
   destinationHint?: string;
@@ -72,10 +72,10 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   suggestedDue: string | null;
   busy: boolean;
   onParse: (text: string) => Promise<ParsedRow[] | null>;
-  // Quick add: hands back one already-cleaned row and nothing else — the
-  // modal builds it into a full task with the current defaults and creates
-  // it right away, skipping the review screen entirely.
-  onQuickAdd: (text: string) => Promise<ParsedRow | null>;
+  // Ask AI: hands back one already-cleaned row and nothing else — the modal
+  // builds it into a full task with the current defaults and creates it right
+  // away, skipping the review screen entirely.
+  onAiAdd: (text: string) => Promise<ParsedRow | null>;
   onCreate: (rows: ParsedRow[], files: { file: File; row: number }[]) => void;
   onCancel: () => void;
 }) {
@@ -88,6 +88,16 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const [followUpAt, setFollowUpAt] = useState<string | null>(DEFAULT_FOLLOW_UP());
   const [owner, setOwner] = useState<string | null>(null); // null = whoever is creating
   const [priority, setPriority] = useState<Priority>("normal");
+  // A priority only sticks once it has actually been chosen: until then the
+  // value in the box is just the default, and the task keeps the automatic,
+  // date derived priority every other task in the app has.
+  const [priorityTouched, setPriorityTouched] = useState(false);
+  const [size, setSize] = useState<TaskSize | null>(null);
+  const [clientId, setClientId] = useState<string>(defaultClientId ?? "");
+  // Due, follow up, priority, owner and size are answered by their defaults;
+  // this opens them for the times the default is wrong (Derek, 2026-09-28: the
+  // fast path should not make you look at five controls first).
+  const [showFields, setShowFields] = useState(false);
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
   // Which button is waiting on its request — busy alone can't tell the two
   // apart since both routes through the same in-flight flag one level up.
@@ -114,6 +124,28 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
     setFiles((fs) => [...fs, ...dropped.map((file) => ({ file, url: URL.createObjectURL(file), row: 0 }))]);
   };
 
+  // The defaults every row is finished with, wherever it came from.
+  const defaults = () => ({ due, followUpAt, assignee: owner, priority, priorityTouched, size });
+  const attachAll = () => files.map((f) => ({ file: f.file, row: 0 }));
+  const blocked = !text.trim() || busy || (needsClient && !clientId);
+
+  // Add as typed: no network, no model, no rewrite. The whole reason this
+  // exists (Derek, 2026-09-28: "just created without changing the name").
+  const addAsTyped = () => {
+    if (blocked) return;
+    onCreate(applyDumpDefaults([verbatimTaskRow(text)], defaults()), attachAll());
+  };
+
+  // One per line: the same promise, for a list that is already a list. No AI,
+  // but it still goes through the review step, because a paste can carry lines
+  // nobody meant as tasks.
+  const splitByLine = () => {
+    if (blocked) return;
+    const made = linesToRows(text);
+    if (!made.length) return;
+    setRows(applyDumpDefaults(made, defaults()));
+  };
+
   const read = async () => {
     setPending("split");
     const parsed = await onParse(text);
@@ -122,39 +154,39 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
     // The AI answers what is in the text. Everything it was not asked to
     // guess at (follow-up, size) and everything the defaults already answer
     // is filled in here, so no row arrives half made.
-    setRows(parsed.map((r) => ({
-      ...r,
-      due: r.due ?? due,
-      followUpAt: followUpAt,
-      size: null,
-      assignee: r.assignee ?? owner,
-      // The chosen default is what every task starts on. The AI only moves it
-      // when the text actually said so (its prompt reserves "urgent" for
-      // wording like urgent or ASAP), so a whole dump does not come back
-      // flagged just because the model felt strongly about it.
-      priority: r.priority === "urgent" ? "urgent" : priority,
-    })));
+    // The chosen defaults are what every task starts on. The AI only moves
+    // priority when the text actually said so (its prompt reserves "urgent"
+    // for wording like urgent or ASAP), so a whole dump does not come back
+    // flagged just because the model felt strongly about it.
+    setRows(applyDumpDefaults(parsed, defaults()));
   };
 
   // Same default fill as `read`, just for the one row and skipping straight
   // to onCreate — quick add's whole point is that nothing stands between
   // typing and a task existing.
-  const quickAdd = async () => {
+  const aiAdd = async () => {
     setPending("quick");
-    const r = await onQuickAdd(text);
+    const r = await onAiAdd(text);
     setPending(null);
     if (!r) return;
-    const row: ParsedRow = {
-      ...r,
-      due: r.due ?? due,
-      followUpAt,
-      size: null,
-      assignee: r.assignee ?? owner,
-      priority: r.priority === "urgent" ? "urgent" : priority,
-      keep: true,
-    };
-    onCreate([row], files.map((f) => ({ file: f.file, row: 0 })));
+    onCreate(applyDumpDefaults([r], defaults()), attachAll());
   };
+
+  // Enter is the fast path, and only while the text is one line: pasting
+  // twenty lines and hitting Enter should not quietly make one task of the
+  // lot. Shift and Enter is always a new line.
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    if (text.includes("\n")) return;
+    e.preventDefault();
+    addAsTyped();
+  };
+
+  // The business name rides along as `sub` so it is both visible and
+  // searchable: two clients can share a first name, the company never does.
+  const clientOptions = [...(clients ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((c) => ({ value: c.id, label: c.name, sub: companyFor?.(c.id) }));
 
   const patch = (i: number, p: Partial<ParsedRow>) => setRows((rs) => rs?.map((r, n) => (n === i ? { ...r, ...p } : r)) ?? rs);
   const kept = rows?.filter((r) => r.keep && r.title.trim()) ?? [];
@@ -200,7 +232,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
           forced: no flex-1 anywhere on this column, because a basis-0 child
           contributes nothing to an auto height and the panel would snap back
           to full screen. */}
-      <div className="fixed inset-x-3 top-1/2 z-50 mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-[1180px] -translate-y-1/2 flex-col rounded-2xl border bg-surface shadow-xl sm:inset-x-8 sm:max-h-[calc(100vh-3rem)]">
+      <div className="fixed inset-x-3 top-3 z-50 mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-[1180px] flex-col rounded-2xl border bg-surface shadow-xl sm:inset-x-8 sm:top-1/2 sm:max-h-[calc(100vh-3rem)] sm:-translate-y-1/2">
         <div className="flex shrink-0 items-start justify-between gap-3 border-b px-6 py-4">
           <div className="min-w-0">
             <h2 className="text-[19px] font-semibold">{rows === null ? "What needs doing?" : `${rows.length} task${rows.length === 1 ? "" : "s"} found`}</h2>
@@ -223,10 +255,18 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                   16px/1.625 plus the padding. Above that it grows, and the
                   panel's max-h is what eventually stops it and hands the
                   overflow to this element's own scrollbar. */}
+              {/* One line to start with, growing as you type until it has used
+                  the screen and only then scrolling. It used to open five lines
+                  tall, which is a box that expects a wall of text before you
+                  have decided to write one. */}
               <textarea ref={dumpRef} value={text} onChange={(e) => setText(e.target.value)} onPaste={onPaste}
-                onDragOver={(e) => e.preventDefault()} onDrop={onDrop} autoFocus rows={5}
-                placeholder={"Type or paste anything. One thing or twenty, and every separate action becomes its own task.\n\nPaste an image or drop a file in and it rides along. Anything in quotes is kept word for word."}
-                className="min-h-[9.75rem] w-full resize-none overflow-y-auto rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted focus:border-accent" />
+                onKeyDown={onKey}
+                onDragOver={(e) => e.preventDefault()} onDrop={onDrop} autoFocus rows={1}
+                placeholder={"What needs doing? Type it and press Enter."}
+                className="min-h-[3rem] w-full resize-none overflow-y-auto rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted focus:border-accent" />
+              <p className="mt-1.5 shrink-0 text-[14px] text-muted">
+                Enter adds it as you typed it. Shift and Enter for a new line. Paste an image or drop a file in and it rides along.
+              </p>
 
               {files.length > 0 && (
                 <div className="mt-3 flex shrink-0 flex-wrap gap-2">
@@ -243,16 +283,34 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 </div>
               )}
 
-              <div className="mt-4 shrink-0 space-y-2 rounded-xl border bg-background/50 px-4 py-3">
+              {needsClient && (
+                <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+                  {fieldLabel("Client")}
+                  <SearchableSelect value={clientId} options={clientOptions} onChange={(v) => { setClientId(v); onPickClient?.(v); }}
+                    placeholder="Pick a client" searchPlaceholder="Search clients…"
+                    className="min-w-[220px] rounded-md border bg-surface px-2.5 py-1 text-[16px]" />
+                  {!clientId && <span className="text-[16px] text-muted">Pick who this is for and it is remembered next time.</span>}
+                </div>
+              )}
+
+              <button onClick={() => setShowFields((v) => !v)}
+                className="mt-3 flex shrink-0 items-center gap-1.5 self-start rounded-md px-1 text-[16px] font-medium text-muted hover:text-foreground">
+                <I.chevron className={`transition ${showFields ? "-rotate-90" : "rotate-180"}`} />
+                {showFields ? "Hide the details" : `Due ${due ? formatDue(due) : "not set"}, ${PRIORITY_META[priority].label.toLowerCase()}, ${owner ? owner : "yours"}`}
+              </button>
+
+              <div className={`mt-2 shrink-0 space-y-2 rounded-xl border bg-background/50 px-4 py-3 ${showFields ? "" : "hidden"}`}>
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Due")}{dayChips(due, setDue)}</div>
                 <div className="flex flex-wrap items-center gap-2">{fieldLabel("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   {fieldLabel("Priority")}
-                  <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)}
-                    className="rounded-md border bg-surface px-2.5 py-1 text-[14px] outline-none">
+                  <select value={priority} onChange={(e) => { setPriority(e.target.value as Priority); setPriorityTouched(true); }}
+                    className="rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none">
                     {manualPriorityOptions(priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
                   </select>
-                  <span className="text-[14px] text-muted">Anything the notes call urgent still comes back urgent.</span>
+                  <span className="text-[16px] text-muted">
+                    {priorityTouched ? "Set by hand, so it stays put." : "Left alone it follows the due date, like every other task."}
+                  </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {fieldLabel("Owner")}
@@ -262,25 +320,48 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                     <option value="client">⏳ Waiting on {clientName}</option>
                     {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
                   </select>
-                  <span className="text-[14px] text-muted">A task the notes name someone else for goes to them instead.</span>
+                  <span className="text-[16px] text-muted">A task the notes name someone else for goes to them instead.</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {fieldLabel("How long")}
+                  <select value={size ?? ""} onChange={(e) => setSize((e.target.value || null) as TaskSize | null)}
+                    className="rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none">
+                    <option value="">Not sized</option>
+                    {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
+                  </select>
+                  <span className="text-[16px] text-muted">An unsized task is counted at four hours wherever time is added up.</span>
                 </div>
               </div>
             </div>
-            <div className="flex shrink-0 items-center justify-between gap-3 border-t px-6 py-3.5">
-              <span className="min-w-0 flex-1 truncate text-[14px] text-muted" title="Split into tasks shows you the list before anything is created. Quick add creates the one task right away.">
-                Split into tasks shows you the list first. Quick add creates the one task right away.
-              </span>
-              <span className="flex shrink-0 items-center gap-2">
-                <button onClick={onCancel} className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background">Cancel</button>
-                <button onClick={quickAdd} disabled={!text.trim() || busy} title="Grammar cleaned up, created as one task right away"
-                  className="rounded-lg border px-3.5 py-2 text-[15px] font-medium hover:bg-background disabled:opacity-40">
-                  {pending === "quick" ? "Adding…" : "Quick add"}
+            {/* Two pairs rather than a row of four: one task or a list, and
+                within each, your words or the AI's (Derek, 2026-09-28: "we
+                have click different buttons to process quick add, AI add,
+                multi"). The left of each pair is the one that touches
+                nothing, and it is the one styled as the answer. */}
+            <div className="shrink-0 space-y-2.5 border-t px-6 py-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-[76px] shrink-0 text-[16px] font-semibold text-muted">One task</span>
+                <button onClick={addAsTyped} disabled={blocked} title="Created exactly as you typed it. No AI, nothing rewritten."
+                  className="flex-1 rounded-lg bg-accent px-4 py-2 text-[16px] font-semibold text-white disabled:opacity-40 sm:flex-none">
+                  Add as typed
                 </button>
-                <button onClick={read} disabled={!text.trim() || busy} title="Read the whole dump for every distinct action item, then review before creating"
-                  className="rounded-lg bg-accent px-4 py-2 text-[15px] font-semibold text-white disabled:opacity-40">
-                  {pending === "split" ? "Reading…" : "Split into tasks"}
+                <button onClick={aiAdd} disabled={blocked} title="AI tidies the wording and reads a date, an owner and a priority out of it"
+                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
+                  {pending === "quick" ? "Asking…" : "✨ Ask AI"}
                 </button>
-              </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-[76px] shrink-0 text-[16px] font-semibold text-muted">A list</span>
+                <button onClick={splitByLine} disabled={blocked} title="One task per line, worded exactly as you wrote them. No AI."
+                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
+                  One per line
+                </button>
+                <button onClick={read} disabled={blocked} title="AI reads the whole thing for every distinct action, then you review before anything is created"
+                  className="flex-1 rounded-lg border px-3.5 py-2 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none">
+                  {pending === "split" ? "Reading…" : "✨ Ask AI to split"}
+                </button>
+                <button onClick={onCancel} className="ml-auto rounded-lg px-3.5 py-2 text-[16px] font-medium text-muted hover:bg-background">Cancel</button>
+              </div>
             </div>
           </>
         ) : (

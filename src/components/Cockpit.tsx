@@ -79,6 +79,7 @@ import { usePersisted } from "@/lib/usePersisted";
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
+import { verbatimTaskRow } from "@/lib/quickAddRow";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
@@ -88,7 +89,6 @@ import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
-import { QuickAddTask } from "./cockpit/QuickAddTask";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
@@ -105,7 +105,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { clientContactIds, findDuplicateTrackedClient as findDuplicateClient } from "@/lib/clientDedup";
-import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, LONG_TITLE_THRESHOLD, DM_LINK_PREFIX } from "@/lib/navState";
+import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, DM_LINK_PREFIX } from "@/lib/navState";
 import { isInboxNotification } from "@/lib/extensionInbox";
 
 // A dumped task's description: what the AI summarised, then the client's own
@@ -117,19 +117,6 @@ function describeDumpRow(r: { description: string; verbatim: string }): string {
   if (r.description.trim()) parts.push(plainTextToHtml(r.description.trim()));
   if (r.verbatim.trim()) parts.push(`<blockquote>${plainTextToHtml(r.verbatim)}</blockquote>`);
   return parts.join("");
-}
-
-// Quick add's offline fallback: the AI grammar pass failed or timed out, but
-// the whole point of the fast button is that it still works. First line (or
-// first 70 characters, whichever is shorter) becomes the title, the rest —
-// ungraded, ungrammared — becomes the description, so nothing typed is lost.
-function rawQuickAddRow(text: string): ParsedRow {
-  const trimmed = text.trim();
-  const firstBreak = trimmed.indexOf("\n");
-  const titleLine = firstBreak === -1 ? trimmed : trimmed.slice(0, firstBreak).trim();
-  const title = titleLine.length > 70 ? titleLine.slice(0, 70).trim() : titleLine;
-  const rest = (titleLine.length > 70 ? trimmed.slice(70) : trimmed.slice(firstBreak + 1)).trim();
-  return { title, description: rest, verbatim: "", assignee: null, due: null, followUpAt: null, size: null, priority: "normal", keep: true };
 }
 
 // Guards the recurrence-clone step in update()/patchTask() against creating
@@ -488,7 +475,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (dmUserId && openDmThreadUnread) markDmRead(dmConversationId(me.id, dmUserId)); }, [dmUserId, openDmThreadUnread, me.id]);
   const [addClientOpen, setAddClientOpen] = useState(false);
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
@@ -715,7 +701,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   };
   // The mind-dump composer. Null when closed; otherwise the group its plus
   // was clicked on (null key = the toolbar button, which belongs to no group).
-  const [dumpGroup, setDumpGroup] = useState<{ key: string | null; personal: boolean } | null>(null);
+  // clientId is set when the composer is opened from somewhere with no client
+  // on screen (the header on Tasks), where it is chosen inside the composer.
+  // Null means "whatever client is open", which is every other way in.
+  const [dumpGroup, setDumpGroup] = useState<{ key: string | null; personal: boolean; clientId?: string | null } | null>(null);
   const [bulkAddBusy, setBulkAddBusy] = useState(false);
   const parseTaskList = async (text: string): Promise<ParsedRow[] | null> => {
     setBulkAddBusy(true);
@@ -746,7 +735,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // title, the rest as description) rather than blocking on Gemini being
   // slow or down, which the review path is allowed to do because a person is
   // about to look the result over anyway.
-  const quickAddTask = async (text: string): Promise<ParsedRow | null> => {
+  const aiAddTask = async (text: string): Promise<ParsedRow | null> => {
     setBulkAddBusy(true);
     try {
       const res = await authedFetch("/api/ai/parse-tasks", {
@@ -756,10 +745,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       });
       const j = await res.json().catch(() => ({}));
       const t = (j.tasks as ParsedRow[] | undefined)?.[0];
-      if (!res.ok || j.error || !t) return rawQuickAddRow(text);
+      if (!res.ok || j.error || !t) return verbatimTaskRow(text);
       return { ...t, followUpAt: null, size: null, keep: true };
     } catch {
-      return rawQuickAddRow(text);
+      return verbatimTaskRow(text);
     } finally {
       setBulkAddBusy(false);
     }
@@ -789,6 +778,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const createTasksFromDump = (rows: ParsedRow[], files: { file: File; row: number }[]) => {
     if (!rows.length || !dumpGroup) return;
     const { key: groupKey, personal } = dumpGroup;
+    // The client the composer was opened for, which differs from the one on
+    // screen only when it was opened from Tasks and picked inside.
+    const targetClient = dumpGroup.clientId ?? activeClient;
     const now = new Date().toISOString();
 
     if (personal) {
@@ -798,7 +790,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         priority: r.priority, assigneeId: me.id, contactId: null,
         due: r.due, followUpAt: r.followUpAt, size: r.size,
-        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: true,
+        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto, private: true,
         subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task));
       setTasks((ts) => [...ts, ...made]);
@@ -809,25 +801,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return;
     }
 
-    if (!activeClient.startsWith("cl_")) return;
+    if (!targetClient.startsWith("cl_")) return;
     let projectId: string;
     // tasks.project_id is a foreign key, so a task inserted in the same tick
     // as the project it belongs to can reach Postgres first and fail the
     // constraint. When we create the list here, hold its write and chain the
     // inserts behind it.
     let projectWrite: PromiseLike<unknown> | null = null;
-    if (groupKey && groupBy === "project") projectId = groupKey;
-    else if (activeProject) projectId = activeProject;
+    // The group and activeProject only apply while the target IS the client on
+    // screen: a task for another client must never land in this one's list.
+    const sameClient = targetClient === activeClient;
+    if (groupKey && groupBy === "project" && sameClient) projectId = groupKey;
+    else if (activeProject && sameClient) projectId = activeProject;
     else {
-      const existing = projects.find((pr) => pr.clientId === activeClient);
+      const existing = projects.find((pr) => pr.clientId === targetClient);
       if (existing) projectId = existing.id;
-      else { const pr: Project = { id: newId("p_"), clientId: activeClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, pr]); projectWrite = upsertProject(pr); projectId = pr.id; }
+      else { const pr: Project = { id: newId("p_"), clientId: targetClient, name: "Tasks", description: "" }; setProjects((ps) => [...ps, pr]); projectWrite = upsertProject(pr); projectId = pr.id; }
     }
     const made: Task[] = rows.map((r) => {
       const waiting = r.assignee === "client";
       const member = r.assignee && r.assignee !== "client" ? users.find((u) => u.name === r.assignee) : null;
       return {
-        id: newId("t_"), projectId, clientId: activeClient, title: r.title.trim(), description: describeDumpRow(r),
+        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: describeDumpRow(r),
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         // isManuallyAssignable guards Conversation (auto-created-only, see
         // data.ts): a dump into that group still lands as the row's own
@@ -838,9 +833,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // only overrides it when the notes name someone else outright. A task
         // waiting on the client still has that owner (see applyWaitingStatusSync).
         assigneeId: member?.id ?? me.id, waitingOnClient: waiting,
-        contactId: activeClient.slice(3),
+        contactId: targetClient.slice(3),
         due: r.due, followUpAt: r.followUpAt, size: r.size,
-        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true,
+        recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto,
         private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task;
     });
@@ -916,53 +911,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     } finally {
       setDraftingDescription(false);
     }
-  };
-  // Background tidy-up for a title someone typed as a whole paragraph. Fired
-  // and forgotten right after a task is created, never awaited: task creation
-  // is a straight client to Supabase write with no server round trip, and it
-  // stays that way. The task is already on screen before this even starts.
-  //
-  // Deliberately silent on every failure path. Nobody asked for this and
-  // nobody is waiting on it, so a Gemini timeout, a parse miss, or a title
-  // that came back unchanged all end with the task exactly as typed. The one
-  // thing worth a toast is success, because a title rewriting itself a second
-  // after you hit enter looks like a bug unless something says otherwise.
-  const maybeCleanupTaskTitle = (taskId: string, title: string, description: string) => {
-    if (title.trim().length <= LONG_TITLE_THRESHOLD) return;
-    void (async () => {
-      try {
-        const res = await authedFetch("/api/ai/cleanup-task-title", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, description }) });
-        const j = await res.json().catch(() => ({}));
-        // Every path out of here used to be silent, which is why "the AI
-        // grammar and spelling fix was removed" (Derek) is indistinguishable
-        // from it running and deciding to change nothing. A failed call now
-        // says so once; the console line names which branch we took, so the
-        // next long title tells us what actually happened.
-        if (!res.ok || j.error) {
-          console.warn("[title cleanup] failed", res.status, j.error ?? "");
-          pushToast("Couldn't tidy up that long title.");
-          return;
-        }
-        const cleaned = typeof j.title === "string" ? j.title.trim() : "";
-        if (!cleaned || cleaned === title.trim()) { console.warn("[title cleanup] no change returned"); return; }
-        // Re-read the task rather than trusting the values we sent: the user
-        // has had a few seconds with it and may have renamed it, written a
-        // description, or deleted it outright. Any of those means our answer
-        // is stale, so leave their version alone.
-        const current = tasksRef.current.find((t) => t.id === taskId);
-        if (!current || current.title !== title) { console.warn("[title cleanup] task changed under us, leaving it alone"); return; }
-        const extracted = typeof j.description === "string" ? j.description.trim() : "";
-        const patch: Partial<Task> = { title: cleaned };
-        // Append, never overwrite — the extracted detail is an addition to
-        // whatever description the task already has, not a replacement for it.
-        if (extracted) patch.description = current.description + plainTextToHtml(extracted);
-        patchTask(taskId, patch);
-        pushToast(extracted ? "Shortened the title, full text moved to the description" : "Cleaned up a long title");
-      } catch (e) {
-        // Network dropped mid-request. The task keeps the title as typed.
-        console.warn("[title cleanup] request failed", e);
-      }
-    })();
   };
   // Re-pulls one contact's info from GHL on demand — the bulk sync re-syncs
   // a whole sub-account (~30 sequential API calls for a big location), way
@@ -1241,6 +1189,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // are written from an effect, not during render.
   const goToViewRef = useRef(goToView);
   const navBlockedRef = useRef(false);
+  // Read through a ref so the listener below can stay mounted once, the same
+  // way goToView does.
+  const openComposerRef = useRef<() => void>(() => {});
   useEffect(() => { goToViewRef.current = goToView; });
   // Don't navigate out from under anything holding work in progress — a
   // dialog asking for an answer, or an open task. A number key reaching the
@@ -1249,14 +1200,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (after a chip or a checkbox click, say) for the key to arrive here.
   useEffect(() => {
     navBlockedRef.current = !!confirmDialog || !!promptDialog || !!linkModal || cmdkOpen
-      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || quickAddOpen || shortcutsOpen || bulkDelegateOpen;
-  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, quickAddOpen, shortcutsOpen, bulkDelegateOpen]);
+      || !!openTaskId || !!dumpGroup || !!mergeSourceId || !!mergeClientState || addClientOpen || shortcutsOpen || bulkDelegateOpen;
+  }, [confirmDialog, promptDialog, linkModal, cmdkOpen, openTaskId, dumpGroup, mergeSourceId, mergeClientState, addClientOpen, shortcutsOpen, bulkDelegateOpen]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (navBlockedRef.current) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // A bare key, like the nav digits and j/k beside it: every Cmd and Ctrl
+      // combination worth having is taken by the browser, and c is one key
+      // under the left hand. navBlockedRef already covers dumpGroup, so it
+      // cannot reopen on top of itself.
+      if (e.key === "c") { e.preventDefault(); openComposerRef.current(); return; }
       const view = NAV_KEY_VIEWS[e.key];
       if (!view) return;
       e.preventDefault();
@@ -2524,36 +2480,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTaskId, navTaskIds]);
 
-  // Quick-add-task FAB: create a task for an explicitly-chosen client/list
-  // (from the floating "+" modal). Mirrors quickAdd's Task shape and the
-  // find-or-create-"Tasks"-list idiom; assignee = the creator.
-  const createQuickTask = (clientId: string, projectId: string | null, title: string, due: string | null, priority: Priority, followUpAt: string | null = null, size: TaskSize | null = null, files: File[] = []) => {
-    if (!title.trim() || !clientId.startsWith("cl_")) return;
-    let pid = projectId ?? "";
-    // Same foreign-key ordering as quickAdd above — see the comment there.
-    let projectWrite: PromiseLike<unknown> | null = null;
-    if (!pid) {
-      const existing = projects.find((p) => p.clientId === clientId);
-      if (existing) pid = existing.id;
-      else { const p: Project = { id: newId("p_"), clientId, name: "Tasks", description: "" }; setProjects((ps) => [...ps, p]); projectWrite = upsertProject(p); pid = p.id; }
-    }
-    const t: Task = {
-      id: newId("t_"), projectId: pid, clientId, title: title.trim(), description: "",
-      status: "todo", priority: isManuallyAssignable(priority) ? priority : "none",
-      assigneeId: me.id, contactId: clientId.slice(3), due, followUpAt, size,
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
-      createdBy: me.id,
-    };
-    setTasks((ts) => [...ts, t]);
-    if (projectWrite) projectWrite.then(() => upsertTask(t, me.id));
-    else upsertTask(t, me.id);
-    maybeCleanupTaskTitle(t.id, t.title, t.description);
-    // Anything pasted into the modal rides along. Uploaded after the row
-    // exists, because an attachment needs a task to hang on.
-    if (files.length) void addFiles(t.id, files);
-    pushToast(`Task added to ${clientById(clientId)?.name ?? "client"}.`);
-  };
-
   // Drag a task row onto a different group header to reprioritize/restatus it
   // (grouped list view, priority/status dims only — due/project groupings
   // don't have an unambiguous single-field patch, so drag is disabled there;
@@ -3362,6 +3288,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
+  // Which client a task belongs to when the composer is opened from somewhere
+  // with no client on screen. The most recently opened one is the best guess
+  // anyone can make, and clientUsed already knows it; picking another in the
+  // composer replaces it for next time by the same route.
+  const lastUsedClientId = (): string | null => {
+    const recent = Object.entries(clientUsed).sort((a, b) => b[1] - a[1]).map(([id]) => id);
+    return recent.find((id) => id.startsWith("cl_") && clientById(id)) ?? null;
+  };
+  const openComposer = () => setDumpGroup({
+    key: null, personal: personalView,
+    clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId(),
+  });
+  useEffect(() => { openComposerRef.current = openComposer; });
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   // Someone found live in GoHighLevel who has never been synced here. The
   // local contact row has to exist first: a client's id is `cl_<contactId>`,
@@ -3753,7 +3692,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     };
     setTasks((ts) => [...ts, t]);
     upsertTask(t, me.id);
-    maybeCleanupTaskTitle(t.id, t.title, t.description);
   };
   const moveTaskToNewProject =(taskId: string, clientId: string) => {
     setPromptDialog({ title: "New project", placeholder: "Project name", confirmLabel: "Create & move", onSubmit: (name) => {
@@ -4452,7 +4390,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {/* Icon only here — the phone header has a title and two controls
                 already, and a labelled button would push one of them off. */}
             {!inboxView && !settingsView && !dirView && (
-              <button onClick={() => setQuickAddOpen(true)} aria-label="New task" title="New task"
+              <button onClick={openComposer} aria-label="New task" title="New task"
                 className="shrink-0 rounded-lg bg-accent p-2 text-white"><I.plus /></button>
             )}
             {isClientDetail && overflowControl}
@@ -4556,7 +4494,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               where the inline row is off because no client is selected.
               Hidden on the views that are not lists of tasks. */}
           {!inboxView && !settingsView && !dirView && (
-            <button onClick={() => setQuickAddOpen(true)} title="New task"
+            <button onClick={openComposer} title="New task (press c)"
               className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">
               <I.plus /> New task
             </button>
@@ -4815,7 +4753,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd={activeClient.startsWith("cl_")} quickAddHint="Pick a client on the left to add tasks." onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>
@@ -4887,13 +4825,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // Keyed on the group so reopening on a different bar starts clean
           // rather than inheriting the last one's text and dates.
           key={`${dumpGroup.personal}:${dumpGroup.key ?? "-"}`}
-          clientName={dumpGroup.personal ? "you" : (clientById(activeClient)?.name ?? "this client")}
+          clientName={dumpGroup.personal ? "you" : (clientById(dumpGroup.clientId ?? activeClient)?.name ?? "this client")}
           listName={activeProject ? (projectById(activeProject)?.name ?? "Tasks") : "Tasks"}
           destinationHint={dumpGroup.personal ? "Your own list" : undefined}
           suggestedDue={dueForGroup(dumpGroup.key)}
           busy={bulkAddBusy}
+          needsClient={!dumpGroup.personal && !(dumpGroup.clientId ?? activeClient).startsWith("cl_")}
+          clients={workableClients}
+          companyFor={(id) => contactForClient(id)?.company}
+          defaultClientId={dumpGroup.clientId}
+          onPickClient={(id) => setDumpGroup((g) => (g ? { ...g, clientId: id } : g))}
           onParse={parseTaskList}
-          onQuickAdd={quickAddTask}
+          onAiAdd={aiAddTask}
           onCreate={createTasksFromDump}
           onCancel={() => setDumpGroup(null)}
         />
@@ -5119,18 +5062,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         }}
         onAddContact={(contact) => { addClientContact(contact); setCmdkOpen(false); }}
         onClose={() => setCmdkOpen(false)} />}
-
-      {quickAddOpen && (
-        <QuickAddTask
-          clients={workableClients}
-          projectsFor={projectsForClient}
-          companyFor={(id) => contactForClient(id)?.company}
-          defaultClientId={activeClient.startsWith("cl_") ? activeClient : ""}
-          defaultProjectId={activeProject}
-          onCreate={createQuickTask}
-          onClose={() => setQuickAddOpen(false)}
-        />
-      )}
 
       {/* Persistent on purpose. Reloading is the only thing that reconciles the
           screen with the database, so this stays until someone does. */}

@@ -261,6 +261,7 @@ const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ["3"], what: "All clients" },
   { keys: ["4"], what: "Projects" },
   { keys: ["5"], what: "Personal" },
+  { keys: ["C"], what: "New task" },
   { keys: ["⌘", "K"], what: "Search everything" },
   { keys: ["J", "↓"], what: "Next task, with one open" },
   { keys: ["K", "↑"], what: "Previous task" },
