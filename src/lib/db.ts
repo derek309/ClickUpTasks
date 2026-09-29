@@ -454,12 +454,12 @@ export const saveTaskDraftEmail = (taskId: string, draft: Task["draftEmail"], up
   noteTaskWrite(taskId);
   return save(() => supabase.from("tasks").update({ draft_email: draft ?? null, updated_by: updatedBy ?? null }).eq("id", taskId));
 };
-// One request for many new/updated tasks at once
-// (up to 18 rows per client) instead of N separate round trips.
-export const bulkUpsertTasks = (ts: Task[]) => {
+// One request for many new/updated tasks at once instead of N separate
+// round trips (the task composer makes a whole list in one go).
+export const bulkUpsertTasks = (ts: Task[], updatedBy?: string | null) => {
   if (!ts.length) return Promise.resolve();
   noteTaskWrite(...ts.map((t) => t.id));
-  return save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t))));
+  return save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t, updatedBy))));
 };
 
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —

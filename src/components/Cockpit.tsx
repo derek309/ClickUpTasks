@@ -795,7 +795,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task));
       setTasks((ts) => [...ts, ...made]);
-      made.forEach((t) => { pinJustAdded(t.id); upsertTask(t, me.id); });
+      made.forEach((t) => pinJustAdded(t.id));
+      bulkUpsertTasks(made, me.id);
       attachDumpFiles(made, files);
       setDumpGroup(null);
       pushToast(`Created ${made.length} task${made.length === 1 ? "" : "s"}`);
@@ -848,7 +849,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Pinned so a task created into a group the current sort or filter would
     // hide does not vanish the moment it is made.
     synced.forEach((t) => pinJustAdded(t.id));
-    const write = () => { synced.forEach((t) => upsertTask(t, me.id)); attachDumpFiles(synced, files); };
+    const write = () => { bulkUpsertTasks(synced, me.id); attachDumpFiles(synced, files); };
     if (projectWrite) projectWrite.then(write); else write();
     setDumpGroup(null);
     pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
