@@ -1202,48 +1202,9 @@ export const SIZE_META: Record<TaskSize, { label: string; hint: string; hours: n
 };
 export const SIZE_ORDER: TaskSize[] = ["quick", "hour", "h2", "h3", "half", "full", "multi"];
 
-// A task nobody has sized still has to occupy the day, or the plan quietly
-// promises time that does not exist. Half a day is the honest middle: it is
-// wrong in both directions rather than optimistic in one.
-export const UNSIZED_HOURS = 4;
-
 // A typed estimate beats the bucket it sits in. The buckets exist so sizing
 // is one click on the common cases, not so an hour and a half has to be
 // rounded to something that is not true.
-// Clock times for the plan. Sizing says how long each thing takes; a start
-// time is the one extra fact needed to turn that into "this is what you are
-// doing at half ten", which is the difference between a list and a day.
-//
-// Minutes since midnight throughout, because arithmetic on "9:30" is how you
-// end up with 9:70. Formatting back to a clock happens once, at the edge.
-export function parseClock(hhmm: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!m) return null;
-  const h = Number(m[1]), min = Number(m[2]);
-  if (h > 23 || min > 59) return null;
-  return h * 60 + min;
-}
-
-export function formatClock(mins: number): string {
-  // Wraps rather than reading 25:00, for a day that runs past midnight.
-  const m = ((mins % 1440) + 1440) % 1440;
-  const h24 = Math.floor(m / 60);
-  const h = h24 % 12 === 0 ? 12 : h24 % 12;
-  return `${h}:${String(m % 60).padStart(2, "0")}${h24 < 12 ? "am" : "pm"}`;
-}
-
-// Lays a day's work end to end from a start time. Back to back on purpose:
-// this is a plan, not a calendar, and inventing gaps would be inventing
-// facts about a day nobody described.
-export function clockSlots(hours: number[], startMins: number): { start: number; end: number }[] {
-  let at = startMins;
-  return hours.map((h) => {
-    const start = at;
-    at += Math.round(h * 60);
-    return { start, end: at };
-  });
-}
-
 // Reads back what was set: the bucket's own name, or the typed estimate when
 // there is one, since a number someone chose deserves to be shown as that
 // number rather than as the bucket it happens to land in.
@@ -1255,92 +1216,6 @@ export function sizeLabel(task: { size?: TaskSize | null; sizeHours?: number | n
     return `${Number(h.toFixed(2))} h`;
   }
   return task.size ? SIZE_META[task.size].label : null;
-}
-
-export function taskHours(task: { size?: TaskSize | null; sizeHours?: number | null }): number {
-  if (typeof task.sizeHours === "number" && task.sizeHours > 0) return task.sizeHours;
-  return task.size ? SIZE_META[task.size].hours : UNSIZED_HOURS;
-}
-
-// Fills a day with the work its dates demand, and says where it runs out.
-//
-// The cut-off is the whole point. Everything past it is what you are not
-// doing today, said now rather than discovered at six o'clock. So a task that
-// does not fit is still returned, marked, rather than hidden.
-//
-// One task larger than the whole day (a Multi-day, or a Full day against a
-// short working day) always takes the first slot rather than being ruled out
-// for not fitting. Otherwise the biggest, most urgent thing on the list is
-// the one thing the plan never shows you.
-export type PlannedTask<T> = { task: T; hours: number; fits: boolean };
-export function fillDay<T extends { size?: TaskSize | null; sizeHours?: number | null }>(
-  ordered: T[],
-  budgetHours: number,
-): { planned: PlannedTask<T>[]; usedHours: number; overflowAt: number | null } {
-  const planned: PlannedTask<T>[] = [];
-  let used = 0;
-  let overflowAt: number | null = null;
-  for (const task of ordered) {
-    const hours = taskHours(task);
-    const first = planned.length === 0;
-    const fits = first || used + hours <= budgetHours;
-    if (fits) used += hours;
-    else if (overflowAt === null) overflowAt = planned.length;
-    planned.push({ task, hours, fits });
-  }
-  return { planned, usedHours: used, overflowAt };
-}
-
-// Lays open work across the next few working days.
-//
-// Nothing is stored: the plan is a reading of the tasks and their dates, so
-// it is right the moment anything moves and there is no second copy to fall
-// out of step. Weekends are skipped rather than filled, and whatever does not
-// fit in a day rolls to the next.
-//
-// The order is the order the dates demand, decided by the caller. This only
-// answers "given that order, what actually fits".
-export type PlanDay<T> = { date: string; planned: PlannedTask<T>[]; usedHours: number; budgetHours: number };
-// `unplanned` is everything the horizon could not reach. Returned, not
-// dropped: with 92 open tasks, a five day plan holds about ten of them, and
-// silently losing the other eighty makes a working plan look broken.
-export type Plan<T> = { days: PlanDay<T>[]; unplanned: T[] };
-export function buildPlan<T extends { size?: TaskSize | null; sizeHours?: number | null }>(
-  ordered: T[],
-  budgetHours: number,
-  days: number,
-  today: string = TODAY,
-): Plan<T> {
-  const out: PlanDay<T>[] = [];
-  const queue = [...ordered];
-  let date = today;
-  // If today is a weekend, start on Monday rather than planning a day nobody
-  // is working.
-  while (isWeekend(date)) date = addDaysIso(date, 1);
-  while (out.length < days) {
-    const { planned, usedHours } = fillDay(queue, budgetHours);
-    const taken = planned.filter((p) => p.fits);
-    out.push({ date, planned: taken, usedHours, budgetHours });
-    queue.splice(0, taken.length);
-    if (queue.length === 0 && out.length >= 1) {
-      // Still pad out the requested days, so an empty Thursday reads as free
-      // rather than simply missing.
-      while (out.length < days) {
-        date = addDaysIso(date, 1);
-        while (isWeekend(date)) date = addDaysIso(date, 1);
-        out.push({ date, planned: [], usedHours: 0, budgetHours });
-      }
-      break;
-    }
-    date = addDaysIso(date, 1);
-    while (isWeekend(date)) date = addDaysIso(date, 1);
-  }
-  return { days: out, unplanned: queue };
-}
-
-export function isWeekend(iso: string): boolean {
-  const dow = new Date(`${iso}T12:00:00Z`).getUTCDay();
-  return dow === 0 || dow === 6;
 }
 
 // Personal work, by either of the two ways it is marked.

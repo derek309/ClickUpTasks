@@ -34,15 +34,8 @@ import {
   derivedPriority,
   effectivePriority,
   effectiveStatus,
-  fillDay,
-  buildPlan,
   isPersonalTask,
-  isWeekend,
-  taskHours,
   SIZE_META,
-  parseClock,
-  formatClock,
-  clockSlots,
   googleLinkName,
   isUselessTitle,
   TASK_ACTION_ORDER,
@@ -1006,106 +999,6 @@ describe("one value per date", () => {
   });
 });
 
-describe("clock times", () => {
-  it("reads a start time, and refuses one that is not a time", () => {
-    expect(parseClock("9:00")).toBe(540);
-    expect(parseClock("09:30")).toBe(570);
-    expect(parseClock("17:00")).toBe(1020);
-    expect(parseClock("9:70")).toBeNull();
-    expect(parseClock("25:00")).toBeNull();
-    expect(parseClock("noon")).toBeNull();
-  });
-  it("formats to a clock people read", () => {
-    expect(formatClock(540)).toBe("9:00am");
-    expect(formatClock(720)).toBe("12:00pm");
-    expect(formatClock(0)).toBe("12:00am");
-    expect(formatClock(1020)).toBe("5:00pm");
-    // A day that runs past midnight wraps rather than reading 25:00.
-    expect(formatClock(1500)).toBe("1:00am");
-  });
-  it("lays the day end to end from the start time", () => {
-    const slots = clockSlots([1, 0.5, 2], 540);
-    expect(slots.map((s) => formatClock(s.start))).toEqual(["9:00am", "10:00am", "10:30am"]);
-    expect(formatClock(slots[2].end)).toBe("12:30pm");
-  });
-  // Nine to five with an eight hour day should land exactly on five.
-  it("ends where the working day ends", () => {
-    const slots = clockSlots([4, 4], parseClock("9:00")!);
-    expect(formatClock(slots[1].end)).toBe("5:00pm");
-  });
-});
-
-describe("filling a day", () => {
-  const t = (size: "quick" | "hour" | "h2" | "h3" | "half" | "full" | "multi" | null) => ({ size });
-
-  it("sizes an unsized task rather than treating it as free", () => {
-    expect(taskHours({ size: null })).toBe(4);
-    expect(taskHours({ size: "quick" })).toBe(0.5);
-  });
-  // A number someone typed beats the bucket it happens to land in.
-  it("prefers a typed estimate over its bucket", () => {
-    expect(taskHours({ size: "hour", sizeHours: 1.5 })).toBe(1.5);
-    expect(taskHours({ size: "hour", sizeHours: 0 })).toBe(1);
-    expect(taskHours({ size: null, sizeHours: 20 })).toBe(20);
-  });
-  it("stops where the day runs out and marks the rest", () => {
-    const { planned, usedHours, overflowAt } = fillDay([t("full"), t("half"), t("quick")], 8);
-    expect(planned.map((p) => p.fits)).toEqual([true, false, false]);
-    expect(usedHours).toBe(8);
-    expect(overflowAt).toBe(1);
-  });
-  it("packs what does fit", () => {
-    const { planned, usedHours, overflowAt } = fillDay([t("hour"), t("half"), t("quick")], 8);
-    expect(planned.every((p) => p.fits)).toBe(true);
-    expect(usedHours).toBe(5.5);
-    expect(overflowAt).toBeNull();
-  });
-  // Otherwise the biggest, most urgent thing on the list is the one thing the
-  // plan never shows you.
-  it("always shows a task bigger than the whole day", () => {
-    const { planned, overflowAt } = fillDay([t("multi"), t("quick")], 3);
-    expect(planned[0].fits).toBe(true);
-    expect(overflowAt).toBe(1);
-  });
-  it("returns the overflow rather than dropping it", () => {
-    const { planned } = fillDay([t("full"), t("full"), t("full")], 6);
-    expect(planned).toHaveLength(3);
-  });
-  it("counts a multi-day as a full day, so the rest of the week is not free", () => {
-    expect(SIZE_META.multi.hours).toBe(SIZE_META.full.hours);
-  });
-});
-
-describe("laying work across the week", () => {
-  const t = (id: string, size: "quick" | "hour" | "half" | "full" | null) => ({ id, size });
-  const tue = "2026-09-01"; // a Tuesday
-
-  it("rolls what does not fit into the next day", () => {
-    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "quick")], 6, 3, tue).days;
-    expect(plan[0].planned.map((p) => p.task.id)).toEqual(["a"]);
-    expect(plan[1].planned.map((p) => p.task.id)).toEqual(["b"]);
-    expect(plan[2].planned.map((p) => p.task.id)).toEqual(["c"]);
-  });
-  it("skips the weekend", () => {
-    const plan = buildPlan([t("a", "full"), t("b", "full"), t("c", "full")], 6, 3, "2026-09-04").days; // Friday
-    expect(plan.map((d) => d.date)).toEqual(["2026-09-04", "2026-09-07", "2026-09-08"]);
-    expect(plan.every((d) => !isWeekend(d.date))).toBe(true);
-  });
-  it("starts on Monday when asked on a Saturday", () => {
-    expect(buildPlan([t("a", "quick")], 6, 1, "2026-09-05").days[0].date).toBe("2026-09-07");
-  });
-  it("pads the remaining days as free rather than omitting them", () => {
-    const plan = buildPlan([t("a", "quick")], 6, 4, tue).days;
-    expect(plan).toHaveLength(4);
-    expect(plan.slice(1).every((d) => d.planned.length === 0 && d.usedHours === 0)).toBe(true);
-  });
-  it("never loses a task", () => {
-    const ids = ["a", "b", "c", "d", "e"];
-    const plan = buildPlan(ids.map((i) => t(i, "half")), 6, 5, tue).days;
-    expect(plan.flatMap((d) => d.planned.map((p) => p.task.id)).sort()).toEqual(ids);
-  });
-});
-
 describe("what counts as personal", () => {
   it("catches the private flag", () => {
     expect(isPersonalTask({ private: true, clientId: "cl_brian" })).toBe(true);
@@ -1118,30 +1011,6 @@ describe("what counts as personal", () => {
   });
   it("leaves client work alone", () => {
     expect(isPersonalTask({ private: false, clientId: "cl_brian" })).toBe(false);
-  });
-});
-
-describe("work the horizon cannot reach", () => {
-  const t = (id: string, size: "half" | null) => ({ id, size });
-  const tue = "2026-09-01";
-
-  // With half-days at four hours and an eight hour day, two tasks fit per day.
-  // Dropping the rest is what made a working plan look like it was pulling
-  // nothing in, out of ninety-two open tasks.
-  it("hands back everything that did not fit", () => {
-    const ids = Array.from({ length: 12 }, (_, i) => `t${i}`);
-    const { days, unplanned } = buildPlan(ids.map((i) => t(i, "half")), 8, 3, tue);
-    expect(days.flatMap((d) => d.planned)).toHaveLength(6);
-    expect(unplanned).toHaveLength(6);
-  });
-  it("loses nothing between the two halves", () => {
-    const ids = Array.from({ length: 9 }, (_, i) => `t${i}`);
-    const { days, unplanned } = buildPlan(ids.map((i) => t(i, null)), 6, 2, tue);
-    const seen = [...days.flatMap((d) => d.planned.map((p) => p.task.id)), ...unplanned.map((x) => x.id)];
-    expect(seen.sort()).toEqual(ids.sort());
-  });
-  it("is empty when everything fits", () => {
-    expect(buildPlan([t("a", "half")], 6, 5, tue).unplanned).toEqual([]);
   });
 });
 
