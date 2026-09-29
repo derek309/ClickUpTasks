@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Draft email on a phone</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e1eaf4;
+    --highlight:#e87722;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 12px 60px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:420px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 4px}
+  .cap{font-size:18px;font-weight:700;margin:30px 0 2px}
+  .why{font-size:16px;color:var(--muted);margin:0 0 12px}
+
+  .win{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+  .top{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .top .t{font-size:18px;font-weight:700;min-width:0;flex:1}
+  .top .t span{display:block;font-size:16px;font-weight:400;color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill{font-size:16px;color:var(--muted);background:var(--background);border-radius:999px;padding:3px 11px}
+  .x{border:0;background:transparent;font-size:22px;color:var(--muted);width:36px;height:36px}
+
+  .row{display:flex;align-items:baseline;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .row .lab{font-size:16px;color:var(--muted);flex:0 0 auto}
+  .row .val{min-width:0;flex:1;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .more{font-size:16px;color:var(--accent);flex:0 0 auto}
+  .subj{padding:10px 14px;border-bottom:1px solid var(--border);font-size:17px;font-weight:600}
+
+  .body{padding:14px;min-height:190px;font-size:16px;line-height:1.5}
+  .body .ph{color:var(--muted)}
+
+  .acts{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--border);
+    background:var(--surface)}
+  .send{border:0;background:var(--accent);color:#fff;border-radius:10px;padding:11px 22px;
+    font-size:16px;font-weight:700}
+  .ic{width:40px;height:40px;border:1px solid var(--border);background:var(--surface);border-radius:10px;
+    font-size:18px;color:var(--muted)}
+  .ic.ai{border-color:var(--accent-soft);background:var(--accent-soft);color:var(--accent)}
+  .saved{font-size:16px;color:var(--muted);margin-left:auto;white-space:nowrap}
+
+  .sum{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);
+    background:var(--background);font-size:16px}
+  .sum .who{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sum .edit{color:var(--accent);font-weight:600}
+
+  .bar{display:flex;gap:14px;padding:8px 14px;border-bottom:1px solid var(--border);color:var(--muted);font-size:17px}
+
+  .note{font-size:16px;color:var(--muted);margin:10px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Draft email on a phone</h1>
+  <p class="sub">Four things take the screen before you can write: the AI bar, two label columns, the formatting toolbar and the attachments box.</p>
+
+  <!-- A -->
+  <p class="cap">A. Tools on the send row</p>
+  <p class="why">Fields become one line each with the label inline. The formatting toolbar, attachments and AI move into buttons beside Send, so the body starts about 200px higher.</p>
+  <div class="win">
+    <div class="top">
+      <div class="t">Draft email <span>SMS warning</span></div>
+      <span class="pill">Not sent</span>
+      <button class="x">✕</button>
+    </div>
+    <div class="row"><span class="lab">To</span><span class="val">giselle.brunetti@yahoo.com</span><span class="more">Cc</span></div>
+    <div class="subj">SMS warning</div>
+    <div class="body">Hi Giselle,<br><span class="ph">Write the email…</span></div>
+    <div class="acts">
+      <button class="send">Send</button>
+      <button class="ic ai" title="Write with AI">✨</button>
+      <button class="ic" title="Formatting">Aa</button>
+      <button class="ic" title="Attach">📎</button>
+      <button class="ic" title="Schedule">🕔</button>
+      <span class="saved">Saved</span>
+    </div>
+  </div>
+  <p class="note">Discard moves into a ⋯ or the window's own close, so a destructive button is not sitting beside Send under your thumb.</p>
+
+  <!-- B -->
+  <p class="cap">B. Headers fold once they are filled</p>
+  <p class="why">To, Cc and the subject collapse into one line you tap to edit. The body gets nearly the whole screen, which is what you are actually here to do.</p>
+  <div class="win">
+    <div class="top">
+      <div class="t">Draft email <span>SMS warning</span></div>
+      <span class="pill">Not sent</span>
+      <button class="x">✕</button>
+    </div>
+    <div class="sum"><span class="who">To Giselle · SMS warning</span><span class="edit">Edit</span></div>
+    <div class="body" style="min-height:250px">Hi Giselle,<br><span class="ph">Write the email…</span></div>
+    <div class="acts">
+      <button class="send">Send</button>
+      <button class="ic ai" title="Write with AI">✨</button>
+      <button class="ic" title="Formatting">Aa</button>
+      <button class="ic" title="Attach">📎</button>
+      <span class="saved">Saved</span>
+    </div>
+  </div>
+  <p class="note">Tapping Edit opens the To, Cc and Subject rows from A, then folds them again.</p>
+
+  <!-- C -->
+  <p class="cap">C. Keep the rows, lose the furniture</p>
+  <p class="why">The smallest change. The rows stay as they are, but the AI bar, the toolbar and the attachments box stop being permanent: formatting appears only while you are in the body, attachments only once there is one.</p>
+  <div class="win">
+    <div class="top">
+      <div class="t">Draft email <span>SMS warning</span></div>
+      <span class="pill">Not sent</span>
+      <button class="x">✕</button>
+    </div>
+    <div class="row"><span class="lab">To</span><span class="val">giselle.brunetti@yahoo.com</span><span class="more">Cc</span></div>
+    <div class="subj">SMS warning</div>
+    <div class="bar">B <i>I</i> <u>U</u> ☰ ❝</div>
+    <div class="body">Hi Giselle,<br><span class="ph">Write the email…</span></div>
+    <div class="acts">
+      <button class="send">Send</button>
+      <button class="ic ai" title="Write with AI">✨</button>
+      <button class="ic" title="Attach">📎</button>
+      <span class="saved">Edited just now</span>
+    </div>
+  </div>
+
+  <p class="cap">The signature, tap to edit</p>
+  <p class="why">It sits under the email as it will go out. Tapping it turns it into an editor in place, and Save keeps it for every future email, not just this one.</p>
+  <div class="win">
+    <div class="body" style="min-height:70px">Hi Giselle,</div>
+    <div style="border-top:1px solid var(--border);padding:12px 14px;color:var(--muted);font-size:16px">
+      Derek Fox; ClickUpLocal <span style="color:var(--accent);font-weight:600">Edit</span>
+    </div>
+  </div>
+  <p class="why" style="margin-top:10px">Tapped:</p>
+  <div class="win">
+    <div class="body" style="min-height:70px">Hi Giselle,</div>
+    <div style="border-top:1px solid var(--border);padding:12px 14px;background:var(--background)">
+      <div style="background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;font-size:16px">Derek Fox; ClickUpLocal</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+        <button class="send" style="padding:9px 18px">Save</button>
+        <button style="border:1px solid var(--border);background:var(--surface);border-radius:10px;padding:9px 16px;font-size:16px">Cancel</button>
+        <span style="font-size:16px;color:var(--muted)">Used on every email you send</span>
+      </div>
+    </div>
+  </div>
+
+  <p class="cap">True in all three</p>
+  <p class="why">The long address stays on one line and cuts off rather than wrapping, since you can read it in full by tapping it. Send is the only filled button. Discard is not next to Send.</p>
+</div>
+</body>
+</html>

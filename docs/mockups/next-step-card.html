@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Next step card</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e3ecf6;
+    --highlight:#e87722; --highlight-soft:#fdeadb;
+    --success:#16a34a; --success-soft:#dcfce7;
+    --danger:#ef4444; --danger-soft:#fee2e2;
+    --sky:#0369a1; --sky-soft:#e0f2fe;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 16px 96px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:28px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 36px}
+  h2{font-size:20px;margin:44px 0 4px}
+  .note{font-size:16px;color:var(--muted);margin:0 0 16px}
+  .frame{background:var(--surface);border-radius:20px;padding:22px;box-shadow:0 1px 3px rgba(15,23,42,.08)}
+  .frame + .frame{margin-top:16px}
+  .fake-title{font-size:20px;font-weight:700;margin:0 0 2px}
+  .fake-meta{font-size:16px;color:var(--muted);margin:0}
+
+  /* shared bits */
+  .tick{width:36px;height:36px;border-radius:999px;border:2px solid var(--border);background:var(--surface);
+    display:flex;align-items:center;justify-content:center;color:transparent;cursor:pointer;flex:0 0 auto;
+    transition:all .15s}
+  .tick:hover{border-color:var(--success);background:var(--success-soft);color:var(--success)}
+  .tick svg{width:18px;height:18px}
+  .label{font-size:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .step-text{font-size:21px;font-weight:800;line-height:1.3;margin:2px 0 0}
+  .step-empty{color:var(--muted)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  .chip{display:inline-flex;align-items:center;gap:6px;border-radius:6px;padding:6px 10px;
+    font-size:16px;font-weight:600;background:var(--background);color:var(--foreground)}
+  .chip.late{background:var(--danger-soft);color:#b91c1c}
+  .chip.soon{background:var(--highlight-soft);color:#b45309}
+  .chip.ghost{background:transparent;color:var(--muted);font-weight:500}
+  .chip.wait{background:var(--sky-soft);color:var(--sky)}
+  .dot{width:8px;height:8px;border-radius:999px;background:var(--sky);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .av{width:24px;height:24px;border-radius:999px;background:var(--accent);color:#fff;font-size:16px;
+    display:flex;align-items:center;justify-content:center;font-weight:700}
+  .prov{font-size:16px;color:var(--muted);text-decoration:underline;text-underline-offset:4px;
+    text-decoration-color:var(--border)}
+  .nudge{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;border-radius:10px;
+    padding:10px 12px;background:var(--danger-soft);color:#b91c1c;font-size:16px;font-weight:500}
+  .nudge button{margin-left:auto;border:1px solid var(--border);background:var(--surface);color:var(--foreground);
+    border-radius:6px;padding:7px 12px;font-size:16px;font-weight:600;cursor:pointer}
+
+  /* ── A: spotlight ─────────────────────────── */
+  .a{position:relative;overflow:hidden;border-radius:var(--radius);background:var(--surface);
+    box-shadow:0 2px 10px rgba(15,23,42,.07);padding:18px 18px 18px 22px;display:flex;gap:14px;align-items:flex-start}
+  .a::before{content:"";position:absolute;inset:0 auto 0 0;width:6px;background:var(--accent)}
+  .a.is-late::before{background:var(--danger)}
+  .a.is-soon::before{background:var(--highlight)}
+  .a.is-wait::before{background:var(--sky)}
+  .a .glow{position:absolute;right:-60px;top:-60px;width:180px;height:180px;border-radius:999px;
+    background:radial-gradient(circle,rgba(232,119,34,.16),transparent 70%);pointer-events:none}
+  .a.is-late .glow{background:radial-gradient(circle,rgba(239,68,68,.18),transparent 70%)}
+  .a .body{min-width:0;flex:1}
+  .a .head{display:flex;align-items:center;gap:10px}
+  .a .flag{font-size:16px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+    background:var(--accent);color:#fff;border-radius:6px;padding:3px 9px}
+  .a.is-late .flag{background:var(--danger)}
+  .a.is-soon .flag{background:var(--highlight)}
+
+  /* ── B: date tile ─────────────────────────── */
+  .b{display:flex;gap:16px;align-items:stretch;border-radius:var(--radius);background:var(--surface);
+    box-shadow:0 2px 10px rgba(15,23,42,.07);padding:16px;position:relative}
+  .tile{width:76px;flex:0 0 76px;border-radius:12px;background:var(--accent);color:#fff;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px;text-align:center}
+  .tile .m{font-size:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
+  .tile .d{font-size:32px;font-weight:800;line-height:1.1}
+  .tile .w{font-size:16px;opacity:.85}
+  .b.is-late .tile{background:var(--danger)}
+  .b.is-soon .tile{background:var(--highlight)}
+  .b .body{min-width:0;flex:1;display:flex;gap:12px;align-items:flex-start}
+
+  /* ── C: banner ────────────────────────────── */
+  .c{border-radius:var(--radius);background:var(--surface);box-shadow:0 2px 10px rgba(15,23,42,.07);overflow:hidden}
+  .c .bar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--accent);color:#fff}
+  .c.is-late .bar{background:var(--danger)}
+  .c.is-soon .bar{background:var(--highlight)}
+  .c.is-wait .bar{background:var(--sky)}
+  .c .bar .label{color:#fff;opacity:.95}
+  .c .bar .right{margin-left:auto;font-size:16px;font-weight:700}
+  .c .body{display:flex;gap:14px;align-items:flex-start;padding:16px}
+
+  /* empty state */
+  .empty{border:2px dashed var(--border);background:transparent;box-shadow:none}
+  .empty .glow{display:none}
+
+  /* asking state */
+  .ask{border-radius:var(--radius);background:var(--surface);box-shadow:0 2px 10px rgba(15,23,42,.07);padding:18px}
+  .ask h3{margin:0 0 10px;font-size:21px;font-weight:800}
+  .ask textarea{width:100%;min-height:74px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;
+    font:16px/1.5 inherit;resize:vertical}
+  .ask .sugg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .ask .sugg button{border:1px solid var(--border);background:var(--background);border-radius:999px;
+    padding:7px 13px;font-size:16px;font-weight:600;cursor:pointer}
+  .ask .sugg button:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Next step card</h1>
+  <p class="sub">Three takes on the same card, each shown in the states it really has. Pick one, or mix parts.</p>
+
+  <h2>Today, for comparison</h2>
+  <p class="note">What is in the app right now.</p>
+  <div class="frame">
+    <div style="display:flex;gap:14px;align-items:flex-start;border:2px dashed var(--border);border-radius:var(--radius);padding:16px">
+      <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+      <div style="min-width:0;flex:1">
+        <div class="label">Next step</div>
+        <p class="step-text">Send the revised homepage copy to Brandon</p>
+        <div class="chips">
+          <span class="chip late">📅 Yesterday</span>
+          <span class="chip"><span class="av">D</span> You</span>
+          <span class="chip ghost">🕔 Add a time</span>
+          <span class="prov">Emailed client · 22h ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ A ══════════ -->
+  <h2>A. Spotlight</h2>
+  <p class="note">A colour spine down the left edge carries the urgency, with a matching flag instead of a grey label. Closest to what is there now, so it is the smallest change.</p>
+
+  <div class="frame">
+    <p class="fake-title">Homepage copy round two</p>
+    <p class="fake-meta">Brandon and Vanessa · In progress</p>
+    <div style="height:18px"></div>
+
+    <div class="a is-late">
+      <div class="glow"></div>
+      <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+      <div class="body">
+        <div class="head"><span class="flag">Next step</span><span class="chip late">📅 Yesterday</span></div>
+        <p class="step-text">Send the revised homepage copy to Brandon</p>
+        <div class="chips">
+          <span class="chip"><span class="av">D</span> You</span>
+          <span class="chip ghost">🕔 Add a time</span>
+          <span class="prov">Emailed client · 22h ago</span>
+        </div>
+        <div class="nudge">
+          <span>Brandon has not replied · 3 days</span>
+          <button>💬 Nudge Brandon</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="a is-wait">
+      <div class="glow"></div>
+      <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+      <div class="body">
+        <div class="head"><span class="flag" style="background:var(--sky)">Next step</span><span class="chip">📅 Friday</span></div>
+        <p class="step-text">Get the video approved</p>
+        <div class="chips">
+          <span class="chip"><span class="av" style="background:#7c3aed">M</span> Michaella</span>
+          <span class="chip">🕔 by 09:00</span>
+          <span class="chip wait"><span class="dot"></span> Waiting on approval <span style="opacity:.5">×</span></span>
+          <span class="prov">Sent for review · 2d ago</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="a empty">
+      <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+      <div class="body">
+        <div class="head"><span class="flag" style="background:var(--border);color:var(--muted)">Next step</span></div>
+        <p class="step-text step-empty">What happens next? Click to write it</p>
+        <div class="chips"><span class="chip ghost">📅 Set a date</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ B ══════════ -->
+  <h2>B. Date tile</h2>
+  <p class="note">The date becomes the visual anchor, the way a calendar block reads. You see when before you read what, which is usually the question you are asking.</p>
+
+  <div class="frame">
+    <div class="b is-late">
+      <div class="tile"><span class="m">Sep</span><span class="d">21</span><span class="w">Yesterday</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <div class="label">Next step</div>
+          <p class="step-text">Send the revised homepage copy to Brandon</p>
+          <div class="chips">
+            <span class="chip"><span class="av">D</span> You</span>
+            <span class="chip ghost">🕔 Add a time</span>
+            <span class="chip ghost">⚡ Tick itself when…</span>
+            <span class="prov">Emailed client · 22h ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="b is-soon">
+      <div class="tile"><span class="m">Sep</span><span class="d">22</span><span class="w">Today</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <div class="label">Next step</div>
+          <p class="step-text">Load the three product photos into the review</p>
+          <div class="chips">
+            <span class="chip"><span class="av" style="background:#7c3aed">M</span> Michaella</span>
+            <span class="chip">🕔 by 16:00</span>
+            <span class="prov">You wrote this · 4h ago</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="b">
+      <div class="tile" style="background:var(--background);color:var(--muted)"><span class="d" style="font-size:26px">＋</span><span class="w">Set a date</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <div class="label">Next step</div>
+          <p class="step-text step-empty">What happens next? Click to write it</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ C ══════════ -->
+  <h2>C. Banner</h2>
+  <p class="note">A solid coloured header the eye lands on from anywhere in a long drawer, with the state spelled out in words on the right.</p>
+
+  <div class="frame">
+    <div class="c is-late">
+      <div class="bar"><span class="label">Next step</span><span class="right">Late by 1 day</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <p class="step-text" style="margin-top:0">Send the revised homepage copy to Brandon</p>
+          <div class="chips">
+            <span class="chip late">📅 Yesterday</span>
+            <span class="chip"><span class="av">D</span> You</span>
+            <span class="chip ghost">🕔 Add a time</span>
+            <span class="prov">Emailed client · 22h ago</span>
+          </div>
+          <div class="nudge">
+            <span>Brandon has not approved yet · 3 days</span>
+            <button>💬 Nudge Brandon</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="c is-wait">
+      <div class="bar"><span class="label">Next step</span><span class="right">Waiting on Brandon</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <p class="step-text" style="margin-top:0">Get the video approved</p>
+          <div class="chips">
+            <span class="chip">📅 Friday</span>
+            <span class="chip"><span class="av" style="background:#7c3aed">M</span> Michaella</span>
+            <span class="chip wait"><span class="dot"></span> Ticks itself when approved <span style="opacity:.5">×</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="c">
+      <div class="bar" style="background:var(--background);color:var(--muted)"><span class="label" style="color:var(--muted)">Next step</span><span class="right">Nothing set</span></div>
+      <div class="body">
+        <div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg></div>
+        <div style="min-width:0;flex:1">
+          <p class="step-text step-empty" style="margin-top:0">What happens next? Click to write it</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ ask ══════════ -->
+  <h2>After you tick it</h2>
+  <p class="note">The same in all three. Only the frame changes.</p>
+  <div class="frame">
+    <div class="ask">
+      <h3>Done. What happens next?</h3>
+      <textarea placeholder="Write the next step"></textarea>
+      <div class="sugg">
+        <button>Follow up with Brandon</button>
+        <button>Send it for review</button>
+        <button>Write the second draft</button>
+      </div>
+      <div class="chips">
+        <span class="chip">📅 Today</span>
+        <span class="chip">📅 Tomorrow</span>
+        <span class="chip">📅 Monday</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

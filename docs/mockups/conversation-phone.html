@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Task conversation on a phone</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e1eaf4;
+    --chat:#7c3aed; --chat-soft:#f3f0ff; --chat-line:#ddd6fe;
+    --note:#92400e; --note-soft:#fffbeb; --note-line:#fde68a;
+    --sms:#0f766e; --sms-soft:#ecfdf5;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 12px 60px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:420px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 4px}
+  .cap{font-size:18px;font-weight:700;margin:30px 0 2px}
+  .why{font-size:16px;color:var(--muted);margin:0 0 12px}
+  .screen{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px;overflow:hidden}
+
+  .tabs{display:flex;gap:18px;border-bottom:1px solid var(--border);padding:0 2px 8px;font-size:16px;color:var(--muted)}
+  .tabs .on{color:var(--foreground);font-weight:700;border-bottom:2px solid var(--accent);padding-bottom:8px;margin-bottom:-9px}
+  .day{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:16px;margin:14px 0 10px}
+  .day::before,.day::after{content:"";height:1px;background:var(--border);flex:1}
+
+  /* now */
+  .old{display:flex;align-items:flex-start;gap:6px}
+  .old .acts{display:flex;gap:4px;flex:0 0 auto}
+  .old .acts span{width:32px;height:32px;border-radius:8px;background:var(--background);display:flex;
+    align-items:center;justify-content:center;font-size:15px}
+  .old .bub{background:var(--chat-soft);border:1px solid var(--chat-line);border-radius:14px;padding:10px 12px;flex:1;min-width:0}
+  .old .av{width:32px;height:32px;border-radius:8px;background:var(--accent);flex:0 0 32px}
+
+  /* A */
+  .msg{background:var(--chat-soft);border:1px solid var(--chat-line);border-radius:14px;padding:10px 12px}
+  .msg + .msg{margin-top:10px}
+  .head{display:flex;align-items:center;gap:8px;min-width:0}
+  .av{width:26px;height:26px;border-radius:999px;background:var(--accent);color:#fff;font-size:16px;
+    display:flex;align-items:center;justify-content:center;font-weight:700;flex:0 0 26px}
+  .who{font-weight:700;font-size:16px;white-space:nowrap}
+  .chan{font-size:16px;color:var(--chat);font-weight:600}
+  .when{font-size:16px;color:var(--muted);margin-left:auto;white-space:nowrap}
+  .dots{border:0;background:transparent;color:var(--muted);font-size:19px;padding:0 2px;flex:0 0 auto}
+  .txt{margin-top:6px;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+
+  /* B */
+  .flat{border-left:4px solid var(--chat);padding:8px 0 8px 12px}
+  .flat + .flat{margin-top:14px}
+  .flat.note{border-left-color:var(--note)}
+  .flat.sms{border-left-color:var(--sms)}
+
+  /* C */
+  .sheet{margin-top:10px;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .sheet button{display:block;width:100%;text-align:left;border:0;background:var(--surface);
+    padding:13px 16px;font-size:16px;border-bottom:1px solid var(--border)}
+  .sheet button:last-child{border-bottom:0;color:#b91c1c}
+
+  .rail{display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);margin-top:14px;padding-top:12px}
+  .rail .big{width:42px;height:42px;border-radius:999px;background:var(--chat);color:#fff;font-weight:700;
+    display:flex;align-items:center;justify-content:center}
+  .railmini{display:flex;align-items:center;gap:8px;font-size:16px;color:var(--muted);
+    border-top:1px solid var(--border);margin-top:14px;padding-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Task conversation on a phone</h1>
+  <p class="sub">One short message takes nine lines, because three buttons on the left and an avatar on the right leave the bubble about half the screen.</p>
+
+  <p class="cap">Now</p>
+  <div class="screen">
+    <div class="old">
+      <div class="acts"><span>↩</span><span>✎</span><span>🗑</span></div>
+      <div class="bub"><b>Derek Fox</b> · <span class="chan">Chat</span><br><span style="color:var(--muted)">· just now</span>
+        <div class="txt">Jsjdhsbdhsbhsj h h g h h Brigham. Hsbdjnsdjjsbd. Hahahaha.</div>
+      </div>
+      <div class="av"></div>
+    </div>
+  </div>
+
+  <!-- A -->
+  <p class="cap">A. Full width, actions behind a ⋯</p>
+  <p class="why">The avatar joins the name line at 26px and the three buttons become one ⋯ inside the bubble, so the words get the whole screen. Same bubbles, same colours.</p>
+  <div class="screen">
+    <div class="tabs"><span class="on">Conversation 1</span><span>Changes 1</span><span>Everything 2</span></div>
+    <div class="day">Today</div>
+    <div class="msg">
+      <div class="head">
+        <span class="av">DF</span><span class="who">Derek Fox</span><span class="chan">Chat</span>
+        <span class="when">just now</span><button class="dots">⋯</button>
+      </div>
+      <div class="txt">Jsjdhsbdhsbhsj h h g h h Brigham. Hsbdjnsdjjsbd. Hahahaha. Kasha's. Dismal.</div>
+    </div>
+    <div class="msg" style="background:var(--note-soft);border-color:var(--note-line)">
+      <div class="head">
+        <span class="av" style="background:var(--note)">DF</span><span class="who">Derek Fox</span>
+        <span class="chan" style="color:var(--note)">🔒 Note</span>
+        <span class="when">2h ago</span><button class="dots">⋯</button>
+      </div>
+      <div class="txt">Called the shop, they want the vendor page live before Friday.</div>
+    </div>
+  </div>
+  <p class="why" style="margin-top:10px">The ⋯ opens the three actions as a sheet, with the destructive one last and red:</p>
+  <div class="sheet">
+    <button>↩ Reply to this</button>
+    <button>✎ Edit</button>
+    <button>🗑 Delete</button>
+  </div>
+
+  <!-- B -->
+  <p class="cap">B. No bubbles, a coloured edge instead</p>
+  <p class="why">On a narrow screen the bubble's own padding and border are costing two words a line. A 4px edge in the channel's colour says the same thing and gives every word back.</p>
+  <div class="screen">
+    <div class="tabs"><span class="on">Conversation 1</span><span>Changes 1</span><span>Everything 2</span></div>
+    <div class="day">Today</div>
+    <div class="flat">
+      <div class="head">
+        <span class="av">DF</span><span class="who">Derek Fox</span><span class="chan">Chat</span>
+        <span class="when">just now</span><button class="dots">⋯</button>
+      </div>
+      <div class="txt">Jsjdhsbdhsbhsj h h g h h Brigham. Hsbdjnsdjjsbd. Hahahaha. Kasha's. Dismal.</div>
+    </div>
+    <div class="flat note">
+      <div class="head">
+        <span class="av" style="background:var(--note)">DF</span><span class="who">Derek Fox</span>
+        <span class="chan" style="color:var(--note)">🔒 Note</span>
+        <span class="when">2h ago</span><button class="dots">⋯</button>
+      </div>
+      <div class="txt">Called the shop, they want the vendor page live before Friday.</div>
+    </div>
+  </div>
+
+  <!-- C -->
+  <p class="cap">C. Full width, and you tap the message itself</p>
+  <p class="why">No ⋯ at all. Tapping a message opens the same sheet. The cleanest to read, but nothing on screen says the actions are there until you try.</p>
+  <div class="screen">
+    <div class="tabs"><span class="on">Conversation 1</span><span>Changes 1</span><span>Everything 2</span></div>
+    <div class="day">Today</div>
+    <div class="msg">
+      <div class="head">
+        <span class="av">DF</span><span class="who">Derek Fox</span><span class="chan">Chat</span>
+        <span class="when">just now</span>
+      </div>
+      <div class="txt">Jsjdhsbdhsbhsj h h g h h Brigham. Hsbdjnsdjjsbd. Hahahaha. Kasha's. Dismal.</div>
+    </div>
+  </div>
+
+  <p class="cap">The client card under it</p>
+  <p class="why">On a phone the client rail stacks below the conversation, so a big "Derek Fox · Active Client" card sits between the last message and the dock. It becomes one quiet line, tappable for the rest.</p>
+  <div class="screen">
+    <div class="txt">…last message</div>
+    <div class="railmini"><span class="av" style="background:var(--chat)">DF</span> Derek Fox · Active Client <span style="margin-left:auto;color:var(--accent);font-weight:600">Open</span></div>
+  </div>
+</div>
+</body>
+</html>

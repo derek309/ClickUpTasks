@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Log note box on a phone</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e1eaf4;
+    --note:#92400e; --note-soft:#fffbeb; --note-line:#fde68a; --note-send:#c8a06a;
+    --chat:#0369a1; --chat-soft:#e0f2fe;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 12px 60px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:420px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 6px}
+  .cap{font-size:18px;font-weight:700;margin:30px 0 2px}
+  .why{font-size:16px;color:var(--muted);margin:0 0 12px}
+
+  .dock{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:12px;
+    box-shadow:0 12px 32px rgba(20,24,40,.14)}
+  .field{background:var(--note-soft);border:1px solid var(--note-line);border-radius:16px;padding:6px}
+  .tabs{display:flex;gap:18px;padding:4px 10px 8px}
+  .tab{font-size:16px;font-weight:600;color:var(--muted);background:none;border:0;padding:2px 0}
+  .tab.on{color:var(--note);border-bottom:2px solid var(--note)}
+  .ta{width:100%;border:0;background:transparent;font:16px/1.4 inherit;padding:8px 10px;resize:none;
+    min-height:44px;color:var(--foreground)}
+  .ta::placeholder{color:var(--muted)}
+  .send{width:44px;height:44px;border-radius:999px;border:0;background:var(--note-send);color:#fff;
+    font-size:19px;font-weight:700;flex:0 0 44px}
+  .more{width:44px;height:44px;border-radius:12px;border:0;background:transparent;color:var(--muted);font-size:20px;flex:0 0 44px}
+  .log{height:44px;border-radius:12px;border:0;background:var(--background);color:var(--foreground);
+    font-size:16px;font-weight:600;padding:0 16px}
+  .rowend{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .grow{flex:1}
+
+  /* broken, for reference */
+  .bad{display:flex;align-items:flex-end;gap:10px}
+  .bad .field{flex:1;min-width:0;overflow:hidden}
+  .bad .tabs{gap:16px;flex-wrap:nowrap;white-space:nowrap}
+  .bad .inner{display:flex;align-items:flex-end;gap:4px}
+  .bad .ta{height:56px;overflow:hidden}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Log note box on a phone</h1>
+  <p class="sub">The box at the bottom of a task. Three ways to fix it.</p>
+
+  <p class="cap">Now</p>
+  <p class="why">The field and the Log action button sit side by side, so on a 375px screen the field gets about half the width. The Email tab falls off its edge and the placeholder clips.</p>
+  <div class="dock">
+    <div class="bad">
+      <div class="field">
+        <div class="tabs"><button class="tab on">🔒 Note</button><button class="tab">Chat</button><button class="tab">Text</button><button class="tab">Email</button></div>
+        <div class="inner">
+          <textarea class="ta">Note for your team, the client never sees it</textarea>
+          <button class="send">↑</button>
+        </div>
+      </div>
+      <button class="log">＋ Log action</button>
+    </div>
+  </div>
+
+  <!-- A -->
+  <p class="cap">A. Stacked</p>
+  <p class="why">Nothing sits beside the field. Tabs across the top, the words full width, then the buttons on one line underneath. Log action keeps its name.</p>
+  <div class="dock">
+    <div class="field">
+      <div class="tabs"><button class="tab on">🔒 Note</button><button class="tab">Chat</button><button class="tab">Text</button><button class="tab">Email</button></div>
+      <textarea class="ta" rows="2" placeholder="Note for your team, the client never sees it"></textarea>
+    </div>
+    <div class="rowend">
+      <button class="log">＋ Log action</button>
+      <span class="grow"></span>
+      <button class="more">⋯</button>
+      <button class="send">↑</button>
+    </div>
+  </div>
+
+  <!-- B -->
+  <p class="cap">B. Everything inside the field</p>
+  <p class="why">One box, nothing outside it. Log action becomes a ＋ on the same line as the send arrow, so the field keeps the whole width and the dock gets shorter.</p>
+  <div class="dock">
+    <div class="field">
+      <div class="tabs"><button class="tab on">🔒 Note</button><button class="tab">Chat</button><button class="tab">Text</button><button class="tab">Email</button></div>
+      <textarea class="ta" rows="2" placeholder="Note for your team, the client never sees it"></textarea>
+      <div class="rowend" style="margin-top:2px">
+        <button class="more" title="Log action">＋</button>
+        <button class="more">⋯</button>
+        <span class="grow"></span>
+        <button class="send">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- C -->
+  <p class="cap">C. One line until you tap it</p>
+  <p class="why">Closed it is a single bar, so it stops covering the task behind it. Tapping opens the full box. Shown closed, then open.</p>
+  <div class="dock" style="padding:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="more" style="background:var(--background);flex:0 0 40px;width:40px;height:40px">＋</button>
+      <div style="flex:1;min-width:0;background:var(--note-soft);border:1px solid var(--note-line);
+        border-radius:999px;padding:10px 16px;color:var(--muted);font-size:16px">🔒 Add a note…</div>
+    </div>
+  </div>
+  <div style="height:10px"></div>
+  <div class="dock">
+    <div class="field">
+      <div class="tabs"><button class="tab on">🔒 Note</button><button class="tab">Chat</button><button class="tab">Text</button><button class="tab">Email</button></div>
+      <textarea class="ta" rows="3" placeholder="Note for your team, the client never sees it"></textarea>
+      <div class="rowend" style="margin-top:2px">
+        <button class="more" title="Log action">＋</button>
+        <button class="more">⋯</button>
+        <span class="grow"></span>
+        <button class="send">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="cap">All three</p>
+  <p class="why">The tabs take the channel's colour, the same as now. Chat shown here, so you can see it is not only the note that changes.</p>
+  <div class="dock">
+    <div class="field" style="background:var(--chat-soft);border-color:#bae6fd">
+      <div class="tabs">
+        <button class="tab">🔒 Note</button>
+        <button class="tab on" style="color:var(--chat);border-color:var(--chat)">Chat</button>
+        <button class="tab">Text</button><button class="tab">Email</button>
+      </div>
+      <textarea class="ta" rows="2" placeholder="Message Jack by chat"></textarea>
+      <div class="rowend" style="margin-top:2px">
+        <button class="more" title="Log action">＋</button>
+        <button class="more">⋯</button>
+        <span class="grow"></span>
+        <button class="send" style="background:var(--chat)">↑</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Task list on a phone</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e1eaf4;
+    --highlight:#e87722; --highlight-soft:#fdece1;
+    --success:#16a34a; --danger:#ef4444; --danger-soft:#fef2f2;
+    --purple:#7c3aed;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 12px 80px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:420px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 8px}
+  .cap{font-size:18px;font-weight:700;margin:32px 0 2px}
+  .why{font-size:16px;color:var(--muted);margin:0 0 12px}
+
+  .list{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .ghead{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:16px;font-weight:700}
+  .ghead .n{margin-left:auto;border-radius:6px;padding:1px 9px;font-size:16px;color:#fff}
+  .ghead.urgent{background:var(--danger-soft);color:#b91c1c}
+  .ghead.urgent .n{background:var(--danger)}
+  .ghead.normal{background:var(--accent-soft);color:var(--accent)}
+  .ghead.normal .n{background:var(--accent)}
+
+  /* ── A: title first ─────────────────────── */
+  .a-row{display:block;padding:13px 14px 13px 16px;border-top:1px solid var(--border);
+    border-left:4px solid var(--highlight);position:relative}
+  .a-row.p-normal{border-left-color:var(--accent)}
+  .a-row .t{font-size:17px;font-weight:600;line-height:1.35;margin:0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:9px}
+  .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 11px;
+    font-size:16px;font-weight:600;background:var(--background);color:var(--muted)}
+  .pill.due{background:var(--danger-soft);color:#b91c1c}
+  .pill.soon{background:var(--highlight-soft);color:#b45309}
+  .pill.ok{background:var(--background);color:var(--foreground)}
+  .pill.wait{background:#fef3c7;color:#92400e}
+  .pill.list{background:transparent;padding-left:0}
+  .who{width:26px;height:26px;border-radius:999px;background:var(--accent);color:#fff;font-size:16px;
+    display:inline-flex;align-items:center;justify-content:center;font-weight:700}
+  .who.m{background:var(--purple)}
+  .who.none{background:var(--background);color:var(--muted);border:1px dashed var(--border)}
+
+  /* ── B: date on the right ───────────────── */
+  .b-row{display:flex;gap:12px;align-items:flex-start;padding:13px 14px 13px 16px;
+    border-top:1px solid var(--border);border-left:4px solid var(--highlight)}
+  .b-row.p-normal{border-left-color:var(--accent)}
+  .b-row .main{min-width:0;flex:1}
+  .b-row .t{font-size:17px;font-weight:600;line-height:1.35;margin:0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .b-row .crumb{font-size:16px;color:var(--muted);margin-top:3px}
+  .b-row .right{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:7px}
+  .b-row .date{font-size:16px;font-weight:700;color:#b91c1c;white-space:nowrap}
+  .b-row .date.soon{color:#b45309}
+  .b-row .date.ok{color:var(--muted)}
+
+  /* ── C: stage stripe ────────────────────── */
+  .c-row{display:flex;gap:12px;align-items:flex-start;padding:13px 14px;border-top:1px solid var(--border)}
+  .c-row .dot{width:14px;height:14px;border-radius:999px;flex:0 0 14px;margin-top:5px;background:var(--highlight)}
+  .c-row .dot.todo{background:var(--purple)}
+  .c-row .main{min-width:0;flex:1}
+  .c-row .t{font-size:17px;font-weight:600;line-height:1.35;margin:0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .c-row .line{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:16px;color:var(--muted)}
+  .c-row .sep{opacity:.45}
+  .c-row .late{color:#b91c1c;font-weight:700}
+  .c-row .soon{color:#b45309;font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Task list on a phone</h1>
+  <p class="sub">Same five rows from your screenshot, three ways. Everything is 16px or bigger.</p>
+  <p class="why">What is wrong now: a checkbox, a priority dot, an empty assignee box and a chevron take the first half of a 375px screen before the title starts, so the title truncates. Then the dates sit on a line of their own with no idea which is which.</p>
+
+  <!-- A -->
+  <p class="cap">A. Title first</p>
+  <p class="why">The controls go away on a phone. The title owns the full width, and everything else becomes a pill underneath it. Tap opens the task, which is what you do 95 percent of the time. Priority stays as the coloured edge.</p>
+  <div class="list">
+    <div class="ghead urgent"><span>●</span> Urgent <span class="n">5</span></div>
+
+    <div class="a-row">
+      <p class="t">Fill in the booking link, apply link and phone in the live site</p>
+      <div class="meta">
+        <span class="pill due">Due Sep 18 · 4 days late</span>
+        <span class="pill list">Website</span>
+      </div>
+    </div>
+
+    <div class="a-row">
+      <p class="t">Deploy Brain Box 1.45.0 to the live site</p>
+      <div class="meta">
+        <span class="pill due">Due Sep 18 · 4 days late</span>
+        <span class="pill list">Website</span>
+      </div>
+    </div>
+
+    <div class="a-row p-normal">
+      <p class="t">1. How Much House Can I Afford</p>
+      <div class="meta">
+        <span class="who">D</span>
+        <span class="pill due">Due Sep 17 · 5 days late</span>
+        <span class="pill">Follow up Sep 18</span>
+        <span class="pill list">Website</span>
+      </div>
+    </div>
+
+    <div class="a-row">
+      <p class="t">Run the full guardrail set against the LIVE chat before the demo</p>
+      <div class="meta">
+        <span class="pill due">Due Sep 18 · 4 days late</span>
+        <span class="pill list">Chat</span>
+      </div>
+    </div>
+
+    <div class="a-row">
+      <p class="t">Stop flagging interest rates and dollar figures</p>
+      <div class="meta">
+        <span class="who">D</span>
+        <span class="pill soon">Due Sep 23 · tomorrow</span>
+        <span class="pill list">Chat</span>
+      </div>
+    </div>
+
+    <div class="ghead normal"><span>●</span> Normal <span class="n">13</span></div>
+    <div class="a-row p-normal">
+      <p class="t">Turn off the sign in requirement on Mike's site</p>
+      <div class="meta">
+        <span class="pill due">Due Sep 18 · 4 days late</span>
+        <span class="pill list">Website</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- B -->
+  <p class="cap">B. Date on the right</p>
+  <p class="why">The date is pinned to the right edge of every row, so the whole list scans as one column of dates. Tighter rows, and you can see more of the list at once.</p>
+  <div class="list">
+    <div class="ghead urgent"><span>●</span> Urgent <span class="n">5</span></div>
+
+    <div class="b-row">
+      <div class="main">
+        <p class="t">Fill in the booking link, apply link and phone in the live site</p>
+        <div class="crumb">Website</div>
+      </div>
+      <div class="right"><span class="date">Sep 18</span></div>
+    </div>
+
+    <div class="b-row">
+      <div class="main">
+        <p class="t">Deploy Brain Box 1.45.0 to the live site</p>
+        <div class="crumb">Website</div>
+      </div>
+      <div class="right"><span class="date">Sep 18</span></div>
+    </div>
+
+    <div class="b-row p-normal">
+      <div class="main">
+        <p class="t">1. How Much House Can I Afford</p>
+        <div class="crumb">Website · follow up Sep 18</div>
+      </div>
+      <div class="right"><span class="date">Sep 17</span><span class="who">D</span></div>
+    </div>
+
+    <div class="b-row">
+      <div class="main">
+        <p class="t">Run the full guardrail set against the LIVE chat before the demo</p>
+        <div class="crumb">Chat</div>
+      </div>
+      <div class="right"><span class="date">Sep 18</span></div>
+    </div>
+
+    <div class="b-row">
+      <div class="main">
+        <p class="t">Stop flagging interest rates and dollar figures</p>
+        <div class="crumb">Chat</div>
+      </div>
+      <div class="right"><span class="date soon">Sep 23</span><span class="who">D</span></div>
+    </div>
+  </div>
+
+  <!-- C -->
+  <p class="cap">C. One line of plain words</p>
+  <p class="why">No pills at all. A stage dot, the title, then one sentence of grey text under it. The quietest of the three, and the shortest rows.</p>
+  <div class="list">
+    <div class="ghead urgent"><span>●</span> Urgent <span class="n">5</span></div>
+
+    <div class="c-row">
+      <span class="dot"></span>
+      <div class="main">
+        <p class="t">Fill in the booking link, apply link and phone in the live site</p>
+        <div class="line"><span class="late">4 days late</span><span class="sep">·</span><span>Website</span></div>
+      </div>
+    </div>
+
+    <div class="c-row">
+      <span class="dot"></span>
+      <div class="main">
+        <p class="t">Deploy Brain Box 1.45.0 to the live site</p>
+        <div class="line"><span class="late">4 days late</span><span class="sep">·</span><span>Website</span></div>
+      </div>
+    </div>
+
+    <div class="c-row">
+      <span class="dot todo"></span>
+      <div class="main">
+        <p class="t">1. How Much House Can I Afford</p>
+        <div class="line"><span class="late">5 days late</span><span class="sep">·</span><span>Website</span><span class="sep">·</span><span class="who">D</span></div>
+      </div>
+    </div>
+
+    <div class="c-row">
+      <span class="dot"></span>
+      <div class="main">
+        <p class="t">Run the full guardrail set against the LIVE chat before the demo</p>
+        <div class="line"><span class="late">4 days late</span><span class="sep">·</span><span>Chat</span></div>
+      </div>
+    </div>
+
+    <div class="c-row">
+      <span class="dot"></span>
+      <div class="main">
+        <p class="t">Stop flagging interest rates and dollar figures</p>
+        <div class="line"><span class="soon">Tomorrow</span><span class="sep">·</span><span>Chat</span><span class="sep">·</span><span class="who">D</span></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="cap">The same in all three</p>
+  <p class="why">A row waiting on the client says so where the date goes, since that is the thing you would otherwise ask.</p>
+  <div class="list">
+    <div class="a-row p-normal">
+      <p class="t">Create the Fruit Shed listing</p>
+      <div class="meta">
+        <span class="pill wait">Waiting on Amanda · 6 days</span>
+        <span class="pill list">Directory</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

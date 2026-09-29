@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>A bar until you pick one</title>
+<style>
+  :root{
+    --accent:#1b3a5c; --accent-soft:#e1eaf4;
+    --note:#92400e; --note-soft:#fffbeb; --note-line:#fde68a; --note-send:#c8a06a;
+    --chat:#0369a1; --chat-soft:#e0f2fe; --chat-line:#bae6fd;
+    --background:#eef4fb; --surface:#ffffff;
+    --foreground:#0f172a; --muted:#6b7280; --border:#dbe4ef;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:20px 12px 60px;background:var(--background);color:var(--foreground);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:420px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{font-size:16px;color:var(--muted);margin:0 0 4px}
+  .cap{font-size:18px;font-weight:700;margin:28px 0 2px}
+  .why{font-size:16px;color:var(--muted);margin:0 0 10px}
+  .step{font-size:16px;color:var(--muted);margin:10px 0 6px;font-weight:600}
+
+  .dock{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:8px;
+    box-shadow:0 12px 32px rgba(20,24,40,.14)}
+  .bar{display:flex;align-items:center;gap:6px}
+  .chan{flex:1;border:0;background:var(--background);border-radius:10px;padding:10px 4px;
+    font-size:16px;font-weight:600;color:var(--foreground)}
+  .chan.note{background:var(--note-soft);color:var(--note)}
+  .plus{width:40px;height:40px;flex:0 0 40px;border:0;background:transparent;color:var(--muted);
+    font-size:20px;border-radius:10px}
+
+  .field{background:var(--note-soft);border:1px solid var(--note-line);border-radius:14px;padding:6px}
+  .field.chat{background:var(--chat-soft);border-color:var(--chat-line)}
+  .tabs{display:flex;gap:16px;padding:2px 10px 6px}
+  .tab{font-size:16px;font-weight:600;color:var(--muted);background:none;border:0;padding:0}
+  .tab.on{color:var(--note);border-bottom:2px solid var(--note)}
+  .tab.on.c{color:var(--chat);border-color:var(--chat)}
+  .ta{width:100%;border:0;background:transparent;font:16px/1.4 inherit;padding:6px 10px;resize:none;min-height:36px}
+  .ta::placeholder{color:var(--muted)}
+  .rowend{display:flex;align-items:center;gap:6px}
+  .icon{width:36px;height:36px;border:0;background:transparent;color:var(--muted);font-size:19px;border-radius:9px;flex:0 0 36px}
+  .send{width:36px;height:36px;border-radius:999px;border:0;background:var(--note-send);color:#fff;
+    font-size:17px;font-weight:700;flex:0 0 36px;margin-left:auto}
+  .send.c{background:var(--chat)}
+  .peek{height:96px;background:linear-gradient(var(--surface),rgba(255,255,255,0));border-radius:12px;
+    border:1px dashed var(--border);display:flex;align-items:flex-start;padding:10px 12px;color:var(--muted);font-size:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>A bar until you pick one</h1>
+  <p class="sub">Your idea: the dock is one slim bar, and tapping a channel opens the box.</p>
+
+  <p class="cap">A. Four buttons, nothing else</p>
+  <p class="why">Closed it is one row about 56px tall, so almost the whole task is visible behind it. The ＋ is Log action.</p>
+  <p class="step">Closed</p>
+  <div class="peek">…the rest of the task keeps this space</div>
+  <div style="height:8px"></div>
+  <div class="dock">
+    <div class="bar">
+      <button class="plus" title="Log action">＋</button>
+      <button class="chan note">🔒 Note</button>
+      <button class="chan">Chat</button>
+      <button class="chan">Text</button>
+      <button class="chan">Email</button>
+    </div>
+  </div>
+
+  <p class="step">After you tap Note</p>
+  <div class="dock">
+    <div class="field">
+      <div class="tabs">
+        <button class="tab on">🔒 Note</button><button class="tab">Chat</button>
+        <button class="tab">Text</button><button class="tab">Email</button>
+      </div>
+      <textarea class="ta" rows="2" placeholder="Private note, your team only" autofocus></textarea>
+      <div class="rowend">
+        <button class="icon" title="Log action">＋</button>
+        <button class="icon">⋯</button>
+        <button class="send">↑</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="step">After you tap Chat</p>
+  <div class="dock">
+    <div class="field chat">
+      <div class="tabs">
+        <button class="tab">🔒 Note</button><button class="tab on c">Chat</button>
+        <button class="tab">Text</button><button class="tab">Email</button>
+      </div>
+      <textarea class="ta" rows="2" placeholder="Message Amanda by chat"></textarea>
+      <div class="rowend">
+        <button class="icon" title="Log action">＋</button>
+        <button class="icon">⋯</button>
+        <button class="send c">↑</button>
+      </div>
+    </div>
+  </div>
+  <p class="why">Email is the odd one: it already opens the full email window rather than this box, so tapping it never opens a text field here. That stays true.</p>
+
+  <p class="cap">B. One line that says what it is for</p>
+  <p class="why">Same idea, but the closed bar reads as a prompt rather than four buttons. Tapping the words opens it on Note; the three names on the right switch straight to that channel.</p>
+  <p class="step">Closed</p>
+  <div class="dock">
+    <div class="bar">
+      <div style="flex:1;min-width:0;background:var(--note-soft);border:1px solid var(--note-line);
+        border-radius:999px;padding:9px 14px;color:var(--muted);font-size:16px">🔒 Add a note…</div>
+      <button class="icon">Chat</button>
+    </div>
+  </div>
+  <p class="why">The trouble with this one on a narrow screen: Chat, Text and Email do not fit beside the prompt, so two of them end up behind a ⋯ and you lose the one tap to a text.</p>
+
+  <p class="cap">What closes it again</p>
+  <p class="why">In both: sending closes it, and so does tapping the channel you are already on. An empty box closes itself when you scroll the task, so it never sits open holding the screen.</p>
+</div>
+</body>
+</html>
