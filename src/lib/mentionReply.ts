@@ -12,6 +12,41 @@
 // "an email came back, put it where it belongs" would be one too many.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { plainTextToHtml } from "./data";
+import { canActOnTask } from "./taskAccess";
+
+/** The start of the mention email's footer line. The email route writes it and
+ *  replyOnly cuts at it, for a mail app that quotes without marking the quote. */
+export const MENTION_EMAIL_FOOTER = "Reply to this email and your answer lands on the task";
+
+/** The answer alone, without the email it answers. Gmail's text body carries
+ *  the whole quoted original under the reply, so without this every reply
+ *  became the answer plus the mention email, as one comment. Cuts at the first
+ *  line that starts a quote in any of the common shapes:
+ *    Gmail, Apple Mail  "On Mon, Sep 29, 2026 at 10:00 AM Derek <d@x> wrote:"
+ *                       (Gmail wraps it over two lines when it is long)
+ *    any client         a line starting with ">"
+ *    Outlook            "-----Original Message-----", or a rule of underscores
+ *                       followed by "From:"
+ *    unmarked           our own footer sentence */
+export function replyOnly(text: string): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const wrote = /^On\s.+\swrote:\s*$/;
+  const cut = lines.findIndex((line, i) => {
+    const l = line.trim();
+    return wrote.test(l)
+      || (/^On\s/.test(l) && wrote.test(`${l} ${(lines[i + 1] ?? "").trim()}`))
+      || l.startsWith(">")
+      || /^-{2,}\s*Original Message\s*-{2,}$/i.test(l)
+      || (/^_{10,}$/.test(l) && /^From:/i.test((lines[i + 1] ?? "").trim()))
+      || l.startsWith(MENTION_EMAIL_FOOTER);
+  });
+  return (cut === -1 ? lines : lines.slice(0, cut)).join("\n").trim();
+}
+
+/** A From address as a literal ilike pattern: case blind, but _ and % match
+ *  only themselves. Unescaped, they are wildcards, and an address with an
+ *  underscore could match someone else's profile. */
+const exactEmail = (email: string) => email.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** Remembers that this Gmail thread is a conversation about this task. Called
  *  after the mention email is sent; failure is not worth failing the send
@@ -47,20 +82,27 @@ export async function commentFromMentionReply(args: {
   gmailMessageId: string;
   at?: string;
 }): Promise<boolean> {
-  const text = args.body.trim();
+  const text = replyOnly(args.body);
   if (!text) return false;
 
   // Only a teammate can write into a task this way. Anyone can put an address
   // in a From header, so this is the check that stops a stranger who learns a
   // thread id from posting into the app.
   const { data: author } = await supabaseAdmin.from("profiles")
-    .select("member_id, id").ilike("email", args.fromEmail).maybeSingle();
+    .select("member_id, id, name, email, role").ilike("email", exactEmail(args.fromEmail)).maybeSingle();
   const authorId = (author?.member_id as string | null) ?? (author?.id as string | null);
-  if (!authorId) return false;
+  if (!author || !authorId) return false;
 
   const { data: task } = await supabaseAdmin.from("tasks")
-    .select("id, comments, deleted_at").eq("id", args.taskId).maybeSingle();
-  if (!task || task.deleted_at) return false;
+    .select("id, title, comments, client_id, assignee_id, is_private, deleted_at").eq("id", args.taskId).maybeSingle();
+  if (!task || task.is_private) return false;
+  // The same rule the mention route applied before it sent the email: a
+  // teammate who could not open this task cannot write into it by mail either.
+  const caller = {
+    id: author.id as string, memberId: (author.member_id as string | null) ?? null, email: (author.email as string | null) ?? "",
+    role: author.role === "admin" ? "admin" as const : "va" as const, canSendMessages: false,
+  };
+  if (!(await canActOnTask(caller, task))) return false;
 
   // The Gmail id is the comment's id, which is what makes this safe to run
   // every fifteen minutes: the poller looks two days back, so it will offer
@@ -70,17 +112,27 @@ export async function commentFromMentionReply(args: {
   const existing = (task.comments as { id?: string }[] | null) ?? [];
   if (existing.some((c) => c?.id === id)) return false;
 
-  const comment = {
-    id,
-    authorId,
-    body: plainTextToHtml(text),
-    at: args.at ?? new Date().toISOString(),
-    kind: "comment" as const,
-  };
+  const at = args.at ?? new Date().toISOString();
+  const comment = { id, authorId, body: plainTextToHtml(text), at, kind: "comment" as const };
   // The RPC rather than a read and replace, so two comments arriving at once
   // cannot overwrite each other (see supabase/realtime.sql).
   const { error } = await supabaseAdmin.rpc("append_comment", { task_id: args.taskId, comment });
   if (error) { console.warn("[mention reply] append failed", error.message); return false; }
+  // append_comment stamps updated_by with the author, and the app skips live
+  // updates stamped with the viewer's own id, so clear it or the author's other
+  // open tabs would not show the comment (same order as MCP add_comment).
+  await supabaseAdmin.from("tasks").update({ updated_by: null }).eq("id", args.taskId);
+
+  // Nothing else tells the task's owner an answer arrived by mail. The id is
+  // fixed per email so a second pass cannot ring twice.
+  const owner = task.assignee_id as string | null;
+  if (owner && owner !== authorId) {
+    const name = ((author.name as string | null) ?? "").trim() || "A teammate";
+    await supabaseAdmin.from("notifications").upsert({
+      id: `n_mr_${args.gmailMessageId}`, recipient_id: owner, text: `${name} replied by email on “${task.title}”`,
+      task_id: args.taskId, actor_id: authorId, client_id: task.client_id, project_id: null, at, read: false, kind: "message",
+    }, { onConflict: "id", ignoreDuplicates: true });
+  }
   return true;
 }
 

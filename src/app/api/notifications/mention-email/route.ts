@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
-import { rememberMentionThread } from "@/lib/mentionReply";
+import { MENTION_EMAIL_FOOTER, rememberMentionThread } from "@/lib/mentionReply";
 import { APP_URL } from "@/lib/appUrl";
 import { canActOnTask } from "@/lib/taskAccess";
 
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td style="border-radius:6px;background:#1b3a5c">
     <a href="${link}" style="display:inline-block;padding:12px 22px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none">Reply in ClickUpTasks</a>
   </td></tr></table>
-  <p style="margin:0;font-size:14px;color:#5f6368">Reply to this email and your answer lands on the task, where the whole team can see it. Or use the button above.</p>
+  <p style="margin:0;font-size:14px;color:#5f6368">${MENTION_EMAIL_FOOTER}, where the whole team can see it. Or use the button above.</p>
 </div>`.trim();
 
   try {
