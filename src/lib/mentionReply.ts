@@ -58,15 +58,21 @@ export async function rememberMentionThread(gmailThreadId: string, taskId: strin
   if (error) console.warn("[mention reply] could not record thread", error.message);
 }
 
-/** The task a Gmail thread is about, or null when the thread is not a mention
- *  email of ours. Unknown table (migration not run yet) reads as "no", which
- *  leaves the poller doing exactly what it did before. */
-export async function taskForMentionThread(gmailThreadId: string | null | undefined): Promise<{ taskId: string } | null> {
-  if (!gmailThreadId) return null;
-  const { data, error } = await supabaseAdmin.from("mention_email_threads")
-    .select("task_id").eq("gmail_thread_id", gmailThreadId).maybeSingle();
-  if (error || !data?.task_id) return null;
-  return { taskId: data.task_id as string };
+/** Which of these Gmail threads are mention emails of ours, and the task each
+ *  is about: one query for a whole mailbox rather than one per email. A read
+ *  that fails reads as "none", which leaves the poller doing what it did
+ *  before this feature. */
+export async function tasksForMentionThreads(gmailThreadIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(gmailThreadIds.filter((id): id is string => !!id))];
+  const found = new Map<string, string>();
+  // In slices, so no request carries an overlong URL.
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabaseAdmin.from("mention_email_threads")
+      .select("gmail_thread_id, task_id").in("gmail_thread_id", ids.slice(i, i + 200));
+    if (error) return found;
+    for (const r of data ?? []) if (r.task_id) found.set(r.gmail_thread_id as string, r.task_id as string);
+  }
+  return found;
 }
 
 /** One inbound reply, as a comment on its task, authored by whoever wrote it.

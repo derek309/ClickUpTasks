@@ -52,15 +52,28 @@ async function run(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const tally = { checked: (docs ?? []).length, sent: 0, noContact: 0, unsure: 0 };
+  // Each review's newest version and its task, two queries for the whole run
+  // rather than two per review.
+  const docIds = (docs ?? []).map((d) => d.id as string);
+  const [{ data: versions }, { data: tasks }] = await Promise.all([
+    docIds.length
+      ? supabaseAdmin.from("task_document_versions").select("document_id, kind, created_at, version").in("document_id", docIds).order("version", { ascending: false })
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    docIds.length
+      ? supabaseAdmin.from("tasks").select("id, title, status, is_private, deleted_at, assignee_id, client_id, project_id").in("id", [...new Set((docs ?? []).map((d) => d.task_id as string))])
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+  ]);
+  const latestOf = new Map<string, Record<string, unknown>>();
+  for (const v of versions ?? []) if (!latestOf.has(v.document_id as string)) latestOf.set(v.document_id as string, v);
+  const taskOf = new Map((tasks ?? []).map((t) => [t.id as string, t]));
+
   for (const doc of docs ?? []) {
     // Only a review the team sent and the client has not answered: once they
     // submit changes, the newest version is theirs, not a send.
-    const { data: latest } = await supabaseAdmin.from("task_document_versions")
-      .select("kind, created_at").eq("document_id", doc.id).order("version", { ascending: false }).limit(1).maybeSingle();
+    const latest = latestOf.get(doc.id as string);
     if (!latest || latest.kind !== "sent") continue;
 
-    const { data: task } = await supabaseAdmin.from("tasks")
-      .select("id, title, status, is_private, deleted_at, assignee_id, client_id, project_id").eq("id", doc.task_id).maybeSingle();
+    const task = taskOf.get(doc.task_id as string);
     if (!task || task.deleted_at || task.is_private || task.status === "done") continue;
 
     const clientRepliedAt = await lastClientWord(task.id as string, doc.id as string);

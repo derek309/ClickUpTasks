@@ -8,7 +8,8 @@ type Row = Record<string, unknown> | null;
 const state: {
   profile: Row; task: Row; appended: unknown[]; appendError: string | null; canAct: boolean;
   emailPattern: string | null; taskUpdates: unknown[]; bells: unknown[];
-} = { profile: null, task: null, appended: [], appendError: null, canAct: true, emailPattern: null, taskUpdates: [], bells: [] };
+  threads: { gmail_thread_id: string; task_id: string }[]; threadQueries: string[][];
+} = { profile: null, task: null, appended: [], appendError: null, canAct: true, emailPattern: null, taskUpdates: [], bells: [], threads: [], threadQueries: [] };
 
 const builder = (table: string, row: Row) => {
   const self: Record<string, unknown> = {};
@@ -17,6 +18,9 @@ const builder = (table: string, row: Row) => {
   self.update = (patch: unknown) => { if (table === "tasks") state.taskUpdates.push(patch); return self; };
   self.upsert = async (r: unknown) => { if (table === "notifications") state.bells.push(r); return { error: null }; };
   self.maybeSingle = async () => ({ data: row, error: null });
+  self.in = (_col: string, ids: string[]) => { state.threadQueries.push(ids); return self; };
+  self.then = (res: (v: unknown) => void) =>
+    res({ data: table === "mention_email_threads" ? state.threads.filter((t) => state.threadQueries.at(-1)!.includes(t.gmail_thread_id)) : null, error: null });
   return self;
 };
 
@@ -33,7 +37,7 @@ vi.mock("./supabaseAdmin", () => ({
 }));
 vi.mock("./taskAccess", () => ({ canActOnTask: async () => state.canAct }));
 
-const { commentFromMentionReply, replyOnly } = await import("./mentionReply");
+const { commentFromMentionReply, replyOnly, tasksForMentionThreads } = await import("./mentionReply");
 
 const reply = (over: Partial<Parameters<typeof commentFromMentionReply>[0]> = {}) =>
   commentFromMentionReply({
@@ -179,5 +183,15 @@ describe("replyOnly", () => {
   });
   it("leaves nothing when there is only a quote", () => {
     expect(replyOnly("> Can you send it?")).toBe("");
+  });
+});
+
+describe("tasksForMentionThreads", () => {
+  it("finds a mailbox's mention threads in one query, each thread once", async () => {
+    state.threads = [{ gmail_thread_id: "th_1", task_id: "t_1" }, { gmail_thread_id: "th_9", task_id: "t_9" }];
+    state.threadQueries = [];
+    const found = await tasksForMentionThreads(["th_1", "th_2", null, "th_1", undefined]);
+    expect(state.threadQueries).toEqual([["th_1", "th_2"]]);
+    expect([...found]).toEqual([["th_1", "t_1"]]);
   });
 });

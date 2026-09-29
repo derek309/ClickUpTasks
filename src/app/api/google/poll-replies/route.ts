@@ -4,7 +4,7 @@ import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest";
-import { taskForMentionThread, commentFromMentionReply } from "@/lib/mentionReply";
+import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -72,6 +72,7 @@ async function run(req: NextRequest) {
       errors.push(`${mailbox}: ${e instanceof Error ? e.message : "read failed"}`);
       continue;
     }
+    const mentionThreads = await tasksForMentionThreads(emails.map((em) => em.threadId));
     for (const em of emails) {
       scanned++;
       // A teammate answering a mention email, checked before anything else:
@@ -79,11 +80,11 @@ async function run(req: NextRequest) {
       // mail from a stranger and park it in the Inbox rather than putting it
       // on the task. Gmail gives a reply the same thread id as the mention we
       // sent, which is the whole of the matching (see lib/mentionReply).
-      const mention = await taskForMentionThread(em.threadId);
-      if (mention) {
+      const mentionTaskId = em.threadId ? mentionThreads.get(em.threadId) : undefined;
+      if (mentionTaskId) {
         try {
           const added = await commentFromMentionReply({
-            taskId: mention.taskId, fromEmail: em.fromEmail, body: em.body,
+            taskId: mentionTaskId, fromEmail: em.fromEmail, body: em.body,
             gmailMessageId: em.gmailId, at: em.internalDate,
           });
           if (added) mentionReplies++;

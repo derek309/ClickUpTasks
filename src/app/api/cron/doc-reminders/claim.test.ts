@@ -17,15 +17,17 @@ function query(table: string) {
   q.select = () => q;
   q.update = (payload: unknown) => { call.op = "update"; call.payload = payload; return q; };
   q.insert = async (payload: unknown) => { call.op = "insert"; call.payload = payload; return { error: state.insertError }; };
-  q.maybeSingle = async () => {
-    if (table === "task_document_versions") return { data: { kind: "sent", created_at: "2026-09-21T16:00:00Z" }, error: null };
-    if (table === "tasks") return { data: { id: "t_1", title: "Homepage", status: "review", is_private: false, deleted_at: null, assignee_id: "u_derek", client_id: "cl_1", project_id: null }, error: null };
-    return { data: null, error: null };
+  q.in = () => q;
+  q.maybeSingle = async () => ({ data: null, error: null });
+  // Awaiting the chain: the reviews, their versions and tasks, or the claim's rows.
+  const lists: Record<string, unknown[]> = {
+    task_documents: [{ id: "d_1", task_id: "t_1", title: "Homepage", kind: "page", reminder_every_days: 1, reminder_round_at: null, reminders_sent: 0, last_reminder_at: null }],
+    task_document_versions: [{ document_id: "d_1", kind: "sent", created_at: "2026-09-21T16:00:00Z", version: 2 }, { document_id: "d_1", kind: "client_submitted", created_at: "2026-09-20T16:00:00Z", version: 1 }],
+    tasks: [{ id: "t_1", title: "Homepage", status: "review", is_private: false, deleted_at: null, assignee_id: "u_derek", client_id: "cl_1", project_id: null }],
   };
-  // Awaiting the chain: the list of reviews, or the claim's returned rows.
   q.then = (res: (v: unknown) => void) => res(
     call.op === "update" ? { data: call.filters.some(([, c]) => c === "reminders_sent") ? state.claimRows : [], error: null }
-      : { data: [{ id: "d_1", task_id: "t_1", title: "Homepage", kind: "page", reminder_every_days: 1, reminder_round_at: null, reminders_sent: 0, last_reminder_at: null }], error: null });
+      : { data: lists[table] ?? [], error: null });
   return q;
 }
 
