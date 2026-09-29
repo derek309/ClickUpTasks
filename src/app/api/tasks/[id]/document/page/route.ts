@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocument, memberLabel, setWorkingFile, NO_STORE } from "@/lib/taskDocumentServer";
+import { teamDocument, memberLabel, setWorkingFile, CHANGED_MEANWHILE, NO_STORE } from "@/lib/taskDocumentServer";
 import { discardVersionFile, docVersionFile, readPageFile, storePageFile } from "@/lib/taskDocumentFiles";
 import { applyTextEdits, cleanEdits, pageText, pageTooBig, PAGE_MAX_BYTES, PAGE_TOO_BIG } from "@/lib/pageHtml";
 import type { PageEdit } from "@/lib/pageFrameProtocol";
@@ -96,17 +96,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       : [...current, { file: stored.fileId, label: "" }];
   }
 
+  let error = "Could not save the page. Try again.";
+  let status = 500;
   try {
-    const data = await setWorkingFile(doc.id, formatImageSet(items), (doc.body as string) ?? "", { updated_by: user.memberId, updated_at: new Date().toISOString() });
-    if (data) {
+    // Only over the list this built on: a second upload at the same moment
+    // would otherwise write its own list over this one's new page.
+    const saved = await setWorkingFile(doc.id, formatImageSet(items), (doc.body as string) ?? "", { updated_by: user.memberId, updated_at: new Date().toISOString() }, { ifUnchanged: true });
+    if ("doc" in saved) {
       // Its first page gives a review still called "New HTML review" a name (reviewAutoName.ts).
       const file = await docVersionFile(doc.id, items[0].file, "page", false);
-      const named = file ? await nameReviewIfDefault(data, { kind: "page", path: file.path, fileName: file.name }) : null;
-      return json({ document: named ?? data, fileIds: created });
+      const named = file ? await nameReviewIfDefault(saved.doc, { kind: "page", path: file.path, fileName: file.name }) : null;
+      return json({ document: named ?? saved.doc, fileIds: created });
     }
+    status = 409;
+    error = saved.refused === "approved" ? "This page is approved. Reopen it to make changes." : CHANGED_MEANWHILE;
   } catch { /* falls through to undo the files */ }
   await undo();
-  return json({ error: "This page is approved. Reopen it to make changes." }, 409);
+  return json({ error }, status);
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

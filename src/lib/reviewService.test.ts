@@ -31,7 +31,7 @@ function builder(table: string) {
 
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 const server = vi.hoisted(() => ({ liveDocument: vi.fn(), linkState: vi.fn(), mintDocLink: vi.fn(), setWorkingFile: vi.fn(), teamSend: vi.fn(), appendTaskEvent: vi.fn() }));
-vi.mock("./taskDocumentServer", () => server);
+vi.mock("./taskDocumentServer", () => ({ ...server, CHANGED_MEANWHILE: "Someone else changed this review at the same moment. Try again." }));
 const files = vi.hoisted(() => ({ docVersionFile: vi.fn(), recordCheckpoint: vi.fn(), removeVersionFile: vi.fn(), sharedVersionFiles: vi.fn() }));
 vi.mock("./taskDocumentFiles", () => files);
 const autoName = vi.hoisted(() => ({ nameReviewIfDefault: vi.fn() }));
@@ -135,7 +135,7 @@ describe("pickReviewVersion", () => {
   it("names an image review from the image it was given", async () => {
     server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
     files.docVersionFile.mockResolvedValue(file(A, "flyer.png"));
-    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1", body: A, title: "" });
+    server.setWorkingFile.mockResolvedValue({ doc: { id: "tdoc_1", body: A, title: "" } });
     await svc.pickReviewVersion("t_1", "image", actor(), { file: A });
     expect(server.setWorkingFile).toHaveBeenCalledWith("tdoc_1", A, "", expect.any(Object));
     expect(autoName.nameReviewIfDefault).toHaveBeenCalledWith({ id: "tdoc_1", body: A, title: "" }, { kind: "image", path: "doc/tdoc_1/flyer.png", fileName: "flyer.png" });
@@ -144,7 +144,7 @@ describe("pickReviewVersion", () => {
   it("keeps a postcard's front and back as one version, labels and order included", async () => {
     server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
     files.docVersionFile.mockImplementation(async (_doc: string, id: string) => file(id, id === A ? "front.png" : "back.png"));
-    server.setWorkingFile.mockResolvedValue({ id: "tdoc_1" });
+    server.setWorkingFile.mockResolvedValue({ doc: { id: "tdoc_1" } });
     expect((await svc.pickReviewVersion("t_1", "image", actor(), { images: [{ file: A, label: "" }, { file: B, label: "Inside" }] })).ok).toBe(true);
     expect(server.setWorkingFile).toHaveBeenCalledWith("tdoc_1", `[{"file":"${A}","label":""},{"file":"${B}","label":"Inside"}]`, "", expect.any(Object));
   });
@@ -156,6 +156,17 @@ describe("pickReviewVersion", () => {
     const eleven = Array.from({ length: 11 }, (_, i) => ({ file: `tdf_${String(i).padStart(8, "0")}-0000-0000-0000-000000000000` }));
     expect(await svc.pickReviewVersion("t_1", "image", actor(), { images: eleven })).toMatchObject({ ok: false, status: 400 });
     expect(server.setWorkingFile).not.toHaveBeenCalled();
+  });
+
+  // It used to answer every refusal with "approved", including a save that
+  // simply crossed another one.
+  it("says which refusal it was", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, body: "" });
+    files.docVersionFile.mockResolvedValue(file(A, "flyer.png"));
+    server.setWorkingFile.mockResolvedValue({ refused: "approved" });
+    expect(await svc.pickReviewVersion("t_1", "image", actor(), { file: A })).toMatchObject({ ok: false, status: 409, error: expect.stringContaining("approved") });
+    server.setWorkingFile.mockResolvedValue({ refused: "changed" });
+    expect(await svc.pickReviewVersion("t_1", "image", actor(), { file: A })).toMatchObject({ ok: false, status: 409, error: expect.stringContaining("at the same moment") });
   });
 });
 

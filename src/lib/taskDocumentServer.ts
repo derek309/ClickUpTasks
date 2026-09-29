@@ -425,12 +425,25 @@ export async function teamDocument(req: NextRequest, taskId: string, columns = "
 /** Make a version the one to send next on an image or page review: a file id, or an
  *  image set's body (imageSet.ts). Unchanged leaves "something to send" alone. Null
  *  when the client approved in the meantime (approved_at in the filter closes that gap). */
-export async function setWorkingFile(documentId: string, body: string, currentBody: string, stamp: Record<string, unknown>): Promise<Record<string, unknown> | null> {
-  const { data, error } = await supabaseAdmin.from("task_documents")
+/** Two saves crossed; the second is refused rather than dropping the first. */
+export const CHANGED_MEANWHILE = "Someone else changed this review at the same moment. Try again.";
+
+/** Saves the review's working body. Refused when the review is approved, and,
+ *  with `ifUnchanged`, when someone else saved since `currentBody` was read:
+ *  a body built from the old one would otherwise drop what they added (two
+ *  pages uploaded at once, each writing its own list). */
+export async function setWorkingFile(
+  documentId: string, body: string, currentBody: string, stamp: Record<string, unknown>, opts: { ifUnchanged?: boolean } = {},
+): Promise<{ doc: Record<string, unknown> } | { refused: "approved" | "changed" }> {
+  let q = supabaseAdmin.from("task_documents")
     .update({ body, ...(body !== currentBody ? { draft_dirty: true } : {}), ...stamp })
-    .eq("id", documentId).is("approved_at", null).select("*").maybeSingle();
+    .eq("id", documentId).is("approved_at", null);
+  if (opts.ifUnchanged) q = q.eq("body", currentBody);
+  const { data, error } = await q.select("*").maybeSingle();
   if (error) throw new Error(error.message);
-  return data;
+  if (data) return { doc: data };
+  const { data: now } = await supabaseAdmin.from("task_documents").select("approved_at").eq("id", documentId).maybeSingle();
+  return { refused: now?.approved_at ? "approved" : "changed" };
 }
 
 /** The teammate's name for the version history, falling back to their email. */

@@ -5,7 +5,7 @@
 // task and kind, the approval lock, versions, the 30 day restore and sending.
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
-import { appendTaskEvent, liveDocument, linkState, mintDocLink, setWorkingFile, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
+import { appendTaskEvent, liveDocument, linkState, mintDocLink, setWorkingFile, CHANGED_MEANWHILE, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
 import { reviewApprovedByTeamEvent } from "./data";
 import { MAX_REMINDER_EVERY } from "./reviewReminders";
 import { docVersionFile, recordCheckpoint, removeVersionFile, sharedVersionFiles } from "./taskDocumentFiles";
@@ -187,8 +187,9 @@ export async function pickReviewVersion(
     return fail(400, missing);
   }
   try {
-    const data = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
-    if (!data) return fail(409, locked(kind));
+    const saved = await setWorkingFile(doc.id, body, (doc.body as string) ?? "", stampOf(actor));
+    if ("refused" in saved) return fail(409, saved.refused === "approved" ? locked(kind) : CHANGED_MEANWHILE);
+    const data = saved.doc;
     // Its first image, page or video gives a review still called "New image
     // review" a name. A video is named from its file name (reviewAutoName.ts).
     const named = await nameReviewIfDefault(data, { kind, path: first.path, fileName: first.name });
