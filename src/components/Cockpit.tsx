@@ -1303,8 +1303,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         } catch { /* roster fetch is best-effort; founder fallback stays */ }
         const d = await fetchAll();
         syncMarks.current = d.marks;
-        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks); setNotifications(d.notifications);
-        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages(d.messages);
+        // Merged, not replaced: a task or conversation fetched on its own while
+        // this was in flight (an old task opened from a link) stays.
+        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks((prev) => mergeFetched(prev, d.tasks)); setNotifications(d.notifications);
+        setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages((prev) => mergeFetched(prev, d.messages));
         setTaskTemplates(d.taskTemplates);
         setVaultFolders(d.vaultFolders);
         setFolders(d.folders);
