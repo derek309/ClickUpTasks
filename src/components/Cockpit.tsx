@@ -22,8 +22,8 @@ import {
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
-  viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf, delegatedItemFor,
-  isCompletionEvent, finishKindOf, handoffDoneEvent,
+  viewerDueDate, isOnPlateOf, delegatedItemFor,
+  isCompletionEvent, finishKindOf,
   CLIENT_STATUS_META,
   clientStatusMeta,
   type ClientStatus,
@@ -37,7 +37,6 @@ import {
   type Task,
   type TaskStatus,
   type Priority,
-  type TaskSize,
   type Subtask,
   type Client,
   type Project,
@@ -66,13 +65,14 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, upsertContact, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, upsertContact, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 import { usePins } from "./cockpit/usePins";
+import { useChecklist } from "./cockpit/useChecklist";
 import { useLists } from "./cockpit/useLists";
 import { useTaskFiles } from "./cockpit/useTaskFiles";
 import type { ChecklistChange } from "./cockpit/checklistChange";
@@ -99,7 +99,6 @@ import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
-import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 
@@ -2476,155 +2475,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The pull direction went too (api/ghl/import-tasks, deleted 2026-09-29).
   // Task.ghlTaskId stays on the model: tasks imported before then still carry
   // it, and the GoHighLevel webhook and the MCP status tool match on it.
-  const toggleSub = (taskId: string, subId: string) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    const s = t.subtasks.find((x) => x.id === subId);
-    const nowDone = s ? !s.done : false;
-    const subtasks = t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x));
-    const patch: Partial<Task> = { subtasks };
-    // A finished handoff has to leave the Delegated stage, or the task sits
-    // there for good claiming it is with someone who is done with it. Taking
-    // one back already did this; the happy path, where they simply finish, is
-    // the one that actually happens.
-    if (t.status === "delegated" && !delegateeOf({ assigneeId: t.assigneeId, subtasks })) patch.status = "in_progress";
-    update(taskId, patch, { patch: subId, with: { done: nowDone } });
-    // A finished handoff goes on the task's record, so the Finished feed can
-    // show it. Until now it left no trace but a bell: nothing said when it was
-    // done or by whom, so it could not appear anywhere after the fact. The same
-    // test deleteSub uses for a delegation: an item given to someone other than
-    // the task's owner, not the owner ticking their own checklist.
-    const handoff = !!s?.assigneeId && s.assigneeId !== t.assigneeId;
-    if (nowDone && handoff && s) {
-      const ev = { id: newId("cm_"), authorId: me.id, kind: "event" as const, at: new Date().toISOString(), body: handoffDoneEvent(s.title) };
-      setTasks((prev) => prev.map((x) => (x.id === taskId ? { ...x, comments: [...x.comments, ev] } : x)));
-      void appendCommentDb(taskId, ev);
-    }
-    // Completing a delegated item pings the task owner so they know it's handled.
-    // Bell only — a checked-off checklist row is progress on work the owner is
-    // already watching, not something that needs to interrupt their inbox.
-    // Delegating an item TO someone (see patchSub) still emails, since that one
-    // is a direct ask.
-    if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId, { skipEmail: true });
-  };
-  const addSub = (taskId: string, title: string) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t || !title.trim()) return;
-    const sub: Subtask = { id: newId("s_"), title: title.trim(), done: false };
-    update(taskId, { subtasks: [...t.subtasks, sub] }, { append: [sub] });
-  };
-  const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }, { patch: subId, with: { title } }); };
-  const deleteSub = (taskId: string, subId: string) => {
-    const t = tasks.find((x) => x.id === taskId);
-    const s = t?.subtasks.find((x) => x.id === subId);
-    if (!t || !s) return;
-    // Taking a handoff back is a bigger deal than deleting a checklist line:
-    // it removes the only thing giving that person access to the task, so it
-    // says whose it was and what happens to the stage.
-    const isDelegation = !!s.assigneeId && s.assigneeId !== t.assigneeId;
-    const who = isDelegation ? (userById(s.assigneeId!)?.name ?? "them") : "";
-    const rest = t.subtasks.filter((x) => x.id !== subId);
-    const lastOne = isDelegation && !delegateeOf({ assigneeId: t.assigneeId, subtasks: rest });
-    setConfirmDialog({
-      title: isDelegation ? `Take this back from ${who}?` : `Delete “${s.title || "this checklist item"}”?`,
-      message: isDelegation
-        ? `${who} loses access to this task${lastOne ? ", and it leaves the Delegated stage" : ""}. What they were asked to do is deleted with it, and this can't be undone.`
-        : "This can't be undone.",
-      confirmLabel: isDelegation ? "Take it back" : "Delete",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        const patch: Partial<Task> = { subtasks: rest };
-        // Nothing is delegated any more, so the task cannot stay in a stage
-        // that means it is with someone else.
-        if (lastOne && t.status === "delegated") patch.status = "in_progress";
-        update(taskId, patch, { remove: subId });
-        if (isDelegation) pushToast(`Taken back from ${who}`);
-      },
-    });
-  };
-  const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => {
-    const t = tasks.find((x) => x.id === taskId);
-    if (!t) return;
-    const before = t.subtasks.find((s) => s.id === subId);
-    update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) }, { patch: subId, with: patch });
-    // Assigning a checklist item to someone else = delegating that step; ping them.
-    if (patch.assigneeId && patch.assigneeId !== before?.assigneeId && patch.assigneeId !== me.id) notify(patch.assigneeId, `${me.name} delegated "${before?.title || "a checklist item"}" on ${t.title} to you`, taskId);
-  };
-  // Handing a task to a teammate without creating a second task. One write
-  // does all of it: a checklist item assigned to them (which is what puts the
-  // task on their list at all, via tasks.delegated_to and the RLS in
-  // supabase/task-delegation.sql), the task's own dates and sizing, the
-  // hidden Delegated stage, and the ping. It lives here rather than in the
-  // dock because the notify and the task write belong to the same owner.
-  const delegateTask = (taskId: string, spec: {
-    toId: string; title: string; instructions: string; theirDue: string; followUpAt: string | null;
-    size: TaskSize | null; priority: Priority; links: string[];
-  }, opts?: { skipEmail?: boolean }): string | null => {
-    const t = tasksRef.current.find((x) => x.id === taskId);
-    if (!t) return null;
-    // Whatever they called it, or a name derived from the brief when they
-    // left it blank: see delegationTitle.
-    const title = spec.title.trim() || delegationTitle(spec.instructions);
-    const sub: Subtask = {
-      id: newId("s_"), title: title || t.title, done: false,
-      assigneeId: spec.toId, due: spec.theirDue,
-      // Links ride in the instructions: LinkedText already renders a URL as a
-      // chip wherever the note is shown, so a separate links column would be
-      // a second way to say the same thing.
-      note: [spec.instructions, ...spec.links].filter(Boolean).join("\n"),
-    };
-    const patch: Partial<Task> = {
-      subtasks: [...t.subtasks, sub],
-      status: "delegated",
-      priority: spec.priority, priorityAuto: false,
-    };
-    if (spec.followUpAt) patch.followUpAt = spec.followUpAt;
-    // Only when nobody has estimated it. A size the owner set by hand is
-    // theirs, and the same rule governs the dock's other actions.
-    if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
-    update(taskId, patch, { append: [sub] });
-    if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId, { skipEmail: opts?.skipEmail });
-    // The handoff's own id, so the caller can open its page: the brief is
-    // written there now rather than in the delegate box (Derek, 2026-09-18).
-    return sub.id;
-  };
-
-  // The same handoff, applied to everything selected. Nine tasks to one person
-  // should differ from nine handoffs only in how long it takes, so each task
-  // gets its own subtask, its own activity line and its own bell, exactly as
-  // it would one at a time. Only the email copies are collapsed: nine bells is
-  // a list, nine emails is a mailbox.
-  const bulkDelegate = (spec: BulkDelegateSpec) => {
-    const chosen = [...selectedTaskIds]
-      .map((id) => tasksRef.current.find((t) => t.id === id))
-      .filter((t): t is Task => !!t);
-    if (!chosen.length) { pushToast("Those tasks are no longer here."); setBulkDelegateOpen(false); return; }
-    const toName = users.find((u) => u.id === spec.toId)?.name ?? "them";
-    const at = new Date().toISOString();
-    bulkDelegations(chosen, spec).forEach(({ taskId, spec: one }, i) => {
-      delegateTask(taskId, one, { skipEmail: i > 0 });
-      // The activity line the dock writes for a single handoff, so a delegated
-      // task reads the same however it got that way.
-      insertTaskAction({
-        id: newId("ta_"), taskId, kind: "delegate", authorId: me.id,
-        toId: spec.toId, parentId: null,
-        body: one.instructions, at,
-        // What you are waiting on is them, not your own follow-up.
-        nextStep: `${toName} to finish this`,
-        nextStepDue: one.theirDue, nextStepDoneAt: null,
-      });
-    });
-    setBulkDelegateOpen(false);
-    clearSelection();
-    pushToast(bulkDelegateSummary(chosen.length, toName));
-  };
-  const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
-
-  // A client's ghlLocationId field is repurposed to store the contact's business/company name.
-  // Which client a task belongs to when the composer is opened from somewhere
-  // with no client on screen. The most recently opened one is the best guess
-  // anyone can make, and clientUsed already knows it; picking another in the
-  // composer replaces it for next time by the same route.
+  const { toggleSub, addSub, deleteSub, renameSub, patchSub, toggleLabel, delegateTask, bulkDelegate } = useChecklist({ tasks, update, me, setTasks, notify, setConfirmDialog, pushToast, tasksRef, selectedTaskIds, setBulkDelegateOpen, clearSelection });
   const lastUsedClientId = (): string | null => {
     const recent = Object.entries(clientUsed).sort((a, b) => b[1] - a[1]).map(([id]) => id);
     return recent.find((id) => id.startsWith("cl_") && clientById(id)) ?? null;
