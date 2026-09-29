@@ -21,11 +21,14 @@ const task = (over: Record<string, unknown> = {}) => ({
 });
 
 let urls: string[] = [];
+let writes: { method: string; url: string; body: any }[] = [];
 /** Answers each REST call with the first rows whose table matches, in order. */
 function fakeSupabase(answers: { table: string; rows: unknown }[]) {
   urls = [];
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+  writes = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     urls.push(String(url));
+    if (init?.method && init.method !== "GET") writes.push({ method: init.method, url: String(url), body: init.body ? JSON.parse(init.body) : null });
     const path = String(url).split("/rest/v1/")[1] ?? "";
     const hit = answers.find((a) => path.startsWith(a.table));
     return { ok: true, status: 200, text: async () => JSON.stringify(hit ? hit.rows : []) } as any;
@@ -102,9 +105,22 @@ describe("what the MCP tools may see", () => {
     expect(write).toContain("deleted_at=is.null");
   });
 
-  it("offers every status the app has", async () => {
+  it("offers every status the app has, and names them all", async () => {
     const tools = (await (await connect()).listTools()).tools;
-    const statuses = (tools.find((t) => t.name === "set_task_status")!.inputSchema as any).properties.status.enum;
+    const tool = tools.find((t) => t.name === "set_task_status")!;
+    const statuses = (tool.inputSchema as any).properties.status.enum;
     expect(statuses).toEqual(["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "delegated", "done"]);
+    for (const s of statuses) expect(tool.description).toContain(s);
+  });
+
+  // The app keeps a deleted task in Trash for 30 days; a chat must not be the
+  // one way to lose a task for good.
+  it("moves a deleted task to Trash rather than deleting it", async () => {
+    fakeSupabase([...names, { table: "tasks", rows: [task()] }]);
+    expect(await call(await connect(), "delete_task", { id: "t_1" })).toContain("Trash");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].method).toBe("PATCH");
+    expect(writes[0].url).toContain("deleted_at=is.null");
+    expect(writes[0].body).toEqual({ deleted_at: expect.any(String), updated_by: null });
   });
 });

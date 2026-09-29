@@ -369,17 +369,20 @@ export function createServer(opts = {}) {
     });
 
   server.tool("delete_task",
-    "Permanently delete a task — cannot be undone, always confirm with the user first. Does NOT delete its mirror in GoHighLevel if it has one.",
+    "Move a task to Trash, where it can be restored from the app for 30 days before it is deleted for good. Confirm with the user first. Does NOT delete its mirror in GoHighLevel if it has one.",
     { id: z.string() },
     async ({ id }) => {
       const t = await loadTask(id, "id,title");
       if (!t) return noTask(id);
-      await sb(`tasks?id=eq.${enc(id)}${LIVE}`, "DELETE");
-      return { content: [{ type: "text", text: `Deleted ${id}: "${t.title}".` }] };
+      // The app's own trash (db.ts deleteTaskDb), not a DELETE: the daily purge
+      // removes it after 30 days along with its review files in storage.
+      // updated_by cleared so the change shows live for everyone.
+      await patchTask(id, { deleted_at: nowIso(), updated_by: null });
+      return { content: [{ type: "text", text: `Moved ${id} to Trash: "${t.title}". It can be restored from the app for 30 days.` }] };
     });
 
   server.tool("set_task_status",
-    "Set a task's status (todo | in_progress | review | changes_requested | waiting | done). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.",
+    `Set a task's status (${STATUSES.join(" | ")}). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.`,
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
       const before = await loadTask(id, "status");
