@@ -63,15 +63,9 @@ async function run(req: NextRequest) {
     .select("client_id, task_id, channel, created_by");
   for (const row of stuck ?? []) await tellAuthor(row, "stopped partway through sending. Check the client's messages before sending it again.");
 
-  // The attempts column arrives with supabase/2026-09-review.sql. Until that
-  // has been run this route still sends, it just does not retry, so the deploy
-  // and the migration do not have to land in the same minute.
-  const { error: noAttemptsColumn } = await supabaseAdmin.from("scheduled_messages").select("attempts").limit(1);
-  const canRetry = !noAttemptsColumn;
-
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
-    .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by, reply_to_message_id")
+    .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by, reply_to_message_id, attempts")
     .eq("status", "pending")
     .lte("scheduled_at", new Date().toISOString());
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -96,15 +90,10 @@ async function run(req: NextRequest) {
       sent++;
       await supabaseAdmin.from("scheduled_messages").update({ status: "sent", sent_message_id: result.messageId }).eq("id", row.id);
     } else {
-      // Read on the failure path only, which is the rare one, so the ordinary
-      // run still asks for one fixed set of columns.
-      const { data: before } = canRetry
-        ? await supabaseAdmin.from("scheduled_messages").select("attempts").eq("id", row.id).maybeSingle()
-        : { data: null };
-      const attempts = ((before?.attempts as number | undefined) ?? 0) + 1;
-      const tryAgain = canRetry && attempts < MAX_SEND_ATTEMPTS;
+      const attempts = Number(row.attempts ?? 0) + 1;
+      const tryAgain = attempts < MAX_SEND_ATTEMPTS;
       await supabaseAdmin.from("scheduled_messages")
-        .update({ status: tryAgain ? "pending" : "failed", error: result.error, ...(canRetry ? { attempts } : {}) })
+        .update({ status: tryAgain ? "pending" : "failed", error: result.error, attempts })
         .eq("id", row.id);
       // Back to pending with a due time already in the past, so the next run
       // picks it up. Only a message that is really not going tells its author.
