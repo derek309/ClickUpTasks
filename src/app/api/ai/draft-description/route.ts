@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
 import { htmlToText } from "@/lib/data";
-import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
+import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 
 // Drafts a task description via Gemini — never writes anything itself, just
 // returns text for the human to review/edit before saving. Modeled on
@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(geminiEndpoint(apiKey), {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const res = await fetch(GEMINI_URL, {
+      method: "POST", headers: geminiHeaders(apiKey),
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });
     if (!res.ok) { const text = await res.text().catch(() => ""); return NextResponse.json({ error: `Gemini API ${res.status}: ${text.slice(0, 240)}` }, { status: 502 }); }

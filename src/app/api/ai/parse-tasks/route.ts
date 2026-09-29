@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
-import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
+import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 
 // Turns a pasted blob (meeting notes, an action-item list, an email) into a
 // set of discrete tasks for a human to review before anything is created
@@ -93,9 +93,9 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(geminiEndpoint(apiKey), {
+    const res = await fetch(GEMINI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: geminiHeaders(apiKey),
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },

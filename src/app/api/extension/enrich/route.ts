@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApiToken } from "@/lib/serverAuth";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { normalizeEnriched, PRIORITIES, ISO_DATE } from "./normalize";
-import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
+import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 
 // Turns a raw scraped email into a task the Clipper can create without you
 // correcting five fields first: a title and description, plus the priority,
@@ -74,9 +74,9 @@ export async function POST(req: NextRequest) {
   ].join("\n");
 
   try {
-    const res = await fetch(geminiEndpoint(apiKey), {
+    const res = await fetch(GEMINI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: geminiHeaders(apiKey),
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },

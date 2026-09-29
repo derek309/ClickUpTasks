@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
-import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
+import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 
 // Answers a question about one task from that task's own record: its
 // description, checklist, attachments, logged actions, notes and the emails
@@ -58,9 +58,9 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(geminiEndpoint(apiKey), {
+    const res = await fetch(GEMINI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: geminiHeaders(apiKey),
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0 } }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
-import { aiRateLimit, geminiEndpoint } from "@/lib/ai";
+import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 
 // Turns a pasted meeting transcript into the two things a task needs from it:
 // what was decided, and what happens next.
@@ -62,9 +62,9 @@ export async function POST(req: NextRequest) {
   ].filter(Boolean).join("\n");
 
   try {
-    const res = await fetch(geminiEndpoint(apiKey), {
+    const res = await fetch(GEMINI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: geminiHeaders(apiKey),
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });

@@ -16,8 +16,8 @@ import { TASK_FILES_BUCKET } from "./db";
 import { htmlToText } from "./data";
 import { pageText } from "./pageHtml";
 import type { ReviewKind } from "./reviewKinds";
+import { GEMINI_URL, geminiHeaders } from "./ai";
 
-const GEMINI_MODEL = "gemini-flash-latest";
 // Inside the save's own request, so the answer already carries the name. Once only.
 const GEMINI_TIMEOUT_MS = 8000;
 /** A document is named once it has this many words, not on its first keystrokes. */
@@ -119,9 +119,9 @@ async function contentParts(source: NameSource, taskTitle: string): Promise<Part
 }
 
 async function askGemini(parts: Part[], apiKey: string): Promise<string | null> {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+  const res = await fetch(GEMINI_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: geminiHeaders(apiKey),
     // No maxOutputTokens: the model can spend a small cap before it writes a word
     // (it answered MAX_TOKENS with no text at 40). cleanReviewName keeps it short.
     body: JSON.stringify({ contents: [{ parts }], generationConfig: { thinkingConfig: { thinkingBudget: 0 }, temperature: 0.4 } }),

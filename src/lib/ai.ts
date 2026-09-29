@@ -8,8 +8,11 @@ import { rateLimitBy } from "./rateLimit";
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
-export const geminiEndpoint = (apiKey: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+export const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+/** The key goes in a header, not the URL: a URL ends up in logs and error
+ *  messages, and this one would carry the key with it. */
+export const geminiHeaders = (apiKey: string) => ({ "Content-Type": "application/json", "x-goog-api-key": apiKey });
 
 // Every one of these routes costs real money per call and none of them is
 // something a person does more than a few times a minute by hand. The budget
