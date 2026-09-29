@@ -71,6 +71,7 @@ import {
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
+import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
@@ -1611,23 +1612,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       if (Date.now() - lastRefetch < 20000) return;
       lastRefetch = Date.now();
       const askedAt = new Date().toISOString();
+      // A task this tab saved from just before the fetch onward keeps its
+      // on screen copy; the fetch may have read it before the save landed
+      // (lib/localTaskWrites).
+      const writesSince = Date.now() - WRITE_SETTLE_MS;
       try {
         const d = await fetchAll();
-        const mergeById = <T extends { id: string }>(prev: T[], incoming: T[]) => {
-          const byId = new Map(prev.map((x) => [x.id, x]));
-          incoming.forEach((x) => byId.set(x.id, x));
-          return [...byId.values()];
-        };
         setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);
-        setTasks((prev) => mergeById(prev, d.tasks));
-        setClients((prev) => mergeById(prev, d.clients));
-        setNotifications((prev) => mergeById(prev, d.notifications));
-        setMessages((prev) => mergeById(prev, d.messages));
-        setClientNotes((prev) => mergeById(prev, d.clientNotes));
-        setVaultFolders((prev) => mergeById(prev, d.vaultFolders));
-        setFolders((prev) => mergeById(prev, d.folders));
-        setStages((prev) => mergeById(prev, d.stages));
-        setDmMessages((prev) => mergeById(prev, d.dmMessages));
+        setTasks((prev) => mergeFetched(prev, d.tasks, tasksWrittenSince(writesSince)));
+        setClients((prev) => mergeFetched(prev, d.clients));
+        setNotifications((prev) => mergeFetched(prev, d.notifications));
+        setMessages((prev) => mergeFetched(prev, d.messages));
+        setClientNotes((prev) => mergeFetched(prev, d.clientNotes));
+        setVaultFolders((prev) => mergeFetched(prev, d.vaultFolders));
+        setFolders((prev) => mergeFetched(prev, d.folders));
+        setStages((prev) => mergeFetched(prev, d.stages));
+        setDmMessages((prev) => mergeFetched(prev, d.dmMessages));
 
         const [goneTasks, goneClients] = await Promise.all([
           trashedSince("tasks", trashedSinceIso),

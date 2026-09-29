@@ -2,6 +2,7 @@
 // domain types, seeds demo data on first run, and exposes upsert/delete helpers.
 
 import { supabase } from "./supabase";
+import { noteTaskWrite } from "./localTaskWrites";
 import type { EmailDraft } from "./data";
 import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
@@ -418,7 +419,7 @@ export async function trashedSince(table: "tasks" | "clients", sinceIso: string)
 
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
-export const upsertTask = (t: Task, updatedBy?: string | null) => save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy)));
+export const upsertTask = (t: Task, updatedBy?: string | null) => { noteTaskWrite(t.id); return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))); };
 
 /** The task columns an edit actually changes, compared as stored. Saving an
  *  edit used to write the whole row from whatever that window had loaded, so a
@@ -441,22 +442,29 @@ export function changedTaskColumns(before: Task, after: Task): Record<string, un
 export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string | null) {
   const changed = changedTaskColumns(before, after);
   if (!Object.keys(changed).length) return null;
+  noteTaskWrite(after.id);
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
   if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
   return res;
 }
 /** A task's draft email, written alone: the only browser write of draft_email
  *  (Derek, 2026-09-12: a stale task save could wipe a reminder's draft). */
-export const saveTaskDraftEmail = (taskId: string, draft: Task["draftEmail"], updatedBy?: string | null) =>
-  save(() => supabase.from("tasks").update({ draft_email: draft ?? null, updated_by: updatedBy ?? null }).eq("id", taskId));
+export const saveTaskDraftEmail = (taskId: string, draft: Task["draftEmail"], updatedBy?: string | null) => {
+  noteTaskWrite(taskId);
+  return save(() => supabase.from("tasks").update({ draft_email: draft ?? null, updated_by: updatedBy ?? null }).eq("id", taskId));
+};
 // One request for many new/updated tasks at once
 // (up to 18 rows per client) instead of N separate round trips.
-export const bulkUpsertTasks = (ts: Task[]) => (ts.length ? save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t)))) : Promise.resolve());
+export const bulkUpsertTasks = (ts: Task[]) => {
+  if (!ts.length) return Promise.resolve();
+  noteTaskWrite(...ts.map((t) => t.id));
+  return save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t))));
+};
 
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —
 // avoids the read-then-full-row-replace race that a plain upsertTask() would
 // have if two teammates comment on the same task within the same window.
-export const appendCommentDb = (taskId: string, comment: Comment) => save(() => supabase.rpc("append_comment", { task_id: taskId, comment }));
+export const appendCommentDb = (taskId: string, comment: Comment) => { noteTaskWrite(taskId); return save(() => supabase.rpc("append_comment", { task_id: taskId, comment })); };
 // Soft delete — see soft-delete.sql. Sets deleted_at instead of removing the
 // row; fetchAll's excludeDeleted filter is what actually hides it from the
 // live app. Restored via restoreTaskDb, purged for good after 30 days by
