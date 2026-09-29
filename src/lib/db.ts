@@ -3,6 +3,7 @@
 
 import { supabase } from "./supabase";
 import { noteTaskWrite } from "./localTaskWrites";
+import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
 import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
@@ -878,16 +879,9 @@ export async function uploadTaskFile(path: string, file: File): Promise<{ ok: tr
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
-/** How much video is stored right now: the number the 30 day purge exists to hold
- *  down (supabase/task-video-purge.sql). Cleared videos and removed ones are not
- *  counted, because neither is taking up space any more. */
-export const fetchVideoStorage = async (): Promise<{ files: number; bytes: number }> => {
-  const { data, error } = await supabase.from("task_document_files")
-    .select("size_bytes").eq("purpose", "video").is("cleared_at", null).is("removed_at", null);
-  if (error) { logErr({ error }); return { files: 0, bytes: 0 }; }
-  const rows = (data ?? []) as { size_bytes: number | null }[];
-  return { files: rows.length, bytes: rows.reduce((sum, r) => sum + Number(r.size_bytes ?? 0), 0) };
-};
+/** How much video is stored right now (lib/videoStorage), for the settings
+ *  screen. */
+export const fetchVideoStorage = async () => (await sumStoredVideo(supabase, (error) => logErr({ error }))) ?? { files: 0, bytes: 0 };
 
 export async function signedUrlForFile(path: string, expirySeconds = 60 * 10): Promise<string | null> {
   const { data } = await supabase.storage.from(TASK_FILES_BUCKET).createSignedUrl(path, expirySeconds);

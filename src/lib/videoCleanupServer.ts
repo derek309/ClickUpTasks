@@ -15,6 +15,7 @@
 // context for its comments.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { TASK_FILES_BUCKET } from "./db";
+import { sumStoredVideo } from "./videoStorage";
 
 /** Days after approval that a video's file is cleared. */
 export const VIDEO_KEEP_DAYS = 30;
@@ -37,15 +38,15 @@ export async function purgeApprovedVideos(now = new Date()): Promise<VideoPurgeR
   const errors: string[] = [];
   const cutoff = new Date(now.getTime() - VIDEO_KEEP_DAYS * 86_400_000).toISOString();
 
-  const { data: docs, error: docError } = await supabaseAdmin.from("task_documents")
-    .select("id").eq("kind", "video").is("deleted_at", null).not("approved_at", "is", null).lt("approved_at", cutoff);
-  if (docError) return { cleared: 0, bytesFreed: 0, errors: [`documents: ${docError.message}`] };
-  const ids = (docs ?? []).map((d) => d.id as string);
-  if (!ids.length) return { cleared: 0, bytesFreed: 0, errors };
-
+  // Files first, joined to their review, so a review whose video was cleared
+  // drops out of the work list. It used to list every approved video review
+  // ever and pass all their ids in one request, which stops working somewhere
+  // past a thousand reviews.
   const { data: files, error: fileError } = await supabaseAdmin.from("task_document_files")
-    .select("id, path, size_bytes").in("document_id", ids)
-    .eq("purpose", "video").is("cleared_at", null).is("removed_at", null).limit(BATCH);
+    .select("id, path, size_bytes, task_documents!inner(id)")
+    .eq("purpose", "video").is("cleared_at", null).is("removed_at", null)
+    .eq("task_documents.kind", "video").is("task_documents.deleted_at", null).lt("task_documents.approved_at", cutoff)
+    .limit(BATCH);
   if (fileError) return { cleared: 0, bytesFreed: 0, errors: [`files: ${fileError.message}`] };
   const rows = files ?? [];
   if (!rows.length) return { cleared: 0, bytesFreed: 0, errors };
@@ -66,8 +67,5 @@ export async function purgeApprovedVideos(now = new Date()): Promise<VideoPurgeR
 
 /** How much video is stored right now: what the purge exists to hold down. */
 export async function storedVideoBytes(): Promise<{ files: number; bytes: number }> {
-  const { data } = await supabaseAdmin.from("task_document_files")
-    .select("size_bytes").eq("purpose", "video").is("cleared_at", null).is("removed_at", null);
-  const rows = data ?? [];
-  return { files: rows.length, bytes: rows.reduce((sum, f) => sum + Number(f.size_bytes ?? 0), 0) };
+  return (await sumStoredVideo(supabaseAdmin)) ?? { files: 0, bytes: 0 };
 }
