@@ -47,3 +47,16 @@ describe("save", () => {
     expect(unsavedCount()).toBe(before + 1);
   });
 }, 30000);
+
+// Taking a handoff back clears the item's assignee by setting it to undefined.
+// JSON drops undefined, so it has to go as null for the database to remove it.
+describe("patchSubtaskDb", () => {
+  it("sends a cleared field as null", async () => {
+    const { supabase } = await import("./supabase");
+    const { patchSubtaskDb } = await import("./db");
+    const rpc = vi.spyOn(supabase, "rpc").mockResolvedValue({ data: null, error: null } as never);
+    await patchSubtaskDb("t_1", "s_1", { assigneeId: undefined, done: true }, "u_me");
+    expect(rpc).toHaveBeenCalledWith("patch_subtask", { task_id: "t_1", subtask_id: "s_1", patch: { assigneeId: null, done: true }, author: "u_me" });
+    rpc.mockRestore();
+  });
+});

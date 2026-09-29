@@ -113,6 +113,21 @@ describe("what the MCP tools may see", () => {
     for (const s of statuses) expect(tool.description).toContain(s);
   });
 
+  // A whole checklist written back over a teammate's tick lost it; the tools
+  // now send the one item.
+  it("ticks and adds checklist items one at a time", async () => {
+    const withList = task({ subtasks: [{ id: "s_1", title: "Send the proof", done: false }, { id: "s_2", title: "Book the call", done: false }] });
+    fakeSupabase([...names, { table: "tasks", rows: [withList] }]);
+    await call(await connect(), "check_item", { id: "t_1", item: "book" });
+    expect(writes).toEqual([{ method: "POST", url: expect.stringContaining("/rpc/patch_subtask"), body: { task_id: "t_1", subtask_id: "s_2", patch: { done: true }, author: null } }]);
+
+    fakeSupabase([...names, { table: "tasks", rows: [withList] }]);
+    await call(await connect(), "add_checklist_items", { id: "t_1", items: ["Invoice", " "] });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].url).toContain("/rpc/append_subtasks");
+    expect(writes[0].body).toMatchObject({ task_id: "t_1", items: [{ title: "Invoice", done: false }], author: null });
+  });
+
   // The app keeps a deleted task in Trash for 30 days; a chat must not be the
   // one way to lose a task for good.
   it("moves a deleted task to Trash rather than deleting it", async () => {

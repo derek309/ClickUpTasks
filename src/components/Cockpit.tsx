@@ -69,7 +69,7 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchMessagesFor, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchMessagesFor, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
@@ -136,6 +136,9 @@ function describeDumpRow(r: { description: string; verbatim: string }): string {
 function hasFreshClone(pool: Task[], src: Task, nextDue: string | null): boolean {
   return pool.some((t) => t.id !== src.id && t.clientId === src.clientId && t.projectId === src.projectId && t.title === src.title && t.due === nextDue && t.status !== "done");
 }
+
+/** One checklist item's change, saved on its own (update's third argument). */
+type ChecklistChange = { patch: string; with: Partial<Subtask> } | { append: Subtask[] } | { remove: string };
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -2553,7 +2556,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // --- mutations ------------------------------------------------------------
 
-  const update = (id: string, patch: Partial<Task>) => {
+  const saveChecklistChange = (taskId: string, item: ChecklistChange, author: string) => {
+    if ("append" in item) void appendSubtasksDb(taskId, item.append, author);
+    else if ("remove" in item) void removeSubtaskDb(taskId, item.remove, author);
+    else void patchSubtaskDb(taskId, item.patch, item.with, author);
+  };
+  // `item` says which one checklist item the edit changes, when it does: that
+  // item goes through its own locked write and the rest of the edit saves as
+  // usual, so two people on one checklist keep both their changes.
+  const update = (id: string, patch: Partial<Task>, item?: ChecklistChange) => {
     const cur = tasksRef.current.find((t) => t.id === id);
     // Keeps status:"waiting" and waitingOnClient in lockstep regardless of
     // which mutation path is used — setTaskStage (the Kanban drag handler)
@@ -2580,7 +2591,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
     // Only the columns this edit changed (saveTaskEdit), so a checklist tick
     // from this window can't carry stale comments or fields over newer ones.
-    if (cur) { void saveTaskEdit(cur, { ...cur, ...synced }, me.id); if (clone) upsertTask(clone, me.id); }
+    if (cur) {
+      void saveTaskEdit(cur, { ...cur, ...synced, ...(item ? { subtasks: cur.subtasks } : {}) }, me.id);
+      if (item) saveChecklistChange(id, item, me.id);
+      if (clone) upsertTask(clone, me.id);
+    }
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if (cur && "draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
   };
@@ -3214,7 +3229,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // one back already did this; the happy path, where they simply finish, is
     // the one that actually happens.
     if (t.status === "delegated" && !delegateeOf({ assigneeId: t.assigneeId, subtasks })) patch.status = "in_progress";
-    update(taskId, patch);
+    update(taskId, patch, { patch: subId, with: { done: nowDone } });
     // A finished handoff goes on the task's record, so the Finished feed can
     // show it. Until now it left no trace but a bell: nothing said when it was
     // done or by whom, so it could not appear anywhere after the fact. The same
@@ -3233,8 +3248,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // is a direct ask.
     if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId, { skipEmail: true });
   };
-  const addSub = (taskId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t && title.trim()) update(taskId, { subtasks: [...t.subtasks, { id: newId("s_"), title: title.trim(), done: false }] }); };
-  const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }); };
+  const addSub = (taskId: string, title: string) => {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t || !title.trim()) return;
+    const sub: Subtask = { id: newId("s_"), title: title.trim(), done: false };
+    update(taskId, { subtasks: [...t.subtasks, sub] }, { append: [sub] });
+  };
+  const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }, { patch: subId, with: { title } }); };
   const deleteSub = (taskId: string, subId: string) => {
     const t = tasks.find((x) => x.id === taskId);
     const s = t?.subtasks.find((x) => x.id === subId);
@@ -3258,7 +3278,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // Nothing is delegated any more, so the task cannot stay in a stage
         // that means it is with someone else.
         if (lastOne && t.status === "delegated") patch.status = "in_progress";
-        update(taskId, patch);
+        update(taskId, patch, { remove: subId });
         if (isDelegation) pushToast(`Taken back from ${who}`);
       },
     });
@@ -3267,7 +3287,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
     const before = t.subtasks.find((s) => s.id === subId);
-    update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) });
+    update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) }, { patch: subId, with: patch });
     // Assigning a checklist item to someone else = delegating that step; ping them.
     if (patch.assigneeId && patch.assigneeId !== before?.assigneeId && patch.assigneeId !== me.id) notify(patch.assigneeId, `${me.name} delegated "${before?.title || "a checklist item"}" on ${t.title} to you`, taskId);
   };
@@ -3303,7 +3323,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Only when nobody has estimated it. A size the owner set by hand is
     // theirs, and the same rule governs the dock's other actions.
     if (spec.size && !t.size && !t.sizeHours) patch.size = spec.size;
-    update(taskId, patch);
+    update(taskId, patch, { append: [sub] });
     if (spec.toId !== me.id) notify(spec.toId, `${me.name} delegated "${title}" to you on ${t.title}`, taskId, { skipEmail: opts?.skipEmail });
     // The handoff's own id, so the caller can open its page: the brief is
     // written there now rather than in the delegate box (Derek, 2026-09-18).
@@ -3446,7 +3466,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const t = tasks.find((x) => x.id === taskId);
     if (!tpl || !t) return;
     const added: Subtask[] = tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false }));
-    update(taskId, { subtasks: [...t.subtasks, ...added] });
+    update(taskId, { subtasks: [...t.subtasks, ...added] }, { append: added });
     pushToast(`Added ${added.length} checklist item${added.length === 1 ? "" : "s"} from "${tpl.name}"`);
   };
   // Creates a brand-new task from a template — title defaults to the

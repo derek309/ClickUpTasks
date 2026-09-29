@@ -29,6 +29,7 @@ import {
   type NoteType,
   type Comment,
   type Message,
+  type Subtask,
   type ScheduledMessage,
   type ScheduledMessageStatus,
   type MessageChannel,
@@ -563,6 +564,24 @@ export const bulkUpsertTasks = (ts: Task[], updatedBy?: string | null) => {
   if (!ts.length) return Promise.resolve();
   noteTaskWrite(...ts.map((t) => t.id));
   return save(() => supabase.from("tasks").upsert(ts.map((t) => taskToRow(t, updatedBy))));
+};
+
+// One checklist item at a time, inside a locked row (supabase/checklist-functions.sql),
+// so two people on one checklist no longer overwrite each other's changes.
+// A key the app clears (set to undefined) is sent as null, which removes it.
+const clearedAsNull = (patch: Partial<Subtask>) =>
+  Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === undefined ? null : v]));
+export const patchSubtaskDb = (taskId: string, subId: string, patch: Partial<Subtask>, author: string | null) => {
+  noteTaskWrite(taskId);
+  return save(() => supabase.rpc("patch_subtask", { task_id: taskId, subtask_id: subId, patch: clearedAsNull(patch), author }));
+};
+export const appendSubtasksDb = (taskId: string, items: Subtask[], author: string | null) => {
+  noteTaskWrite(taskId);
+  return save(() => supabase.rpc("append_subtasks", { task_id: taskId, items, author }));
+};
+export const removeSubtaskDb = (taskId: string, subId: string, author: string | null) => {
+  noteTaskWrite(taskId);
+  return save(() => supabase.rpc("remove_subtask", { task_id: taskId, subtask_id: subId, author }));
 };
 
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —

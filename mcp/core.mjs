@@ -594,10 +594,12 @@ export function createServer(opts = {}) {
       const t = await loadTask(id, "subtasks");
       if (!t) return noTask(id);
       const it = item.toLowerCase();
-      let hit = null;
-      const subtasks = (t.subtasks || []).map((s) => (!hit && s.title.toLowerCase().includes(it) ? (hit = s, { ...s, done: done ?? true }) : s));
+      const hit = (t.subtasks || []).find((s) => s.title.toLowerCase().includes(it)) ?? null;
       if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
-      await patchTask(id, { subtasks });
+      // The one item, in a locked row (supabase/checklist-functions.sql), so a
+      // teammate ticking another item at the same moment keeps their tick.
+      // No author, so the change shows live for everyone.
+      await sb("rpc/patch_subtask", "POST", { task_id: id, subtask_id: hit.id, patch: { done: done ?? true }, author: null });
       return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
     });
 
@@ -610,8 +612,7 @@ export function createServer(opts = {}) {
       const titles = items.map((s) => s.trim()).filter(Boolean);
       if (!titles.length) return { content: [{ type: "text", text: "No items to add." }] };
       const added = titles.map((title) => ({ id: rid("s_"), title, done: false }));
-      const subtasks = [...(t.subtasks || []), ...added];
-      await patchTask(id, { subtasks });
+      await sb("rpc/append_subtasks", "POST", { task_id: id, items: added, author: null });
       const summary = added.map((s) => ({ id: s.id, title: s.title }));
       return { content: [{ type: "text", text: `Added ${added.length} checklist item(s) to ${id}: ${JSON.stringify(summary)}` }] };
     });
