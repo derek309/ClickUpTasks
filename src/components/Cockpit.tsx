@@ -11,26 +11,20 @@ import {
   nextDueAhead,
   effectivePriority,
   effectiveStatus,
-  buildPlan,
-  isPersonalTask,
   htmlToText,
   nextOccurrence,
   plainTextToHtml,
   TODAY,
   todayIso,
   addDaysIso,
-  daysBetween,
-  THIS_MONDAY,
   DUE_BUCKETS,
   dueBucketOf,
-  NURTURE_CHECK_IN_DAYS,
   TRIAL_DAYS, trialState,
   STATUS_META,
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   applyWaitingStatusSync,
   mentionsUser,
   viewerDueDate, isOnPlateOf, delegationTitle, delegateeOf, delegatedItemFor,
-  isSnoozed,
   isCompletionEvent, finishKindOf, handoffDoneEvent,
   CLIENT_STATUS_META,
   clientStatusMeta,
@@ -75,13 +69,12 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting, fetchOpenNextSteps, setNextStepDoneDb, patchNextStepDb } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchContacts, trashedSince, fetchOpenReviews, fetchVideoStorage, fetchFeedSeen, markFeedSeenDb, fetchClientEmailDrafts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, restoreTaskDb, hardDeleteTaskDb, upsertClient, upsertProject, deleteProjectDb, restoreProjectDb, hardDeleteProjectDb, deleteClientDb, restoreClientDb, hardDeleteClientDb, mergeClientsDb, insertNotif, markNotifReadDb, uploadTaskFile, signedUrlForFile, downloadUrlForFile, deleteTaskFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, upsertTaskTemplate, deleteTaskTemplateDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, upsertFolder, deleteFolderDb, upsertStage, deleteStageDb, rowToTask, rowToClient, rowToNotif, rowToMessage, rowToClientNote, rowToDmMessage, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, markTaskChannelReadDb, reassignMessagesTaskDb, insertMessage, deleteMessageDb, upsertContact, rowToScheduledMessage, insertTaskAction, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { subscribeRealtime } from "@/lib/realtime";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { usePersisted } from "@/lib/usePersisted";
-import { PlanView } from "./cockpit/PlanView";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
@@ -101,8 +94,6 @@ import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
-import { NextStepsBoard } from "./cockpit/NextStepsBoard";
-import { buildNextStepsToday, type NextStepRow } from "@/lib/nextStepsToday";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
 import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
@@ -222,23 +213,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // No "completed" any more — it moved to All Tasks. Anyone whose stored
   // value still says completed fails this guard and lands back on Work,
   // rather than on a tab that no longer has a button or a view.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "plan" | "steps" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "plan", "steps", "reviews", "drafts"].includes(v as string));
+  // Plan and Next steps were removed (Derek, 2026-09-28: "we are not using it
+  // at all"). Anyone whose remembered tab or deep link still says one of them
+  // lands on Work rather than a blank screen.
+  const [dashboardView, setDashboardView] = usePersisted<"work" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "reviews", "drafts"].includes(v as string));
   // Your next steps due today or late, across every task, for the Next steps
   // tab (Derek, 2026-09-16). Steps are read per task everywhere else, so the
   // open ones are fetched when the tab is opened.
-  const [nextStepRows, setNextStepRows] = useState<NextStepRow[]>([]);
-  const [nextStepsLoading, setNextStepsLoading] = useState(false);
-  const loadNextSteps = async () => {
-    setNextStepsLoading(true);
-    try {
-      const steps = await fetchOpenNextSteps();
-      setNextStepRows(buildNextStepsToday(tasksRef.current, steps, me.id, todayIso()));
-    } catch {
-      // Best effort, like the other boards: an empty list rather than an error.
-    } finally {
-      setNextStepsLoading(false);
-    }
-  };
   // What is out with a client, for the Reviews tab. Loaded when that tab is
   // opened rather than at boot: a document is otherwise read one task at a
   // time (supabase/task-documents.sql), and the board is two small queries
@@ -303,12 +284,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // the loading flag, and writing state straight from an effect body is what
   // stops the compiler optimising the component around it.
   useEffect(() => {
-    if (!myWork || dashboardView !== "steps") return;
-    const r = requestAnimationFrame(() => { void loadNextSteps(); });
-    return () => cancelAnimationFrame(r);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myWork, dashboardView]);
-  useEffect(() => {
     if (!myWork || dashboardView !== "reviews") return;
     const r = requestAnimationFrame(() => { void loadOpenReviews(); });
     return () => cancelAnimationFrame(r);
@@ -318,11 +293,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // setting: how long your day is is a personal fact, and app_settings only
   // stores booleans anyway. Read after mount so the server and the first
   // client render agree.
-  const [planPersonal, setPlanPersonal] = usePersisted("planPersonal", false, (v) => typeof v === "boolean");
-  const [workdayHours, setWorkdayHours] = usePersisted("workdayHours8", 8, (v) => typeof v === "number" && v >= 1 && v <= 16);
   // Nine to five by default. The plan needs one clock fact to turn "three
   // hours" into "you are on this at half ten".
-  const [dayStart, setDayStart] = usePersisted("dayStart", "09:00", (v) => typeof v === "string" && /^\d{2}:\d{2}$/.test(v));
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   // All Tasks can show the completed log instead of the open list. It moved
@@ -696,26 +668,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     pushToast(`${c.name}'s trial is closed.`);
   };
 
-  // Stamp reviewedAt = today, clearing this client/project from the Review
-  // tier until next Monday (weekly) or its next nurture cycle. See
-  // clientNeedsReview.
-  const setClientReviewed = (clientId: string) => {
-    const c = clientById(clientId);
-    if (!c) return;
-    const nc = { ...c, reviewedAt: TODAY };
-    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-    markOwnClientWrite(nc.id);
-    upsertClient(nc);
-    pushToast(`Reviewed ${c.name} — cleared until next check-in.`);
-  };
-  const setProjectReviewed = (projectId: string) => {
-    const p = projectById(projectId);
-    if (!p) return;
-    const np = { ...p, reviewedAt: TODAY };
-    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
-    upsertProject(np);
-    pushToast(`Reviewed ${p.name}.`);
-  };
   // Point a client at a synced GHL contact (or null to unlink). Used for
   // clients whose id isn't itself a contact id, so GHL features can't derive
   // one from the id — see contactForClient.
@@ -1193,7 +1145,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!s.view && s.client === "all") setAllTasksScope(s.assignee ?? "mine");
     // Same reasoning as the assignee above: absent means the default half of
     // the view, not whatever this browser was last left on.
-    if (s.view === "work") setDashboardView(s.sub === "plan" || s.sub === "steps" || s.sub === "reviews" ? s.sub : "work");
+    if (s.view === "work") setDashboardView(s.sub === "reviews" || s.sub === "drafts" ? s.sub : "work");
     if (!s.view && s.client === "all") {
       // A link straight into Finished is looking at it, the same as the button.
       if (s.sub === "completed" && !allTasksCompleted) openFinished();
@@ -2161,59 +2113,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets
-  // forgotten. This surfaces it at the very top instead — but resets, so it
-  // doesn't nag forever:
-  //  A) has open tasks, none dated (no due dates, no follow-up) AND not yet
-  //     reviewed since this Monday → weekly review.
-  //  B) a "nurture"-status client whose last review was >= NURTURE_CHECK_IN_DAYS
-  //     ago (or never) → monthly relationship check-in, even with zero tasks.
-  // Marking it reviewed (setClientReviewed) stamps reviewedAt=today, dropping
-  // it out until next Monday / next cycle. Conversation-task clients are
-  // excluded — they're already surfaced via the "New message" tier and are
-  // actively being worked, not forgotten.
-  function clientNeedsReview(clientId: string, forAssignee?: string): boolean {
-    const c = clientById(clientId);
-    if (!c) return false;
-    if (hasOpenConversationTask(clientId)) return false;
-    const open = (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    // A task carrying only a follow-up date is dated — it has a day it comes
-    // back — so it must not drag the client into "nothing here has a date".
-    const hasAnyDate = open.some((t) => urgencyDateOf(t));
-    const reviewedThisWeek = !!c.reviewedAt && c.reviewedAt >= THIS_MONDAY;
-    if (open.length > 0 && !hasAnyDate && !reviewedThisWeek) return true; // (A)
-    if (c.status === "nurture" && (!c.reviewedAt || daysBetween(c.reviewedAt, TODAY) >= NURTURE_CHECK_IN_DAYS)) return true; // (B)
-    // (C) Still waiting on the client for something. These were invisible on
-    // every dashboard: going "waiting on client" unassigns the task (see
-    // applyWaitingStatusSync), so it stops counting toward anyone's My Work
-    // and nothing ever brings it back up. A thing you're blocked on is
-    // exactly what a Monday review is for (Derek: "if we're waiting on a
-    // client task it should pop up to review").
-    //
-    // Deliberately NOT scoped by forAssignee — a waiting task has no
-    // assignee by construction, so scoping it would filter out every one of
-    // them and this condition would never fire. The client is already in
-    // this person's board via assignedClientsFor (an assigned task, or
-    // following the client), so it can't leak someone else's work in.
-    // Snoozed waiting work is excluded: you already decided when to chase it,
-    // and raising it in Monday's review before that day is the app second
-    // guessing a call you made deliberately.
-    if (!reviewedThisWeek && waitingTasksFor(clientId).some((t) => !isSnoozed(t))) return true;
-    return false;
-  }
   /** Open tasks this client owes us an answer on. Unassigned by construction,
    *  so every caller has to look them up deliberately rather than expecting
    *  them in an assignee-scoped list. */
   function waitingTasksFor(clientId: string): Task[] {
     return (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && t.waitingOnClient);
-  }
-  // Projects have no status, so only condition (A) applies — no nurture cadence.
-  function projectNeedsReview(projectId: string, forAssignee?: string): boolean {
-    const p = projectById(projectId);
-    if (!p) return false;
-    const open = (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee));
-    const hasAnyDate = open.some((t) => urgencyDateOf(t));
-    const reviewedThisWeek = !!p.reviewedAt && p.reviewedAt >= THIS_MONDAY;
-    return open.length > 0 && !hasAnyDate && !reviewedThisWeek;
   }
   // Tier scheme (lower = more urgent, sorts first):
   //   0 Review · 1 New message · 2 Overdue · 3 Due today · 4 Due tomorrow ·
@@ -2232,7 +2136,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // there, not a teammate's. Omitted for the sidebar's "Overdue first" sort,
   // which is intentionally client-wide across every assignee.
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (clientNeedsReview(clientId, forAssignee)) return { tier: URGENCY_TIER.needsReview, due: "", priorityRank: 0 };
     if (hasOpenConversationTask(clientId)) return { tier: URGENCY_TIER.newMessage, due: "", priorityRank: 0 };
     return urgencyKeyFrom((scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee)));
   }
@@ -2240,7 +2143,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // message" tier — that's a client-level Conversation concept, not a
   // project one.
   function projectUrgencyKey(projectId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (projectNeedsReview(projectId, forAssignee)) return { tier: URGENCY_TIER.needsReview, due: "", priorityRank: 0 };
     return urgencyKeyFrom((scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee)));
   }
   // A personal to-do's own tier — no Review/New-message concept (those are
@@ -2315,30 +2217,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .filter((g) => g.items.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, scopedTasks, clients, projects, myWorkUser]);
-  // The Monday "set up your week" queue: my clients/projects currently in the
-  // Review tier, in the same order My Work shows them. Drives the header
-  // "Review next" button so you can click through them one at a time (the
-  // interaction Derek wanted — open each, decide, advance) instead of hunting.
-  // Memoized — reuses myAssignedClients/myAssignedProjects instead of
-  // recalling assignedClientsFor/assignedProjectsFor from scratch, and only
-  // reruns the clientNeedsReview/projectNeedsReview scan when the underlying
-  // data changes rather than on every render.
-  const reviewQueue: { kind: "client" | "project"; id: string }[] = useMemo(() => [
-    ...myAssignedClients.filter((c) => clientNeedsReview(c.id, me.id)).map((c) => ({ kind: "client" as const, id: c.id })),
-    ...myAssignedProjects.filter((p) => projectNeedsReview(p.id, me.id)).map((p) => ({ kind: "project" as const, id: p.id })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [myAssignedClients, myAssignedProjects, scopedTasks, clients, projects, me.id]);
-  const goToNextReview = (afterClientId: string, afterProjectId: string | null) => {
-    const curIdx = reviewQueue.findIndex((r) => (afterProjectId ? r.kind === "project" && r.id === afterProjectId : r.kind === "client" && r.id === afterClientId));
-    // Wrap around so the last item's "next" loops back to the first still-
-    // pending one; nothing left → let the caller know via a toast.
-    const next = reviewQueue[(curIdx + 1) % reviewQueue.length] ?? reviewQueue[0];
-    if (!next) { pushToast("Nothing left to review — all caught up. 🎉"); return; }
-    if (next.kind === "project") { const pr = projectById(next.id); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(pr?.clientId ?? "all"); setActiveProject(next.id); }
-    else { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(next.id); setActiveProject(null); }
-    setClientTab("tasks");
-    setOpenTaskId(null);
-  };
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -2527,26 +2405,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // My open work in the order its dates demand, then laid across the days.
   // Same ordering the list uses, so the plan never disagrees with the board
   // about what is next.
-  const planDays = useMemo(() => {
-    const mine = tasks
-      // Personal tasks are excluded by default. They have their own view, and
-      // a long overdue admin backlog (pay rent, YNAB) sorts to the front and
-      // fills every day, leaving no room for a single client task — which is
-      // exactly what the plan is for. They still take real time, so they can
-      // be folded back in.
-      .filter((t) => t.status !== "done" && isOnPlateOf(t, me.id) && (planPersonal || !isPersonalTask(t)))
-      .sort((a, b) => {
-        const da = viewerDueDate(a, me.id) ?? "9999";
-        const db = viewerDueDate(b, me.id) ?? "9999";
-        if (da !== db) return da.localeCompare(db);
-        return PRIORITY_META[effectivePriority(a)].rank - PRIORITY_META[effectivePriority(b)].rank;
-      });
-    // Two working weeks. Five days held about ten tasks out of ninety-odd,
-    // which is a day-by-day view rather than a plan you can promise from.
-    return buildPlan(mine, workdayHours, 10);
-  }, [tasks, workdayHours, me.id, planPersonal]);
-  const planUnsized = useMemo(() => planDays.days.flatMap((d) => d.planned).filter((p) => !p.task.size).length, [planDays]);
-
   // due-date buckets relative to the fixed "today" — "This week"/"Next week"
   // are calendar weeks starting Sunday, not rolling 7-day windows, so the
   // boundary always falls on a Saturday regardless of what day "today" is.
@@ -4470,17 +4328,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               task each their own way (hasOpenConversationTask / Follow Up's
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
+          <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
+          {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
+            <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+          )}
+          <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
+          {/* Teammate chats sit under Personal rather than between the work
+              views (Derek, 2026-09-28): they are people, not places work
+              lives, and they were splitting My Work and All Tasks off from
+              Clients and Projects. */}
           {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
             <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
               <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
               {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
             </SideItem>
           ))}
-          <SideItem active={dirView === "clients"} title="Clients (press 3)" onClick={() => goToView("clients")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{clientList.length}</span></SideItem>
-          {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
-          )}
-          <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -4568,8 +4430,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-col gap-2">
               <div className="flex rounded-lg bg-background p-0.5">
                 <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
-                <button onClick={() => setDashboardView("plan")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "plan" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Plan</button>
-                <button onClick={() => setDashboardView("steps")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "steps" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Next steps</button>
                 <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
                 <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
               </div>
@@ -4677,33 +4537,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </span>
                 );
               })()}
-              {/* Review controls — only when the open scope currently needs a
-                  review. "Reviewed" clears it (stamps reviewedAt=today); "Next"
-                  jumps to the next client/project still awaiting review. */}
-              {(() => {
-                const scopedProject = activeProject ? projectById(activeProject) : null;
-                const needsReview = scopedProject ? projectNeedsReview(scopedProject.id, me.id) : clientNeedsReview(activeClient, me.id);
-                if (!needsReview) return null;
-                return (
-                  <span className="inline-flex overflow-hidden rounded-md border border-teal-500/40">
-                    <button onClick={() => (scopedProject ? setProjectReviewed(scopedProject.id) : setClientReviewed(activeClient))}
-                      title="Mark reviewed — clears this from the Review list until the next check-in"
-                      className="inline-flex items-center gap-1 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20"><I.check /> <span className="hidden sm:inline">Reviewed</span></button>
-                    {/* Only when there's actually something outstanding, and
-                        only for someone allowed to message this client. */}
-                    {!scopedProject && waitingTasksFor(activeClient).length > 0 && canMessageClient(activeClient) && (
-                      <button onClick={() => openRemindClient(activeClient)}
-                        title="Email this client the items we're still waiting on, with their portal link"
-                        className="border-l border-teal-500/40 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">
-                        Remind ({waitingTasksFor(activeClient).length})
-                      </button>
-                    )}
-                    <button onClick={() => goToNextReview(activeClient, activeProject)}
-                      title="Go to the next client/project that needs review"
-                      className="border-l border-teal-500/40 bg-teal-500/10 px-2 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">Next ›</button>
-                  </span>
-                );
-              })()}
+              {/* Emailing the client what we are still waiting on used to live
+                  inside the weekly review strip, so it only appeared on a
+                  client the review cadence had raised. The cadence is gone
+                  (Derek, 2026-09-28); being blocked on a client is not, so
+                  this shows whenever there is something outstanding. */}
+              {!activeProject && waitingTasksFor(activeClient).length > 0 && canMessageClient(activeClient) && (
+                <button onClick={() => openRemindClient(activeClient)}
+                  title="Email this client the items we're still waiting on, with their portal link"
+                  className="rounded-md border border-teal-500/40 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">
+                  Remind ({waitingTasksFor(activeClient).length})
+                </button>
+              )}
               {/* Secondary/config actions folded into one overflow menu so the
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
                   / Review instead of a cluster of equal-weight buttons. Same
@@ -4717,8 +4562,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
-                <button onClick={() => setDashboardView("plan")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "plan" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Plan</button>
-                <button onClick={() => setDashboardView("steps")} title="Your next steps due today or late, across every task" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "steps" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Next steps</button>
                 <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
                 <button onClick={() => setDashboardView("drafts")} title="Everything written and not sent yet" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "drafts" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Drafts</button>
               </div>
@@ -4792,7 +4635,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={openTasksByClient} starred={starred} onToggleStar={toggleStar}
-            needsReview={(id) => clientNeedsReview(id, me.id)}
             onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddClient={() => setAddClientOpen(true)} onRename={renameClient} onDelete={deleteClient}
             sort={clientSort} onSetSort={saveClientSort} scope={clientListScope} onToggleScope={() => setClientListScope((s) => (s === "mine" ? "all" : "mine"))}
@@ -4820,25 +4662,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               openClientList(row.clientId, null);
               setClientTab("chat");
             }} />
-        ) : myWork && dashboardView === "steps" ? (
-          <NextStepsBoard rows={nextStepRows} loading={nextStepsLoading} onRefresh={loadNextSteps}
-            context={(row) => {
-              const t = tasks.find((x) => x.id === row.taskId);
-              return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
-            }}
-            // Ticking a step here does what ticking it on the task does: the step
-            // is done, and the follow up it carried is cleared.
-            onDone={(row) => {
-              if (row.stepId) setNextStepDoneDb(row.stepId, new Date().toISOString());
-              const t = tasks.find((x) => x.id === row.taskId);
-              if (t?.followUpAt && t.followUpAt <= row.due) patchTask(row.taskId, { followUpAt: null });
-            }}
-            onMove={(row, date) => {
-              if (row.stepId) patchNextStepDb(row.stepId, { nextStepDue: date });
-              patchTask(row.taskId, { followUpAt: date });
-              setNextStepRows((rs) => (date > todayIso() ? rs.filter((r) => r.key !== row.key) : rs.map((r) => (r.key === row.key ? { ...r, due: date, late: date < todayIso() } : r))));
-            }}
-            onOpenTask={setOpenTaskId} />
         ) : myWork && dashboardView === "reviews" ? (
           <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews} videoStorage={videoStorage}
             taskContext={(taskId) => {
@@ -4846,11 +4669,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
             }}
             onOpenTask={setOpenTaskId} />
-        ) : myWork && dashboardView === "plan" ? (
-          <PlanView days={planDays.days} unplanned={planDays.unplanned} budgetHours={workdayHours} onBudget={setWorkdayHours}
-            clientById={clientById} projectById={projectById} onOpen={setOpenTaskId}
-            onSize={(taskId, patch) => patchTask(taskId, patch)} dayStart={dayStart} onDayStart={setDayStart} unsizedCount={planUnsized}
-            includePersonal={planPersonal} onIncludePersonal={setPlanPersonal} />
         ) : showCompletedLog ? (
           // Now an All Tasks mode rather than a My Work tab — day-grouped feed
           // of what finished and when. The header's scope answers WHOSE work,

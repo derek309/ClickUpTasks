@@ -13,7 +13,7 @@ type ClientSort = "manual" | "az" | "tasks" | "recent" | "used" | "urgent" | "mi
 type GroupBy = "flat" | "team";
 
 export function ClientsDirectory({
-  clients, clientCompany, taskCount, tasksByClient, starred, onToggleStar, needsReview, onOpen,
+  clients, clientCompany, taskCount, tasksByClient, starred, onToggleStar, onOpen,
   canAdmin, onAddClient, onRename, onDelete, sort, onSetSort, scope, onToggleScope,
   groupBy, onSetGroupBy, teamGroups,
 }: {
@@ -26,7 +26,6 @@ export function ClientsDirectory({
   tasksByClient?: Map<string, Task[]>;
   starred: Set<string>;
   onToggleStar: (id: string) => void;
-  needsReview: (id: string) => boolean;
   onOpen: (id: string) => void;
   canAdmin: boolean;
   onAddClient: () => void;
@@ -79,7 +78,6 @@ export function ClientsDirectory({
         className={DIR_ROW}>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 truncate text-[15px] font-medium leading-tight">{c.name}
-            {needsReview(c.id) && <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-teal-600" style={{ background: "#14b8a61a" }}>Review</span>}
           </span>
           {company && <span className="block truncate text-[13px] leading-tight text-muted">{company}</span>}
         </span>
