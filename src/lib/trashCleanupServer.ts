@@ -115,3 +115,20 @@ export async function purgeExpiredTrash(): Promise<PurgeResult> {
   const tasks = await remove("tasks", taskIds, errors);
   return { documents, clients, projects, tasks, kept: liveInClient.size + liveInProject.size, errors };
 }
+
+/** Days an unmatched email or meeting note is kept. */
+export const UNMATCHED_KEEP_DAYS = 90;
+
+/** Email from unknown senders and Granola notes that matched no client are
+ *  still recorded (Derek, 2026-09-29), but nothing reads them after a while,
+ *  so they go after 90 days rather than piling up for ever. */
+export async function purgeOldUnmatched(now = new Date()): Promise<{ inbound: number; granola: number; errors: string[] }> {
+  const cutoff = new Date(now.getTime() - UNMATCHED_KEEP_DAYS * 86_400_000).toISOString();
+  const errors: string[] = [];
+  const sweep = async (table: "inbound_unmatched" | "granola_unmatched") => {
+    const { data, error } = await supabaseAdmin.from(table).delete().lt("created_at", cutoff).select("id");
+    if (error) { errors.push(`${table}: ${error.message}`); return 0; }
+    return data?.length ?? 0;
+  };
+  return { inbound: await sweep("inbound_unmatched"), granola: await sweep("granola_unmatched"), errors };
+}

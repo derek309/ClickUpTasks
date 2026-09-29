@@ -46,7 +46,7 @@ function builder(table: string) {
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 vi.mock("./taskDocumentFiles", () => ({ deleteDocStorage: async (id: string) => { removedFiles.push(id); } }));
 
-const { purgeExpiredTrash } = await import("./trashCleanupServer");
+const { purgeExpiredTrash, purgeOldUnmatched } = await import("./trashCleanupServer");
 
 const OLD = "2026-01-01T00:00:00.000Z";
 const ids = (t: string) => db[t].map((r) => r.id).sort();
@@ -100,5 +100,18 @@ describe("purgeExpiredTrash", () => {
   it("leaves trash younger than 30 days alone", async () => {
     await purgeExpiredTrash();
     expect(ids("tasks")).toContain("t_recent");
+  });
+});
+
+describe("purgeOldUnmatched", () => {
+  it("drops unmatched emails and notes older than 90 days, and keeps newer ones", async () => {
+    db = {
+      inbound_unmatched: [{ id: "e_old", created_at: "2026-06-01T00:00:00.000Z" }, { id: "e_new", created_at: "2026-09-20T00:00:00.000Z" }],
+      granola_unmatched: [{ id: "g_old", created_at: "2026-05-01T00:00:00.000Z" }],
+    };
+    const r = await purgeOldUnmatched(new Date("2026-09-29T12:00:00.000Z"));
+    expect(r).toEqual({ inbound: 1, granola: 1, errors: [] });
+    expect(db.inbound_unmatched.map((x) => x.id)).toEqual(["e_new"]);
+    expect(db.granola_unmatched).toEqual([]);
   });
 });

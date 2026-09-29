@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
-import { purgeExpiredTrash } from "@/lib/trashCleanupServer";
+import { purgeExpiredTrash, purgeOldUnmatched } from "@/lib/trashCleanupServer";
 import { purgeOldMentionThreads } from "@/lib/mentionReply";
 
 // Daily sweep — permanently deletes clients/projects/tasks past their
 // 30-day Trash window (see supabase/soft-delete.sql). Same cron auth as the
 // other crons (cronAuth.ts).
 //
-// It also does the one piece of housekeeping that is not trash: mention email
-// threads, which are only worth keeping while a reply might still arrive
-// (supabase/mention-email-threads.sql).
+// It also does the housekeeping that is not trash: mention email threads, which
+// are only worth keeping while a reply might still arrive
+// (supabase/mention-email-threads.sql), and unmatched emails and meeting notes
+// older than 90 days.
 
 export const maxDuration = 60;
 
@@ -27,5 +28,6 @@ async function run(req: NextRequest) {
 
   const result = await purgeExpiredTrash();
   const mentionThreads = await purgeOldMentionThreads();
-  return NextResponse.json({ ok: true, ...result, mentionThreads });
+  const unmatched = await purgeOldUnmatched();
+  return NextResponse.json({ ok: true, ...result, mentionThreads, unmatched });
 }

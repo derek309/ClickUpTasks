@@ -336,8 +336,8 @@ export async function fetchAll() {
 // The Inbox's "Unmatched email" and unmatched-meeting sections were removed
 // (see Cockpit.tsx), and with them the only readers of inbound_unmatched and
 // granola_unmatched. Both tables are still WRITTEN by the server (poll-replies,
-// the Granola sync) as a record of what did not match, so the rows are kept;
-// nothing reads them from the browser, and fetchAll no longer pages two whole
+// the Granola sync) as a record of what did not match, kept for 90 days
+// (purgeOldUnmatched in trashCleanupServer); nothing reads them from the browser, and fetchAll no longer pages two whole
 // tables on every single page load to build two arrays nobody renders.
 
 export const upsertContact = (c: Contact) => save(() => supabase.from("contacts").upsert(contactToRow(c)));
