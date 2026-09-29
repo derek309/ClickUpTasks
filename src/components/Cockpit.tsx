@@ -44,7 +44,6 @@ import {
   type NotificationKind,
   type ClientLink,
   type ClientNote,
-  type NoteType,
   type Comment,
   type Message,
   type MessageChannel,
@@ -63,13 +62,14 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, upsertClient, upsertProject, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientLink, deleteClientLinkDb, upsertClientNote, deleteClientNoteDb, appendCommentDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, insertDmMessage, deleteDmMessageDb, updateDmMessageDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, patchSubtaskDb, appendSubtasksDb, removeSubtaskDb, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertTask, saveTaskEdit, saveTaskDraftEmail, deleteTaskDb, upsertClient, upsertProject, insertNotif, markNotifReadDb, signedUrlForFile, upsertClientNote, appendCommentDb, bulkUpsertTasks, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 import { usePins } from "./cockpit/usePins";
+import { useClientRecords } from "./cockpit/useClientRecords";
 import { useClientAdmin } from "./cockpit/useClientAdmin";
 import { useTemplates } from "./cockpit/useTemplates";
 import { useChecklist } from "./cockpit/useChecklist";
@@ -105,7 +105,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
-import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, DM_LINK_PREFIX } from "@/lib/navState";
+import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 import { isInboxNotification } from "@/lib/extensionInbox";
 
 // A dumped task's description: what the AI summarised, then the client's own
@@ -2488,97 +2488,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { restoreClient, restoreProjectFromTrash, restoreTaskFromTrash, purgeClient, purgeProject, purgeTask, renameClient, deleteClient, addClientContact, addRemoteContact, mergeClients } = useClientAdmin({ subAccounts, setContacts, clients, setActiveClient, setMyWork, setPersonalView, setInboxView, setDmUserId, setSettingsView, setDirView, setAddClientOpen, pushToast, clientById, setClients, markOwnClientWrite, tasks, projects, setProjects, setTasks, me, setPromptDialog, setConfirmDialog, setClientLinks, setClientNotes, activeClient, contactById, setMessages, setFolders, setVaultFolders, setNotifications, syncMarks, olderTasksLoaded, resetConversations });
   const { saveTemplate, deleteTemplate, useTemplateAsTask, applyTemplate } = useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks });
   const { createStage, addProject, renameProject, deleteProject, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
-  // --- client links -----------------------------------------------------
-  const saveLink = (clientId: string, initial: ClientLink | undefined, v: { label: string; url: string; groupLabel: string; color: string }) => {
-    if (initial) {
-      const updated: ClientLink = { ...initial, ...v };
-      setClientLinks((ls) => ls.map((l) => (l.id === initial.id ? updated : l)));
-      upsertClientLink(updated);
-    } else {
-      const link: ClientLink = { id: newId("cl_"), clientId, position: clientLinks.filter((l) => l.clientId === clientId).length, ...v };
-      setClientLinks((ls) => [...ls, link]);
-      upsertClientLink(link);
-    }
-    setLinkModal(null);
-  };
-  const deleteLink = (link: ClientLink) => setConfirmDialog({
-    title: `Delete "${link.label}"?`, message: "This can't be undone.", confirmLabel: "Delete",
-    onConfirm: () => { setConfirmDialog(null); setClientLinks((ls) => ls.filter((l) => l.id !== link.id)); deleteClientLinkDb(link.id); },
-  });
-  const reorderLinks = (clientId: string, orderedIds: string[]) => {
-    const reordered = orderedIds.map((id, i) => { const l = clientLinks.find((x) => x.id === id)!; return { ...l, position: i }; });
-    setClientLinks((ls) => [...ls.filter((l) => l.clientId !== clientId), ...reordered]);
-    reordered.forEach((l) => upsertClientLink(l));
-  };
-
-  // --- direct messages -----------------------------------------------------
-  // Private 1:1 chat between two teammates — see supabase/dm-chat.sql. A DM
-  // has exactly one addressee by construction, so there's no @mention scan:
-  // every send notifies the recipient directly.
-  const sendDmMessage = (otherUserId: string, body: string, attachments?: Attachment[], replyToId?: string | null) => {
-    if (!body.trim() && !attachments?.length) return;
-    const cid = dmConversationId(me.id, otherUserId);
-    // Only email the FIRST message of a burst — if the newest message in this
-    // thread so far is already mine, the recipient's inbox has been pinged and
-    // a rapid-fire follow-up shouldn't add another email. The in-app bell still
-    // fires every time; a reply from them resets "first of burst".
-    const prior = dmMessages.filter((mm) => mm.conversationId === cid);
-    const newest = prior.length ? prior.reduce((a, b) => (b.at > a.at ? b : a)) : null;
-    const firstOfBurst = !newest || newest.authorId !== me.id;
-    const m: DmMessage = { id: newId("dm_"), conversationId: cid, authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
-    setDmMessages((ms) => [...ms, m]);
-    insertDmMessage(m);
-    // Straight to the thread. Without a link the email fell back to the app
-    // root, so "Justin sent you a message" landed you on your own dashboard
-    // with no way to find the message it was about (Derek: "it doesn't link
-    // to where the message is"). The recipient is the one reading the mail,
-    // so the thread they need is the one with ME in it.
-    notify(otherUserId, `${me.name} sent you a message`, null, {
-      kind: "dm", skipEmail: !firstOfBurst, link: `${DM_LINK_PREFIX}&dm=${encodeURIComponent(me.id)}`,
-    });
-  };
-  const deleteDmMessage = (id: string) => {
-    setConfirmDialog({
-      title: "Delete this message?",
-      message: "It disappears for both of you. This can't be undone.",
-      confirmLabel: "Delete",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        setDmMessages((ms) => ms.filter((m) => m.id !== id));
-        deleteDmMessageDb(id);
-      },
-    });
-  };
-  // Both participants (or admin) can pin — matches dm_messages_update's RLS
-  // predicate exactly (the same people who can already read the thread).
-  const pinDmMessage = (id: string, pinned: boolean) => {
-    const patch = { pinned, pinnedBy: pinned ? me.id : null, pinnedAt: pinned ? new Date().toISOString() : null };
-    setDmMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-    updateDmMessageDb(id, patch);
-  };
-
-  // --- client notes ------------------------------------------------------
-  const addNote = (clientId: string, type: NoteType, body: string, projectId?: string | null, attachments?: Attachment[]) => {
-    const note: ClientNote = { id: newId("cn_"), clientId, projectId: projectId ?? null, type, body, authorId: me.id, at: new Date().toISOString(), ...(attachments?.length ? { attachments } : {}) };
-    setClientNotes((ns) => [note, ...ns]); // newest-first feed
-    upsertClientNote(note);
-    // @mentions notify, same as task comments — the one signal that pulls
-    // people back into this feed instead of it going stale and unread.
-    const where = projectId ? projectById(projectId)?.name : clientById(clientId)?.name;
-    users.forEach((u) => {
-      if (u.id !== me.id && mentionsUser(body, u.name)) notify(u.id, `${me.name} mentioned you in the ${where ?? "team"} chat`, null, { clientId, projectId, kind: "message" });
-    });
-  };
-  const editNote = (note: ClientNote, body: string) => {
-    const updated: ClientNote = { ...note, body };
-    setClientNotes((ns) => ns.map((n) => (n.id === note.id ? updated : n)));
-    upsertClientNote(updated);
-  };
-  const deleteNote = (note: ClientNote) => {
-    setClientNotes((ns) => ns.filter((n) => n.id !== note.id));
-    deleteClientNoteDb(note.id);
-  };
-
+  const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
