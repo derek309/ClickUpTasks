@@ -2108,8 +2108,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // thread needs a reply"), not raw unread-message state — a thread stays
   // boosted for as long as its task is open, even after the message itself
   // is marked read, and clears only when the task is completed.
-  function hasOpenConversationTask(clientId: string): boolean {
-    return (scopedTasksByClientId.get(clientId) ?? []).some((t) => t.status !== "done" && t.priority === "conversation" && isMessageConversationTask(t.title));
+  //
+  // forAssignee, like clientUrgencyKey's: a reply task sitting on a teammate's
+  // list used to raise that client to the top of YOUR board, which is how
+  // Giselle led Derek's My Work on work that was all Justin's (2026-09-28).
+  // Unassigned reply tasks still count for everyone, since nobody has picked
+  // them up and somebody has to.
+  function hasOpenConversationTask(clientId: string, forAssignee?: string): boolean {
+    return (scopedTasksByClientId.get(clientId) ?? []).some((t) => t.status !== "done" && t.priority === "conversation" && isMessageConversationTask(t.title)
+      && (!forAssignee || !t.assigneeId || t.assigneeId === forAssignee));
   }
   // The Review/Check-in tier (Derek + Justin, Jul 17): a client with open work
   // but nothing actually dated silently sinks to the bottom and gets
@@ -2136,7 +2143,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // there, not a teammate's. Omitted for the sidebar's "Overdue first" sort,
   // which is intentionally client-wide across every assignee.
   function clientUrgencyKey(clientId: string, forAssignee?: string): { tier: number; due: string; priorityRank: number } {
-    if (hasOpenConversationTask(clientId)) return { tier: URGENCY_TIER.newMessage, due: "", priorityRank: 0 };
+    if (hasOpenConversationTask(clientId, forAssignee)) return { tier: URGENCY_TIER.newMessage, due: "", priorityRank: 0 };
     return urgencyKeyFrom((scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!forAssignee || t.assigneeId === forAssignee)));
   }
   // Same tiering as clientUrgencyKey, scoped to one project's tasks. No "New
@@ -2352,6 +2359,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // with "Hide done" on by default, so the sidebar/board badge and the list
   // never disagree about how many tasks "need attention".
   const clientTaskCount = (clientId: string) => (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done").length;
+  // What the My Work board counts: the open tasks that are actually yours, or
+  // nobody's. "3 tasks" on a client whose three tasks all belong to a
+  // teammate is a number about someone else's day (Derek, 2026-09-28: "when I
+  // look at the tasks nothing is for me").
+  const myClientTaskCount = (clientId: string) => (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser)).length;
+  const myProjectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser)).length;
   // Open tasks bucketed by client, for the Clients directory's Tasks
   // column. One pass instead of a filter per row.
   // Not memoized: useMemo over a bucketing loop trips
@@ -4679,7 +4692,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             seenAt={finishedMarkerAt}
             onOpenTask={(_clientId: string, taskId: string) => setOpenTaskId(taskId)} />
         ) : myWork ? (
-          <ClientsBoard groups={myWorkGroups} clientTaskCount={clientTaskCount} projectTaskCount={projectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
+          <ClientsBoard groups={myWorkGroups} clientTaskCount={myClientTaskCount} projectTaskCount={myProjectTaskCount} hasUnreadMessage={hasUnreadMessage} onOpenTask={setOpenTaskId}
             onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); }}
             onOpenProject={(id) => {
               if (id === PERSONAL_PROJECT_ID) { setMyWork(false); setPersonalView(true); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setOpenTaskId(null); return; }
