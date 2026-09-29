@@ -339,6 +339,20 @@ function TaskDetailBody({
 // away underneath it rather than hidden anywhere deeper. A phase auto-opens
 // the first time this loads if it holds the next required step, so a
 // returning client doesn't have to go hunting for where they left off.
+const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
+// Groups a flat task list by project — a section per project, plus a
+// catch-all for anything whose project got deleted/reassigned out from
+// under it. Shared by both top-level sections (needsResponseGroups,
+// inProgressGroups) rather than duplicated per section.
+function groupByProject(list: WaitingTask[], projects: WaitingProject[]) {
+  const groups = projects
+    .map((p) => ({ project: p as WaitingProject | null, tasks: list.filter((t) => t.projectId === p.id).sort(sortFn) }))
+    .filter((g) => g.tasks.length > 0);
+  const orphan = list.filter((t) => !projects.some((p) => p.id === t.projectId)).sort(sortFn);
+  if (orphan.length > 0) groups.push({ project: null, tasks: orphan });
+  return groups;
+}
+
 export default function WaitingView({ token }: { token: string }) {
   const [clientName, setClientName] = useState<string | null>(null);
   // Off until the API says otherwise, so a slow/failed load never flashes an
@@ -510,19 +524,6 @@ export default function WaitingView({ token }: { token: string }) {
     for (const el of Object.values(threadRefs.current)) { if (el) el.scrollTop = el.scrollHeight; }
   }, [tasks, selectedTaskId]);
 
-  const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
-  // Groups a flat task list by project — a section per project, plus a
-  // catch-all for anything whose project got deleted/reassigned out from
-  // under it. Shared by both top-level sections below (needsResponseGroups,
-  // inProgressGroups) rather than duplicated per section.
-  const groupByProject = (list: WaitingTask[]) => {
-    const groups = projects
-      .map((p) => ({ project: p as WaitingProject | null, tasks: list.filter((t) => t.projectId === p.id).sort(sortFn) }))
-      .filter((g) => g.tasks.length > 0);
-    const orphan = list.filter((t) => !projects.some((p) => p.id === t.projectId)).sort(sortFn);
-    if (orphan.length > 0) groups.push({ project: null, tasks: orphan });
-    return groups;
-  };
   // Split into two top-level sections instead of interleaving within each
   // project: "what we need from you" (needsResponse) always leads, since
   // that's the actionable half of the page, then "what we're working on"
@@ -545,8 +546,8 @@ export default function WaitingView({ token }: { token: string }) {
     [projectFilter],
   );
   const open = useMemo(() => (tasks ?? []).filter((t) => t.status !== "done").filter(inFilter), [tasks, inFilter]);
-  const needsResponseGroups = useMemo(() => groupByProject(open.filter((t) => t.needsResponse)), [open, projects]);
-  const inProgressGroups = useMemo(() => groupByProject(open.filter((t) => !t.needsResponse)), [open, projects]);
+  const needsResponseGroups = useMemo(() => groupByProject(open.filter((t) => t.needsResponse), projects), [open, projects]);
+  const inProgressGroups = useMemo(() => groupByProject(open.filter((t) => !t.needsResponse), projects), [open, projects]);
   const totalOpen = open.length;
   // Completed items are their own flat list (not grouped) since there's
   // rarely more than a handful — shown behind the collapsed toggle below.
