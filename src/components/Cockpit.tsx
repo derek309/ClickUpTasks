@@ -52,13 +52,14 @@ import {
   THIS_MONTH_END,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, upsertProject, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
 import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 import { usePins } from "./cockpit/usePins";
+import { useShareLinks } from "./cockpit/useShareLinks";
 import { useNotify } from "./cockpit/useNotify";
 import { useAiHelpers } from "./cockpit/useAiHelpers";
 import { useComposer } from "./cockpit/useComposer";
@@ -934,96 +935,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A folder link is just the current client/project link with tab=chat
   // and folder=<id> layered on — built fresh at click time, not mirrored
   // into the live URL bar as you browse (see currentNav's vaultFolder note).
-  // Public "here's what we need from you" link for this client — see
-  // supabase/client-share-token.sql. Unlike copyLink above, this is a share
-  // link, not an app deep-link: it needs to keep working (and copy to the
-  // same URL) every time it's clicked, so the token is generated once and
-  // reused, not regenerated per click. crypto.randomUUID() is fine here —
-  // this only needs to be unguessable, not secret from the browser that's
-  // about to hand it to the client.
-  // projectId is optional — when given, the copied link opens pre-switched
-  // to that one list (the public page's own project switcher) instead of
-  // the client's merged view. Still the exact same token underneath: a
-  // client with several projects gets ONE link to hand out (or bookmark),
-  // not a separate one to track per list — the ?project= param is just a
-  // convenience starting point, copyable from any project's own menu.
-  // Core of copyClientShareLink below, factored out so the task email
-  // composer (auto-populating a client link in the draft) can mint/reuse the
-  // same token without going through the clipboard. Returns null (and toasts)
-  // when a non-admin hits a client with no token yet — same refusal as before.
-  const getClientShareUrl = (clientId: string, opts?: { projectId?: string; taskId?: string }): string | null => {
-    const c = clientById(clientId);
-    if (!c) return null;
-    // "Personal" is a pseudo-client every teammate's private tasks share (see
-    // PERSONAL_CLIENT_ID) — minting a share token for it would publish every
-    // teammate's private list on the public waiting page, since that page
-    // selects tasks by client_id. There is no legitimate client to hand this
-    // link to, so it's refused outright rather than gated on admin.
-    if (clientId === PERSONAL_CLIENT_ID) { pushToast("Personal tasks can't be shared."); return null; }
-    if (!c.shareToken && !canAdmin) { pushToast("Ask an admin to create this client's share link first."); return null; }
-    const token = c.shareToken ?? crypto.randomUUID().replace(/-/g, "");
-    if (!c.shareToken) {
-      const nc = { ...c, shareToken: token };
-      setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
-      markOwnClientWrite(nc.id);
-      upsertClient(nc);
-    }
-    const params = new URLSearchParams();
-    if (opts?.projectId) params.set("project", opts.projectId);
-    if (opts?.taskId) params.set("task", opts.taskId);
-    const qs = params.toString();
-    return `${window.location.origin}/waiting/${token}${qs ? `?${qs}` : ""}`;
-  };
-  // Public "here's what we need from you" link for this client — see
-  // supabase/client-share-token.sql. Unlike copyLink above, this is a share
-  // link, not an app deep-link: it needs to keep working (and copy to the
-  // same URL) every time it's clicked, so the token is generated once and
-  // reused, not regenerated per click. crypto.randomUUID() is fine here —
-  // this only needs to be unguessable, not secret from the browser that's
-  // about to hand it to the client.
-  // projectId is optional — when given, the copied link opens pre-switched
-  // to that one list (the public page's own project switcher) instead of
-  // the client's merged view. Still the exact same token underneath: a
-  // client with several projects gets ONE link to hand out (or bookmark),
-  // not a separate one to track per list — the ?project= param is just a
-  // convenience starting point, copyable from any project's own menu.
-  const copyClientShareLink = (clientId: string, projectId?: string) => {
-    const url = getClientShareUrl(clientId, { projectId });
-    if (!url) return;
-    navigator.clipboard?.writeText(url).then(
-      () => pushToast(projectId ? "🔗 List link copied — opens straight to this list" : "🔗 Client link copied — shows what we're waiting on them for"),
-      () => pushToast("⚠️ Couldn't copy link"),
-    );
-  };
-  // Real per-project link (see supabase/project-share-token.sql) — a
-  // DIFFERENT token from the client's own, not a query param on it. Every
-  // /api/waiting/[token]/* lookup scopes to this project's id the moment it
-  // resolves the token, so there is nothing else for the recipient to reach
-  // regardless of what they click or edit in the URL — unlike
-  // copyClientShareLink(clientId, projectId) above, whose ?project= is only
-  // a starting view within the full client link. Same mint-once-reuse shape
-  // as getClientShareUrl (Derek: emailing a list link to outside reviewers
-  // was leaking every other list on the client).
-  const getProjectShareUrl = (projectId: string): string | null => {
-    const p = projectById(projectId);
-    if (!p) return null;
-    if (!p.shareToken && !canAdmin) { pushToast("Ask an admin to create this list's share link first."); return null; }
-    const token = p.shareToken ?? crypto.randomUUID().replace(/-/g, "");
-    if (!p.shareToken) {
-      const np = { ...p, shareToken: token };
-      setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
-      upsertProject(np);
-    }
-    return `${window.location.origin}/waiting/${token}`;
-  };
-  const copyProjectShareLink = (projectId: string) => {
-    const url = getProjectShareUrl(projectId);
-    if (!url) return;
-    navigator.clipboard?.writeText(url).then(
-      () => pushToast("🔗 List link copied — only this list, nothing else on the client"),
-      () => pushToast("⚠️ Couldn't copy link"),
-    );
-  };
   // A failed save is not a passing event, it is a state: the screen is showing
   // something the database refused, and it will keep showing it until the page
   // is reloaded. A toast said so once and then took the evidence away with it.
@@ -1879,6 +1790,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   const { createTasksFromDump } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles });
   const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary, draftDescription, draftingDescription } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
+  const { getClientShareUrl, copyClientShareLink, copyProjectShareLink } = useShareLinks({ clientById, pushToast, canAdmin, setClients, markOwnClientWrite, projectById, setProjects });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
     <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
