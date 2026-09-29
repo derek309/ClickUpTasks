@@ -1763,13 +1763,20 @@ export type StepWatch =
   | { kind: "reply" }
   | { kind: "handoff"; subId: string };
 
+/** Every value next_step_watch may hold. The database check constraint
+ *  (supabase/next-step-watch-video.sql) carries this exact pattern and a test
+ *  holds the two together: when they drifted, a step waiting on a video
+ *  approval could not be saved. Add a review kind here AND in a new SQL file. */
+export const STEP_WATCH_PATTERN = "^(approved:(doc|image|page|video)|reply|handoff:[A-Za-z0-9_-]+)$";
+const STEP_WATCH_RE = new RegExp(STEP_WATCH_PATTERN);
+
 export function parseStepWatch(raw: string | null | undefined): StepWatch | null {
-  if (!raw) return null;
+  if (!raw || !STEP_WATCH_RE.test(raw)) return null;
   if (raw === "reply") return { kind: "reply" };
-  const approved = /^approved:(doc|image|page|video)$/.exec(raw);
-  if (approved) return { kind: "approved", review: approved[1] as "doc" | "image" | "page" | "video" };
-  const handoff = /^handoff:([A-Za-z0-9_-]+)$/.exec(raw);
-  return handoff ? { kind: "handoff", subId: handoff[1] } : null;
+  const [kind, rest] = [raw.slice(0, raw.indexOf(":")), raw.slice(raw.indexOf(":") + 1)];
+  return kind === "approved"
+    ? { kind: "approved", review: rest as "doc" | "image" | "page" | "video" }
+    : { kind: "handoff", subId: rest };
 }
 export const formatStepWatch = (w: StepWatch): string =>
   w.kind === "reply" ? "reply" : w.kind === "approved" ? `approved:${w.review}` : `handoff:${w.subId}`;

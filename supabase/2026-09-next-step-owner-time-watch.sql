@@ -5,6 +5,7 @@
 --   next_step_time   a time of day for the step, "17:00"
 --   next_step_watch  what ticks the step off by itself:
 --                      approved:doc | approved:image | approved:page  the client approves that review
+--                        (approved:video added 2026-09-29, supabase/next-step-watch-video.sql)
 --                      reply                                          the client writes back on any channel
 --                      handoff:<checklist item id>                    a delegation is marked done
 --

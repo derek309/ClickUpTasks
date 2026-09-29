@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatStepTime, formatStepWatch, parseStepWatch, stepWatchState, suggestNextSteps } from "./data";
+import { STEP_WATCH_PATTERN, formatStepTime, formatStepWatch, parseStepWatch, stepWatchState, suggestNextSteps } from "./data";
 
 const nameOf = (id: string) => ({ m_mp: "Michaella Pastrana", m_df: "Derek Fox" } as Record<string, string>)[id] ?? "Someone";
 
@@ -9,6 +11,15 @@ describe("parseStepWatch", () => {
     expect(parseStepWatch("approved:audio")).toBeNull();
     expect(parseStepWatch("handoff:")).toBeNull();
     expect(parseStepWatch(null)).toBeNull();
+  });
+
+  it("only writes values the database check allows", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/next-step-watch-video.sql"), "utf8");
+    expect(sql).toContain(`next_step_watch ~ '${STEP_WATCH_PATTERN}'`);
+    const allowed = new RegExp(STEP_WATCH_PATTERN);
+    for (const review of ["doc", "image", "page", "video"] as const) expect(formatStepWatch({ kind: "approved", review })).toMatch(allowed);
+    expect(formatStepWatch({ kind: "reply" })).toMatch(allowed);
+    expect(formatStepWatch({ kind: "handoff", subId: "s_12ab-C" })).toMatch(allowed);
   });
 });
 
