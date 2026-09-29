@@ -62,17 +62,22 @@ describe("the deep-link URL", () => {
   });
 });
 
-// Plan and the completed log used to be clicks and nothing else: neither could
-// be linked or bookmarked, and the completed log had no way in but landing on
-// All Tasks and pressing its button.
+// The review boards and the completed log used to be clicks and nothing else:
+// none could be linked or bookmarked.
 describe("the second half of a view", () => {
-  it("carries My Work's Plan tab, and only there", () => {
-    expect(buildSearch({ ...base, view: "work", sub: "plan" })).toBe("?view=work&sub=plan");
-    expect(parseSearch("?view=work&sub=plan").sub).toBe("plan");
+  it("carries My Work's boards, and only there", () => {
+    expect(buildSearch({ ...base, view: "work", sub: "reviews" })).toBe("?view=work&sub=reviews");
+    expect(parseSearch("?view=work&sub=drafts").sub).toBe("drafts");
     // Work is the default half, so it stays off the URL.
     expect(buildSearch({ ...base, view: "work", sub: null })).toBe("?view=work");
-    // Nowhere else has a Plan.
-    expect(buildSearch({ ...base, view: "clients", sub: "plan" })).toBe("?view=clients");
+    // Nowhere else has these boards.
+    expect(buildSearch({ ...base, view: "clients", sub: "reviews" })).toBe("?view=clients");
+  });
+
+  // Plan and Next steps were removed on 2026-09-28.
+  it("lands an old Plan or Next steps link on Work", () => {
+    expect(parseSearch("?view=work&sub=plan").sub).toBe(null);
+    expect(parseSearch("?view=work&sub=steps").sub).toBe(null);
   });
 
   it("carries the completed log on All Tasks, whoever it is scoped to", () => {
@@ -90,10 +95,10 @@ describe("the second half of a view", () => {
 
   it("round trips both halves through a link", () => {
     for (const s of [
-      { ...base, view: "work" as const, sub: "plan" as const },
+      { ...base, view: "work" as const, sub: "reviews" as const },
       { ...base, sub: "completed" as const },
       { ...base, assignee: "all", sub: "completed" as const },
-      { ...base, view: "work" as const, sub: "plan" as const, task: "t_9" },
+      { ...base, view: "work" as const, sub: "drafts" as const, task: "t_9" },
     ]) {
       expect(buildSearch(parseSearch(buildSearch(s)))).toBe(buildSearch(s));
     }

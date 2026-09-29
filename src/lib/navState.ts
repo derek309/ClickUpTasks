@@ -12,7 +12,6 @@
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?assignee=<id>|all            All Tasks scoped to one person or everyone
 //                                  (the default "mine" is never encoded)
-//   ?sub=plan                     My Work showing Plan instead of Work
 //   ?sub=reviews                  My Work showing what is out with a client
 //   ?sub=drafts                   My Work showing what is written and unsent
 //   ?sub=completed                All Tasks showing the completed log
@@ -23,7 +22,7 @@
 // day" and "here is what we finished" could not be linked, bookmarked or sent
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
-export type NavSub = "plan" | "steps" | "reviews" | "drafts" | "completed";
+export type NavSub = "reviews" | "drafts" | "completed";
 export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
@@ -31,7 +30,7 @@ export function buildSearch(s: NavState): string {
     p.set("view", s.view);
     if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
     // Only My Work has these halves; anywhere else the parameter would be noise.
-    if (s.view === "work" && (s.sub === "plan" || s.sub === "reviews" || s.sub === "drafts")) p.set("sub", s.sub);
+    if (s.view === "work" && (s.sub === "reviews" || s.sub === "drafts")) p.set("sub", s.sub);
   } else if (s.client !== "all") {
     p.set("client", s.client);
     if (s.project) p.set("project", s.project);
@@ -70,7 +69,9 @@ export function parseSearch(search: string): NavState {
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     assignee: p.get("assignee"),
-    sub: sub === "plan" || sub === "steps" || sub === "reviews" || sub === "drafts" || sub === "completed" ? sub : null,
+    // Plan and Next steps were removed (2026-09-28); an old ?sub=plan link
+    // lands on Work.
+    sub: sub === "reviews" || sub === "drafts" || sub === "completed" ? sub : null,
   };
 }
 
@@ -83,14 +84,6 @@ export const NAV_KEY_VIEWS: Record<string, "dashboard" | "alltasks" | "clients" 
   "4": "projects",
   "5": "personal",
 };
-
-// Titles longer than this get quietly rewritten by AI after the task is
-// created (see maybeCleanupTaskTitle). 80 characters is roughly two typical
-// sentences: a genuine task title almost never runs that long, so anything
-// past it is a sign the whole thought got typed into the title box. It also
-// matches the "under 80 characters" title the Gmail extension's enrich prompt
-// already asks Gemini for, so both paths agree on what a good title looks like.
-export const LONG_TITLE_THRESHOLD = 80;
 
 // The first half of a deep link to a direct message, for notification emails:
 // it is always followed by &dm=<memberId>. Named for Team Chat, which this app
