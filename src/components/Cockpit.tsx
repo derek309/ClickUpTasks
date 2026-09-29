@@ -75,7 +75,7 @@ import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTas
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
 import AddClientModal from "./AddClientModal";
-import { usePersisted } from "@/lib/usePersisted";
+import { afterFirstFrame, usePersisted } from "@/lib/usePersisted";
 
 
 import { I, Avatar, SideItem, MAX_ATTACHMENT_BYTES, newId, formatBytes, kindFromName, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
@@ -1063,7 +1063,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     over: overPin === id && dragPin !== id,
   });
   const [drawerFull, setDrawerFull] = useState(false);
-  useEffect(() => { try { setDrawerFull(localStorage.getItem("cut_drawerFull") === "1"); } catch {} }, []);
+  useEffect(() => afterFirstFrame(() => setDrawerFull(localStorage.getItem("cut_drawerFull") === "1")), []);
   // Drop the project filter whenever we leave its client (or enter My Work).
   useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView && !settingsView ? p : null)); }, [activeClient, myWork, personalView, inboxView, settingsView, projects]);
   // Clear the folder-rail scope whenever the client/view changes.
@@ -1226,16 +1226,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useState<"light" | "dark" | "auto">("light");
   const [sidebarHidden, setSidebarHidden] = useState(false);
-  useEffect(() => { try { setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1"); } catch {} }, []);
+  useEffect(() => afterFirstFrame(() => setSidebarHidden(localStorage.getItem("cut_sidebarHidden") === "1")), []);
   // Theme: light/dark/auto, persisted as cut_theme. Auto resolves off the
   // clock (dark 19:00–6:59) rather than prefers-color-scheme — there's no
   // OS-level dark-mode signal in play here, just "dim it in the evening".
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("cut_theme");
-      if (saved === "light" || saved === "dark" || saved === "auto") setTheme(saved);
-    } catch {}
-  }, []);
+  useEffect(() => afterFirstFrame(() => {
+    const saved = localStorage.getItem("cut_theme");
+    if (saved === "light" || saved === "dark" || saved === "auto") setTheme(saved);
+  }), []);
   const resolveTheme = (t: "light" | "dark" | "auto"): "light" | "dark" => {
     if (t !== "auto") return t;
     const h = new Date().getHours();
@@ -2383,6 +2381,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Memoized — a linear scan of the full tasks table every render, even
   // when no task is open.
   const openTask = useMemo(() => tasks.find((t) => t.id === openTaskId) ?? null, [tasks, openTaskId]);
+  // The drawer's own slices, kept as the same arrays until they really change:
+  // filtering inline handed it new ones on every render anywhere in the app.
+  const openTaskClientId = openTask?.clientId ?? null;
+  const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId) : []), [messages, openTaskId]);
+  const openTaskClientLinks = useMemo(() => (openTaskClientId ? clientLinks.filter((l) => l.clientId === openTaskClientId) : []), [clientLinks, openTaskClientId]);
   // The start load holds the last 60 days of messages (db.ts fetchAll). A
   // conversation's older ones load when it opens: the task drawer, a client's
   // Journal, the client email composer. Once per conversation per session.
@@ -4904,10 +4907,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           full={drawerFull} onToggleFull={toggleDrawerFull}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={messages.filter((m) => m.taskId === openTask.id)} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={openTaskMessages} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
-          clientLinks={clientLinks.filter((l) => l.clientId === openTask.clientId)}
+          clientLinks={openTaskClientLinks}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
       )}
 

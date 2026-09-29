@@ -16,6 +16,14 @@ import { useEffect, useRef, useState } from "react";
 // exist during the server render, and seeding from it there would make the
 // server and client markup disagree. Deferred a frame so nothing sets state
 // synchronously inside an effect.
+/** Runs a read of browser storage one frame after mount, for an effect to
+ *  return: the same deferral usePersisted uses, for reads that predate it and
+ *  keep their own keys. Storage that is unavailable leaves the default. */
+export function afterFirstFrame(read: () => void): () => void {
+  const r = requestAnimationFrame(() => { try { read(); } catch { /* private mode, blocked storage */ } });
+  return () => cancelAnimationFrame(r);
+}
+
 export function usePersisted<T>(key: string, initial: T, isValid?: (v: unknown) => boolean): [T, (v: T) => void] {
   const [value, setValue] = useState<T>(initial);
   // Guards against the load landing after the user has already changed the
@@ -23,17 +31,14 @@ export function usePersisted<T>(key: string, initial: T, isValid?: (v: unknown) 
   const touched = useRef(false);
 
   useEffect(() => {
-    const r = requestAnimationFrame(() => {
+    return afterFirstFrame(() => {
       if (touched.current) return;
-      try {
-        const raw = localStorage.getItem(`ct.${key}`);
-        if (raw === null) return;
-        const parsed = JSON.parse(raw) as T;
-        if (isValid && !isValid(parsed)) return;
-        setValue(parsed);
-      } catch { /* corrupt or unavailable: keep the default */ }
+      const raw = localStorage.getItem(`ct.${key}`);
+      if (raw === null) return;
+      const parsed = JSON.parse(raw) as T;
+      if (isValid && !isValid(parsed)) return;
+      setValue(parsed);
     });
-    return () => cancelAnimationFrame(r);
     // isValid is intentionally not a dependency: callers pass an inline
     // function, which would re-run this on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
