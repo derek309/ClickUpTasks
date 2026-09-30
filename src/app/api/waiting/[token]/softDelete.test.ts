@@ -12,6 +12,7 @@ vi.mock("@/lib/supabaseAdmin", async () => ({
 }));
 vi.mock("@/lib/db", () => ({ TASK_FILES_BUCKET: "task-files" }));
 vi.mock("@/lib/rateLimit", () => ({ rateLimit: async () => null }));
+vi.mock("@/lib/clientAnswered", () => ({ clientAnsweredOnTask: async () => {} }));
 vi.mock("@/lib/waitingNotify", () => ({
   resolveNotifyRecipient: async () => null,
   notifyTeamOfClientActivity: async () => {},

@@ -4,6 +4,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase, advanceDue, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
 import { isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
+import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -188,6 +189,7 @@ async function handleMessageReply(body: any, custom: any) {
   const taskId = (await taskForConversation(contact.id, ghlConversationId))
     ?? await upsertConversationTask(contact, ghlContactId);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
+  await clientAnsweredOnTask(taskId, "reply");
   const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
   const notifText = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`

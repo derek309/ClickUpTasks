@@ -11,6 +11,7 @@ import { SAFE_CONTACT_ID, closeAnsweredReplyTask, isClosedReplyTask } from "@/li
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
+import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -288,6 +289,7 @@ export async function ingestInboundMessage(opts: {
   if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific(), updated_by: null }).eq("id", taskId);
   else taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
+  await clientAnsweredOnTask(taskId, "reply");
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 80);
   const text = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`

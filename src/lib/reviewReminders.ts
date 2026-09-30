@@ -88,6 +88,14 @@ export function reminderRound(s: Pick<ReminderState, "sentAt" | "roundAt" | "las
   return { start, sent, capped: sent >= MAX_REMINDERS };
 }
 
+/** Where the reminders stand, in a few words, for the task's Reminders chip
+ *  and the deliverable's row. The review's own screen says it in a sentence. */
+export function reminderSummary(everyDays: number, round: { sent: number; capped: boolean } | null): string {
+  if (everyDays <= 0) return "off";
+  if (!round || round.sent === 0) return "none sent yet";
+  return round.capped ? `all ${MAX_REMINDERS} sent, no answer` : `${round.sent} of ${MAX_REMINDERS} sent`;
+}
+
 /** Whether a reminder goes out on this run. */
 export function reminderDue(s: ReminderState): ReminderDecision {
   const { start: roundStart, sent: sentThisRound } = reminderRound(s);

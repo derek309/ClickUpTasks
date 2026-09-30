@@ -26,7 +26,7 @@ import { PAGE_TOO_BIG, pageText, pageTooBig } from "./pageHtml";
 import { buildReviewEmail } from "./reviewEmail";
 import { placeDraftLink } from "./draftLink";
 import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
-import { htmlToText } from "./data";
+import { REVIEW_FOLLOW_UP_DAYS, addBusinessDaysIso, htmlToText, todayPacific } from "./data";
 import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
 import { MAX_SET_IMAGES, cleanImageLabel, imageLabel, parseImageSet, type ImageSetItem } from "./imageSet";
@@ -398,6 +398,11 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       // The same step the drawer takes after a send: the task waits on the client.
       await event(task.id, `${label} sent version ${number} of the ${what(kind)} for review`);
       if (task.status !== "waiting") await supabaseAdmin.from("tasks").update({ status: "waiting", waiting_on_client: true, updated_by: null }).eq("id", task.id);
+      // And the owner checks back once the client's reminders have run out,
+      // unless a follow up further out is already set (data.ts waitingFollowUp).
+      const today = todayPacific();
+      await supabaseAdmin.from("tasks").update({ follow_up_at: addBusinessDaysIso(today, REVIEW_FOLLOW_UP_DAYS), updated_by: null })
+        .eq("id", task.id).or(`follow_up_at.is.null,follow_up_at.lte.${today}`);
 
       let emailNote = "No email was drafted.";
       if (email.draftEmail) {

@@ -962,6 +962,30 @@ export function applyWaitingStatusSync(before: { status: TaskStatus; waitingOnCl
   return out;
 }
 
+// Waiting on a client used to mean nobody was reminded of anything: the task
+// sat in Waiting until someone remembered it (Derek, 2026-09-30: "if we're
+// waiting on a client, we need to automatically have a reminder set"). The
+// reminder is the task's own follow up date, which is what brings a task back
+// onto its owner's list. Two business days for a plain wait. Four for a review,
+// because the client is emailed on each of the first three (reviewReminders.ts)
+// and the owner is only needed once those have run out.
+export const WAITING_FOLLOW_UP_DAYS = 2;
+export const REVIEW_FOLLOW_UP_DAYS = 4;
+/** The follow up date to set when this edit starts a wait on the client, or
+ *  null to leave it alone: it was already waiting, the edit sets its own date,
+ *  or a date further out is already there. `synced` is the edit after
+ *  applyWaitingStatusSync. */
+export function waitingFollowUp(
+  before: { status: TaskStatus; waitingOnClient?: boolean; followUpAt?: string | null },
+  synced: Partial<Task>,
+  today: string = TODAY,
+): string | null {
+  const startsWaiting = synced.waitingOnClient === true && !before.waitingOnClient && before.status !== "waiting";
+  if (!startsWaiting || synced.followUpAt !== undefined) return null;
+  if (before.followUpAt && before.followUpAt > today) return null;
+  return addBusinessDaysIso(today, WAITING_FOLLOW_UP_DAYS);
+}
+
 /** What a client's answer does to a task, as the snake_case columns to write.
  *
  *  The one rule for every public route where a client answers: a reply, a review
@@ -987,8 +1011,10 @@ export function clientAnswerPatch(
   if (synced.status !== undefined) patch.status = synced.status;
   if (synced.waitingOnClient !== undefined) patch.waiting_on_client = synced.waitingOnClient;
   if (synced.assigneeId !== undefined) patch.assignee_id = synced.assigneeId;
-  // Runs on the server, whose clock is UTC: see todayPacific.
-  if (wasWaiting) patch.due = todayPacific();
+  // Runs on the server, whose clock is UTC: see todayPacific. The follow up
+  // goes with the wait it was set for (waitingFollowUp): left in place, a date
+  // still two days out would keep the answered task off today's list.
+  if (wasWaiting) { patch.due = todayPacific(); patch.follow_up_at = null; }
   return patch;
 }
 

@@ -39,6 +39,21 @@ function addDaysIso(iso, days) {
   dt.setUTCDate(dt.getUTCDate() + days);
   return dt.toISOString().slice(0, 10);
 }
+// When a task starts waiting on the client, the date its owner checks back:
+// two business days out, unless a follow up further out is already set. The
+// app's waitingFollowUp (src/lib/data.ts), replicated here because this is a
+// separate Node process with no app import.
+function waitingFollowUp(before) {
+  const today = todayIso();
+  if (before.status === "waiting" || (before.follow_up_at && before.follow_up_at > today)) return null;
+  let out = today;
+  for (let left = 2; left > 0;) {
+    out = addDaysIso(out, 1);
+    const dow = new Date(`${out}T12:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) left--;
+  }
+  return out;
+}
 // Blank-line-separated paragraphs -> <p> tags, matching the web app's own
 // plainTextToHtml (src/lib/data.ts) so a draft opens correctly in the task
 // drawer's rich-text review panel — this script has no import access to
@@ -339,7 +354,7 @@ export function createServer(opts = {}) {
       // waiting boundary: the read is what enforces trash and privacy, and
       // "waiting" status and waiting_on_client always move together after it
       // (see data.ts's applyWaitingStatusSync).
-      const before = await loadTask(id, "status");
+      const before = await loadTask(id, "status,follow_up_at");
       if (!before) return noTask(id);
       if (assignee_id !== undefined) {
         const resolved = await resolveAssignee(assignee_id);
@@ -355,6 +370,8 @@ export function createServer(opts = {}) {
         if (waiting_on_client) { patch.assignee_id = null; patch.status = "waiting"; }
         else if (before.status === "waiting") patch.status = "review";
       }
+      const checkBack = patch.status === "waiting" ? waitingFollowUp(before) : null;
+      if (checkBack) patch.follow_up_at = checkBack;
       if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
       const [t] = await patchTask(id, patch);
       if (!t) return noTask(id);
@@ -385,13 +402,17 @@ export function createServer(opts = {}) {
     `Set a task's status (${STATUSES.join(" | ")}). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.`,
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
-      const before = await loadTask(id, "status");
+      const before = await loadTask(id, "status,follow_up_at");
       if (!before) return noTask(id);
       const patch = { status };
       // "waiting" status and waiting_on_client always move together (see
       // data.ts's applyWaitingStatusSync) — replicated here since this tool
       // is a separate Node process with no app import.
-      if (status === "waiting") { patch.waiting_on_client = true; patch.assignee_id = null; }
+      if (status === "waiting") {
+        patch.waiting_on_client = true; patch.assignee_id = null;
+        const checkBack = waitingFollowUp(before);
+        if (checkBack) patch.follow_up_at = checkBack;
+      }
       else if (before.status === "waiting") patch.waiting_on_client = false;
       const [t] = await patchTask(id, patch);
       let ghl = "";

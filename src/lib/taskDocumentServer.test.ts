@@ -54,6 +54,10 @@ vi.mock("./waitingNotify", () => ({
   notifyTeamOfClientActivity: (...args: unknown[]) => notify(...args),
 }));
 vi.mock("./serverAuth", () => ({ requireUser: async () => null, callerCanSeeTask: async () => false }));
+// Its own queries are tested beside it (inboundIngest.outbound.test.ts); here
+// the question is only whether an answer reaches it, and as what.
+const answered = vi.fn<(taskId: string | null, what: string) => Promise<void>>(async () => {});
+vi.mock("./clientAnswered", () => ({ clientAnsweredOnTask: (taskId: string | null, what: string) => answered(taskId, what) }));
 // The document's comments, as docComments returns them, set per test.
 let docCommentRows: any[] = [];
 vi.mock("./taskDocumentFiles", () => ({
@@ -223,7 +227,7 @@ describe("clientPublish", () => {
     const comment = rpcCalls.find((c) => c.name === "append_comment")?.args.comment;
     expect(comment).toMatchObject({ kind: "event", authorId: "client" });
     const taskUpdate = calls.find((c) => c.table === "tasks" && c.op === "update");
-    expect(taskUpdate?.payload).toEqual({ status: "review", waiting_on_client: false, due: todayIso(), updated_by: null });
+    expect(taskUpdate?.payload).toEqual({ status: "review", waiting_on_client: false, due: todayIso(), follow_up_at: null, updated_by: null });
   });
 
   it("moves the task to Approved (not Done) and always emails the owner on approval", async () => {
@@ -232,6 +236,8 @@ describe("clientPublish", () => {
     await clientPublish(scope, "client_approved", "<p>Latest</p>", 3);
     const taskUpdate = calls.find((c) => c.table === "tasks" && c.op === "update");
     expect((taskUpdate?.payload as any).status).toBe("approved");
+    // The follow up waiting on this approval finishes here, not in a browser.
+    expect(answered).toHaveBeenLastCalledWith(scope.taskId, `approved:${scope.kind}`);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0][0]).toMatchObject({ notifyRecipient: "u_owner" });
     expect((notify.mock.calls[0][0] as any).subject).toMatch(/approved/);

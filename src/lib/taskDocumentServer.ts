@@ -28,6 +28,7 @@ import { discardVersionFile, docComments, docVersionFile, readPageFile, sharedVe
 import { filePurpose, isFileKind, kindNoun, kindWhat, noDocumentYet, parseKind, type ReviewKind } from "./reviewKinds";
 import { formatImageSet, parseImageSet, replaceSetFiles, setFiles } from "./imageSet";
 import { openClientComments } from "./reviewChanges";
+import { clientAnsweredOnTask } from "./clientAnswered";
 
 /** Why a client cannot approve: comments or edits of theirs are changes to submit
  *  (Derek, 2026-09-15: one button, Approve or Submit changes, never both). */
@@ -351,6 +352,9 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
     (approved ? "approved" : "review") as TaskStatus,
   );
   await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
+  // Either answer is news, so a follow up date still days away must not hide
+  // it; an approval also finishes a follow up that was waiting on it.
+  await clientAnsweredOnTask(scope.taskId, approved ? `approved:${scope.kind}` : "changes");
 
   // Named by the review, so a task's document, image review and HTML review tell apart in an inbox.
   await notifyOwnerOfClientDoc(scope, {

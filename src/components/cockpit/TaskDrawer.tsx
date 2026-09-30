@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, REVIEW_FOLLOW_UP_DAYS, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -13,7 +13,7 @@ import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon }
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl } from "@/lib/db";
+import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
 import { SizePicker } from "./SizePicker";
@@ -22,7 +22,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
-import { TaskDocument } from "./TaskDocument";
+import { TaskDocument, type ReviewReminders } from "./TaskDocument";
 import { HandoffPage } from "./HandoffPage";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
@@ -188,6 +188,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Reads as text until you click Edit: a live editor on every task put a
   // formatting toolbar in front of what the description actually says.
   const [descEditing, setDescEditing] = useState(false);
+  // The client reminders on each review that is with the client, as the
+  // reviews themselves report them (TaskDocument onReminders). Keyed by task,
+  // like the other state here, because the drawer is not remounted per task.
+  const [reminderState, setReminderState] = useState<{ taskId: string; byKind: Partial<Record<TaskDocumentKind, ReviewReminders>> }>({ taskId: "", byKind: {} });
+  const reportReminders = (kind: TaskDocumentKind) => (r: ReviewReminders | null) =>
+    setReminderState((p) => {
+      const byKind = { ...(p.taskId === task.id ? p.byKind : {}) };
+      if (r) byKind[kind] = r; else delete byKind[kind];
+      return { taskId: task.id, byKind };
+    });
+  const reminders = reminderState.taskId === task.id ? Object.values(reminderState.byKind).filter((r): r is ReviewReminders => !!r) : [];
   const [dupOpen, setDupOpen] = useState(false);
   // The delegation whose handoff page is open. A handoff link (?task=…&handoff=…)
   // opens it straight away; read once, since the app rewrites the address.
@@ -661,6 +672,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* How long it takes, as a small clock at the end of the due date. */}
         <SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} />
       </span>
+      {/* What is chasing this while the client has it (Derek, 2026-09-30:
+          "the other thing we're missing is reminders"). A review emails the
+          client by itself; a plain wait only has our own follow up date. Shown
+          only while something is with the client, so it is never an empty chip. */}
+      {(reminders.length > 0 || task.waitingOnClient) && (
+        <span className={chip}>
+          <span className="text-muted">Reminders</span>
+          {reminders.length > 0 ? (
+            <ActionMenu title="Reminder emails to the client" triggerClassName="-mx-1 rounded px-1 font-medium hover:bg-surface"
+              label={reminders.length === 1 ? reminders[0].summary : `${reminders.length} reviews`}
+              items={reminders.flatMap((r) => {
+                const pre = reminders.length > 1 ? `${r.name}: ` : "";
+                return [
+                  { label: `${r.name}: ${r.summary}`, onClick: r.open },
+                  r.everyDays !== 1 && { label: `${pre}Remind every business day`, onClick: () => r.setEvery(1) },
+                  r.everyDays !== 2 && { label: `${pre}Remind every 2 business days`, onClick: () => r.setEvery(2) },
+                  r.everyDays !== 0 && { label: `${pre}Turn reminders off`, onClick: () => r.setEvery(0) },
+                  r.canRestart && { label: `${pre}Restart reminders`, onClick: r.restart },
+                ];
+              })} />
+          ) : (
+            <span className="font-medium">{task.followUpAt ? `We follow up ${formatDue(task.followUpAt)}` : "None set"}</span>
+          )}
+        </span>
+      )}
       {task.recurrence === "custom" && (
         <span className={`${chip} flex-wrap py-1 text-muted`}>
           {task.recurrenceUnit === "nth-weekday" ? (
@@ -785,6 +821,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setAskNext(null);
     setAutoDone(null);
     setNextDraft("");
+  };
+  // A review has just gone to the client. Until now that set nothing, so the
+  // task sat in Waiting with no date on it. The client is emailed on each of
+  // the next three business days; the owner comes back the day after, and the
+  // follow up finishes itself if the client approves first. An open follow up
+  // keeps its own words and date and only gains the finish line.
+  const followUpOnReview = (kind: TaskDocumentKind, name: string) => {
+    const watch = `approved:${kind}`;
+    if (openStep) {
+      if (task.status !== "waiting") onPatch({ status: "waiting" });
+      if (!openStep.nextStepWatch) patchStep({ nextStepWatch: watch });
+      return;
+    }
+    const date = addBusinessDaysIso(TODAY, REVIEW_FOLLOW_UP_DAYS);
+    onPatch({ status: "waiting", followUpAt: date });
+    setNewStep(`Get ${client.name.split(" ")[0]}'s approval on ${name}`, date, watch);
   };
   const dateTone = { late: "bg-danger-soft text-danger", soon: "bg-highlight-soft text-highlight", later: "bg-background text-foreground", none: "bg-background text-muted" }[stepDate.tone];
   const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
@@ -1058,7 +1110,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
     <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
-      onEmailClient={(review) => startReviewEmail(review)}
+      onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
@@ -1426,7 +1478,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // client document. Each has its own key, apart from the lines beside it; below
   // startReviewEmail so they never read it before it exists.
   const reviewBlocks = !canHaveDocument ? null : REVIEW_LINES.map(({ kind }) => (
-    <TaskDocument key={`${kind}-${task.id}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
+    <TaskDocument key={`${kind}-${task.id}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
       startNonce={reviewStartNonce[kind]}
       onPresence={(exists) => setReviewPresence((p) => {

@@ -20,6 +20,8 @@ function builder(table: string) {
     eq: (k: string, v: unknown) => { call.filters.push([k, v]); return b; },
     neq: (k: string, v: unknown) => { call.filters.push([`neq:${k}`, v]); return b; },
     not: (k: string, _o: string, v: unknown) => { call.filters.push([`not:${k}`, v]); return b; },
+    is: (k: string, v: unknown) => { call.filters.push([`is:${k}`, v]); return b; },
+    gt: (k: string, v: unknown) => { call.filters.push([`gt:${k}`, v]); return b; },
     or: (expr: string) => { call.filters.push(["or", expr]); return b; },
     contains: (k: string, v: unknown) => { call.filters.push([`contains:${k}`, v]); return b; },
     order: () => b,
@@ -40,6 +42,7 @@ vi.mock("./supabaseAdmin", () => ({
 }));
 
 const { ingestOutboundMessage, ingestInboundMessage } = await import("./inboundIngest");
+const { clientAnsweredOnTask } = await import("./clientAnswered");
 
 const has = (c: Call, key: string) => c.filters.some(([k]) => k === key);
 const baseOpts = {
@@ -51,10 +54,11 @@ const baseOpts = {
 };
 
 type TaskRow = { title: string; priority: string; status: string };
-function setup(o: { threadTask?: string | null; conversationTask?: string | null; alreadyIngested?: boolean; tasks?: Record<string, TaskRow>; lastInbound?: string }) {
+function setup(o: { threadTask?: string | null; conversationTask?: string | null; alreadyIngested?: boolean; tasks?: Record<string, TaskRow>; lastInbound?: string; openStep?: { id: string; next_step_watch: string | null } }) {
   calls.length = 0;
   rpcs.length = 0;
   answer = (c) => {
+    if (c.table === "task_actions") return o.openStep ? [o.openStep] : [];
     if (c.table === "tasks" && has(c, "id")) return o.tasks?.[c.filters.find(([k]) => k === "id")![1] as string] ?? null;
     if (c.table === "messages" && c.cols === "created_at") return o.lastInbound ? [{ created_at: o.lastInbound }] : [];
     if (c.table === "clients") return [{ id: "cl_tracked" }];
@@ -165,6 +169,43 @@ describe("a client's next message after the Reply to task closed", () => {
     setup({ threadTask: "t_thread", tasks: { t_thread: { title: "Build the homepage", priority: "normal", status: "done" } } });
     await ingestInboundMessage(inbound);
     expect(newTasks()).toEqual([]);
-    expect(taskWrites().map((c) => c.filters)).toEqual([[["id", "t_thread"]]]);
+    expect(taskWrites().every((c) => c.filters.some(([k, v]) => k === "id" && v === "t_thread"))).toBe(true);
+    expect(taskWrites().some((c) => (c.payload as { due?: string }).due)).toBe(true);
+  });
+});
+
+// Derek, 2026-09-30: a follow up that waits on the client should not need
+// someone to have the task open for it to finish.
+describe("a client's answer and the follow up that was waiting on it", () => {
+  const stepTicks = () => calls.filter((c) => c.table === "task_actions" && c.op === "update");
+  const followUpPulls = () => taskWrites().filter((c) => has(c, "gt:follow_up_at"));
+
+  it("finishes a follow up that was waiting on exactly this", async () => {
+    setup({ openStep: { id: "ta_1", next_step_watch: "approved:doc" } });
+    await clientAnsweredOnTask("t_1", "approved:doc");
+    expect(stepTicks().map((c) => c.filters)).toEqual([[["id", "ta_1"]]]);
+    expect((stepTicks()[0].payload as { next_step_done_at: string }).next_step_done_at).toBeTruthy();
+  });
+
+  it("leaves a follow up that waits on something else, or on nothing", async () => {
+    for (const watch of ["approved:page", "reply", null]) {
+      setup({ openStep: { id: "ta_1", next_step_watch: watch } });
+      await clientAnsweredOnTask("t_1", "approved:doc");
+      expect(stepTicks()).toEqual([]);
+    }
+  });
+
+  it("pulls a follow up date that is still ahead back to today, and only that", async () => {
+    setup({});
+    await clientAnsweredOnTask("t_1", "reply");
+    expect(followUpPulls()).toHaveLength(1);
+    const pull = followUpPulls()[0];
+    expect((pull.payload as { follow_up_at: string }).follow_up_at).toBe(pull.filters.find(([k]) => k === "gt:follow_up_at")![1]);
+  });
+
+  it("does nothing for a message that is on no task", async () => {
+    setup({});
+    await clientAnsweredOnTask(null, "reply");
+    expect(calls).toEqual([]);
   });
 });

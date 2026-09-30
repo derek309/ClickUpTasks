@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { businessDaysBetween, isBusinessDay, reminderDue, MAX_REMINDERS, type ReminderState } from "./reviewReminders";
+import { businessDaysBetween, isBusinessDay, reminderDue, MAX_REMINDERS, type ReminderState, reminderSummary } from "./reviewReminders";
 
 // 2026: Fri 18 Sep, Sat 19, Sun 20, Mon 21, Tue 22 ... Times are UTC; 16:00Z is
 // 9 AM in California, which is the zone business days are counted in.
@@ -94,5 +94,15 @@ describe("reminderDue", () => {
     expect(reminderDue({ ...base, everyDays: 2 }).reason).toBe("not yet");
     expect(reminderDue({ ...base, everyDays: 2, now: at("2026-09-23") }).due).toBe(true);
     expect(reminderDue({ ...base, everyDays: 0 }).reason).toBe("off");
+  });
+});
+
+describe("reminderSummary", () => {
+  it("says where the reminders stand in a few words", () => {
+    expect(reminderSummary(0, { sent: 2, capped: false })).toBe("off");
+    expect(reminderSummary(1, null)).toBe("none sent yet");
+    expect(reminderSummary(1, { sent: 0, capped: false })).toBe("none sent yet");
+    expect(reminderSummary(2, { sent: 1, capped: false })).toBe("1 of 3 sent");
+    expect(reminderSummary(1, { sent: 3, capped: true })).toBe("all 3 sent, no answer");
   });
 });

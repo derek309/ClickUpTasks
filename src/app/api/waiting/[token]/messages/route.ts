@@ -6,6 +6,7 @@ import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
 import { resolveWaitingToken } from "@/lib/waitingToken";
+import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 
 // Public, token-gated — the client sends one message in a running, per-task
 // chat (as opposed to ./respond/route.ts's one-shot "submit your answer").
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     channel: "chat", direction: "inbound", subject: null, body: text, attachments, created_by: null,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await clientAnsweredOnTask(taskId, "reply");
 
   const notifyRecipient = await resolveNotifyRecipient(scope.assignedTo);
   if (notifyRecipient) {

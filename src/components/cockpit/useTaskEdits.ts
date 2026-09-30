@@ -9,7 +9,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, waitingFollowUp, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -48,6 +48,9 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // patches status through here, bypassing patchTask entirely, so this
     // needs its own copy of the sync rather than relying on patchTask's.
     const synced = cur ? { ...patch, ...applyWaitingStatusSync(cur, patch) } : patch;
+    // Starting a wait on the client sets when we check back (waitingFollowUp).
+    const checkBack = cur ? waitingFollowUp(cur, synced) : null;
+    if (checkBack) synced.followUpAt = checkBack;
     // Recurrence also needs its own copy, for the same reason — dragging a
     // recurring task into a done-flagged Kanban stage went through here, not
     // patchTask, so it was marking the task done with no next occurrence
@@ -172,6 +175,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // date moves.
     const withAuto: Partial<Task> = patch.priority !== undefined && patch.priority !== before.priority ? { ...patch, priorityAuto: false } : patch;
     const synced: Partial<Task> = { ...withAuto, ...applyWaitingStatusSync(before, withAuto) };
+    const checkBack = waitingFollowUp(before, synced);
+    if (checkBack) synced.followUpAt = checkBack;
     const events = describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
     const updated: Task = { ...before, ...synced, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;

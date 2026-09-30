@@ -32,7 +32,7 @@ import {
 import { diffDocText, diffText, summarizeDocChanges, summarizeTextChanges } from "@/lib/docDiff";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatPinTime, publishedFiles, type PinAnchor } from "@/lib/reviewPins";
-import { MAX_REMINDERS, reminderRound } from "@/lib/reviewReminders";
+import { MAX_REMINDERS, reminderRound, reminderSummary } from "@/lib/reviewReminders";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
@@ -80,7 +80,12 @@ const docApi = (taskId: string, kind: TaskDocumentKind, path: string, init?: Req
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient }: {
+export type ReviewReminders = {
+  kind: TaskDocumentKind; name: string; summary: string; everyDays: number; canRestart: boolean;
+  setEvery: (every: number) => void; restart: () => void; open: () => void;
+};
+
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient, onSent, onReminders }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -98,6 +103,12 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   startNonce: number;
   /** Tells the drawer whether a document exists, so it can hide the chip. */
   onPresence: (exists: boolean) => void;
+  /** Just sent to the client. The drawer sets the follow up from it; without
+   *  it the task is only moved to Waiting. */
+  onSent?: (kind: TaskDocumentKind, name: string) => void;
+  /** The client reminders on this review while it is with the client, or null.
+   *  The drawer's Reminders chip shows and changes them from the task itself. */
+  onReminders?: (r: ReviewReminders | null) => void;
 }) {
   const image = kind === "image";
   const page = kind === "page";
@@ -628,7 +639,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const previousBody = doc.version > 0 ? versions[0]?.body : undefined;
     const earlier = publishedFiles(versions).length;
     await load();
-    if (task.status !== "waiting") onPatch({ status: "waiting" });
+    // The drawer moves the task to Waiting and sets the follow up in one edit;
+    // anywhere else the task is only moved.
+    if (onSent) onSent(kind, doc.title.trim() || task.title);
+    else if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
     const copied = !!url && await copy(url);
     // Straight into an email to the client, written with AI (Derek, 2026-09-11:
@@ -840,6 +854,38 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     </div>
   ) : null;
 
+  const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
+  // Reminder emails while it sits with the client (reviewReminders.ts). The round
+  // is worked out the same way the cron works it out, so this line never says
+  // one number while the cron acts on another.
+  const round = doc && lastSent ? reminderRound({
+    sentAt: lastSent.createdAt, roundAt: doc.reminderRoundAt,
+    lastReminderAt: doc.lastReminderAt, remindersSent: doc.remindersSent,
+  }) : null;
+  // The light path, like setStage: save it and take the row back. patchDoc also
+  // remounts the editor and jumps back to the newest version, which Reopen
+  // needs and a dropdown does not.
+  const setReminders = async (reminders: "restart" | { every: number }, done: string) => {
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ reminders }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not change the reminders."); return; }
+    setDoc(rowToTaskDocument(j.document));
+    pushToast(done);
+  };
+  // Reported up while it is with the client, and again whenever the numbers
+  // change, so the task's chip and this review never disagree.
+  const setReminderEvery = (every: number) => void setReminders({ every }, every === 0 ? "Reminders are off." : "Reminder frequency saved.");
+  const restartReminders = () => void setReminders("restart", `Reminders restarted. The next goes out the next business morning, up to ${MAX_REMINDERS} more.`);
+  const reminders = doc?.status === "with_client" ? {
+    kind, name: doc.title.trim() || kindNewName(kind), summary: reminderSummary(doc.reminderEveryDays, round),
+    everyDays: doc.reminderEveryDays, canRestart: doc.reminderEveryDays > 0 && !!round && round.sent > 0,
+  } : null;
+  const remindersKey = reminders ? `${reminders.name}|${reminders.summary}|${reminders.everyDays}|${reminders.canRestart}` : "";
+  useEffect(() => {
+    onReminders?.(reminders ? { ...reminders, setEvery: setReminderEvery, restart: restartReminders, open: () => switchView({ full: true }) } : null);
+    return () => onReminders?.(null);
+  }, [remindersKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!doc) return deletedLine;
 
   const view = STATUS_VIEW[doc.status];
@@ -926,6 +972,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     doc.version > 0 && link ? `Link ${link.live ? "on" : "off"}` : null,
     doc.version > 0 ? (doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : "Not viewed yet") : null,
     openComments ? `${openComments} open ${openComments === 1 ? "comment" : "comments"}` : null,
+    // Said on the row, not only inside the review: whether the client is being
+    // chased is the thing you want to know before opening it.
+    reminders ? `Reminders ${reminders.summary}${round && round.sent > 0 && doc.lastReminderAt ? `, last ${new Date(doc.lastReminderAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}` : null,
     activeFiles.length ? `${activeFiles.length} ${activeFiles.length === 1 ? "file" : "files"}` : null,
     `Edited ${timeAgo(doc.updatedAt)}`,
   ].filter(Boolean).join(" · ");
@@ -1205,28 +1254,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   // One bar for the whole image or HTML review (Derek, 2026-09-14 redesign): which
   // version, where it stands, and the few actions that belong to all its images or pages.
-  const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
-  // Reminder emails while it sits with the client (reviewReminders.ts). The round
-  // is worked out the same way the cron works it out, so this line never says
-  // one number while the cron acts on another.
-  const round = lastSent ? reminderRound({
-    sentAt: lastSent.createdAt, roundAt: doc.reminderRoundAt,
-    lastReminderAt: doc.lastReminderAt, remindersSent: doc.remindersSent,
-  }) : null;
   const reminderLine = doc.reminderEveryDays <= 0 ? "Reminder emails are off for this review."
     : !round || round.sent === 0 ? `The client gets a reminder email ${doc.reminderEveryDays === 1 ? "every business day" : `every ${doc.reminderEveryDays} business days`} until they answer, ${MAX_REMINDERS} at most.`
       : round.capped ? `${MAX_REMINDERS} reminders sent and no answer yet. They have stopped.`
         : `${round.sent} of ${MAX_REMINDERS} reminders sent.`;
-  // The light path, like setStage: save it and take the row back. patchDoc also
-  // remounts the editor and jumps back to the newest version, which Reopen
-  // needs and a dropdown does not.
-  const setReminders = async (reminders: "restart" | { every: number }, done: string) => {
-    const res = await api("", { method: "PATCH", body: JSON.stringify({ reminders }) });
-    const j = await readJson(res);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not change the reminders."); return; }
-    setDoc(rowToTaskDocument(j.document));
-    pushToast(done);
-  };
   const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const barStatus = needsSend
     ? (doc.version ? "Changes not sent" : "Not sent yet")
@@ -1309,17 +1340,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
           <select value={doc.reminderEveryDays} aria-label="How often to remind the client"
             onChange={(e) => {
               const every = Number(e.target.value);
-              void setReminders({ every }, every === 0 ? "Reminders are off." : "Reminder frequency saved.");
+              setReminderEvery(every);
             }}
             className="cursor-pointer rounded-lg border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent">
             <option value={1}>Every business day</option>
             <option value={2}>Every 2 business days</option>
             <option value={0}>Off</option>
           </select>
-          {doc.reminderEveryDays > 0 && round && round.sent > 0 && (
-            <button onClick={() => void setReminders("restart", `Reminders restarted. The next goes out the next business morning, up to ${MAX_REMINDERS} more.`)}
-              className={quiet}>Restart reminders</button>
-          )}
+          {reminders?.canRestart && <button onClick={restartReminders} className={quiet}>Restart reminders</button>}
         </div>
       )}
 

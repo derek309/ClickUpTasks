@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  waitingFollowUp,
   isReplyTask,
   unansweredPreviewByTask,
   type Message,
@@ -884,11 +885,11 @@ describe("linkSpans with angleLabels", () => {
 describe("clientAnswerPatch", () => {
   it("reopens a waiting task for its owner: stops waiting, due today, owner kept", () => {
     expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: "u_justin" }, "u_justin", "review"))
-      .toEqual({ status: "review", waiting_on_client: false, due: todayIso() });
+      .toEqual({ status: "review", waiting_on_client: false, due: todayIso(), follow_up_at: null });
   });
   it("assigns the recipient only when nobody owns the task", () => {
     expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: null }, "u_derek", "approved"))
-      .toEqual({ status: "approved", waiting_on_client: false, assignee_id: "u_derek", due: todayIso() });
+      .toEqual({ status: "approved", waiting_on_client: false, assignee_id: "u_derek", due: todayIso(), follow_up_at: null });
   });
   it("leaves the due date and owner alone when the task was not waiting", () => {
     expect(clientAnswerPatch({ status: "in_progress", waiting_on_client: false, assignee_id: null }, "u_derek", "approved"))
@@ -896,7 +897,7 @@ describe("clientAnswerPatch", () => {
   });
   it("moves a waiting task to review when the answer sets no status", () => {
     expect(clientAnswerPatch({ status: "waiting", waiting_on_client: true, assignee_id: "u_justin" }, "u_justin"))
-      .toEqual({ status: "review", waiting_on_client: false, due: todayIso() });
+      .toEqual({ status: "review", waiting_on_client: false, due: todayIso(), follow_up_at: null });
   });
 });
 
@@ -1255,5 +1256,27 @@ describe("unansweredPreviewByTask", () => {
     const call = msg({ id: "m2", channel: "call", direction: "outbound", body: "Call, 2 min", at: "2026-09-30T03:00:00Z" });
     expect(unansweredPreviewByTask([msg({ body: "Call me" }), call]).get("t_1")).toBe("Call me");
     expect(unansweredPreviewByTask([msg({ taskId: null, body: "Hello" })]).size).toBe(0);
+  });
+});
+
+describe("waitingFollowUp", () => {
+  const friday = "2026-10-02";
+  it("sets a check back two business days out when a wait starts", () => {
+    expect(waitingFollowUp({ status: "todo" }, { status: "waiting", waitingOnClient: true }, "2026-09-30")).toBe(friday);
+    // Over a weekend: Friday plus two business days is Tuesday.
+    expect(waitingFollowUp({ status: "todo" }, { waitingOnClient: true, status: "waiting" }, friday)).toBe("2026-10-06");
+  });
+  it("replaces a date that has already passed", () => {
+    expect(waitingFollowUp({ status: "todo", followUpAt: "2026-09-20" }, { waitingOnClient: true }, "2026-09-30")).toBe(friday);
+  });
+  it("leaves a follow up that is further out, and one the same edit sets", () => {
+    expect(waitingFollowUp({ status: "todo", followUpAt: "2026-10-20" }, { waitingOnClient: true }, "2026-09-30")).toBeNull();
+    expect(waitingFollowUp({ status: "todo" }, { waitingOnClient: true, followUpAt: "2026-10-09" }, "2026-09-30")).toBeNull();
+    expect(waitingFollowUp({ status: "todo" }, { waitingOnClient: true, followUpAt: null }, "2026-09-30")).toBeNull();
+  });
+  it("does nothing for a task that was already waiting, or an edit that is not a wait", () => {
+    expect(waitingFollowUp({ status: "waiting", waitingOnClient: true }, { waitingOnClient: true }, "2026-09-30")).toBeNull();
+    expect(waitingFollowUp({ status: "todo" }, { due: "2026-10-09" }, "2026-09-30")).toBeNull();
+    expect(waitingFollowUp({ status: "waiting", waitingOnClient: true }, { status: "done", waitingOnClient: false }, "2026-09-30")).toBeNull();
   });
 });
