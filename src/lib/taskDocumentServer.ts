@@ -349,7 +349,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   const patch = clientAnswerPatch(
     { status: scope.taskStatus, waiting_on_client: scope.waitingOnClient, assignee_id: scope.assigneeId },
     recipient,
-    (approved ? "approved" : "review") as TaskStatus,
+    (approved ? "approved" : "changes_requested") as TaskStatus,
   );
   await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
   // Either answer is news, so a follow up date still days away must not hide
@@ -365,6 +365,30 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
       : `${scope.clientName} ${sentChanges ? "sent changes" : "asked for changes"} on "${scope.reviewName}"`,
   }, recipient);
   return { ok: true, version };
+}
+
+/** A client's comment on a sent review asks for changes, the same as the Send my
+ *  changes button: most clients drop pins and never press it (Derek, 2026-09-30,
+ *  Fleet Feet sat at Client review with two open pins). The review moves to
+ *  Changes and the task to Changes requested, off the client's plate and back on
+ *  the owner's list. Only from Client review, so later comments change nothing,
+ *  and guarded on the stage so two quick comments move it once. True when it moved. */
+export async function clientCommentAsksForChanges(scope: DocScope): Promise<boolean> {
+  if (scope.documentStatus !== "with_client") return false;
+  const { data: moved } = await supabaseAdmin.from("task_documents")
+    .update({ status: "client_submitted", updated_at: new Date().toISOString() })
+    .eq("id", scope.documentId).eq("status", "with_client").is("approved_at", null)
+    .select("id");
+  if (!moved?.length) return false;
+  const recipient = scope.assigneeId ?? await resolveNotifyRecipient(scope.assignedTo);
+  const patch = clientAnswerPatch(
+    { status: scope.taskStatus, waiting_on_client: scope.waitingOnClient, assignee_id: scope.assigneeId },
+    recipient,
+    "changes_requested",
+  );
+  await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
+  await clientAnsweredOnTask(scope.taskId, "changes");
+  return true;
 }
 
 // ---------------------------------------------------------------------------

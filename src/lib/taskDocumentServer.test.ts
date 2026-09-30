@@ -227,7 +227,7 @@ describe("clientPublish", () => {
     const comment = rpcCalls.find((c) => c.name === "append_comment")?.args.comment;
     expect(comment).toMatchObject({ kind: "event", authorId: "client" });
     const taskUpdate = calls.find((c) => c.table === "tasks" && c.op === "update");
-    expect(taskUpdate?.payload).toEqual({ status: "review", waiting_on_client: false, due: todayIso(), follow_up_at: null, updated_by: null });
+    expect(taskUpdate?.payload).toEqual({ status: "changes_requested", waiting_on_client: false, due: todayIso(), follow_up_at: null, updated_by: null });
   });
 
   it("moves the task to Approved (not Done) and always emails the owner on approval", async () => {

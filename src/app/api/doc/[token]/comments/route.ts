@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
-  DOC_TOKEN_PATTERN, NO_STORE, docClosed, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc, reviewOnTask,
+  DOC_TOKEN_PATTERN, NO_STORE, clientCommentAsksForChanges, docClosed, docNotFound, resolveDocToken, readPublicJson, logClientDocEvent, notifyOwnerOfClientDoc, reviewOnTask,
   type DocScope,
 } from "@/lib/taskDocumentServer";
 import { kindNoun } from "@/lib/reviewKinds";
@@ -49,10 +49,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // "on Back, pin 2" when the version holds several images.
   const place = pin ? await pinImageName(scope.documentId, pin.fileId) : null;
   await logClientDocEvent(scope.taskId, `${scope.clientName} commented on the ${noun}${pin ? ` on ${place ? `${place}, ` : ""}pin ${pin.number}` : ""}: ${body ? `"${snippet}"` : "added a file"}`);
+  // The first comment on a sent review asks for changes: the review moves to
+  // Changes and the task onto the owner's list, and the owner always hears.
+  const asked = await clientCommentAsksForChanges(scope);
   await notifyOwnerOfClientDoc(scope, {
-    always: false,
-    text: `${scope.clientName} commented on the ${noun}${reviewOnTask(scope)}.`,
-    subject: `${scope.clientName} commented on "${scope.reviewName}"`,
+    always: asked,
+    text: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} the ${noun}${reviewOnTask(scope)}.`,
+    subject: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} "${scope.reviewName}"`,
   });
   return json({ comment: r.comment });
 }
