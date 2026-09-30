@@ -30,6 +30,7 @@ import { HandoffPage } from "./HandoffPage";
 // and handed to the first drawer that holds that delegation.
 let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
 import { DraftEmail } from "./DraftEmail";
+import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
 
@@ -1084,6 +1085,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // so a second click opens it again after it was closed; one counter per review
   // kind, so opening one never reopens the other.
   const [docStartNonce, setDocStartNonce] = useState(0);
+  // Project instructions for an outside person (TaskBrief.tsx), reported the same way.
+  const [briefStartNonce, setBriefStartNonce] = useState(0);
+  const [briefPresence, setBriefPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
+  const showBrief = canHaveDocument && briefPresence.taskId === task.id && briefPresence.exists;
   const [reviewStartNonce, setReviewStartNonce] = useState<Record<FileKind, number>>({ image: 0, page: 0, video: 0 });
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
@@ -1113,6 +1118,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
+  );
+  // Separate from the client document (Derek, 2026-09-30): its own line, link and files.
+  const briefBlock = !canHaveDocument ? null : (
+    <TaskBrief key={`brief-${task.id}`} task={task} clientName={client.name} pushToast={pushToast} startNonce={briefStartNonce}
+      onPresence={(exists) => setBriefPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   const descriptionBlock = (
     <div>
@@ -1493,6 +1503,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
       !hasDescription && { label: "Description", onClick: showDescription },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
+      canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
       hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
       !showChecklist && { label: "Checklist", onClick: () => openSection("checklist") },
@@ -1500,7 +1511,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
   );
-  const hasDeliverables = showDocument || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail;
+  const hasDeliverables = showDocument || showBrief || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail;
   // The embedded sibling-task list used to live here — deleted (item 4):
   // the "N of M" pager (onPrev/onNext below) already does the same job of
   // moving between tasks in this list, without duplicating a whole list
@@ -1547,6 +1558,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {section("Deliverables", (
         <>
           {documentBlock}
+          {briefBlock}
           {reviewBlocks}
           {draftEmailBlock}
           {/* Links and files live in the client rail, under the contact card

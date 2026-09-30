@@ -926,6 +926,36 @@ export const fetchTaskDocumentVersions = async (documentId: string): Promise<Tas
   }));
 };
 
+// Project instructions on a task, for an outside person (supabase/task-briefs.sql,
+// src/lib/briefServer.ts). Read here through row level security; every write goes
+// through /api/tasks/[id]/brief.
+export type TaskBrief = {
+  id: string; taskId: string; title: string; body: string; dueOn: string | null;
+  showBusiness: boolean; uploadsOpen: boolean; viewedAt: string | null; updatedAt: string;
+};
+export type TaskBriefFile = {
+  id: string; path: string; name: string; sizeBytes: number; fromOutside: boolean;
+  addedByLabel: string | null; createdAt: string; removedAt: string | null; movedAt: string | null;
+};
+export const rowToTaskBrief = (r: any): TaskBrief => ({
+  id: r.id, taskId: r.task_id, title: r.title ?? "", body: r.body ?? "", dueOn: r.due_on ?? null,
+  showBusiness: r.show_business !== false, uploadsOpen: r.uploads_open !== false, viewedAt: r.viewed_at ?? null, updatedAt: r.updated_at,
+});
+export const fetchTaskBrief = async (taskId: string): Promise<TaskBrief | null> => {
+  const { data, error } = await supabase.from("task_briefs").select("*").eq("task_id", taskId).maybeSingle();
+  // Before supabase/task-briefs.sql is run the table is missing: no instructions, quietly.
+  if (error) return null;
+  return data ? rowToTaskBrief(data) : null;
+};
+export const fetchTaskBriefFiles = async (briefId: string): Promise<TaskBriefFile[]> => {
+  const { data, error } = await supabase.from("task_brief_files").select("*").eq("brief_id", briefId).is("removed_at", null).order("created_at", { ascending: true });
+  if (error) { logErr({ error }); return []; }
+  return (data ?? []).map((r: any) => ({
+    id: r.id, path: r.path, name: r.name, sizeBytes: Number(r.size_bytes ?? 0), fromOutside: !!r.from_outside,
+    addedByLabel: r.added_by_label ?? null, createdAt: r.created_at, removedAt: r.removed_at ?? null, movedAt: r.moved_at ?? null,
+  }));
+};
+
 export const insertMessage = (m: Message) => save(() => supabase.from("messages").insert(messageToRow(m)));
 // One write per opened conversation, not per message — flips every unread
 // inbound row for that contact in a single UPDATE.

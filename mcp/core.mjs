@@ -269,9 +269,15 @@ export function createServer(opts = {}) {
       const checklist = (t.subtasks || []).map((s) => ({ title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
+      // Project instructions for an outside person (supabase/task-briefs.sql), if
+      // any. Before that SQL is run the table is missing, which is simply none.
+      const briefRow = await sb(`task_briefs?select=title,body,due_on&task_id=eq.${enc(id)}&limit=1`).then((r) => r?.[0] ?? null, () => null);
       const text = [
         brief(t),
         t.description ? `\nDescription:\n${stripHtml(t.description)}` : "",
+        briefRow && stripHtml(briefRow.body || "").trim()
+          ? `\nProject instructions for an outside person${briefRow.title ? ` ("${briefRow.title}")` : ""}${briefRow.due_on ? `, due back ${briefRow.due_on}` : ""}:\n${stripHtml(briefRow.body)}`
+          : "",
         checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
         links ? `\nLinks:\n${links}` : "",
         comments ? `\nRecent comments:\n${comments}` : "",

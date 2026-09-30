@@ -58,7 +58,8 @@ describe("what the MCP tools may see", () => {
     await call(client, "get_task", { id: "t_1" });
     await call(client, "list_clients", {});
     await call(client, "list_projects", {});
-    for (const u of urls.filter((x) => !x.includes("/profiles"))) expect(u).toContain("deleted_at=is.null");
+    // Project instructions are deleted for good, never trashed, so they have no deleted_at.
+    for (const u of urls.filter((x) => !x.includes("/profiles") && !x.includes("/task_briefs"))) expect(u).toContain("deleted_at=is.null");
   });
 
   it("hides a teammate's private task from a listing and from get_task", async () => {

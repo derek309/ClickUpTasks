@@ -13,6 +13,7 @@
 //   cascade. The rows cascade on their own; their stored files did not.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { deleteDocStorage } from "./taskDocumentFiles";
+import { deleteBriefStorage } from "./briefServer";
 
 const RETENTION_DAYS = 30;
 // Per run, and per .in() list, so no request carries an overlong URL.
@@ -64,6 +65,10 @@ async function deleteReviewFilesOfTasks(taskIds: string[], errors: string[]): Pr
     const { data: docs, error } = await supabaseAdmin.from("task_documents").select("id").in("task_id", group);
     if (error) { errors.push(`document lookup: ${error.message}`); continue; }
     for (const d of docs ?? []) await deleteDocStorage(d.id as string);
+    // Project instructions (supabase/task-briefs.sql) and the files sent back on
+    // them. Missing table before that SQL is run: nothing to remove.
+    const { data: briefs } = await supabaseAdmin.from("task_briefs").select("id").in("task_id", group);
+    for (const b of briefs ?? []) await deleteBriefStorage(b.id as string);
   }
 }
 

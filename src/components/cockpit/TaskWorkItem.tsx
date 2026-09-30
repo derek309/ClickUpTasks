@@ -32,6 +32,9 @@ const ROW_TONE = {
   page: { box: "border-l-foreground", tile: "bg-background" },
   video: { box: "border-l-muted", tile: "bg-background" },
   email: { box: "border-l-accent", tile: "bg-accent-soft" },
+  // Project instructions leave the building, so they get the brand pair: a navy
+  // stripe over an orange tile, unlike the client document (orange on orange).
+  brief: { box: "border-l-accent", tile: "bg-highlight-soft" },
 } as const;
 
 export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }: {

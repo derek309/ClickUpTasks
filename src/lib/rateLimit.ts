@@ -20,7 +20,7 @@ import { hashToken } from "./tokenCrypto";
 // below must stay well under that 1-hour sweep, or a long window's rows get
 // deleted mid-window and the counter silently resets.
 
-export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment" | "doc_view" | "page_frame";
+export type WaitingAction = "read" | "message" | "respond" | "status" | "request" | "upload" | "doc_read" | "doc_submit" | "doc_approve" | "doc_upload" | "doc_comment" | "doc_view" | "page_frame" | "brief_read" | "brief_upload" | "brief_view";
 
 type Rule = {
   /** Max requests per window for one token+IP pair. */
@@ -85,6 +85,12 @@ export const RATE_LIMITS: Record<WaitingAction, Rule> = {
   // A web page review's sandboxed frame (/page-frame/[ticket]): one load per
   // open, width switch or reload, keyed by the short lived ticket.
   page_frame:  { limit: 240, windowMs: 10 * MINUTE },
+  // Project instructions at /brief/[token], for an outside person. Read like a
+  // document. Each file is two calls, and a designer's files can be 200MB, so
+  // uploads get a tighter cap per link than the document's.
+  brief_read:   { limit: 120, windowMs: 10 * MINUTE },
+  brief_upload: { limit: 40,  windowMs: 30 * MINUTE, tokenLimit: 80 },
+  brief_view:   { limit: 10,  windowMs: 10 * MINUTE, tokenLimit: 40 },
 };
 
 /** A fixed window limit on a key you choose, for the signed-in side of the app,

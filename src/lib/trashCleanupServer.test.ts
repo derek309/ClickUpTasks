@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type Row = Record<string, any>;
 let db: Record<string, Row[]>;
 const removedFiles: string[] = [];
+const removedBriefFiles: string[] = [];
 
 function cascade(table: string, ids: string[]) {
   const drop = (t: string, keep: (r: Row) => boolean) => { db[t] = db[t].filter(keep); };
@@ -20,7 +21,10 @@ function cascade(table: string, ids: string[]) {
     cascade("tasks", taskIds);
   }
   if (table === "projects") cascade("tasks", db.tasks.filter((t) => ids.includes(t.project_id)).map((t) => t.id));
-  if (table === "tasks") drop("task_documents", (d) => !ids.includes(d.task_id));
+  if (table === "tasks") {
+    drop("task_documents", (d) => !ids.includes(d.task_id));
+    drop("task_briefs", (b) => !ids.includes(b.task_id));
+  }
   drop(table, (r) => !ids.includes(r.id));
 }
 
@@ -45,6 +49,7 @@ function builder(table: string) {
 
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 vi.mock("./taskDocumentFiles", () => ({ deleteDocStorage: async (id: string) => { removedFiles.push(id); } }));
+vi.mock("./briefServer", () => ({ deleteBriefStorage: async (id: string) => { removedBriefFiles.push(id); } }));
 
 const { purgeExpiredTrash, purgeOldUnmatched } = await import("./trashCleanupServer");
 
@@ -53,6 +58,7 @@ const ids = (t: string) => db[t].map((r) => r.id).sort();
 
 beforeEach(() => {
   removedFiles.length = 0;
+  removedBriefFiles.length = 0;
   const recent = new Date().toISOString();
   db = {
     clients: [
@@ -78,6 +84,10 @@ beforeEach(() => {
       { id: "d_live", task_id: "t_live_in_client", deleted_at: null },
       { id: "d_trashed", task_id: "t_live_in_project", deleted_at: OLD },
     ],
+    task_briefs: [
+      { id: "b_gone", task_id: "t_gone" },
+      { id: "b_live", task_id: "t_live_in_client" },
+    ],
   };
 });
 
@@ -95,6 +105,12 @@ describe("purgeExpiredTrash", () => {
     await purgeExpiredTrash();
     expect(removedFiles.sort()).toEqual(["d_alone", "d_gone", "d_trashed"]);
     expect(ids("task_documents")).toEqual(["d_live"]);
+  });
+
+  it("removes the files of project instructions on purged tasks, and only those", async () => {
+    await purgeExpiredTrash();
+    expect(removedBriefFiles).toEqual(["b_gone"]);
+    expect(ids("task_briefs")).toEqual(["b_live"]);
   });
 
   it("leaves trash younger than 30 days alone", async () => {

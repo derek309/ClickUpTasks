@@ -86,7 +86,7 @@ export function isDocFilePath(documentId: string, path: unknown): path is string
 /** What actually landed in storage at `path` after a direct upload: it must exist,
  *  be under the cap and not carry a type a browser would run. Anything else is
  *  deleted. Shared by the document's files and the client portal's uploads. */
-export async function checkStoredFile(path: string, purpose: UploadPurpose = "file"): Promise<{ ok: true; size: number } | Fail> {
+export async function checkStoredFile(path: string, purpose: UploadPurpose | "design" = "file"): Promise<{ ok: true; size: number } | Fail> {
   const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
   const { data: info, error } = await storage.info(path);
   if (error || !info) return fail(400, "The upload didn't finish. Please try again.");
@@ -393,6 +393,32 @@ export async function storeImageFile(
     return fail(500, "Could not save the image. Please try again.");
   }
   return { ok: true, fileId, name };
+}
+
+/** Copy a file already in storage (an image sent back on a task's project
+ *  instructions, briefServer.ts) into the image review as a new image file. The
+ *  original stays where it was. The caller makes it part of the working copy. */
+export async function adoptImageFile(documentId: string, sourcePath: string, rawName: string, size: number, actor: DocActor): Promise<{ ok: true; fileId: string } | Fail> {
+  const named = checkFileName(rawName);
+  if (!named.ok) return named;
+  if (!isPreviewableImage(named.name)) return fail(400, IMAGE_ONLY);
+  const full = await roomFor(documentId, "image");
+  if (full) return full;
+  const path = `${docFileFolder(documentId)}${randomUUID()}-${storageSafeName(named.name)}`;
+  const storage = supabaseAdmin.storage.from(TASK_FILES_BUCKET);
+  const { error: copyError } = await storage.copy(sourcePath, path);
+  if (copyError) return fail(500, `Could not copy ${named.name}. Please try again.`);
+  const now = new Date().toISOString();
+  const fileId = "tdf_" + randomUUID();
+  const { error } = await supabaseAdmin.from("task_document_files").insert({
+    id: fileId, document_id: documentId, path, name: named.name, size_bytes: size,
+    kind: sharedFileKind(named.name), purpose: "image", added_by: actor.id, added_by_label: actor.label, created_at: now, shared_at: now,
+  });
+  if (error) {
+    await storage.remove([path]);
+    return fail(500, `Could not add ${named.name}. Please try again.`);
+  }
+  return { ok: true, fileId };
 }
 
 /** A web page review's HTML, or null when the file is not a live page version (or,

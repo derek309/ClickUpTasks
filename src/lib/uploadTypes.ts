@@ -28,13 +28,27 @@ export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 export const VIDEO_WARN_BYTES = 200 * 1024 * 1024;
 
 
+/** What an outside person may send back through project instructions (a Fiverr
+ *  designer's work): everything shareable, plus the files designers deliver.
+ *  None of these run when opened; the team only ever downloads them. */
+export const DESIGN_FILE_EXT = new Set([
+  ...SHAREABLE_FILE_EXT,
+  "zip", "ai", "psd", "eps", "indd", "tif", "tiff", "fig", "sketch", "afdesign", "xd",
+]);
+
+/** A designer's print PDF or layered file runs far past 25MB. */
+export const MAX_DESIGN_BYTES = 200 * 1024 * 1024;
+
 export const extOf = (name: string) => (name.includes(".") ? name.split(".").pop()!.toLowerCase() : "");
 
 export const isShareableFileName = (name: string) => SHAREABLE_FILE_EXT.has(extOf(name));
 
-/** The cap on one upload. Only a video review's video gets the bigger one. */
-export const maxUploadBytes = (purpose: "file" | "image" | "video") =>
-  (purpose === "video" ? MAX_VIDEO_BYTES : MAX_SHARED_FILE_BYTES);
+export const isDesignFileName = (name: string) => DESIGN_FILE_EXT.has(extOf(name));
+
+/** The cap on one upload. A video review's video and a file sent back on project
+ *  instructions get bigger ones. */
+export const maxUploadBytes = (purpose: "file" | "image" | "video" | "design") =>
+  (purpose === "video" ? MAX_VIDEO_BYTES : purpose === "design" ? MAX_DESIGN_BYTES : MAX_SHARED_FILE_BYTES);
 
 /** A file a video review can hold: the extensions every browser can play back. */
 export const isReviewVideo = (name: string) => VIDEO_EXT.has(extOf(name));

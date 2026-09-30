@@ -4,7 +4,7 @@
 // check and record it. Used by the client review document (the team's drawer and
 // the client's /doc page) and the client portal's uploads (/waiting/[token]). See
 // src/lib/taskDocumentFiles.ts for the checks on the other side.
-import { formatFileSize, isReviewVideo, maxUploadBytes, isShareableFileName } from "./uploadTypes";
+import { formatFileSize, isDesignFileName, isReviewVideo, maxUploadBytes, isShareableFileName } from "./uploadTypes";
 
 /** Posts one JSON payload to the caller's upload route and returns the response. */
 export type DocFileApi = (payload: Record<string, unknown>) => Promise<Response>;
@@ -44,9 +44,13 @@ function putToUploadUrl(uploadUrl: string, file: File, onProgress?: (share: numb
 /** One file, start to confirm. On success, the confirm response's JSON; otherwise
  *  a message that can be shown to the person as it is. purpose "video" is a video
  *  review's video, which has its own, much larger cap (uploadTypes.ts). */
-export async function uploadSharedFile(file: File, api: DocFileApi, purpose: "file" | "image" | "video" = "file", onProgress?: (share: number) => void): Promise<{ ok: true; result: Record<string, unknown> } | { ok: false; error: string; overLimit?: boolean }> {
+export async function uploadSharedFile(file: File, api: DocFileApi, purpose: "file" | "image" | "video" | "design" = "file", onProgress?: (share: number) => void): Promise<{ ok: true; result: Record<string, unknown> } | { ok: false; error: string; overLimit?: boolean }> {
   if (purpose === "video" && !isReviewVideo(file.name)) return { ok: false, error: `${file.name} can't be added. Add an MP4, MOV, WebM or M4V video.` };
-  if (!isShareableFileName(file.name)) return { ok: false, error: `${file.name} can't be added. Add a photo, PDF, document, spreadsheet, slides or a video.` };
+  if (purpose === "design" ? !isDesignFileName(file.name) : !isShareableFileName(file.name)) {
+    return { ok: false, error: purpose === "design"
+      ? `${file.name} can't be added. Send a PDF, an image, a ZIP or a design file.`
+      : `${file.name} can't be added. Add a photo, PDF, document, spreadsheet, slides or a video.` };
+  }
   const cap = maxUploadBytes(purpose);
   if (file.size > cap) return { ok: false, error: `${file.name} is ${formatFileSize(file.size)}, over the ${formatFileSize(cap)} limit.` };
   try {
