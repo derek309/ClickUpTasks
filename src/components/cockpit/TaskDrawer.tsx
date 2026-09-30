@@ -1757,8 +1757,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <HandoffPage task={task} sub={hs} meId={meId} clientLinks={clientLinks} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
               onPatchSub={onPatchSub} onToggleSub={onToggleSub} onClose={() => setOpenHandoff(null)}
               onOpenFile={(att) => { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); else void openPreview(att); }}
-              onSendDm={onSendDm} pushToast={pushToast}
-              onOpenDeliverables={() => { setOpenHandoff(null); requestAnimationFrame(() => document.getElementById("task-deliverables")?.scrollIntoView({ behavior: "smooth", block: "start" })); }} />
+              onSendDm={onSendDm} pushToast={pushToast} onPatchTask={onPatch} canAdmin={!!canAdmin} />
           ) : null;
         })()}
         <ActionDock

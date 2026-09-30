@@ -735,7 +735,12 @@ export interface Subtask {
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
 export type HandoffLink = { id: string; label: string; url: string };
-export type HandoffMessage = { id: string; authorId: string | null; body: string; at: string };
+/** A line in the handoff's chat. `to` is who else it was sent to, picked with
+ *  @; an "event" is a status change, shown as a quiet line, not a bubble. */
+export type HandoffMessage = { id: string; authorId: string | null; body: string; at: string; to?: string[]; kind?: "event" };
+/** Where the handoff stands, set by whoever has it. Done is the checklist
+ *  item's own tick, so it is not stored here. */
+export type HandoffStatus = "todo" | "doing" | "stuck";
 export type HandoffDeliverable = "doc" | "image" | "page" | "video";
 export interface Handoff {
   /** What good looks like. Starts as the delegation's instructions. */
@@ -750,6 +755,7 @@ export interface Handoff {
   doneWhen: string[];
   /** Questions and updates between the two people. */
   thread: HandoffMessage[];
+  status: HandoffStatus;
 }
 
 /** A delegation's handoff with every part present. The goal falls back to the
@@ -764,6 +770,7 @@ export function handoffOf(sub: Pick<Subtask, "note" | "handoff">): Handoff {
     deliverables: h.deliverables ?? [],
     doneWhen: h.doneWhen ?? [],
     thread: h.thread ?? [],
+    status: h.status ?? "todo",
   };
 }
 

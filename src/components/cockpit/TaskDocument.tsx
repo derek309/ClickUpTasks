@@ -85,7 +85,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient, onSent, onReminders }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -109,6 +109,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   /** The client reminders on this review while it is with the client, or null.
    *  The drawer's Reminders chip shows and changes them from the task itself. */
   onReminders?: (r: ReviewReminders | null) => void;
+  /** A Copy code button on the row, for whoever builds the email or page from
+   *  it (a handoff page): a client document's HTML, or a web page review's page. */
+  showCopyCode?: boolean;
 }) {
   const image = kind === "image";
   const page = kind === "page";
@@ -958,6 +961,17 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
+  // The version the client approved, else the last one sent, else the draft:
+  // the one someone scheduling the email should be pasting.
+  const codeBody = kind === "doc"
+    ? (versions.find((v) => v.version === doc.approvedVersion)?.body ?? [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0]?.body ?? doc.body)
+    : "";
+  // A web page review copies its page, the same way its own window does.
+  const pageFile = kind === "page" ? (approvedFile ?? sent.at(-1)) : undefined;
+  const copyCodeButton = !showCopyCode ? null
+    : codeBody ? <button onClick={() => void copy(codeBody).then((ok) => pushToast(ok ? "Code copied." : "Could not copy the code."))} className={quiet}>Copy code</button>
+    : pageFile ? <button onClick={() => void copyCode(pageFile)} className={quiet}>Copy code</button>
+    : null;
   const headerActions = (
     <>
       {onEmailClient && doc.version > 0 && (
@@ -981,7 +995,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={copyLinkButton}
+    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}</>}
       onOpen={() => switchView({ full: true })} />
   );
   if (!visible) return <>{row}{deletedLine}</>;
