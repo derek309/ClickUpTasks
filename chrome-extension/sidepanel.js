@@ -349,6 +349,7 @@ function renderClientResults(query) {
         selectClient(c.id);
         clientSource = "user";
         void rememberClientForSender(senderEmail, c);
+        if (siteMode) void rememberClientForSite(c);
       });
       clientResultsEl.appendChild(row);
     }
@@ -474,6 +475,7 @@ function selectClient(id) {
     loadProjectsFor(selectedClientId);
   }
   loadTasksFor(selectedClientId);
+  if (siteMode) void resolveSiteTarget();
 }
 
 clientSearchInput.addEventListener("input", () => {
@@ -481,7 +483,8 @@ clientSearchInput.addEventListener("input", () => {
   matchHintEl.textContent = "";
   allTasks = [];
   renderTaskList();
-  showView("pick");
+  showView(siteMode ? "none" : "pick");
+  if (siteMode) { siteTarget = null; renderSiteTarget(); }
   renderClientResults(clientSearchInput.value);
 });
 clientSearchInput.addEventListener("focus", () => renderClientResults(clientSearchInput.value));
@@ -507,7 +510,7 @@ function pillFor(t) {
 function renderTaskList(loadingText = null) {
   taskListEl.innerHTML = "";
   const first = clientSearchInput.value.split(/[ —]/)[0] || "the client";
-  listHeadingEl.textContent = selectedClientId ? "Add to a task" : "Pick a client";
+  listHeadingEl.textContent = !selectedClientId ? "Pick a client" : siteMode ? "Put the changes on" : "Add to a task";
   newTaskBtn.disabled = !selectedClientId;
   taskFilterInput.style.display = selectedClientId && allTasks.length > 5 ? "" : "none";
   taskFilterInput.placeholder = `Search ${first}'s ${allTasks.length} open tasks`;
@@ -538,7 +541,8 @@ function taskRow(t, isHere) {
   const title = document.createElement("b");
   title.textContent = t.title;
   const sub = document.createElement("span");
-  if (isHere) { sub.className = "flag"; sub.textContent = "This is already on it"; }
+  if (siteMode && t.id === siteTarget?.taskId) { sub.className = "flag"; sub.textContent = "Changes go here now"; }
+  else if (isHere) { sub.className = "flag"; sub.textContent = siteMode ? "Changes from this site" : "This is already on it"; }
   else sub.textContent = [projectNames[t.projectId], t.waitingOnClient ? "Waiting on the client" : null].filter(Boolean).join(" · ");
   text.append(title, sub);
   row.append(text);
@@ -549,7 +553,11 @@ function taskRow(t, isHere) {
     p.textContent = pill.text;
     row.append(p);
   }
-  row.addEventListener("click", () => { openTaskId = openTaskId === t.id ? "" : t.id; renderTaskList(); });
+  row.addEventListener("click", () => {
+    // Reviewing a site, a row is where the changes go, not a note box.
+    if (siteMode) { void setSiteTarget(t); return; }
+    openTaskId = openTaskId === t.id ? "" : t.id; renderTaskList();
+  });
   wrap.append(row);
   if (t.id === openTaskId) {
     // What goes on the task: a note (the email's sender and opening lines,
@@ -584,7 +592,7 @@ function showView(which) {
   newViewEl.style.display = which === "new" ? "" : "none";
   if (which === "new") titleInput.focus();
 }
-newTaskBtn.addEventListener("click", () => showView("new"));
+newTaskBtn.addEventListener("click", () => (siteMode ? void setSiteTarget(null) : showView("new")));
 backToTasksBtn.addEventListener("click", () => showView("pick"));
 
 // A side panel stays open as you browse (unlike a popup, which closes on
@@ -601,6 +609,7 @@ async function init(forceClientRefresh = false) {
     return;
   }
   formEl.style.display = "";
+  leaveSiteMode();
   // enrichedKey is deliberately NOT reset here: init() re-runs on Refresh and
   // on every new screenshot, and clearing it would re-run the AI on an email
   // it has already read.
@@ -638,6 +647,12 @@ async function init(forceClientRefresh = false) {
   // click (or a manual paste) — everything else below is read live, every
   // time the panel opens or Refresh is pressed.
   if (capture?.screenshot) addScreenshot(capture.screenshot);
+
+  // Any website that is not Gmail: the site review list, not the email form.
+  if (!email && siteOf(tab)) {
+    await enterSiteMode(tab, token);
+    return;
+  }
 
   if (email) {
     // Gmail — same as before, takes priority over the generic tab data.
@@ -908,7 +923,16 @@ async function submit({ taskId = null, taskTitle = "", body = "", button }) {
 // init() already consumed it before this listener could see the same write)
 // the fresh-open case.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.pendingCapture?.newValue) init();
+  if (area !== "local" || !changes.pendingCapture?.newValue) return;
+  // Reviewing this same site: a toolbar capture is one more screenshot for the
+  // change being typed, not a reason to start the panel over.
+  const cap = changes.pendingCapture.newValue;
+  if (siteMode && siteOf({ url: cap.url })?.host === site?.host) {
+    void chrome.storage.local.remove("pendingCapture");
+    if (cap.screenshot) addScreenshot(cap.screenshot);
+    return;
+  }
+  init();
 });
 
 init();
@@ -1040,3 +1064,352 @@ async function showAlreadyClipped(link) {
 
 
 
+
+// ---------------------------------------------------------------------------
+// Site review (Derek, 2026-09-30, mockup A: "if I'm on a website I want to be
+// able to pull up a client ... and add changes to a list very quickly if I
+// review a local site or live site").
+//
+// On any page that is not Gmail the panel becomes a fast list: type a change,
+// paste a screenshot, Enter. Each change lands at once on the site's "Website
+// changes" task, as a checklist item plus a comment holding the page address
+// and the screenshots (/api/extension/tasks/[id]/change). Nothing waits in the
+// panel to be lost.
+//
+// The client, in order: the one you picked for this site before (server
+// memory, "site:<host>"), the one the site's own CUL Feedback plugin files
+// into, the client of an earlier "Website changes" task for this site, a
+// contact's email domain, and last a guess from the site's name.
+
+const siteHeadEl = document.getElementById("siteHead");
+const siteHostEl = document.getElementById("siteHost");
+const siteTagEl = document.getElementById("siteTag");
+const sitePageEl = document.getElementById("sitePage");
+const siteTopEl = document.getElementById("siteTop");
+const siteBottomEl = document.getElementById("siteBottom");
+const siteTargetTitleEl = document.getElementById("siteTargetTitle");
+const siteTargetChangeBtn = document.getElementById("siteTargetChange");
+const changeTextInput = document.getElementById("changeText");
+const addChangeBtn = document.getElementById("addChange");
+const siteDoneHeadEl = document.getElementById("siteDoneHead");
+const siteDoneEl = document.getElementById("siteDone");
+const panelNameEl = document.getElementById("panelName");
+const sourceEl = document.getElementById("source");
+const pasteZoneEl = document.getElementById("pasteZone");
+
+let siteMode = false;
+let site = null; // { host, origin, url, title }
+// The task changes go on: { taskId, title } or null for "make one on the first change".
+let siteTarget = null;
+// The list the site's CUL Feedback plugin files into, used for a new task.
+let pluginProjectId = null;
+let siteDone = []; // [{ n, text, where, shots }] added to siteTarget, newest first
+
+const isGmailUrl = (u) => /^https:\/\/mail\.google\.com\//.test(u || "");
+function siteOf(tab) {
+  const u = tab?.url || "";
+  if (!/^https?:\/\//i.test(u) || isGmailUrl(u) || u.startsWith(API_BASE)) return null;
+  try {
+    const url = new URL(u);
+    return { host: url.host.replace(/^www\./, ""), origin: url.origin, url: u, title: tab.title || "", path: url.pathname };
+  } catch { return null; }
+}
+const isLocalHost = (h) => /(\.local|\.test|\.localhost)(:\d+)?$/.test(h) || /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(h);
+const newTaskTitle = () => `Website changes: ${site.host}`;
+
+function showSitePage() {
+  siteHostEl.textContent = site.host;
+  const local = isLocalHost(site.host);
+  siteTagEl.textContent = local ? "LOCAL" : "LIVE";
+  siteTagEl.className = `tag ${local ? "local" : "live"}`;
+  sitePageEl.textContent = [site.title, site.path].filter(Boolean).join(" · ");
+}
+
+function leaveSiteMode() {
+  siteMode = false;
+  site = null;
+  siteTarget = null;
+  pluginProjectId = null;
+  siteDone = [];
+  panelNameEl.textContent = "ClickUpTasks";
+  siteHeadEl.style.display = "none";
+  siteTopEl.style.display = "none";
+  siteBottomEl.style.display = "none";
+  sourceEl.style.display = "";
+  pasteZoneEl.textContent = "📋 Click here, then ⌘V to add a screenshot";
+  newTaskBtn.textContent = "+ New task";
+}
+
+async function enterSiteMode(tab, token) {
+  siteMode = true;
+  site = siteOf(tab);
+  panelNameEl.textContent = "Site review";
+  sourceEl.style.display = "none";
+  siteHeadEl.style.display = "";
+  siteTopEl.style.display = "";
+  siteBottomEl.style.display = "";
+  pasteZoneEl.textContent = "📋 ⌘V a screenshot for this change";
+  showView("none");
+  showSitePage();
+  renderSiteTarget();
+  renderSiteDone();
+  changeTextInput.value = "";
+  changeTextInput.focus();
+  // The origin is the link a "Website changes" task carries, so this finds the
+  // one already made for this site, and its client with it.
+  permalink = site.origin;
+  await resolveSiteClient(token);
+}
+
+const HINT = {
+  remembered: ["✓ Remembered for this site", ""],
+  plugin: ["✓ From the site's CUL Feedback plugin", ""],
+  task: ["✓ From this site's Website changes task", ""],
+  domain: ["Guessed from a contact's email domain, check it", "guess"],
+  name: ["Guessed from the site name, check it", "guess"],
+};
+function hint(kind) {
+  const [text, cls] = HINT[kind];
+  matchHintEl.textContent = text;
+  matchHintEl.className = cls;
+  clientSource = "server";
+}
+const canPick = (id) => allClients.some((c) => c.id === id);
+
+async function resolveSiteClient(token) {
+  const forHost = site.host;
+  const [matched, plugin, byLink] = await Promise.all([
+    apiFetch(`/api/extension/match-client?site=${encodeURIComponent(site.host)}`, token).then((r) => r.match).catch(() => null),
+    askSitePlugin(site.origin),
+    apiFetch(`/api/extension/tasks/by-link?link=${encodeURIComponent(site.origin)}`, token).then((r) => r.tasks || []).catch(() => []),
+  ]);
+  if (!siteMode || site?.host !== forHost) return; // moved on while this was out
+  clippedTasks = byLink;
+  // Its list only fits its own client; another client's task goes in that client's default list.
+  pluginProjectId = plugin?.project_id ? { clientId: plugin.client_id, projectId: plugin.project_id } : null;
+  if (matched?.matchType === "remembered" && canPick(matched.entryId || matched.clientId)) {
+    selectClient(matched.entryId || matched.clientId); hint("remembered");
+  } else if (plugin?.client_id && canPick(plugin.client_id)) {
+    selectClient(plugin.client_id); hint("plugin");
+  } else if (byLink[0]?.clientId && canPick(byLink[0].clientId)) {
+    selectClient(byLink[0].clientId); hint("task");
+  } else if (matched && canPick(matched.entryId || matched.clientId)) {
+    selectClient(matched.entryId || matched.clientId); hint("domain");
+  } else {
+    const guess = guessClientFromHost(site.host);
+    if (guess) { selectClient(guess.id); hint("name"); }
+    else { renderSiteTarget(); }
+  }
+}
+
+/** Ask the site which client it belongs to. Only a site with the CUL Feedback
+ *  plugin (0.4.0 or later) answers; everything else fails fast and quietly. */
+async function askSitePlugin(origin) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    const res = await fetch(`${origin}/wp-json/cul-feedback/v1/client`, { signal: ctrl.signal, credentials: "omit" });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return typeof json?.client_id === "string" && json.client_id ? json : null;
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
+/** jackflynn.local -> Jack Flynn. Only a single clear match counts. */
+function guessClientFromHost(host) {
+  const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const label = norm(host.replace(/:\d+$/, "").split(".")[0]);
+  if (label.length < 4) return null;
+  const people = allClients.filter((c) => c.kind !== "project");
+  const names = (c) => [norm(c.name), norm(c.company)].filter((n) => n.length >= 4);
+  const exact = people.filter((c) => names(c).includes(label));
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+  const close = people.filter((c) => names(c).some((n) => (n.length >= 5 && label.includes(n)) || (label.length >= 5 && n.includes(label))));
+  return close.length === 1 ? close[0] : null;
+}
+
+async function rememberClientForSite(entry) {
+  if (!site || !entry) return;
+  const token = await getToken();
+  if (!token) return;
+  try {
+    await apiFetch("/api/extension/match-client", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: site.host, client_id: entry.kind === "project" ? entry.clientId : entry.id, entry_id: entry.kind === "project" ? entry.id : null }),
+    });
+  } catch { /* the memory is a convenience, never block on it */ }
+}
+
+// Where changes go for the selected client: the task you chose for this site
+// last time, else the site's existing "Website changes" task, else a new one
+// made on the first change.
+async function resolveSiteTarget() {
+  if (!siteMode || !selectedClientId) { siteTarget = null; renderSiteTarget(); return; }
+  const { siteTargets = {} } = await chrome.storage.local.get("siteTargets");
+  const saved = siteTargets[site.host];
+  const existing = clippedTasks.find((t) => t.clientId === selectedClientId);
+  if (saved && saved.clientId === selectedClientId) siteTarget = { taskId: saved.taskId, title: saved.title };
+  else if (existing) siteTarget = { taskId: existing.id, title: existing.title };
+  else siteTarget = null;
+  await loadSiteDone();
+  renderSiteTarget();
+}
+
+async function setSiteTarget(t) {
+  siteTarget = t ? { taskId: t.id, title: t.title } : null;
+  const { siteTargets = {} } = await chrome.storage.local.get("siteTargets");
+  if (t) siteTargets[site.host] = { clientId: selectedClientId, taskId: t.id, title: t.title };
+  else delete siteTargets[site.host];
+  await chrome.storage.local.set({ siteTargets });
+  showView("none");
+  await loadSiteDone();
+  renderSiteTarget();
+  changeTextInput.focus();
+}
+
+function renderSiteTarget() {
+  if (!siteMode) return;
+  siteTargetChangeBtn.disabled = !selectedClientId;
+  siteTargetTitleEl.textContent = !selectedClientId
+    ? "Pick the client above first"
+    : siteTarget ? siteTarget.title : `＋ New task: "${newTaskTitle()}"`;
+  addChangeBtn.disabled = !selectedClientId;
+}
+
+siteTargetChangeBtn.addEventListener("click", () => {
+  const open = pickViewEl.style.display !== "none";
+  showView(open ? "none" : "pick");
+  if (!open) { listHeadingEl.textContent = "Put the changes on"; newTaskBtn.textContent = "＋ New task"; }
+});
+
+// This session's changes on the current task, kept for the browser session so
+// closing and reopening the panel still shows them.
+const doneKey = () => `siteDone:${siteTarget?.taskId || ""}`;
+async function loadSiteDone() {
+  siteDone = [];
+  if (siteTarget?.taskId) {
+    const got = await chrome.storage.session.get(doneKey()).catch(() => ({}));
+    siteDone = got[doneKey()] || [];
+  }
+  renderSiteDone();
+}
+function renderSiteDone(freshN = null) {
+  siteDoneEl.innerHTML = "";
+  if (!siteMode || !siteDone.length) { siteDoneHeadEl.style.display = "none"; return; }
+  siteDoneHeadEl.style.display = "";
+  siteDoneHeadEl.textContent = `Added this session (${siteDone.length}) · `;
+  const a = document.createElement("a");
+  a.href = `${API_BASE}/?task=${encodeURIComponent(siteTarget.taskId)}`;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = "Open the task";
+  siteDoneHeadEl.append(a);
+  for (const c of siteDone) {
+    const row = document.createElement("div");
+    row.className = `chg${c.n === freshN ? " fresh" : ""}`;
+    const n = document.createElement("div");
+    n.className = "n";
+    n.textContent = String(c.n);
+    const t = document.createElement("div");
+    t.className = "t";
+    const b = document.createElement("b");
+    b.textContent = c.text;
+    const s = document.createElement("span");
+    s.textContent = [c.where, c.shots ? `${c.shots} screenshot${c.shots === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+    t.append(b, s);
+    row.append(n, t);
+    siteDoneEl.append(row);
+  }
+}
+
+async function addChange() {
+  const text = changeTextInput.value.trim();
+  if (!siteMode || addChangeBtn.disabled) return;
+  if (!selectedClientId) { statusEl.textContent = "Pick the client first."; statusEl.className = "err"; return; }
+  if (!text) { statusEl.textContent = "Type the change first."; statusEl.className = "err"; changeTextInput.focus(); return; }
+  const token = await getToken();
+  if (!token) return;
+  const clientId = selectedClientId;
+  const page = { ...site };
+  const shots = [...capturedScreenshots];
+  addChangeBtn.disabled = true;
+  statusEl.textContent = shots.length ? "Uploading the screenshot…" : "Adding…";
+  statusEl.className = "";
+  try {
+    const paths = [];
+    for (const dataUrl of shots) paths.push(await uploadScreenshot(token, dataUrl, clientId));
+    let r;
+    try {
+      r = await postChange(token, clientId, page, text, paths);
+    } catch (e) {
+      // The remembered task was finished or binned: make a fresh one, once.
+      if (!/task is closed/.test(e?.message || "")) throw e;
+      await setSiteTarget(null);
+      r = await postChange(token, clientId, page, text, paths);
+    }
+    siteDone.unshift({ n: r.n, text, where: [page.title, page.path].filter(Boolean).join(" · "), shots: paths.length });
+    await chrome.storage.session.set({ [doneKey()]: siteDone }).catch(() => {});
+    // Only what was sent is cleared: anything typed or pasted meanwhile stays.
+    if (changeTextInput.value.trim() === text) changeTextInput.value = "";
+    capturedScreenshots = capturedScreenshots.filter((s) => !shots.includes(s));
+    renderScreenshotGallery();
+    statusEl.textContent = "";
+    renderSiteDone(r.n);
+  } catch (e) {
+    statusEl.textContent = e instanceof Error ? e.message : "Couldn't add that change.";
+    statusEl.className = "err";
+  } finally {
+    addChangeBtn.disabled = !selectedClientId;
+    changeTextInput.focus();
+  }
+}
+/** One change onto the target task, making the "Website changes" task first
+ *  when this site has none yet. */
+async function postChange(token, clientId, page, text, paths) {
+  if (!siteTarget) {
+    statusEl.textContent = "Making the Website changes task…";
+    const created = await apiFetch("/api/extension/tasks", token, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId, project_id: pluginProjectId?.clientId === clientId ? pluginProjectId.projectId : undefined, title: newTaskTitle(),
+        description: `Changes from a review of ${page.origin}`, link: page.origin,
+        due: DEFAULT_DUE(), follow_up_at: DEFAULT_FOLLOW_UP(), priority: "normal",
+      }),
+    });
+    await setSiteTarget({ id: created.id, title: created.title || newTaskTitle() });
+  }
+  return apiFetch(`/api/extension/tasks/${encodeURIComponent(siteTarget.taskId)}/change`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, url: page.url, page_title: page.title, screenshot_paths: paths }),
+  });
+}
+addChangeBtn.addEventListener("click", () => void addChange());
+changeTextInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); void addChange(); }
+});
+
+// Follow the browser. Moving to another page on the same site only updates the
+// page line, so a change half typed survives it; another site (or leaving
+// Gmail for one) starts over. Gmail to Gmail stays on Refresh, as before.
+// The host an init() is already starting for: a page load fires several
+// updates (address, title, complete) and one start over is enough.
+let movingTo = null;
+async function onTabMoved() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+  const next = siteOf(tab);
+  if (siteMode && next && next.host === site.host) { site = next; permalink = site.origin; showSitePage(); return; }
+  if (!siteMode && !next) return;
+  const key = next?.host ?? "(not a site)";
+  if (movingTo === key) return;
+  movingTo = key;
+  try { await init(); } finally { movingTo = null; }
+}
+chrome.tabs.onActivated.addListener(() => void onTabMoved());
+chrome.tabs.onUpdated.addListener((_id, info, tab) => {
+  if (tab.active && (info.url || info.status === "complete" || info.title)) void onTabMoved();
+});

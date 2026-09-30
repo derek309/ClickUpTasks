@@ -9,6 +9,13 @@ import { isClientVisible, visibleClientIds } from "@/lib/extensionApi";
 // fine against these; only the fallback below skips them.
 const FREEMAIL_DOMAINS = new Set(["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com", "live.com", "protonmail.com"]);
 const stripWww = (d: string) => d.replace(/^www\./, "");
+// "site:jackflynn.local" from a host or a full address; null when it is neither.
+function siteKey(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let host = raw.trim().toLowerCase();
+  try { host = new URL(/^[a-z]+:\/\//.test(host) ? host : `http://${host}`).host; } catch { return null; }
+  return host ? `site:${stripWww(host)}` : null;
+}
 
 // Best-effort client suggestion for the extension's side panel — either from
 // a Gmail sender's email, or (review mode) directly from the domain of the
@@ -33,16 +40,21 @@ export async function GET(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const email = req.nextUrl.searchParams.get("email")?.trim().toLowerCase();
-  const domainParam = req.nextUrl.searchParams.get("domain")?.trim().toLowerCase();
+  // A website under review (the clipper's site mode). Its host is remembered
+  // under a "site:" key in the same table as senders, so a pick made once for
+  // jackflynn.local sticks, and it doubles as the domain for the guess below.
+  const site = siteKey(req.nextUrl.searchParams.get("site"));
+  const domainParam = (req.nextUrl.searchParams.get("domain") ?? (site ? site.slice(5) : ""))?.trim().toLowerCase();
+  const memoryKey = email || site;
 
   // Hoisted: the remembered tier and the domain tier both need it, and it is
   // two queries for a non-admin.
   const visible = await visibleClientIds(caller);
   const canSee = (id: string) => visible === "all" || visible.has(id);
 
-  if (email) {
+  if (memoryKey) {
     const { data: remembered } = await supabaseAdmin
-      .from("sender_client_memory").select("client_id, entry_id, owner_id, updated_at").eq("sender_email", email);
+      .from("sender_client_memory").select("client_id, entry_id, owner_id, updated_at").eq("sender_email", memoryKey);
     // Your own filing always wins for you. Failing that, the most recently
     // taught mapping from a teammate, but only for a client you can see.
     const mine = (remembered ?? []).find((r) => r.owner_id === caller.id && canSee(r.client_id));
@@ -56,6 +68,9 @@ export async function GET(req: NextRequest) {
       // through to the tiers below rather than reporting a match to nothing.
       if (client) return NextResponse.json({ match: { clientId: client.id, clientName: client.name, entryId: hit.entry_id ?? null, matchType: "remembered" } });
     }
+  }
+
+  if (email) {
 
     const { data: contact } = await supabaseAdmin.from("contacts").select("client_id").ilike("email", email).limit(1).maybeSingle();
     if (contact && canSee(contact.client_id)) {
@@ -94,10 +109,10 @@ export async function POST(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const email = (typeof body.email === "string" ? body.email.trim().toLowerCase() : "") || siteKey(body.site) || "";
   const clientId = typeof body.client_id === "string" ? body.client_id : "";
   const entryId = typeof body.entry_id === "string" && body.entry_id ? body.entry_id : null;
-  if (!email || !clientId) return NextResponse.json({ error: "Missing email or client_id." }, { status: 400 });
+  if (!email || !clientId) return NextResponse.json({ error: "Missing email (or site) or client_id." }, { status: 400 });
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
   // An entry id is a workspace project to re-select. Confirm it really belongs

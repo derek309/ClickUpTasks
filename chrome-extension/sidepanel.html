@@ -77,11 +77,36 @@
   #taskEmpty { padding: 10px 2px; }
   .back { background: none; color: #1B3A5C; font-weight: 600; text-align: left; padding: 0; margin-top: 14px; }
   .created-link { color: #1B3A5C; font-weight: 600; text-decoration: underline; }
+
+  /* Site review (Derek, 2026-09-30, mockup A): on any website the panel is a
+     fast list. Type a change, paste a screenshot, Enter, next. */
+  #siteHead { background: #1B3A5C; color: #fff; border-radius: 12px; padding: 12px; }
+  #siteHead .host { font-weight: 800; font-size: 18px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; overflow-wrap: anywhere; }
+  #siteHead .page { opacity: .85; overflow-wrap: anywhere; }
+  .tag { font-size: 16px; font-weight: 700; border-radius: 6px; padding: 0 7px; }
+  .tag.local { background: #E87722; color: #fff; }
+  .tag.live { background: #22c55e; color: #fff; }
+  #siteTarget { margin-top: 12px; border: 2px solid #1B3A5C; border-radius: 10px; padding: 9px 11px; background: #eef4fb; display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+  #siteTarget b { color: #1B3A5C; display: block; overflow-wrap: anywhere; }
+  #siteTargetChange { width: auto; margin: 0; padding: 4px 10px; background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; font-weight: 600; flex: none; }
+  #changeText { border: 2px solid #E87722; background: #fffaf5; min-height: 72px; }
+  #changeText:focus { outline: none; border-color: #1B3A5C; }
+  #addChange { background: #E87722; }
+  .kbd { color: #6b7280; text-align: center; margin-top: 6px; }
+  .chg { display: flex; gap: 10px; border: 1px solid #d0dce8; border-radius: 10px; padding: 9px 10px; margin-bottom: 7px; }
+  .chg .n { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #1B3A5C; color: #fff; font-weight: 800; display: grid; place-items: center; }
+  .chg .t { flex: 1; min-width: 0; }
+  .chg .t b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+  .chg .t span { color: #6b7280; overflow-wrap: anywhere; }
+  .chg.fresh { border-color: #16a34a; background: #ecfdf3; }
+  #siteDoneHead { font-weight: 700; margin: 16px 0 8px; }
+  #siteDoneHead a { color: #1B3A5C; }
 </style>
 </head>
 <body>
-  <h1>ClickUpTasks <button id="refresh" type="button" title="Re-read the open email or page. For a screenshot, click the toolbar icon to capture one, or paste one in with ⌘V.">🔄 Refresh</button></h1>
+  <h1><span id="panelName">ClickUpTasks</span> <button id="refresh" type="button" title="Re-read the open email or page. For a screenshot, click the toolbar icon to capture one, or paste one in with ⌘V.">🔄 Refresh</button></h1>
   <div id="form">
+    <div id="siteHead" style="display:none"><div class="host"><span id="siteHost"></span><span id="siteTag" class="tag"></span></div><div class="page" id="sitePage"></div></div>
     <div id="source"><span class="icon" id="sourceIcon">✉️</span><div><b id="sourceTitle"></b><span class="muted" id="sourceSub"></span></div></div>
 
     <label for="clientSearch">Client</label>
@@ -95,12 +120,26 @@
       <button id="addContactBtn" type="button" style="margin-top:6px;background:#fff;color:#1B3A5C;border:1px solid #d0dce8;">+ Add "<span id="addContactName"></span>" as a contact</button>
     </div>
 
+    <!-- Site review: where the changes go, and the box you type them in. -->
+    <div id="siteTop" style="display:none">
+      <div id="siteTarget"><div><span class="muted">Changes go on</span><b id="siteTargetTitle"></b></div><button id="siteTargetChange" type="button">Change</button></div>
+      <label for="changeText">What needs changing?</label>
+      <textarea id="changeText" placeholder="Type a change, ⌘V a screenshot, Enter to add"></textarea>
+    </div>
+
     <div id="emailAtts" style="display:none;">
       <h2>Attachments on this email</h2>
       <div id="emailAttsList"></div>
     </div>
     <div id="pasteZone" tabindex="0">📋 Click here, then ⌘V to add a screenshot</div>
     <div id="screenshotGallery"></div>
+
+    <div id="siteBottom" style="display:none">
+      <button id="addChange" type="button">Add change ⏎</button>
+      <div class="kbd">Enter adds it. Shift+Enter for a new line.</div>
+      <div id="siteDoneHead" style="display:none"></div>
+      <div id="siteDone"></div>
+    </div>
 
     <!-- The client's open tasks, first: most clips go onto work that already exists. -->
     <div id="pickView">
