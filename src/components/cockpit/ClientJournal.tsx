@@ -21,7 +21,7 @@ import {
   mentionCandidates, applyMention,
 } from "@/lib/data";
 import { safeMessageHtml } from "@/lib/safeHtml";
-import { I, Avatar, CollapsibleText, newId, useStickyBottom, JumpToLatestButton } from "./ui";
+import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { SchedulePopover } from "./SchedulePopover";
@@ -155,7 +155,6 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
-  const { ref: feedRef, atBottom, checkAtBottom, scrollToBottom, followIfAtBottom } = useStickyBottom<HTMLDivElement>();
   // A7a: month index — keyed by each day-divider's own key (a toDateString,
   // already unique per calendar day) so "jump to month" can reuse the
   // dividers already in the feed instead of tagging every row a second way.
@@ -213,7 +212,10 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     window.addEventListener("mouseup", onUp);
   };
 
-  // One merged, oldest-first feed — notes, messages, task comments, and
+  // One merged feed, newest first (Derek, 2026-09-30: "reverse the conversation
+  // order so that the latest message is at the top"): what just happened is the
+  // reason the Journal was opened, and it used to be the furthest thing from
+  // where the page lands. Notes, messages, task comments, and
   // task-completion events. Every other system event (assignee/due/priority
   // changes) is deliberately dropped here: it stays visible in the task's
   // own Activity tab, where it's already contextual, but including every
@@ -226,7 +228,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
       if (c.kind === "event") return isCompletionEvent(c.body) ? { kind: "completion", at: c.at, comment: { ...c, taskId: t.id, taskTitle: t.title } } : null;
       return { kind: "activity", at: c.at, comment: { ...c, taskId: t.id, taskTitle: t.title } };
     }).filter((x): x is JournalItem => x !== null)),
-  ].sort((a, b) => a.at.localeCompare(b.at));
+  ].sort((a, b) => b.at.localeCompare(a.at));
 
   const q = searchQuery.trim().toLowerCase();
   const matchesSearch = (it: JournalItem): boolean => {
@@ -272,7 +274,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const feedRows = buildFeedRows(pinnedRecap ? filteredItems.filter((it) => !(it.kind === "note" && it.note.id === pinnedRecap.id)) : filteredItems);
 
   // A7a: one entry per month, newest first, each pointing at the day-divider
-  // key of that month's earliest entry (feedRows renders oldest-first, so
+  // key of that month's latest entry (feedRows renders newest first, so
   // that divider is the one to scroll to — it's the top of that month's
   // block). Built from feedRows itself so the index only ever lists months
   // actually present under the current segment/sub-filter/search.
@@ -305,11 +307,6 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   const mentionCands = mentionCandidates(draft, users);
   const mentionOpen = mentionCands.length > 0;
 
-  // Auto-follow the newest entry — but only while already at the bottom, so
-  // scrolling up to read history isn't fought by a new note/message/comment
-  // (see the "Jump to latest" button below).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { followIfAtBottom(); }, [journalItems.length]);
   useEffect(() => { if ((messages?.length ?? 0) > 0) onOpenMessages?.(); }, [messages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
@@ -594,7 +591,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div ref={feedRef} onScroll={checkAtBottom} className="h-full overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="h-full overflow-y-auto px-4 py-4 sm:px-5">
           <div className="mx-auto max-w-3xl space-y-3">
             {pinnedRecap && (
               <div className="rounded-xl border border-accent/40 bg-accent-soft/40 p-3.5 shadow-soft">
@@ -757,7 +754,6 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
             })}
           </div>
         </div>
-        <JumpToLatestButton show={!atBottom && filteredItems.length > 0} onClick={() => scrollToBottom()} />
         </div>
 
         {/* A7a: month index — desktop-only side rail, not part of the mobile
