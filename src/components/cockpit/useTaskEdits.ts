@@ -287,7 +287,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
         const idSet = new Set(deletable);
         setTasks((ts) => ts.filter((t) => !idSet.has(t.id)));
         if (openTaskId && idSet.has(openTaskId)) setOpenTaskId(null);
-        deletable.forEach((id) => deleteTaskDb(id));
+        deletable.forEach((id) => deleteTaskDb(id, me.id));
         clearSelection();
         pushToast(`${n} task${n === 1 ? "" : "s"} deleted`);
       },
@@ -333,7 +333,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     setTasks((ts) => [...ts, copy]);
     upsertTask(copy, me.id);
     setOpenTaskId(copy.id);
-    pushToast(target && target.projectId !== src.projectId ? `Duplicated into ${projectById(target.projectId)?.name ?? "another list"}` : "Task duplicated", { label: "Undo", run: () => { setTasks((ts) => ts.filter((t) => t.id !== copy.id)); deleteTaskDb(copy.id); setOpenTaskId(id); } });
+    pushToast(target && target.projectId !== src.projectId ? `Duplicated into ${projectById(target.projectId)?.name ?? "another list"}` : "Task duplicated", { label: "Undo", run: () => { setTasks((ts) => ts.filter((t) => t.id !== copy.id)); deleteTaskDb(copy.id, me.id); setOpenTaskId(id); } });
   };
 
   const deleteTask = (id: string) => {
@@ -343,7 +343,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
         setConfirmDialog(null);
         setTasks((ts) => ts.filter((t) => t.id !== id));
         setOpenTaskId(null);
-        deleteTaskDb(id);
+        deleteTaskDb(id, me.id);
         pushToast("Task moved to Trash");
       },
     });

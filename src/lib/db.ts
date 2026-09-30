@@ -588,21 +588,25 @@ export const removeSubtaskDb = (taskId: string, subId: string, author: string | 
 // avoids the read-then-full-row-replace race that a plain upsertTask() would
 // have if two teammates comment on the same task within the same window.
 export const appendCommentDb = (taskId: string, comment: Comment) => { noteTaskWrite(taskId); return save(() => supabase.rpc("append_comment", { task_id: taskId, comment })); };
+// Moving to the Trash records when and by whom (supabase/trash-deleted-by.sql);
+// bringing something back clears both.
+const trashedBy = (by: string | null, at = new Date().toISOString()) => ({ deleted_at: at, deleted_by: by });
+const RESTORED = { deleted_at: null, deleted_by: null };
 // Soft delete — see soft-delete.sql. Sets deleted_at instead of removing the
 // row; fetchAll's excludeDeleted filter is what actually hides it from the
 // live app. Restored via restoreTaskDb, purged for good after 30 days by
 // the /api/cron/purge-trash sweep (trashCleanupServer.ts), or immediately
 // via hardDeleteTaskDb from the Trash panel's "Delete forever".
-export const deleteTaskDb = (id: string) => save(() => supabase.from("tasks").update({ deleted_at: new Date().toISOString() }).eq("id", id));
+export const deleteTaskDb = (id: string, by: string | null) => save(() => supabase.from("tasks").update(trashedBy(by)).eq("id", id));
 // Restoring a task also brings back the project and client it sits in when
 // those are in the Trash (just those rows, not their other tasks). A live task
 // under a trashed parent stayed hidden, and the parent's purge 30 days later
 // deleted it along with the parent.
 export const restoreTaskDb = async (id: string) => {
   const { data: t } = await supabase.from("tasks").select("project_id, client_id").eq("id", id).maybeSingle();
-  if (t?.project_id) await save(() => supabase.from("projects").update({ deleted_at: null }).eq("id", t.project_id).not("deleted_at", "is", null));
-  if (t?.client_id) await save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", t.client_id).not("deleted_at", "is", null));
-  return save(() => supabase.from("tasks").update({ deleted_at: null }).eq("id", id));
+  if (t?.project_id) await save(() => supabase.from("projects").update(RESTORED).eq("id", t.project_id).not("deleted_at", "is", null));
+  if (t?.client_id) await save(() => supabase.from("clients").update(RESTORED).eq("id", t.client_id).not("deleted_at", "is", null));
+  return save(() => supabase.from("tasks").update(RESTORED).eq("id", id));
 };
 export const hardDeleteTaskDb = (id: string) => save(() => supabase.from("tasks").delete().eq("id", id));
 export const upsertClient = (c: Client) => save(() => supabase.from("clients").upsert(clientToRow(c)));
@@ -612,53 +616,63 @@ export const upsertProject = (p: Project) => save(() => supabase.from("projects"
 // Soft delete, cascading to this project's own not-yet-deleted tasks (parity
 // with the old ON DELETE CASCADE — a project's tasks disappear with it, and
 // come back with it via restoreProjectDb). See deleteTaskDb's comment.
-export const deleteProjectDb = async (id: string) => {
-  const deletedAt = new Date().toISOString();
-  await save(() => supabase.from("tasks").update({ deleted_at: deletedAt }).eq("project_id", id).is("deleted_at", null));
-  return save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("id", id));
+export const deleteProjectDb = async (id: string, by: string | null) => {
+  const stamp = trashedBy(by);
+  await save(() => supabase.from("tasks").update(stamp).eq("project_id", id).is("deleted_at", null));
+  return save(() => supabase.from("projects").update(stamp).eq("id", id));
 };
 // Brings back only the tasks trashed together with the project (deleteProjectDb
 // stamps them with the project's own deleted_at), not ones trashed on their own
 // before it. Its client comes back too if it is in the Trash, as for a task.
 export const restoreProjectDb = async (id: string) => {
   const { data: p } = await supabase.from("projects").select("deleted_at, client_id").eq("id", id).maybeSingle();
-  if (p?.deleted_at) await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("project_id", id).eq("deleted_at", p.deleted_at));
-  if (p?.client_id) await save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", p.client_id).not("deleted_at", "is", null));
-  return save(() => supabase.from("projects").update({ deleted_at: null }).eq("id", id));
+  if (p?.deleted_at) await save(() => supabase.from("tasks").update(RESTORED).eq("project_id", id).eq("deleted_at", p.deleted_at));
+  if (p?.client_id) await save(() => supabase.from("clients").update(RESTORED).eq("id", p.client_id).not("deleted_at", "is", null));
+  return save(() => supabase.from("projects").update(RESTORED).eq("id", id));
 };
 export const hardDeleteProjectDb = (id: string) => save(() => supabase.from("projects").delete().eq("id", id));
 // Cascades to this client's own not-yet-deleted projects AND tasks — a
 // client's whole tree goes to Trash together and comes back together.
-export const deleteClientDb = async (id: string) => {
-  const deletedAt = new Date().toISOString();
-  await save(() => supabase.from("tasks").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null));
-  await save(() => supabase.from("projects").update({ deleted_at: deletedAt }).eq("client_id", id).is("deleted_at", null));
-  return save(() => supabase.from("clients").update({ deleted_at: deletedAt }).eq("id", id));
+export const deleteClientDb = async (id: string, by: string | null) => {
+  const stamp = trashedBy(by);
+  await save(() => supabase.from("tasks").update(stamp).eq("client_id", id).is("deleted_at", null));
+  await save(() => supabase.from("projects").update(stamp).eq("client_id", id).is("deleted_at", null));
+  return save(() => supabase.from("clients").update(stamp).eq("id", id));
 };
 // Same rule as restoreProjectDb: only what was trashed with the client comes back.
 export const restoreClientDb = async (id: string) => {
   const { data: c } = await supabase.from("clients").select("deleted_at").eq("id", id).maybeSingle();
   if (c?.deleted_at) {
-    await save(() => supabase.from("tasks").update({ deleted_at: null }).eq("client_id", id).eq("deleted_at", c.deleted_at));
-    await save(() => supabase.from("projects").update({ deleted_at: null }).eq("client_id", id).eq("deleted_at", c.deleted_at));
+    await save(() => supabase.from("tasks").update(RESTORED).eq("client_id", id).eq("deleted_at", c.deleted_at));
+    await save(() => supabase.from("projects").update(RESTORED).eq("client_id", id).eq("deleted_at", c.deleted_at));
   }
-  return save(() => supabase.from("clients").update({ deleted_at: null }).eq("id", id));
+  return save(() => supabase.from("clients").update(RESTORED).eq("id", id));
 };
 export const hardDeleteClientDb = (id: string) => save(() => supabase.from("clients").delete().eq("id", id));
 
-export interface TrashEntry { id: string; name: string; deletedAt: string }
+/** One row in the Trash. clientName is the client a task or list belonged to
+ *  (null for a client itself); deletedBy is the member id of whoever trashed
+ *  it, null for anything trashed before that was recorded. */
+export interface TrashEntry { id: string; name: string; deletedAt: string; clientName: string | null; deletedBy: string | null }
 // Trash panel's data source — deliberately not routed through
 // rowToTask/rowToProject/rowToClient (which the live app's excludeDeleted
-// fetches already cover): this only ever needs an id/name/deletedAt to list
-// and act on, not the full row shape.
+// fetches already cover): this only needs enough to list a row and act on it.
 export async function fetchTrash(): Promise<{ clients: TrashEntry[]; projects: TrashEntry[]; tasks: TrashEntry[] }> {
   const [c, p, t] = await Promise.all([
-    supabase.from("clients").select("id,name,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
-    supabase.from("projects").select("id,name,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
-    supabase.from("tasks").select("id,title,deleted_at").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+    supabase.from("clients").select("id,name,deleted_at,deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+    supabase.from("projects").select("id,name,client_id,deleted_at,deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+    supabase.from("tasks").select("id,title,client_id,deleted_at,deleted_by").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
   ]);
-  const toEntry = (r: { id: string; deleted_at: string; name?: string; title?: string }): TrashEntry =>
-    ({ id: r.id, name: r.name ?? r.title ?? "(untitled)", deletedAt: r.deleted_at });
+  // The clients those rows belonged to, trashed or not, for their names.
+  const clientIds = [...new Set([...(p.data ?? []), ...(t.data ?? [])].map((r) => r.client_id as string).filter(Boolean))];
+  const { data: owners } = clientIds.length
+    ? await supabase.from("clients").select("id,name").in("id", clientIds)
+    : { data: [] as { id: string; name: string }[] };
+  const clientName = new Map((owners ?? []).map((o) => [o.id as string, titleCase(o.name as string)]));
+  const toEntry = (r: { id: string; deleted_at: string; deleted_by?: string | null; client_id?: string; name?: string; title?: string }): TrashEntry => ({
+    id: r.id, name: r.name ?? r.title ?? "(untitled)", deletedAt: r.deleted_at, deletedBy: r.deleted_by ?? null,
+    clientName: r.client_id ? clientName.get(r.client_id) ?? null : null,
+  });
   return {
     clients: (c.data ?? []).map(toEntry),
     projects: (p.data ?? []).map(toEntry),

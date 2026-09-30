@@ -334,7 +334,7 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     await reassignMessagesTaskDb(sourceId, targetId);
     setTasks((ts) => ts.filter((t) => t.id !== sourceId));
     setOpenTaskId((id) => (id === sourceId ? targetId : id));
-    deleteTaskDb(sourceId);
+    deleteTaskDb(sourceId, me.id);
     pushToast(`Merged into "${target.title}"`);
   };
   // This can't be undone (the source task is deleted), so every entry point
@@ -373,7 +373,7 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
         setProjects((ps) => ps.filter((x) => x.id !== id));
         setTasks((ts) => ts.filter((t) => t.projectId !== id));
         setClientNotes((ns) => ns.filter((n) => n.projectId !== id));
-        deleteProjectDb(id);
+        deleteProjectDb(id, me.id);
       },
     });
   };

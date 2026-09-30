@@ -7,11 +7,13 @@
 // that becomes visible and reversible, for 30 days, before the daily
 // /api/cron/purge-trash sweep really deletes it.
 import { useEffect, useState } from "react";
-import { timeAgo } from "@/lib/data";
+import { timeAgo, userById } from "@/lib/data";
 import { I } from "./cockpit/ui";
 import { type TrashEntry, fetchTrash } from "@/lib/db";
 
 const RETENTION_DAYS = 30;
+/** The teammate's name, or null when nobody was recorded or they left the team. */
+const deleterName = (id: string | null) => (id ? userById(id)?.name ?? null : null);
 const daysLeft = (deletedAt: string) => Math.max(0, RETENTION_DAYS - Math.floor((Date.now() - Date.parse(deletedAt)) / 86400000));
 
 export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestoreTask, onPurgeClient, onPurgeProject, onPurgeTask }: {
@@ -67,16 +69,23 @@ export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestor
               <div className="overflow-hidden rounded-lg border">
                 {g.entries.map((e, i) => (
                   <div key={e.id} className={`flex items-center gap-3 px-3 py-2 ${i > 0 ? "border-t" : ""}`}>
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{e.name}</span>
-                    <span className="shrink-0 text-[12px] text-muted">Deleted {timeAgo(e.deletedAt)} · {daysLeft(e.deletedAt)}d left</span>
+                    {/* Whose it was and who binned it (Derek, 2026-09-29: "can we say who
+                        deleted and what client it went with"). Anything trashed before
+                        deleted_by existed just leaves the name off. */}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[16px] font-medium">{e.name}</div>
+                      <div className="truncate text-[16px] text-muted">
+                        {[e.clientName, `Deleted ${timeAgo(e.deletedAt)}${deleterName(e.deletedBy) ? ` by ${deleterName(e.deletedBy)}` : ""}`, `${daysLeft(e.deletedAt)} days left`].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
                     <button onClick={() => act(g.key, e.id, g.onRestore)} disabled={busyId === e.id}
-                      className="shrink-0 rounded-md border border-accent/40 px-2.5 py-1 text-[13px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
+                      className="shrink-0 rounded-md border border-accent/40 px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
                       Restore
                     </button>
                     <button
                       onClick={() => { if (window.confirm(`Permanently delete "${e.name}"? This can't be undone.`)) act(g.key, e.id, g.onPurge); }}
                       disabled={busyId === e.id}
-                      className="shrink-0 rounded-md border px-2.5 py-1 text-[13px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                      className="shrink-0 rounded-md border px-2.5 py-1 text-[16px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                       Delete forever
                     </button>
                   </div>

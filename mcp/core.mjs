@@ -377,7 +377,7 @@ export function createServer(opts = {}) {
       // The app's own trash (db.ts deleteTaskDb), not a DELETE: the daily purge
       // removes it after 30 days along with its review files in storage.
       // updated_by cleared so the change shows live for everyone.
-      await patchTask(id, { deleted_at: nowIso(), updated_by: null });
+      await patchTask(id, { deleted_at: nowIso(), deleted_by: ME, updated_by: null });
       return { content: [{ type: "text", text: `Moved ${id} to Trash: "${t.title}". It can be restored from the app for 30 days.` }] };
     });
 

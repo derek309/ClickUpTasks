@@ -136,6 +136,6 @@ describe("what the MCP tools may see", () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].method).toBe("PATCH");
     expect(writes[0].url).toContain("deleted_at=is.null");
-    expect(writes[0].body).toEqual({ deleted_at: expect.any(String), updated_by: null });
+    expect(writes[0].body).toEqual({ deleted_at: expect.any(String), deleted_by: ME, updated_by: null });
   });
 });

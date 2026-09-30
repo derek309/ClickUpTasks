@@ -138,7 +138,7 @@ export function useClientAdmin({ subAccounts, setContacts, clients, setActiveCli
         setTasks((ts) => ts.filter((t) => t.clientId !== id));
         setClientLinks((ls) => ls.filter((l) => l.clientId !== id));
         setClientNotes((ns) => ns.filter((n) => n.clientId !== id));
-        deleteClientDb(id);
+        deleteClientDb(id, me.id);
         if (activeClient === id) setActiveClient("all");
       },
     });
