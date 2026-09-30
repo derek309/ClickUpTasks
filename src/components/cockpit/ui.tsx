@@ -291,6 +291,33 @@ export function SearchableSelect({
   );
 }
 
+// Shared by every inline dropdown (the list's cell editors, ActionMenu): they're nested inside overflow-auto
+// scroll containers (the list card, the page), so plain `absolute` popups get
+// silently clipped whenever a row is near the bottom or right edge. Fixed
+// positioning off the trigger's own screen rect (clamped to the viewport)
+// sidesteps that — the same approach InlineDue/DatePopover already used.
+// A dropdown is as wide as its longest row. Hardcoding a pixel width meant
+// "Changes requested" hung out over the edge of the status menu (Derek,
+// 2026-09-08), and the same trap was set in the priority menu for "Client
+// request" — the labels are 15px while the control that opens them is 13px,
+// so eyeballing the trigger width always underestimates.
+//
+// max-content sizes to the longest row; minWidth keeps a short menu from
+// looking mean next to its trigger; MENU_MAX stops one long client name from
+// producing a menu half the screen wide.
+export const MENU_MAX = 280;
+export function menuStyle(pos: { top: number; left: number }, minWidth: number): React.CSSProperties {
+  return { position: "fixed", top: pos.top, left: pos.left, minWidth, width: "max-content", maxWidth: MENU_MAX };
+}
+
+export function menuPos(ref: React.RefObject<HTMLElement | null>, width: number, height = 240) {
+  const r = ref.current?.getBoundingClientRect();
+  if (!r) return { top: 0, left: 0 };
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+  const top = r.bottom + height > window.innerHeight ? Math.max(8, r.top - height) : r.bottom + 4;
+  return { top, left };
+}
+
 // "Sticky scroll to latest" for a message feed — shared by DmChat and
 // ClientJournal (notes/email/SMS feed). Auto-follows new messages
 // only while already scrolled to the bottom, so reading older history isn't

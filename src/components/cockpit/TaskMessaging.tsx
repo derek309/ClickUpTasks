@@ -198,17 +198,21 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean } }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, description } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
   // Channel tabs are gone: on a real task "Activity 14" filtered out almost
   // nothing, and search finds a message faster than a channel does.
-  const [view, setView] = useState<"conversation" | "changes" | "all">("conversation");
+  // Description is the fourth tab, last (Derek, 2026-09-30: "we don't always
+  // need it, but it's kind of getting in the way"). It used to be a section
+  // between the follow up and the deliverables, pushing the work down the page
+  // on every task to show text that is read once.
+  const [view, setView] = useState<"conversation" | "changes" | "all" | "description">("conversation");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
@@ -612,13 +616,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // Choosing a tab that shows messages is reading them, so it clears their dots.
   const selectView = (v: typeof view) => {
     setView(v);
-    if (v !== "changes") unreadChannels.forEach((ch) => onMarkChannelRead?.(ch));
+    if (v === "conversation" || v === "all") unreadChannels.forEach((ch) => onMarkChannelRead?.(ch));
   };
-  const tab = (v: typeof view, label: string, count: number, unread = false) => (
+  // The dot says there is something behind the tab: unread messages, or on
+  // Description, that one has been written.
+  const tab = (v: typeof view, label: string, count: number | null, dot = false, dotTitle = "New messages") => (
     <button role="tab" aria-selected={view === v} onClick={() => selectView(v)}
       className={`-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-2 pb-2.5 pt-1 text-[16px] font-medium sm:px-3 ${view === v ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
-      {label}<span className="font-normal text-muted">{count}</span>
-      {unread && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" title="New messages" />}
+      {label}{count !== null && <span className="font-normal text-muted">{count}</span>}
+      {dot && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" title={dotTitle} />}
     </button>
   );
   const closeSearch = () => { setSearchOpen(false); setSearchQuery(""); };
@@ -628,7 +634,8 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {tab("conversation", "Conversation", conversationCount, unreadChannels.length > 0)}
         {tab("changes", "Changes", changesCount)}
         {tab("all", "Everything", allFeedItems.length)}
-        <button onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
+        {description && tab("description", "Description", null, description.has, "This task has a description")}
+        <button hidden={view === "description"} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
           className={`mb-1.5 ml-auto shrink-0 rounded-lg p-2 ${searchOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.search /></button>
       </div>
       {searchOpen && (
@@ -685,7 +692,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px]" aria-hidden>{ACTION_ICON[a.kind]}</span>
           <div className="min-w-0 flex-1 text-[16px] text-muted">
             <span className="font-semibold text-foreground">{meta.verb}</span> · {who}{toName ? ` → ${toName}` : ""} · {timeAgo(a.at)}
-            {a.nextStep && <span className={a.nextStepDoneAt ? "line-through" : ""}> · Next step: {a.nextStep}</span>}
+            {a.nextStep && <span className={a.nextStepDoneAt ? "line-through" : ""}> · Follow up: {a.nextStep}</span>}
             {onLogAction && (
               <button onClick={() => { setReplyingAction(a.id); setActionReply(""); }}
                 className="ml-2 font-medium text-accent opacity-0 transition hover:underline focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">Reply</button>
@@ -751,7 +758,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             // two drifted apart (2026-09-14 redesign).
             <div className="mt-1.5 flex items-start gap-2 text-[16px] text-muted">
               <span aria-hidden>{a.nextStepDoneAt ? "✓" : "→"}</span>
-              <span className={a.nextStepDoneAt ? "line-through" : ""}>Next step: {a.nextStep}</span>
+              <span className={a.nextStepDoneAt ? "line-through" : ""}>Follow up: {a.nextStep}</span>
             </div>
           )}
           {/* The thread. Every entry can be replied to, not just team
@@ -1159,7 +1166,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const feedArea = (
     <>
       {filterBar}
-      {commentsFeed}
+      <div id="task-feed">{view === "description" && description ? description.node : commentsFeed}</div>
       <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
     </>
   );
@@ -1182,5 +1189,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
 
   // openCompose goes out so the dock can drive this composer rather than
   // shipping a second, poorer one of its own.
-  return { feedArea, composerFooter, openCompose };
+  // Add → Description lands here: the tab, scrolled into view, since it sits
+  // at the bottom of the page and the menu that opens it is near the top.
+  const showDescription = () => {
+    setView("description");
+    requestAnimationFrame(() => document.getElementById("task-feed")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+  return { feedArea, composerFooter, openCompose, showDescription };
 }

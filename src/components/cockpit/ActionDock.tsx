@@ -337,7 +337,7 @@ export function ActionDock({
       task.attachments.length ? `Attachments:\n${task.attachments.map((a) => `${a.name}${a.url ? ` (${a.url})` : ""}`).join("\n")}` : "",
     ];
     const entries = [
-      ...actions.map((a) => ({ at: a.at, text: `[${a.at.slice(0, 10)}] ${TASK_ACTION_META[a.kind].verb}: ${a.body}${a.nextStep ? `\nNext step: ${a.nextStep}` : ""}` })),
+      ...actions.map((a) => ({ at: a.at, text: `[${a.at.slice(0, 10)}] ${TASK_ACTION_META[a.kind].verb}: ${a.body}${a.nextStep ? `\nFollow up: ${a.nextStep}` : ""}` })),
       ...(messages ?? []).map((m) => ({ at: m.at, text: `[${m.at.slice(0, 10)}] ${m.direction === "inbound" ? "Received" : "Sent"} ${m.channel}${m.subject ? ` — ${m.subject}` : ""}:\n${htmlToText(m.body).trim()}` })),
       ...task.comments.filter((c) => c.kind !== "event").map((c) => ({ at: c.at, text: `[${c.at.slice(0, 10)}] Note: ${c.body}` })),
     ].sort((x, y) => x.at.localeCompare(y.at));
@@ -468,7 +468,7 @@ export function ActionDock({
 
     pushToast(done
       ? `${TASK_ACTION_META[kind].verb} · marked done`
-      : `${TASK_ACTION_META[kind].verb}${nextDue ? ` · follow up ${formatDue(nextDue)}` : nextStep.trim() ? " · next step set" : ""}`);
+      : `${TASK_ACTION_META[kind].verb}${nextDue ? ` · follow up ${formatDue(nextDue)}` : nextStep.trim() ? " · follow up set" : ""}`);
     setView("closed");
   };
 
@@ -847,7 +847,7 @@ export function ActionDock({
             <div className="mb-1.5 text-[16px] text-muted">Internal. The client never sees this.</div>
             {bodyBox("Note for the team…")}
             {wantNext ? nextStepPanel("note") : (
-              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a next step</button>
+              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a follow up</button>
             )}
             {commitRow("note", "Post note")}
           </div>
@@ -868,7 +868,7 @@ export function ActionDock({
             </div>
             {bodyBox("What do you need from them?")}
             {wantNext ? nextStepPanel("team") : (
-              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a next step</button>
+              <button onClick={() => setWantNext(true)} className="mt-2 text-[16px] text-accent underline underline-offset-[3px]">Add a follow up</button>
             )}
             {commitRow("team", "Send")}
           </div>
@@ -880,7 +880,7 @@ export function ActionDock({
             <div className="mb-1.5 text-[16px] text-muted">Sent{contact ? ` to ${contact.name}` : ""}. It is in the feed above.</div>
             {body && <div className="mb-2 max-h-16 overflow-hidden rounded-[9px] border bg-background px-3 py-2 text-[16px] leading-snug text-muted">{body.split("\n").slice(0, 2).join(" ").slice(0, 160)}…</div>}
             {nextStepPanel(view)}
-            {commitRow(view, "Save next step")}
+            {commitRow(view, "Save follow up")}
           </div>
         )}
 

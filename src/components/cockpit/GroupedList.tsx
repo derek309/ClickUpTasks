@@ -11,7 +11,7 @@ import {
   addDaysIso, dateQuickPicks, stepDateLabel,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, LabelChips, LIST_COLUMNS } from "./ui";
+import { I, Avatar, LabelChips, LIST_COLUMNS, MENU_MAX, menuPos, menuStyle } from "./ui";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
@@ -520,33 +520,6 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
 }
 
 // --- inline cell editors ----------------------------------------------------
-
-// Shared by every inline dropdown below: they're nested inside overflow-auto
-// scroll containers (the list card, the page), so plain `absolute` popups get
-// silently clipped whenever a row is near the bottom or right edge. Fixed
-// positioning off the trigger's own screen rect (clamped to the viewport)
-// sidesteps that — the same approach InlineDue/DatePopover already used.
-// A dropdown is as wide as its longest row. Hardcoding a pixel width meant
-// "Changes requested" hung out over the edge of the status menu (Derek,
-// 2026-09-08), and the same trap was set in the priority menu for "Client
-// request" — the labels are 15px while the control that opens them is 13px,
-// so eyeballing the trigger width always underestimates.
-//
-// max-content sizes to the longest row; minWidth keeps a short menu from
-// looking mean next to its trigger; MENU_MAX stops one long client name from
-// producing a menu half the screen wide.
-const MENU_MAX = 280;
-function menuStyle(pos: { top: number; left: number }, minWidth: number): React.CSSProperties {
-  return { position: "fixed", top: pos.top, left: pos.left, minWidth, width: "max-content", maxWidth: MENU_MAX };
-}
-
-function menuPos(ref: React.RefObject<HTMLElement | null>, width: number, height = 240) {
-  const r = ref.current?.getBoundingClientRect();
-  if (!r) return { top: 0, left: 0 };
-  const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-  const top = r.bottom + height > window.innerHeight ? Math.max(8, r.top - height) : r.bottom + 4;
-  return { top, left };
-}
 
 // The stage's own dot, doubling as complete. Lives on its own so the Name
 // cell can carry it when the Stage column is switched off — which the default

@@ -1804,7 +1804,7 @@ export function stepWatchState(w: StepWatch, ctx: {
   }
   const sub = ctx.subtasks.find((s) => s.id === w.subId);
   const who = sub?.assigneeId ? ctx.nameOf(sub.assigneeId).split(" ")[0] : "They";
-  return { waiting: `Ticks when ${who} marks "${sub?.title ?? "the handoff"}" done`, met: sub?.done ? `${who} finished "${sub.title}"` : null };
+  return { waiting: `Waiting on ${who} to finish "${sub?.title ?? "the handoff"}"`, met: sub?.done ? `${who} finished "${sub.title}"` : null };
 }
 
 /** Likely next steps, from what is going on with the task right now: an open
@@ -1824,17 +1824,17 @@ export function suggestNextSteps(ctx: {
   for (const s of ctx.subtasks) {
     if (s.done || !s.assigneeId || s.assigneeId === ctx.taskOwnerId) continue;
     const who = ctx.nameOf(s.assigneeId).split(" ")[0];
-    out.push({ text: `Make sure ${who} finishes "${s.title}"`, watch: `handoff:${s.id}`, due: s.due ?? addBusinessDaysIso(today, 1), hint: `Ticks when ${who} marks the handoff done` });
+    out.push({ text: `Make sure ${who} finishes "${s.title}"`, watch: `handoff:${s.id}`, due: s.due ?? addBusinessDaysIso(today, 1), hint: `Done when ${who} marks the handoff done` });
   }
   for (const kind of ["page", "image", "video", "doc"] as const) {
     const r = ctx.reviews[kind];
     if (!r || (r.status !== "with_client" && r.status !== "client_submitted")) continue;
     const name = r.title.trim() || "the review";
     out.push(r.status === "with_client"
-      ? { text: `Get ${first}'s approval on ${name}`, watch: `approved:${kind}`, due: addBusinessDaysIso(today, 1), hint: `Ticks when ${first} approves it` }
+      ? { text: `Get ${first}'s approval on ${name}`, watch: `approved:${kind}`, due: addBusinessDaysIso(today, 1), hint: `Done when ${first} approves it` }
       : { text: `Make ${first}'s changes to ${name}`, watch: null, due: today, hint: `${first} sent changes` });
   }
-  if (ctx.canMessage) out.push({ text: `Hear back from ${first}`, watch: "reply", due: addBusinessDaysIso(today, 3), hint: `Ticks when ${first} writes back` });
+  if (ctx.canMessage) out.push({ text: `Hear back from ${first}`, watch: "reply", due: addBusinessDaysIso(today, 3), hint: `Done when ${first} writes back` });
   return out.slice(0, 3);
 }
 

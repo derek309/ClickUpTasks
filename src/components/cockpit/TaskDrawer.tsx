@@ -6,7 +6,7 @@ import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
-  parseStepWatch, stepWatchState, suggestNextSteps, formatStepTime, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -727,7 +727,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const watch = parseStepWatch(openStep?.nextStepWatch);
   const watchState = watch && openStep ? stepWatchState(watch, { since: openStep.at, clientName: client.name, messages: messages ?? [], subtasks: task.subtasks, reviews, nameOf }) : null;
   const suggestions = suggestNextSteps({ clientName: client.name, canMessage: mayContactClient, subtasks: task.subtasks, taskOwnerId: task.assigneeId, reviews, nameOf });
-  const stepTime = formatStepTime(openStep?.nextStepTime);
   const patchStep = (patch: Partial<Pick<TaskAction, "nextStepOwner" | "nextStepTime" | "nextStepWatch">>) => {
     if (!openStep) return;
     updateActionRow(openStep.id, patch);
@@ -779,7 +778,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // keeps the story of what was planned.
   const setNewStep = (text: string, date: string | null, watchRaw: string | null = null) => {
     const step = text.trim();
-    if (!step) { pushToast("Write the next step first."); return; }
+    if (!step) { pushToast("Write the follow up first."); return; }
     logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
       body: "", at: new Date().toISOString(), nextStep: step, nextStepDue: date, nextStepDoneAt: null, nextStepWatch: watchRaw });
     if (date !== (task.followUpAt ?? null)) onPatch({ followUpAt: date });
@@ -795,7 +794,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // "Waiting on Brandon to approve the emails" is a sentence for the chip; the
   // band only has room for who it is waiting on.
   const waitingOn = openStep && watchState && !watchState.met
-    ? watchState.waiting.replace(/^Ticks when (.+?) marks .*$/, "Waiting on $1").replace(/ to (reply|approve).*$/, "")
+    ? watchState.waiting.replace(/ to (reply|approve|finish).*$/, "")
     : null;
   const barTone = asking ? "bg-success text-white"
     : !openStep && !followUp ? "bg-background text-muted"
@@ -812,7 +811,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
     <div className={`mt-7 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
       <div className={`flex items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
-        <span className="text-[16px] font-bold tracking-wide">NEXT STEP</span>
+        <span className="text-[16px] font-bold tracking-wide">FOLLOW UP</span>
         <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
       </div>
       <div className="flex items-start gap-3.5 px-4 py-4 sm:px-5">
@@ -842,7 +841,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             )}
             <input autoFocus value={nextDraft} onChange={(e) => setNextDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") setNewStep(nextDraft, dateQuickPicks()[1].date); if (e.key === "Escape") { e.stopPropagation(); setAskNext(null); } }}
-              placeholder="Like: send the approved emails to Michaella" aria-label="Next step"
+              placeholder="Like: send the approved emails to Michaella" aria-label="Follow up"
               className="mt-2 w-full rounded-lg bg-surface px-3 py-2 text-[16px] outline-none ring-1 ring-border focus:ring-2 focus:ring-accent" />
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {dateQuickPicks().slice(1, 4).map((q) => (
@@ -857,7 +856,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {editingStep ? (
               <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
-                onBlur={saveStepDraft} aria-label="Next step"
+                onBlur={saveStepDraft} aria-label="Follow up"
                 className="mt-0.5 w-full rounded-lg bg-background px-2 py-1 text-[21px] font-bold outline-none ring-2 ring-accent" />
             ) : openStep ? (
               <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} title="Click to edit"
@@ -875,7 +874,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 formatValue={() => `📅 ${stepDate.label}`} emptyLabel="📅 Set a date"
                 className={`rounded-[5px] !px-2.5 !py-1.5 text-[16px] font-semibold ${dateTone}`} />
               {openStep && (
-                // Clock and owner are native pickers laid over their chips.
+                // The owner is a native picker laid over its chip.
                 <label className="relative inline-flex cursor-pointer items-center gap-1.5 rounded-[5px] bg-background py-1 pl-1 pr-2.5 text-[16px] font-semibold hover:ring-1 hover:ring-border" title="Who this step is for">
                   {stepOwner ? <Avatar id={stepOwner.id} size={24} /> : <span className="h-6 w-6 rounded-full bg-border" />}
                   {stepOwner ? (stepOwner.id === meId ? "You" : stepOwner.name) : "Nobody"}
@@ -885,13 +884,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </select>
                 </label>
               )}
-              {openStep && (
-                <label className="relative inline-flex cursor-pointer items-center gap-1 rounded-[5px] bg-background px-2.5 py-1.5 text-[16px] font-semibold hover:ring-1 hover:ring-border" title="A time of day for this step">
-                  🕔 {stepTime ? `by ${stepTime}` : <span className="font-medium text-muted">Add a time</span>}
-                  <input type="time" value={openStep.nextStepTime ?? ""} onChange={(e) => patchStep({ nextStepTime: e.target.value || null })}
-                    aria-label="Time for this step" className="absolute inset-0 cursor-pointer opacity-0" />
-                </label>
-              )}
+              {/* No time of day (Derek, 2026-09-30: "usually we don't need a time
+                  ... it's just going to be the date when we need to follow up").
+                  It was display only; nothing ever read it. */}
               {openStep && watchState && (
                 <span className="inline-flex items-center gap-2 rounded-[5px] bg-sky-50 px-2.5 py-1.5 text-[16px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-sky-600" />{watchState.waiting}
@@ -899,9 +894,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </span>
               )}
               {openStep && !watch && suggestions.some((sg) => sg.watch) && (
-                <ActionMenu label={<span className="text-[16px] font-medium text-muted">⚡ Tick itself when…</span>} title="Finish this step by itself when something happens"
+                <ActionMenu label={<span className="text-[16px] font-medium text-muted">⚡ Done when…</span>} title="Finish this follow up by itself when something happens"
                   triggerClassName="rounded-[5px] px-2 py-1.5 hover:bg-background"
-                  items={suggestions.filter((sg) => sg.watch).map((sg) => ({ label: sg.hint.replace(/^Ticks when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) }))} />
+                  items={suggestions.filter((sg) => sg.watch).map((sg) => ({ label: sg.hint.replace(/^Done when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) }))} />
               )}
               {openStep && (
                 <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
@@ -1018,7 +1013,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const sectionOpen = (k: string) => openSections.taskId === task.id && openSections.keys.includes(k);
   const openSection = (k: string) =>
     setOpenSections((s) => (s.taskId === task.id ? { taskId: task.id, keys: [...s.keys, k] } : { taskId: task.id, keys: [k] }));
-  const showDescription = htmlToText(task.description).trim().length > 0 || sectionOpen("description");
+  const hasDescription = htmlToText(task.description).trim().length > 0;
   const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
   const showAttachments = task.attachments.length > 0 || sectionOpen("attachments");
   // A client document is for sharing, so a private task and the Personal client
@@ -1067,18 +1062,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       startNonce={docStartNonce}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
-  const descriptionBlock = !showDescription ? null : (
+  const descriptionBlock = (
     <div>
+      {!descEditing && hasDescription && (
+        <div className="mb-1 flex justify-end">
+          <button onClick={() => setDescEditing(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>
+        </div>
+      )}
       {/* Reads as text until you click it. A permanently-live editor put a
           formatting toolbar and an AI prompt box in the rail on every task,
           which is most of why this column looked twice the weight of the
           mockup it came from. */}
-      {descEditing || !htmlToText(task.description).trim() ? (
+      {descEditing || !hasDescription ? (
         <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       ) : (
         <button onClick={() => setDescEditing(true)} title="Click to edit"
           className="-mx-2 block w-full max-w-[72ch] rounded-lg px-2 py-1 text-left text-[16px] leading-relaxed hover:bg-surface">
-          <CollapsibleText text={htmlToText(task.description)} maxLines={5} />
+          {/* Its own tab now, so it has the room: folded only when it is long. */}
+          <CollapsibleText text={htmlToText(task.description)} maxLines={30} maxChars={4000} />
         </button>
       )}
       {descEditing && (
@@ -1122,7 +1123,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   // Reply on a client's chat or text: the dock's box switches to it (Derek, 2026-09-16).
   const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null>(null);
-  const { feedArea, composerFooter, openCompose } = useTaskMessaging({
+  const { feedArea, composerFooter, openCompose, showDescription } = useTaskMessaging({
+    description: { node: descriptionBlock, has: hasDescription },
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
@@ -1437,7 +1439,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
     <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
-      !showDescription && { label: "Description", onClick: () => openSection("description") },
+      !hasDescription && { label: "Description", onClick: showDescription },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
       hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
@@ -1477,10 +1479,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </section>
   );
 
-  // The task in reading order: what it is, what happens next, what it says,
-  // what has been made for it, then everything said and done about it
-  // (2026-09-14 redesign). The description used to sit in the side rail cut
-  // off after a few lines, though it is what explains the task.
+  // The task in reading order: what it is, when we follow up, what has been
+  // made for it, then everything said and done about it. The description is
+  // the last tab of that feed rather than a section above the deliverables
+  // (Derek, 2026-09-30: "it's kind of getting in the way there. We can move
+  // the deliverables up").
   const mainColumn = (
     <>
       {titleRow}
@@ -1489,10 +1492,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {delegationRow}
       {nextStepCard}
       {clientResponseBlock}
-      {showDescription && section("Description", descriptionBlock,
-        !descEditing && htmlToText(task.description).trim()
-          ? <button onClick={() => setDescEditing(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>
-          : undefined)}
       {section("Deliverables", (
         <>
           {documentBlock}
