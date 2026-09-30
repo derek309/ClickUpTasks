@@ -651,6 +651,49 @@ export function createServer(opts = {}) {
       "Bring back the review of this kind deleted most recently (within 30 days). The task can't have a live one of that kind.",
       { task_id: z.string(), kind: KIND },
       async ({ task_id, kind }) => reply(await services.restoreReview(task_id, kind)));
+
+    // Project instructions for an outside person (a Fiverr designer, say), apart
+    // from the reviews: they never go to the client and act as nobody.
+    server.tool("get_project_instructions",
+      "Read a task's project instructions for an outside person (a Fiverr designer or other third party): the text, due date, whether the outside link is on (and the link), the files sent with them, and the files the person sent back (with ids for put_sent_back_in_image_review). Never shown to the client.",
+      { task_id: z.string() },
+      async ({ task_id }) => reply(await services.getProjectInstructions(task_id)));
+
+    server.tool("write_project_instructions",
+      `Create a task's project instructions for an outside person, or change them. Separate from the client document; the client never sees them. Write only what the outside person needs (the job, sizes and format, what must be on it, look and feel, what to send back) and NEVER the client's phone, email or contact name. Pass the WHOLE text each time you pass body (read it with get_project_instructions first when editing). ${DOC_TEXT} Nothing leaves until a link is made.`,
+      {
+        task_id: z.string(),
+        body: z.string().optional().describe("the whole instructions, in the simple markdown described above; omit to keep them"),
+        title: z.string().optional().describe("their name, like \"Grand opening postcard\"; omit to keep it"),
+        due: z.string().nullable().optional().describe("yyyy-mm-dd, when the person should send it back; null clears it"),
+        show_business: z.boolean().optional().describe("whether the outside page names the client's business (default on)"),
+        files_back: z.boolean().optional().describe("whether the person can send files back through the link (default on)"),
+      },
+      async ({ task_id, body, title, due, show_business, files_back }) => {
+        const html = body === undefined ? undefined : docTextToHtml(body);
+        if (html !== undefined && !docHtmlToText(html)) return reply("The instructions are empty.");
+        return reply(await services.writeProjectInstructions(task_id, html, { title, due, showBusiness: show_business, uploadsOpen: files_back }));
+      });
+
+    server.tool("get_project_instructions_link",
+      "The outside link to a task's project instructions, to paste to the outside person. With new: true, makes a fresh one (any old one stops) that works for days (7, 14 or 30, default 14). With extend: true, keeps the same link working for days more from today. Making a link sends nothing; only share it with the person doing the work.",
+      {
+        task_id: z.string(),
+        new: z.boolean().optional(),
+        extend: z.boolean().optional(),
+        days: z.union([z.literal(7), z.literal(14), z.literal(30)]).optional(),
+      },
+      async ({ task_id, new: fresh, extend, days }) => reply(await services.getProjectInstructionsLink(task_id, { fresh, extend, days })));
+
+    server.tool("turn_off_project_instructions_link",
+      "Switch the outside link to a task's project instructions off for good.",
+      { task_id: z.string() },
+      async ({ task_id }) => reply(await services.turnOffProjectInstructionsLink(task_id)));
+
+    server.tool("put_sent_back_in_image_review",
+      "Put images the outside person sent back (file ids from get_project_instructions; JPG, PNG, WebP or GIF only, up to 10) into the task's image review as its next version, NOT sent. Two images read as Front and Back. The client sees nothing until send_for_review.",
+      { task_id: z.string(), file_ids: z.array(z.string()).min(1).max(10) },
+      async ({ task_id, file_ids }) => reply(await services.moveSentBackToImageReview(task_id, file_ids)));
   }
 
   server.tool("check_item",

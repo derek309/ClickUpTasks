@@ -37,6 +37,14 @@ An HTML review version can hold up to 10 pages the same way, like two emails
 for one campaign (Derek, 2026-09-16): `add_review_version` takes `pages`, each
 with its own `html` and `label`, and `image_labels` and `pin.image` work for pages too.
 
+Project instructions (hosted only), for an outside person such as a Fiverr
+designer, apart from the reviews and never shown to the client (Derek,
+2026-09-30): `get_project_instructions`, `write_project_instructions`,
+`get_project_instructions_link` (`new` makes one for 7, 14 or 30 days,
+`extend` keeps it longer), `turn_off_project_instructions_link`,
+`put_sent_back_in_image_review` (images the person sent back become the image
+review's next version, not sent). `get_task` also prints them.
+
 What Claude may and may not do (Derek, 2026-09-13):
 
 - Claude may send a review, which turns on the client's private link and moves

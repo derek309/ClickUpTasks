@@ -31,6 +31,11 @@ import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
 import { MAX_SET_IMAGES, cleanImageLabel, imageLabel, parseImageSet, type ImageSetItem } from "./imageSet";
 import { docHtmlToText } from "../../mcp/core.mjs";
+import {
+  briefLinkState, createBrief, extendBriefLink, liveBrief, mintBriefLink, moveToImageReview, revokeBriefLink, saveBrief,
+} from "./briefServer";
+import { BRIEF_TITLE, cleanLinkDays, formatDue, linkDaysLabel } from "./brief";
+import { formatFileSize } from "./uploadTypes";
 
 export type ReviewVersion = number | "next";
 /** One image for an image review version: from a link or an upload, where it goes
@@ -527,6 +532,95 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       if (!r.ok) return r.error;
       await event(task.id, `${await actor.label()} restored the ${what(kind)}`);
       return `Restored the ${what(kind)} on "${task.title}", with its versions, comments and link.`;
+    },
+
+    // Project instructions for an outside person (supabase/task-briefs.sql,
+    // briefServer.ts), separate from the reviews: they never go to the client.
+
+    async getProjectInstructions(taskId: string): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const brief = await liveBrief(task.id);
+      if (!brief) return `"${task.title}" has no project instructions yet. write_project_instructions makes them.`;
+      const [link, { data: files }] = await Promise.all([
+        briefLinkState(brief.id as string, origin),
+        supabaseAdmin.from("task_brief_files").select("id, name, size_bytes, from_outside, added_by_label, created_at, moved_at")
+          .eq("brief_id", brief.id as string).is("removed_at", null).order("created_at", { ascending: true }),
+      ]);
+      const fileLine = (f: Record<string, unknown>) =>
+        `  - ${f.id} ${f.name} (${formatFileSize(Number(f.size_bytes ?? 0))}${f.from_outside ? `, from ${f.added_by_label ?? "someone outside"}${f.moved_at ? ", in the image review" : ""}` : ""})`;
+      const ours = (files ?? []).filter((f) => !f.from_outside);
+      const back = (files ?? []).filter((f) => f.from_outside);
+      return [
+        `Project instructions on "${task.title}": ${((brief.title as string) || "").trim() || BRIEF_TITLE}`,
+        brief.due_on ? `Due back: ${formatDue(brief.due_on as string)}` : "No due date.",
+        link.live ? `Link on until ${link.expiresAt ? formatDue(link.expiresAt.slice(0, 10)) : "turned off"}${link.url ? `: ${link.url}` : ""}` : "Not shared (no live link).",
+        `Business name shown: ${brief.show_business === false ? "no" : "yes"} · Files back: ${brief.uploads_open === false ? "off" : "on"}${brief.viewed_at ? ` · Viewed ${String(brief.viewed_at).slice(0, 16).replace("T", " ")} UTC` : ""}`,
+        "",
+        docHtmlToText((brief.body as string) ?? "") || "(empty)",
+        ours.length ? `\nFiles for them:\n${ours.map(fileLine).join("\n")}` : "",
+        back.length ? `\nSent back:\n${back.map(fileLine).join("\n")}` : "",
+      ].filter((l) => l !== "").join("\n");
+    },
+
+    async writeProjectInstructions(taskId: string, html: string | undefined, change: { title?: string; due?: string | null; showBusiness?: boolean; uploadsOpen?: boolean }): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const existed = !!(await liveBrief(task.id));
+      const made = await createBrief(task, actor, "blank");
+      if (!made.ok) return made.error;
+      const input: Record<string, unknown> = {};
+      if (html !== undefined) input.body = html;
+      if (change.title !== undefined) input.title = change.title;
+      if (change.due !== undefined) input.due = change.due;
+      if (change.showBusiness !== undefined) input.showBusiness = change.showBusiness;
+      if (change.uploadsOpen !== undefined) input.uploadsOpen = change.uploadsOpen;
+      if (Object.keys(input).length) {
+        const r = await saveBrief(task.id, actor, input);
+        if (!r.ok) return r.error;
+      }
+      await event(task.id, `${await actor.label()} ${existed ? "updated" : "wrote"} the project instructions`);
+      return `${existed ? "Updated" : "Created"} the project instructions on "${task.title}". Nobody outside sees them until a link is made (get_project_instructions_link with new).`;
+    },
+
+    async getProjectInstructionsLink(taskId: string, opts: { fresh?: boolean; extend?: boolean; days?: number }): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const brief = await liveBrief(task.id);
+      if (!brief) return `"${task.title}" has no project instructions yet. write_project_instructions makes them.`;
+      const id = brief.id as string;
+      const days = cleanLinkDays(opts.days);
+      const warn = "Anyone with it can read the instructions and send files back, without signing in. It never shows the client's contact or acts as the client.";
+      if (opts.fresh) {
+        const made = await mintBriefLink(id, task.id, actor, origin, days);
+        await event(task.id, `${await actor.label()} made a link to the project instructions (${linkDaysLabel(days)})`);
+        return `${made.url}\n\nWorks for ${linkDaysLabel(days)}. Any older link stopped working. ${warn}`;
+      }
+      if (opts.extend && !(await extendBriefLink(id, days))) return "The link is off. Pass new: true to make one.";
+      const link = await briefLinkState(id, origin);
+      if (!link.live) return "The link is off or expired. Pass new: true to make one.";
+      const until = link.expiresAt ? formatDue(link.expiresAt.slice(0, 10)) : "turned off";
+      return link.url ? `${link.url}\n\nWorks until ${until}. ${warn}` : `The link is on until ${until}, but it can't be shown again. Pass new: true to replace it.`;
+    },
+
+    async turnOffProjectInstructionsLink(taskId: string): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const brief = await liveBrief(task.id);
+      if (!brief) return `"${task.title}" has no project instructions.`;
+      await revokeBriefLink(brief.id as string);
+      await event(task.id, `${await actor.label()} turned off the project instructions link`);
+      return "The link is off for good. get_project_instructions_link with new: true makes a fresh one.";
+    },
+
+    async moveSentBackToImageReview(taskId: string, fileIds: string[]): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const brief = await liveBrief(task.id);
+      if (!brief) return `"${task.title}" has no project instructions.`;
+      const r = await moveToImageReview(task, brief.id as string, fileIds, actor);
+      if (!r.ok) return r.error;
+      return `Put ${r.moved === 1 ? "1 image" : `${r.moved} images`} in the image review on "${task.title}" as the next version, not sent. The client sees nothing until send_for_review.`;
     },
   };
 

@@ -14,6 +14,8 @@ const REVIEW_TOOLS = [
   "list_reviews", "get_review", "get_client_document", "create_review", "update_review", "write_document", "write_client_document",
   "start_image_upload", "add_review_version", "use_version", "remove_version", "send_for_review", "get_review_link",
   "revoke_review_link", "add_review_comment", "update_review_comment", "delete_review_comment", "delete_review", "restore_review",
+  "get_project_instructions", "write_project_instructions", "get_project_instructions_link", "turn_off_project_instructions_link",
+  "put_sent_back_in_image_review",
 ];
 
 async function connect(services?: Record<string, unknown>) {
@@ -105,5 +107,29 @@ describe("review tools over MCP", () => {
     const result = await client.callTool({ name: "add_review_comment", arguments: { task_id: "t_1", kind: "image", text: "x", pin: { version: 1, x: 1.5, y: 0 } } }) as any;
     expect(result.isError).toBe(true);
     expect(addComment).not.toHaveBeenCalled();
+  });
+});
+
+describe("project instructions tools over MCP", () => {
+  it("writes them from markdown, passes only what was given, and refuses empty text", async () => {
+    const writeProjectInstructions = vi.fn(async () => "Created.");
+    const client = await connect({ writeProjectInstructions });
+    await call(client, "write_project_instructions", { task_id: "t_1", body: "## The job\n\nA postcard", title: "Postcard", due: "2026-10-06" });
+    expect(writeProjectInstructions).toHaveBeenCalledWith("t_1", "<h2>The job</h2><p>A postcard</p>",
+      { title: "Postcard", due: "2026-10-06", showBusiness: undefined, uploadsOpen: undefined });
+    await call(client, "write_project_instructions", { task_id: "t_1", show_business: false });
+    expect(writeProjectInstructions).toHaveBeenLastCalledWith("t_1", undefined,
+      { title: undefined, due: undefined, showBusiness: false, uploadsOpen: undefined });
+    expect(await call(client, "write_project_instructions", { task_id: "t_1", body: "  " })).toBe("The instructions are empty.");
+    expect(writeProjectInstructions).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes a link only when asked, for the days picked", async () => {
+    const getProjectInstructionsLink = vi.fn(async () => "https://x/brief/brf_1");
+    const client = await connect({ getProjectInstructionsLink });
+    await call(client, "get_project_instructions_link", { task_id: "t_1" });
+    expect(getProjectInstructionsLink).toHaveBeenCalledWith("t_1", { fresh: undefined, extend: undefined, days: undefined });
+    await call(client, "get_project_instructions_link", { task_id: "t_1", new: true, days: 30 });
+    expect(getProjectInstructionsLink).toHaveBeenLastCalledWith("t_1", { fresh: true, extend: undefined, days: 30 });
   });
 });
