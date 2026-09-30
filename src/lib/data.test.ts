@@ -1222,6 +1222,23 @@ describe("unansweredPreviewByTask", () => {
     expect(unansweredPreviewByTask([msg({ body })]).get("t_1")).toBe("Yes, Tuesday works.");
   });
 
+  // Both from real rows on 2026-09-30: the preview was half signature.
+  it("cuts a quote out of a body that was stored as one line", () => {
+    const body = "Just a reminder about the website changes Jenny Yannessa Classic Gymnastics Owner/Director On Sep 22, 2026, at 9:42 AM, Classic gymnastics &lt;info@classicgymnastics.net&gt; wrote: Just a reminder";
+    expect(unansweredPreviewByTask([msg({ body })]).get("t_1")).toBe("Just a reminder about the website changes Jenny Yannessa Classic Gymnastics Owner/Director");
+  });
+
+  it("leaves out what the mail app signs with", () => {
+    expect(unansweredPreviewByTask([msg({ body: "Ok please proceed with the reset\n\nGet Outlook for iOS<https://aka.ms/o0ukef>" })]).get("t_1")).toBe("Ok please proceed with the reset");
+    expect(unansweredPreviewByTask([msg({ body: "Ok please proceed with the reset Get Outlook for iOS<https://aka.ms/o0ukef>" })]).get("t_1")).toBe("Ok please proceed with the reset");
+    expect(unansweredPreviewByTask([msg({ body: "Sounds good\n\nSent from my iPhone" })]).get("t_1")).toBe("Sounds good");
+    expect(unansweredPreviewByTask([msg({ body: "Sounds good\n-- \nMatt\n555 1234" })]).get("t_1")).toBe("Sounds good");
+  });
+
+  it("keeps an ordinary sentence that starts with On", () => {
+    expect(unansweredPreviewByTask([msg({ body: "On Tuesday we are closed, can we do Wednesday?" })]).get("t_1")).toBe("On Tuesday we are closed, can we do Wednesday?");
+  });
+
   it("reads an HTML body as text", () => {
     expect(unansweredPreviewByTask([msg({ body: "<p>Looks <b>great</b></p>" })]).get("t_1")).toBe("Looks great");
   });

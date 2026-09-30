@@ -2310,6 +2310,13 @@ export const MENTION_EMAIL_FOOTER = "Reply to this email and your answer lands o
  *    Outlook            "-----Original Message-----", or a rule of underscores
  *                       followed by "From:"
  *    unmarked           our own footer sentence */
+const MAIL_APP_SIGNATURE = /^(?:Sent from (?:my |Yahoo Mail)|Get Outlook for )/i;
+/** The same cuts for a body that reached us as one line (an HTML only email is
+ *  flattened when it is stored), where there is no line start to test. Looser
+ *  than replyOnly, so it is only used for the list preview: a glance can afford
+ *  to lose the odd sentence, a comment cannot. */
+const INLINE_QUOTE_OR_SIGNATURE = /(?:^|\s)(?:On\s[A-Z][\s\S]{0,250}?\swrote:|Sent from (?:my |Yahoo Mail)|Get Outlook for )/;
+
 export function replyOnly(text: string): string {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const wrote = /^On\s.+\swrote:\s*$/;
@@ -2320,7 +2327,11 @@ export function replyOnly(text: string): string {
       || l.startsWith(">")
       || /^-{2,}\s*Original Message\s*-{2,}$/i.test(l)
       || (/^_{10,}$/.test(l) && /^From:/i.test((lines[i + 1] ?? "").trim()))
-      || l.startsWith(MENTION_EMAIL_FOOTER);
+      || l.startsWith(MENTION_EMAIL_FOOTER)
+      // A signature is not the answer either. "--" alone is the standard
+      // delimiter; the other two are what phones add without being asked.
+      || l === "--"
+      || MAIL_APP_SIGNATURE.test(l);
   });
   return (cut === -1 ? lines : lines.slice(0, cut)).join("\n").trim();
 }
@@ -2341,7 +2352,8 @@ export function unansweredPreviewByTask(messages: Message[]): Map<string, string
   const previews = new Map<string, string>();
   for (const [taskId, m] of latest) {
     if (m.direction !== "inbound") continue;
-    const said = replyOnly(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body).replace(/\s+/g, " ").trim().slice(0, 140);
+    const flat = replyOnly(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body).replace(/\s+/g, " ").trim();
+    const said = flat.slice(0, flat.match(INLINE_QUOTE_OR_SIGNATURE)?.index ?? flat.length).trim().slice(0, 140);
     const preview = [m.subject?.trim(), said].filter(Boolean).join(": ");
     if (preview) previews.set(taskId, preview);
   }

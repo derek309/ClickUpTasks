@@ -167,9 +167,10 @@ describe("replyOnly", () => {
     expect(replyOnly(`${answer}\n\nOn Mon, Sep 29, 2026 at 10:00 AM Derek Fox <derek@clickuplocal.com> wrote:\n\n> Derek Fox mentioned you on`)).toBe(answer);
     expect(replyOnly(`${answer}\r\n\r\nOn Mon, Sep 29, 2026 at 10:00 AM Derek Fox <\r\nderek@clickuplocal.com> wrote:\r\n\r\n> quoted`)).toBe(answer);
   });
-  it("cuts Apple Mail's quote", () => {
+  it("cuts Apple Mail's quote, and the line the phone signs with", () => {
     expect(replyOnly(`${answer}\n\nSent from my iPhone\n\nOn Sep 29, 2026, at 10:00 AM, Derek Fox <derek@clickuplocal.com> wrote:\n\n> quoted`))
-      .toBe(`${answer}\n\nSent from my iPhone`);
+      .toBe(answer);
+    expect(replyOnly(`${answer}\n\nOn Sep 29, 2026, at 10:00 AM, Derek Fox <derek@clickuplocal.com> wrote:\n\n> quoted`)).toBe(answer);
   });
   it("cuts Outlook's quote, in both of its shapes", () => {
     expect(replyOnly(`${answer}\n\n-----Original Message-----\nFrom: Derek Fox`)).toBe(answer);
