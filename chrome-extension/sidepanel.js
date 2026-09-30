@@ -15,26 +15,27 @@ const subAccountSel = document.getElementById("subAccountSel");
 const addContactBtn = document.getElementById("addContactBtn");
 const addContactNameEl = document.getElementById("addContactName");
 const screenshotGalleryEl = document.getElementById("screenshotGallery");
-const modeNewBtn = document.getElementById("modeNew");
-const modeExistingBtn = document.getElementById("modeExisting");
-const newTaskFieldsEl = document.getElementById("newTaskFields");
-const existingTaskFieldsEl = document.getElementById("existingTaskFields");
-const taskSearchInput = document.getElementById("taskSearch");
-const taskResultsEl = document.getElementById("taskResults");
+const pickViewEl = document.getElementById("pickView");
+const newViewEl = document.getElementById("newView");
+const newTaskBtn = document.getElementById("newTaskBtn");
+const backToTasksBtn = document.getElementById("backToTasks");
+const taskFilterInput = document.getElementById("taskFilter");
+const taskListEl = document.getElementById("taskList");
+const taskEmptyEl = document.getElementById("taskEmpty");
+const listHeadingEl = document.getElementById("listHeading");
+const sourceIconEl = document.getElementById("sourceIcon");
+const sourceTitleEl = document.getElementById("sourceTitle");
+const sourceSubEl = document.getElementById("sourceSub");
 const projectSel = document.getElementById("project");
-const existingProjectSel = document.getElementById("existingProject");
 const dueInput = document.getElementById("due");
 const followUpInput = document.getElementById("followUp");
 const prioritySel = document.getElementById("priority");
 const assigneeSel = document.getElementById("assignee");
-const titleLabelEl = document.getElementById("titleLabel");
 const titleInput = document.getElementById("title");
 const notesInput = document.getElementById("notes");
 const statusEl = document.getElementById("status");
 const createBtn = document.getElementById("create");
 const enrichBtn = document.getElementById("enrich");
-const clippedEl = document.getElementById("alreadyClipped");
-const clippedListEl = document.getElementById("alreadyClippedList");
 const emailAttsEl = document.getElementById("emailAtts");
 const emailAttsListEl = document.getElementById("emailAttsList");
 const refreshBtn = document.getElementById("refresh");
@@ -56,9 +57,13 @@ let selectedEntryId = "";
 // auto-matched. Only a "user" pick is ever taught to the memory.
 let clientSource = null;
 let capturedScreenshots = []; // data URLs, in the order added
-let mode = "new"; // "new" | "existing"
-let allTasks = []; // [{id, title, status}] for the current client
-let selectedTaskId = "";
+let allTasks = []; // [{id, title, status, projectId, due, followUpAt, waitingOnClient}] for the current client
+// Tasks this email or page is already on (by its link), pinned to the top.
+let clippedTasks = [];
+// The row that is open, showing its note box and Add button.
+let openTaskId = "";
+// List id -> name, to label each task row with where it lives.
+let projectNames = {};
 
 document.getElementById("openOptions").addEventListener("click", (e) => {
   e.preventDefault();
@@ -109,15 +114,18 @@ async function attachEmailThread(token, taskId) {
       // A disagreement between what we tried to write and what the database
       // confirmed is the whole bug we have been chasing, so say it out loud
       // rather than rounding it up into a success.
+      // A line under the "Task created / Added" link, not in place of it.
+      const line = document.createElement("div");
       if (typeof res.attempted === "number" && res.attempted !== res.imported) {
-        statusEl.textContent = `Thread bound, but ${res.attempted - res.imported} message(s) did not save. Thread ${res.threadId}.`;
-        statusEl.className = "err";
-        return;
+        line.textContent = `Thread bound, but ${res.attempted - res.imported} message(s) did not save. Thread ${res.threadId}.`;
+        line.className = "err";
+      } else {
+        line.textContent = res.confident
+          ? `Watching this thread: ${count}.`
+          : `Matched by subject: ${count}. Check it is the right thread.`;
+        line.className = res.confident ? "muted" : "err";
       }
-      statusEl.textContent = res.confident
-        ? `Watching this thread — ${count}.`
-        : `Matched by subject — ${count}. Check it is the right thread.`;
-      statusEl.className = "ok";
+      statusEl.append(line);
     }
   } catch {
     // Silent: the clip itself worked.
@@ -263,7 +271,7 @@ async function loadMembers(token) {
 
 async function loadProjectsFor(clientId) {
   projectSel.innerHTML = "";
-  existingProjectSel.innerHTML = '<option value="">All lists</option>';
+  projectNames = {};
   const blankOpt = document.createElement("option");
   blankOpt.value = "";
   blankOpt.textContent = "Default";
@@ -278,24 +286,28 @@ async function loadProjectsFor(clientId) {
       opt.value = p.id;
       opt.textContent = p.name;
       projectSel.appendChild(opt);
-      // The same lists, for narrowing the task search. A client with a dozen
-      // lists has far too many open tasks to scan as one flat list.
-      existingProjectSel.appendChild(opt.cloneNode(true));
+      projectNames[p.id] = p.name;
     }
+    renderTaskList();
   } catch { /* leave just "Default" — task creation still works via the fallback */ }
 }
 
 async function loadTasksFor(clientId) {
   allTasks = [];
-  selectedTaskId = "";
-  taskSearchInput.value = "";
+  openTaskId = "";
+  taskFilterInput.value = "";
+  renderTaskList(clientId ? "Loading their open tasks…" : null);
   if (!clientId) return;
   const token = await getToken();
   if (!token) return;
   try {
     const { tasks } = await apiFetch(`/api/extension/tasks?client_id=${encodeURIComponent(clientId)}`, token);
+    // A reply from another client can land while this one loads; keep only
+    // the answer for the client still selected.
+    if (clientId !== selectedClientId) return;
     allTasks = tasks;
-  } catch { /* leave empty — search will just show "No matches" */ }
+  } catch { /* leave empty — the list says there are none */ }
+  renderTaskList();
 }
 
 function clientLabel(c) {
@@ -467,92 +479,113 @@ function selectClient(id) {
 clientSearchInput.addEventListener("input", () => {
   selectedClientId = ""; // typing invalidates any prior selection/auto-match
   matchHintEl.textContent = "";
+  allTasks = [];
+  renderTaskList();
+  showView("pick");
   renderClientResults(clientSearchInput.value);
 });
 clientSearchInput.addEventListener("focus", () => renderClientResults(clientSearchInput.value));
 clientSearchInput.addEventListener("blur", () => clientResultsEl.classList.remove("open"));
 
-function listNameFor(projectId) {
-  if (!projectId) return "";
-  const opt = [...existingProjectSel.options].find((o) => o.value === projectId);
-  return opt ? opt.textContent : "";
+// How soon a task needs you, from its follow up date, else its due date.
+const localToday = () => todayIso();
+function dateOf(t) { return t.followUpAt || t.due || null; }
+function pillFor(t) {
+  const d = dateOf(t);
+  if (!d) return null;
+  const today = localToday();
+  const days = Math.round((Date.parse(`${d}T12:00:00`) - Date.parse(`${today}T12:00:00`)) / 86400000);
+  if (days < 0) return { text: `${-days}d late`, tone: "late" };
+  if (days === 0) return { text: "Today", tone: "soon" };
+  if (days === 1) return { text: "Tomorrow", tone: "soon" };
+  return { text: new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" }), tone: "later" };
 }
 
-function renderTaskResults(query) {
-  const q = query.trim().toLowerCase();
-  const list = existingProjectSel.value;
-  const inList = list ? allTasks.filter((t) => t.projectId === list) : allTasks;
-  const matches = !q ? inList : inList.filter((t) => t.title.toLowerCase().includes(q));
-  taskResultsEl.innerHTML = "";
-  if (!matches.length) {
-    const empty = document.createElement("div");
-    empty.className = "result-row";
-    empty.style.cssText = "color:#94a3b8;cursor:default;";
-    empty.textContent = !selectedClientId
-      ? "Pick a client first"
-      : (existingProjectSel.value ? "No matching open tasks in this list" : "No matching open tasks");
-    taskResultsEl.appendChild(empty);
-  } else {
-    for (const t of matches.slice(0, 50)) {
-      const row = document.createElement("div");
-      row.className = "result-row";
-      row.textContent = t.title;
-      // Which list it is in, when the search spans all of them: two tasks
-      // called "Website" under different lists are otherwise one row twice.
-      const listName = !list && listNameFor(t.projectId);
-      if (listName) {
-        const tag = document.createElement("span");
-        tag.textContent = listName;
-        tag.style.cssText = "color:#64748b;font-size:11px;margin-left:6px;";
-        row.appendChild(tag);
-      }
-      row.addEventListener("mousedown", (e) => { e.preventDefault(); selectTask(t.id); });
-      taskResultsEl.appendChild(row);
-    }
+// The client's open tasks as the first thing on the panel, so adding an email
+// to work that already exists is one click, not a mode switch and a search
+// (Derek, 2026-09-30). The task the email is already on sits at the top.
+function renderTaskList(loadingText = null) {
+  taskListEl.innerHTML = "";
+  const first = clientSearchInput.value.split(/[ —]/)[0] || "the client";
+  listHeadingEl.textContent = selectedClientId ? "Add to a task" : "Pick a client";
+  newTaskBtn.disabled = !selectedClientId;
+  taskFilterInput.style.display = selectedClientId && allTasks.length > 5 ? "" : "none";
+  taskFilterInput.placeholder = `Search ${first}'s ${allTasks.length} open tasks`;
+  if (loadingText || !selectedClientId) {
+    taskEmptyEl.textContent = loadingText || "Choose who this is for above, then pick one of their tasks or make a new one.";
+    return;
   }
-  taskResultsEl.classList.add("open");
+  const q = taskFilterInput.value.trim().toLowerCase();
+  const here = new Set(clippedTasks.map((t) => t.id));
+  const pinned = clippedTasks.filter((t) => !t.clientId || t.clientId === selectedClientId);
+  const rest = allTasks.filter((t) => !here.has(t.id)).sort((a, b) => {
+    const da = dateOf(a), db = dateOf(b);
+    if (da && db) return da.localeCompare(db);
+    return da ? -1 : db ? 1 : 0;
+  });
+  const shown = [...pinned, ...rest].filter((t) => !q || t.title.toLowerCase().includes(q));
+  taskEmptyEl.textContent = shown.length ? "" : q ? "No open task matches that." : `${first} has no open tasks. Make a new one.`;
+  for (const t of shown.slice(0, 60)) taskListEl.append(taskRow(t, here.has(t.id)));
 }
 
-function selectTask(id) {
-  const t = allTasks.find((x) => x.id === id);
-  selectedTaskId = id;
-  taskSearchInput.value = t ? t.title : "";
-  taskResultsEl.classList.remove("open");
+function taskRow(t, isHere) {
+  const wrap = document.createElement("div");
+  wrap.className = `task${isHere ? " here" : ""}${t.id === openTaskId ? " open" : ""}`;
+  const row = document.createElement("div");
+  row.className = "task-row";
+  const text = document.createElement("div");
+  text.className = "t";
+  const title = document.createElement("b");
+  title.textContent = t.title;
+  const sub = document.createElement("span");
+  if (isHere) { sub.className = "flag"; sub.textContent = "This is already on it"; }
+  else sub.textContent = [projectNames[t.projectId], t.waitingOnClient ? "Waiting on the client" : null].filter(Boolean).join(" · ");
+  text.append(title, sub);
+  row.append(text);
+  const pill = !isHere && pillFor(t);
+  if (pill) {
+    const p = document.createElement("span");
+    p.className = `pill ${pill.tone}`;
+    p.textContent = pill.text;
+    row.append(p);
+  }
+  row.addEventListener("click", () => { openTaskId = openTaskId === t.id ? "" : t.id; renderTaskList(); });
+  wrap.append(row);
+  if (t.id === openTaskId) {
+    // What goes on the task: a note (the email's sender and opening lines,
+    // editable), plus the attachments and screenshots ticked above.
+    const add = document.createElement("div");
+    add.className = "task-add";
+    const note = document.createElement("textarea");
+    note.value = notesInput.value;
+    note.placeholder = "Add a note (optional)";
+    note.setAttribute("aria-label", `Note for ${t.title}`);
+    const go = document.createElement("button");
+    go.type = "button";
+    go.textContent = permalink && senderEmail ? "Add email to this task" : "Add to this task";
+    go.addEventListener("click", () => void submit({ taskId: t.id, taskTitle: t.title, body: note.value.trim(), button: go }));
+    const open = document.createElement("a");
+    open.className = "open-link";
+    open.href = `${API_BASE}/?task=${encodeURIComponent(t.id)}`;
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.textContent = "Open the task";
+    add.append(note, go, open);
+    wrap.append(add);
+    requestAnimationFrame(() => note.focus());
+  }
+  return wrap;
 }
+taskFilterInput.addEventListener("input", () => { openTaskId = ""; renderTaskList(); });
 
-taskSearchInput.addEventListener("input", () => {
-  selectedTaskId = "";
-  renderTaskResults(taskSearchInput.value);
-});
-existingProjectSel.addEventListener("change", () => {
-  // Changing the list invalidates a task chosen from a different one.
-  selectedTaskId = "";
-  taskSearchInput.value = "";
-  // renderTaskResults already opens the list, which is the point: picking a
-  // list should SHOW you its tasks, not wait for you to click into a search
-  // box and discover they were there all along (Derek, 2026-09-04).
-  renderTaskResults("");
-});
-taskSearchInput.addEventListener("focus", () => renderTaskResults(taskSearchInput.value));
-taskSearchInput.addEventListener("blur", () => taskResultsEl.classList.remove("open"));
-
-function setMode(next) {
-  mode = next;
-  modeNewBtn.classList.toggle("active", mode === "new");
-  modeExistingBtn.classList.toggle("active", mode === "existing");
-  newTaskFieldsEl.style.display = mode === "new" ? "" : "none";
-  existingTaskFieldsEl.style.display = mode === "existing" ? "" : "none";
-  titleLabelEl.style.display = mode === "new" ? "" : "none";
-  titleInput.style.display = mode === "new" ? "" : "none";
-  createBtn.textContent = mode === "new" ? "Create Task" : "Add to Task";
-  // Switching to "Add to existing task" shows the client's open tasks straight
-  // away. Everything below already worked; it was simply never on screen until
-  // the search box had focus.
-  if (mode === "existing") renderTaskResults("");
-  else taskResultsEl.classList.remove("open");
+// The two views. New task is the form it always was, one click in.
+function showView(which) {
+  pickViewEl.style.display = which === "pick" ? "" : "none";
+  newViewEl.style.display = which === "new" ? "" : "none";
+  if (which === "new") titleInput.focus();
 }
-modeNewBtn.addEventListener("click", () => setMode("new"));
-modeExistingBtn.addEventListener("click", () => setMode("existing"));
+newTaskBtn.addEventListener("click", () => showView("new"));
+backToTasksBtn.addEventListener("click", () => showView("pick"));
 
 // A side panel stays open as you browse (unlike a popup, which closes on
 // any click outside it) — Refresh re-reads whatever's currently open
@@ -577,19 +610,21 @@ async function init(forceClientRefresh = false) {
   statusEl.textContent = "";
   statusEl.className = "";
   matchHintEl.textContent = "";
+  matchHintEl.className = "";
   addContactEl.style.display = "none";
   selectedClientId = "";
+  allTasks = [];
+  renderTaskList();
   clientSearchInput.value = "";
   emailAttachments = [];
   renderEmailAttachments();
-  clippedListEl.innerHTML = "";
-  clippedEl.style.display = "none";
+  clippedTasks = [];
   dueInput.value = DEFAULT_DUE();
   followUpInput.value = DEFAULT_FOLLOW_UP();
   prioritySel.value = "normal";
   assigneeSel.value = "";
   clearScreenshots();
-  setMode("new");
+  showView("pick");
 
   const [email, capture, tab, clients] = await Promise.all([
     getCurrentEmail(), getPendingCapture(), readActiveTab(), loadClients(token, forceClientRefresh).catch(() => []), loadMembers(token).catch(() => {}),
@@ -611,6 +646,9 @@ async function init(forceClientRefresh = false) {
     senderEmail = email.senderEmail || null;
     const fromLine = senderName || senderEmail ? `From: ${senderName || ""}${senderEmail ? ` <${senderEmail}>` : ""}` : "";
     notesInput.value = [fromLine, email.snippet || ""].filter(Boolean).join("\n\n");
+    sourceIconEl.textContent = "✉️";
+    sourceTitleEl.textContent = email.subject || "(no subject)";
+    sourceSubEl.textContent = senderName || senderEmail || "";
     permalink = email.permalink || null;
     mailIds = { gmailMessageId: email.gmailMessageId || null, rfc822MessageId: email.rfc822MessageId || null };
     // Ticked by default: if you're clipping an email that has attachments,
@@ -623,6 +661,9 @@ async function init(forceClientRefresh = false) {
     // Any other page — title/URL are native tab properties (needs the
     // "tabs" permission), no scraping or click needed for these two fields.
     titleInput.value = tab?.title || "";
+    sourceIconEl.textContent = "🌐";
+    sourceTitleEl.textContent = tab?.title || "This page";
+    sourceSubEl.textContent = tab?.url ? new URL(tab.url).hostname : "";
     senderName = null;
     senderEmail = null;
     emailAttachments = [];
@@ -636,9 +677,9 @@ async function init(forceClientRefresh = false) {
   // what you picked yourself for this exact sender outranks a contact or a
   // domain guess. See /api/extension/match-client.
   const MATCH_HINT = {
-    remembered: "Auto-selected — remembered for this sender",
-    exact: "Auto-selected — matched sender's email",
-    domain: "Auto-selected via company domain — please verify",
+    remembered: "✓ Remembered for this sender",
+    exact: "✓ Matched from the sender's email",
+    domain: "Guessed from the company domain, check it",
   };
   if (senderEmail) {
     try {
@@ -648,7 +689,8 @@ async function init(forceClientRefresh = false) {
         // and the client it files under is never in the list to select.
         selectClient(match.entryId || match.clientId);
         clientSource = "server";
-        matchHintEl.textContent = MATCH_HINT[match.matchType] || MATCH_HINT.exact;
+        matchHintEl.textContent = `${MATCH_HINT[match.matchType] || MATCH_HINT.exact} (${senderEmail})`;
+        matchHintEl.className = match.matchType === "domain" ? "guess" : "";
       } else {
         showAddContact();
       }
@@ -663,7 +705,8 @@ async function init(forceClientRefresh = false) {
       if (match) {
         selectClient(match.entryId || match.clientId);
         clientSource = "server";
-        matchHintEl.textContent = `Auto-selected — matched this page's domain`;
+        matchHintEl.textContent = "Guessed from this page's domain, check it";
+        matchHintEl.className = "guess";
       }
     } catch { /* not a valid URL, or no match — leave the picker empty */ }
   }
@@ -743,7 +786,7 @@ async function runEnrich() {
     statusEl.className = "err";
   } finally {
     enrichBtn.disabled = false;
-    enrichBtn.textContent = "✨ Enrich with AI";
+    enrichBtn.textContent = "✨ Fill in with AI";
   }
 }
 
@@ -762,8 +805,7 @@ function resetFormAfterSubmit() {
   clientSearchInput.value = "";
   emailAttachments = [];
   renderEmailAttachments();
-  clippedListEl.innerHTML = "";
-  clippedEl.style.display = "none";
+  clippedTasks = [];
   projectSel.value = "";
   dueInput.value = DEFAULT_DUE();
   followUpInput.value = DEFAULT_FOLLOW_UP();
@@ -771,39 +813,40 @@ function resetFormAfterSubmit() {
   assigneeSel.value = "";
   matchHintEl.textContent = "";
   clearScreenshots();
-  selectedTaskId = "";
-  taskSearchInput.value = "";
+  openTaskId = "";
+  taskFilterInput.value = "";
   allTasks = [];
-  setMode("new");
+  renderTaskList();
+  showView("pick");
 }
 
-createBtn.addEventListener("click", async () => {
+createBtn.addEventListener("click", () => void submit({ button: createBtn }));
+
+// One path for both: a new task from the form, or this added to an existing
+// task picked from the list (`taskId`, with the note from its own box).
+async function submit({ taskId = null, taskTitle = "", body = "", button }) {
   const token = await getToken();
   if (!token) return;
   const clientId = selectedClientId;
+  const isNew = !taskId;
   if (!clientId) {
     statusEl.textContent = "Pick a client.";
     statusEl.className = "err";
     return;
   }
-  if (mode === "new" && !titleInput.value.trim()) {
+  if (isNew && !titleInput.value.trim()) {
     statusEl.textContent = "Enter a title.";
     statusEl.className = "err";
     return;
   }
-  if (mode === "existing" && !selectedTaskId) {
-    statusEl.textContent = "Pick a task to add this to.";
-    statusEl.className = "err";
-    return;
-  }
 
-  createBtn.disabled = true;
-  statusEl.textContent = mode === "new" ? "Creating…" : "Adding…";
+  button.disabled = true;
+  statusEl.textContent = isNew ? "Creating…" : "Adding…";
   statusEl.className = "";
   // Learn the client from what you actually filed against, not only from
   // adding a brand new contact (Derek: "when I pick a client and create a
   // task have it remember that client and preselect when I open another email
-  // from them"). Picking a client and pressing Create is the strongest signal
+  // from them"). Picking a client and filing to it is the strongest signal
   // there is about who a sender belongs to — stronger than the server's
   // contact or domain guess, which is why the recall above beats it.
   //
@@ -819,7 +862,7 @@ createBtn.addEventListener("click", async () => {
     if (attCount) { statusEl.textContent = `Fetching ${attCount} attachment${attCount === 1 ? "" : "s"}…`; }
     const { files, skipped } = await uploadEmailAttachments(token, clientId);
 
-    if (mode === "new") {
+    if (isNew) {
       const created = await apiFetch("/api/extension/tasks", token, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -829,21 +872,21 @@ createBtn.addEventListener("click", async () => {
         }),
       });
       // Link straight to what was just made (Derek: "make a link to it so I
-      // can click and go to it"). The panel clears itself immediately after
-      // this, so without a link the task you just created is gone from view
-      // with nothing to click. Opens in a new tab: this is a side panel, and
-      // navigating it away would close the form you're still working in.
-      showCreatedLink(created?.id, created?.title || titleInput.value.trim(), skipped);
+      // can click and go to it"); the thread line goes under it.
+      showCreatedLink(created?.id, created?.title || titleInput.value.trim(), skipped, "Task created.");
       await attachEmailThread(token, created?.id);
     } else {
-      await apiFetch(`/api/extension/tasks/${encodeURIComponent(selectedTaskId)}/comment`, token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: notesInput.value.trim(), screenshot_paths: screenshotPaths }),
-      });
-      await attachEmailThread(token, selectedTaskId);
-      statusEl.textContent = "Added to task.";
-      statusEl.className = "ok";
+      // Nothing to say and nothing to attach is still a real clip: the email
+      // thread itself is what gets bound to the task below.
+      if (body || screenshotPaths.length || files.length) {
+        await apiFetch(`/api/extension/tasks/${encodeURIComponent(taskId)}/comment`, token, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body, screenshot_paths: screenshotPaths, files }),
+        });
+      }
+      showCreatedLink(taskId, taskTitle, skipped, "Added.");
+      await attachEmailThread(token, taskId);
     }
     // The panel stays open (it's a sidebar, not a popup) — clear the form
     // instead of trying to close anything, ready for the next page.
@@ -852,9 +895,9 @@ createBtn.addEventListener("click", async () => {
     statusEl.textContent = e instanceof Error ? e.message : "Failed.";
     statusEl.className = "err";
   } finally {
-    createBtn.disabled = false;
+    button.disabled = false;
   }
-});
+}
 
 // The side panel is persistent — clicking the toolbar icon while it's
 // already open calls chrome.sidePanel.open() on the SAME document instead of
@@ -888,11 +931,11 @@ let emailAttachments = [];
 /** "Task created" plus a link to the thing itself. Built as real DOM rather
  *  than innerHTML so a task title containing < or & can't inject markup into
  *  the panel. Falls back to plain text if the API didn't hand back an id. */
-function showCreatedLink(taskId, title, skipped = []) {
+function showCreatedLink(taskId, title, skipped = [], lead = "Task created.") {
   statusEl.textContent = "";
   statusEl.className = "ok";
-  if (!taskId) { statusEl.textContent = "Task created."; return; }
-  statusEl.append("Task created. ");
+  if (!taskId) { statusEl.textContent = lead; return; }
+  statusEl.append(`${lead} `);
   const a = document.createElement("a");
   a.href = `${API_BASE}/?task=${encodeURIComponent(taskId)}`;
   a.target = "_blank";
@@ -978,8 +1021,7 @@ async function uploadEmailAttachments(token, clientId) {
  *  the panel exactly as it was, since a missing warning is a far smaller
  *  problem than a blocked capture. */
 async function showAlreadyClipped(link) {
-  clippedListEl.innerHTML = "";
-  clippedEl.style.display = "none";
+  clippedTasks = [];
   if (!link) return;
   const token = await getToken();
   if (!token) return;
@@ -988,39 +1030,10 @@ async function showAlreadyClipped(link) {
     ({ tasks } = await apiFetch(`/api/extension/tasks/by-link?link=${encodeURIComponent(link)}`, token));
   } catch { return; }
   if (!tasks?.length) return;
-
-  clippedEl.style.display = "";
-  for (const t of tasks) {
-    const row = document.createElement("div");
-    row.className = "clip-row";
-    const title = document.createElement("span");
-    title.className = "t";
-    title.textContent = t.title;
-    title.title = t.title;
-    const open = document.createElement("a");
-    open.href = `${API_BASE}/?task=${encodeURIComponent(t.id)}`;
-    open.target = "_blank";
-    open.rel = "noopener noreferrer";
-    open.textContent = "Open";
-    // Straight into "add a comment to this task" with it already chosen —
-    // the thing you almost always want when a page is already clipped.
-    const addTo = document.createElement("button");
-    addTo.type = "button";
-    addTo.className = "linkish";
-    addTo.textContent = "Add to it";
-    addTo.addEventListener("click", async () => {
-      if (t.clientId && t.clientId !== selectedClientId) {
-        selectClient(t.clientId);
-        await loadTasksFor(t.clientId);
-      }
-      setMode("existing");
-      selectedTaskId = t.id;
-      taskSearchInput.value = t.title;
-      notesInput.focus();
-    });
-    row.append(title, open, addTo);
-    clippedListEl.append(row);
-  }
+  clippedTasks = tasks;
+  // Already clipped under a client nobody picked yet: that client is the answer.
+  if (!selectedClientId && tasks[0].clientId) selectClient(tasks[0].clientId);
+  renderTaskList();
 }
 
 

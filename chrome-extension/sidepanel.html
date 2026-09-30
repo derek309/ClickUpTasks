@@ -2,80 +2,88 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Create ClickUpTasks task</title>
+<title>ClickUpTasks Clipper</title>
 <style>
-  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; padding: 14px; color: #1B3A5C; max-width: 420px; }
-  h1 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  #refresh { width: auto; margin-top: 0; padding: 5px 8px; font-size: 12px; background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; }
-  label { display: block; font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
-  select, input, textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid #d0dce8; border-radius: 6px; font-size: 13px; font-family: inherit; }
-  textarea { resize: vertical; min-height: 50px; }
-  #title { resize: vertical; min-height: 40px; }
-  button { width: 100%; margin-top: 12px; background: #1B3A5C; color: #fff; border: none; border-radius: 6px; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  /* 16px throughout: Derek's minimum, labels and fine print included. */
+  body { font-family: Inter, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 16px; padding: 14px; color: #1c2030; max-width: 440px; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #1B3A5C; }
+  #refresh { width: auto; margin-top: 0; padding: 6px 10px; background: #fff; color: #1B3A5C; border: 1px solid #d0dce8; font-weight: 600; }
+  label { display: block; font-size: 16px; font-weight: 600; margin: 12px 0 4px; }
+  select, input, textarea { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #d0dce8; border-radius: 8px; font-size: 16px; font-family: inherit; color: inherit; background: #fff; }
+  textarea { resize: vertical; min-height: 60px; }
+  button { width: 100%; margin-top: 12px; background: #1B3A5C; color: #fff; border: none; border-radius: 8px; padding: 11px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
   button:disabled { opacity: 0.5; cursor: default; }
-  #enrich { margin-top: 8px; background: #fff; color: #E87722; border: 1px solid #E87722; }
-  #matchHint { font-size: 11px; margin-top: 3px; color: #64748b; }
-  #status { font-size: 12px; margin-top: 8px; }
-  /* Attachments found on the open Gmail message. */
-  /* Existing task(s) already made from this page. Amber rather than the
-     neutral grey of the other blocks: this is the one thing on the panel
-     that should stop you before you press Create. */
-  #alreadyClipped { margin-top: 10px; border: 1px solid #fcd9a4; border-radius: 8px; padding: 8px 10px; background: #fffaf0; }
-  #alreadyClipped h2 { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #b45309; }
-  .clip-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; color: #334155; }
-  .clip-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .clip-row a, .clip-row button.linkish { flex: none; width: auto; margin: 0; padding: 0 0 0 6px; background: none; border: none; color: #b45309; font-size: 12px; font-weight: 600; text-decoration: underline; cursor: pointer; }
-  #emailAtts { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; background: #f8fafc; }
-  #emailAtts h2 { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #1B3A5C; }
-  .att-row { display: flex; align-items: center; gap: 6px; margin: 0; padding: 3px 0; font-size: 12px; font-weight: 400; color: #334155; }
-  .att-row input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
-  .att-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .att-row .s { flex: none; font-size: 10px; color: #94a3b8; }
-  .created-link { color: #1B3A5C; font-weight: 600; text-decoration: underline; }
-  .created-link:hover { opacity: .8; }
+  #enrich { background: #fff; color: #E87722; border: 1px solid #E87722; font-weight: 600; }
+  #matchHint { margin-top: 4px; color: #16a34a; }
+  #matchHint.guess { color: #b45309; }
+  #status { margin-top: 10px; }
   .ok { color: #16a34a; }
   .err { color: #dc2626; }
-  #needsToken { font-size: 12px; color: #64748b; display: none; }
+  .muted { color: #6b7280; }
+  #needsToken { color: #64748b; display: none; }
   #needsToken a { color: #E87722; }
+
+  /* What is being clipped: the email, or the page. */
+  #source { display: flex; gap: 10px; align-items: flex-start; background: #eef4fb; border-radius: 10px; padding: 10px 12px; }
+  #source .icon { font-size: 20px; line-height: 1.2; }
+  #source b { display: block; line-height: 1.3; overflow-wrap: anywhere; }
+
   .combo { position: relative; }
-  #clientResults, #taskResults { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 6px 6px; display: none; box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
-  #clientResults.open, #taskResults.open { display: block; }
-  .result-row { padding: 6px 9px; cursor: pointer; }
+  #clientResults { position: absolute; z-index: 10; top: 100%; left: 0; right: 0; max-height: 280px; overflow-y: auto; background: #fff; border: 1px solid #d0dce8; border-top: none; border-radius: 0 0 8px 8px; display: none; box-shadow: 0 6px 14px rgba(0,0,0,0.08); }
+  #clientResults.open { display: block; }
+  .result-row { padding: 8px 11px; cursor: pointer; }
   .result-row:hover { background: #EEF4FB; }
-  .result-name { font-size: 13px; font-weight: 600; }
-  .result-sub { font-size: 11px; color: #64748b; }
+  .result-name { font-weight: 600; }
+  .result-sub { color: #64748b; }
   .row2 { display: flex; gap: 8px; }
   .row2 > div { flex: 1; min-width: 0; }
+
+  #emailAtts { margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; background: #f8fafc; }
+  #emailAtts h2, .sub-h { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+  .att-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 3px 0; font-weight: 400; }
+  .att-row input[type="checkbox"] { width: auto; flex: none; margin: 0; padding: 0; border: none; }
+  .att-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #screenshotGallery { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  #screenshotGallery:empty { display: none; }
   .shot-thumb { position: relative; width: 92px; height: 70px; }
   .shot-thumb img { width: 100%; height: 100%; object-fit: cover; border: 1px solid #d0dce8; border-radius: 6px; display: block; }
-  .shot-thumb .shot-remove { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; margin: 0; padding: 0; border-radius: 50%; background: rgba(27,58,92,0.9); font-size: 10px; line-height: 18px; }
-  #pasteZone { margin-top: 10px; padding: 8px; border: 1px dashed #d0dce8; border-radius: 6px; text-align: center; font-size: 11px; color: #64748b; cursor: text; }
+  .shot-thumb .shot-remove { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; margin: 0; padding: 0; border-radius: 50%; background: rgba(27,58,92,0.9); font-size: 14px; line-height: 22px; }
+  #pasteZone { margin-top: 12px; padding: 8px 10px; border: 1px dashed #d0dce8; border-radius: 8px; color: #64748b; cursor: text; }
   #pasteZone:focus { outline: none; border-color: #E87722; color: #1B3A5C; }
-  #pasteZone .hint { display: block; margin-top: 2px; font-size: 10px; color: #94a3b8; }
-  .mode-toggle { display: flex; gap: 6px; margin-top: 8px; }
-  .mode-btn { flex: 1; padding: 6px; border: 1px solid #d0dce8; border-radius: 6px; background: #fff; color: #1B3A5C; font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
-  .mode-btn.active { background: #1B3A5C; color: #fff; }
-  /* "This task" before a task is chosen: dimmed so it reads as not-yet-usable,
-     but still clickable, because clicking it is how you get to the picker. */
-  .mode-btn.needs-task:not(.active) { color: #94a3b8; }
-  /* Work contexts — the saved tab set for this client (and optionally this
-     task). Sits directly under the client picker because it's scoped by the
-     same selection. */
-  #wsActions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  /* The panel's global rules are written for full-width form fields:
-     `select, input, textarea { width: 100% }` blows a checkbox up to the full
-     row and squeezes the title out of existence, and `label` carries
-     display:block plus a top margin and bold weight. Both need undoing here,
-     since a row is a label wrapping a checkbox and a line of text. */
-  /* Overrides the panel's global full-width button rule, same reason the
-     checkbox above needs one. Only shows on row hover so a list of saved
-     tabs reads as a list, not a row of delete buttons. */
+
+  /* The client's open tasks: click one to add this to it (Derek, 2026-09-30:
+     "pull in a list of tasks that are already there then click on it"). */
+  .list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 18px 0 8px; }
+  .list-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+  #newTaskBtn { width: auto; margin: 0; padding: 8px 12px; font-weight: 600; }
+  #taskFilter { margin-bottom: 8px; }
+  .task { border: 1px solid #d0dce8; border-radius: 10px; margin-bottom: 8px; background: #fff; }
+  .task-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; cursor: pointer; }
+  .task-row:hover { background: #f5f8fc; border-radius: 10px; }
+  .task-row .t { flex: 1; min-width: 0; }
+  .task-row .t b { display: block; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .task-row .t span { color: #6b7280; }
+  .pill { flex: none; border-radius: 5px; padding: 1px 8px; font-weight: 600; }
+  .pill.late { background: #fef2f2; color: #dc2626; }
+  .pill.soon { background: #fdece1; color: #c2410c; }
+  .pill.later { background: #eef4fb; color: #6b7280; }
+  .task.here { border-color: #16a34a; background: #ecfdf3; }
+  .task.here .t span.flag { color: #15803d; font-weight: 600; }
+  .task.open { border-color: #1B3A5C; box-shadow: 0 0 0 1px #1B3A5C; }
+  .task.open .task-row:hover { background: none; }
+  .task-add { padding: 0 12px 12px; }
+  .task-add button { margin-top: 8px; }
+  .task-add .open-link { display: inline-block; margin-top: 8px; color: #1B3A5C; font-weight: 600; }
+  #taskEmpty { padding: 10px 2px; }
+  .back { background: none; color: #1B3A5C; font-weight: 600; text-align: left; padding: 0; margin-top: 14px; }
+  .created-link { color: #1B3A5C; font-weight: 600; text-decoration: underline; }
 </style>
 </head>
 <body>
-  <h1>Create ClickUpTasks task <button id="refresh" type="button" title="Reset this form and re-read the current page's title/link. For a screenshot, click the toolbar icon to auto-capture one, or paste one in below with ⌘V.">🔄 Refresh</button></h1>
+  <h1>ClickUpTasks <button id="refresh" type="button" title="Re-read the open email or page. For a screenshot, click the toolbar icon to capture one, or paste one in with ⌘V.">🔄 Refresh</button></h1>
   <div id="form">
+    <div id="source"><span class="icon" id="sourceIcon">✉️</span><div><b id="sourceTitle"></b><span class="muted" id="sourceSub"></span></div></div>
+
     <label for="clientSearch">Client</label>
     <div class="combo">
       <input id="clientSearch" type="text" placeholder="Search by name, business, or contact…" autocomplete="off" />
@@ -87,73 +95,45 @@
       <button id="addContactBtn" type="button" style="margin-top:6px;background:#fff;color:#1B3A5C;border:1px solid #d0dce8;">+ Add "<span id="addContactName"></span>" as a contact</button>
     </div>
 
-    <div id="alreadyClipped" style="display:none;">
-      <h2>Already clipped</h2>
-      <div id="alreadyClippedList"></div>
-    </div>
-
     <div id="emailAtts" style="display:none;">
       <h2>Attachments on this email</h2>
       <div id="emailAttsList"></div>
     </div>
-
-    <div class="mode-toggle">
-      <button id="modeNew" type="button" class="mode-btn active">New task</button>
-      <button id="modeExisting" type="button" class="mode-btn">Add to existing task</button>
-    </div>
-
-    <div id="newTaskFields">
-      <label for="project">List (optional)</label>
-      <select id="project"><option value="">Default</option></select>
-      <div class="row2">
-        <div>
-          <label for="due">Due date</label>
-          <input id="due" type="date" />
-        </div>
-        <div>
-          <label for="followUp">Follow up</label>
-          <input id="followUp" type="date" />
-        </div>
-      </div>
-      <div class="row2">
-        <div>
-          <label for="priority">Priority</label>
-          <select id="priority">
-            <option value="none">No priority</option>
-            <option value="normal" selected>Normal</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </div>
-        <div>
-          <label for="assignee">Assign to</label>
-          <select id="assignee"><option value="">Me</option></select>
-        </div>
-      </div>
-    </div>
-
-    <div id="existingTaskFields" style="display:none">
-      <label for="existingProject">List</label>
-      <select id="existingProject"><option value="">All lists</option></select>
-      <label for="taskSearch">Task</label>
-      <div class="combo">
-        <input id="taskSearch" type="text" placeholder="Search, or pick from the list below…" autocomplete="off" />
-        <div id="taskResults"></div>
-      </div>
-    </div>
-
-    <label for="title" id="titleLabel">Title</label>
-    <textarea id="title" rows="2"></textarea>
-    <label for="notes">Notes</label>
-    <textarea id="notes"></textarea>
-
-    <div id="pasteZone" tabindex="0">
-      📋 Click, then ⌘V / Ctrl+V to add a screenshot
-      <span class="hint">Paste as many as you need. ⌘⌃⇧4 on Mac copies straight to your clipboard. For a full page, use GoFullPage then paste its image here.</span>
-    </div>
+    <div id="pasteZone" tabindex="0">📋 Click here, then ⌘V to add a screenshot</div>
     <div id="screenshotGallery"></div>
 
-    <button id="enrich" type="button">✨ Enrich with AI</button>
-    <button id="create">Create Task</button>
+    <!-- The client's open tasks, first: most clips go onto work that already exists. -->
+    <div id="pickView">
+      <div class="list-head"><h2 id="listHeading">Add to a task</h2><button id="newTaskBtn" type="button">+ New task</button></div>
+      <input id="taskFilter" type="text" placeholder="Search open tasks" autocomplete="off" />
+      <div id="taskList"></div>
+      <div id="taskEmpty" class="muted"></div>
+    </div>
+
+    <!-- A new task: the form it always was, one click in. -->
+    <div id="newView" style="display:none">
+      <label for="title">Title</label>
+      <textarea id="title" rows="2"></textarea>
+      <div class="row2">
+        <div><label for="project">List</label><select id="project"><option value="">Default</option></select></div>
+        <div><label for="assignee">Assign to</label><select id="assignee"><option value="">Me</option></select></div>
+      </div>
+      <div class="row2">
+        <div><label for="due">Due date</label><input id="due" type="date" /></div>
+        <div><label for="followUp">Follow up</label><input id="followUp" type="date" /></div>
+      </div>
+      <label for="priority">Priority</label>
+      <select id="priority">
+        <option value="none">No priority</option>
+        <option value="normal" selected>Normal</option>
+        <option value="urgent">Urgent</option>
+      </select>
+      <label for="notes">Notes</label>
+      <textarea id="notes"></textarea>
+      <button id="enrich" type="button">✨ Fill in with AI</button>
+      <button id="create">Create task</button>
+      <button id="backToTasks" type="button" class="back">← Back to the client's tasks</button>
+    </div>
     <div id="status"></div>
   </div>
   <div id="needsToken">

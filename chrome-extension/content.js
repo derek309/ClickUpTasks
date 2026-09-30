@@ -105,17 +105,36 @@ function scrapeMailIds() {
   };
 }
 
+// Our own side of a thread: the signed in Gmail account (Gmail puts it in the
+// page title, "Inbox - derek@clickuplocal.com - Gmail") and anyone on the team
+// domain. A thread whose last message is our own reply used to hand the panel
+// our own address as the "sender", so it never matched the client (Derek,
+// 2026-09-30: "pull up the client based on the email").
+const TEAM_DOMAIN = "@clickuplocal.com";
+function isOurs(email) {
+  const e = (email || "").toLowerCase();
+  if (!e) return true;
+  const me = (document.title.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [])[0];
+  return e.endsWith(TEAM_DOMAIN) || (!!me && e === me.toLowerCase());
+}
+
 function scrapeSender() {
   // `.gD`'s `name`/`email` attributes are set directly by Gmail (not
   // derived from the volatile class name itself), so this stays reasonably
   // stable even if the class churns — but fall back to any element in the
   // thread carrying an `email` attribute if `.gD` itself stops matching.
-  const known = document.querySelectorAll(".gD");
-  const lastKnown = known[known.length - 1];
-  if (lastKnown) return { name: lastKnown.getAttribute("name") || lastKnown.textContent?.trim() || null, email: lastKnown.getAttribute("email") || null };
-  const fallback = document.querySelectorAll("[email]");
-  const lastFallback = fallback[fallback.length - 1];
-  if (lastFallback) return { name: lastFallback.getAttribute("name") || null, email: lastFallback.getAttribute("email") };
+  //
+  // Newest first, and the first one that is not us: the client's last message,
+  // else (a thread only we have written in) whoever it was sent to.
+  // Only the open thread: the rest of Gmail (the chat roster, the account
+  // switcher) also carries `email` attributes.
+  const thread = document.querySelector('[role="main"]') || document;
+  const pick = (el) => ({ name: el.getAttribute("name") || el.textContent?.trim() || null, email: el.getAttribute("email") || null });
+  const senders = [...thread.querySelectorAll(".gD")].reverse();
+  const outside = senders.find((el) => !isOurs(el.getAttribute("email")))
+    || [...thread.querySelectorAll("[email]")].reverse().find((el) => !isOurs(el.getAttribute("email")));
+  if (outside) return pick(outside);
+  if (senders[0]) return pick(senders[0]);
   return { name: null, email: null };
 }
 

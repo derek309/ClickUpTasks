@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
   if (!clientId) return NextResponse.json({ error: "Missing client_id." }, { status: 400 });
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
-  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at, project_id").eq("client_id", clientId).neq("status", "done").order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at, project_id, due, follow_up_at, waiting_on_client").eq("client_id", clientId).neq("status", "done").is("deleted_at", null).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const query = (req.nextUrl.searchParams.get("query") || "").trim().toLowerCase();
@@ -125,6 +125,8 @@ export async function GET(req: NextRequest) {
   // two tasks called "Website" under different lists are otherwise the same
   // row twice.
   return NextResponse.json({
-    tasks: filtered.slice(0, 30).map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: t.project_id })),
+    // The dates say which ones need you now: the clipper lists a client's open
+    // tasks first and sorts them by when they come back (2026-09-30).
+    tasks: filtered.slice(0, 100).map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: t.project_id, due: t.due, followUpAt: t.follow_up_at, waitingOnClient: t.waiting_on_client === true })),
   });
 }

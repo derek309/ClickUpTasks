@@ -20,7 +20,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}));
   const text = typeof body.body === "string" ? body.body.trim() : "";
   const screenshotPaths: string[] = Array.isArray(body.screenshot_paths) ? body.screenshot_paths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0) : [];
-  if (!text && !screenshotPaths.length) return NextResponse.json({ error: "Nothing to add — no note or screenshot." }, { status: 400 });
+  // The email's own attachments, when the clipper adds an email to a task that
+  // already exists (the same shape a new task takes them in).
+  const files: { path: string; name: string; kind: string }[] = Array.isArray(body.files)
+    ? body.files
+        .filter((f: unknown): f is Record<string, unknown> => !!f && typeof f === "object")
+        .map((f: Record<string, unknown>) => ({
+          path: typeof f.path === "string" ? f.path : "",
+          name: typeof f.name === "string" && f.name.trim() ? f.name.trim().slice(0, 200) : "Attachment",
+          kind: f.kind === "image" ? "image" : "file",
+        }))
+        .filter((f: { path: string }) => f.path.length > 0)
+        .slice(0, 20)
+    : [];
+  if (!text && !screenshotPaths.length && !files.length) return NextResponse.json({ error: "Nothing to add — no note, screenshot or file." }, { status: 400 });
 
   const { data: task } = await supabaseAdmin.from("tasks").select("client_id, assignee_id, is_private, deleted_at").eq("id", taskId).maybeSingle();
   if (!task) return NextResponse.json({ error: "No such task." }, { status: 404 });
@@ -31,8 +44,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Any other path could hang another client's file on this comment, and the
   // app signs attachment paths for whoever opens the task.
   const folder = `extension/${task.client_id}/`;
-  if (screenshotPaths.some((p) => !p.startsWith(folder) || p.includes(".."))) {
-    return NextResponse.json({ error: "Screenshots must be uploaded for this task's client." }, { status: 400 });
+  if ([...screenshotPaths, ...files.map((f) => f.path)].some((p) => !p.startsWith(folder) || p.includes(".."))) {
+    return NextResponse.json({ error: "Screenshots and files must be uploaded for this task's client." }, { status: 400 });
   }
 
   const comment = {
@@ -40,8 +53,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     authorId: caller.memberId,
     body: text,
     at: new Date().toISOString(),
-    ...(screenshotPaths.length
-      ? { attachments: screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })) }
+    ...(screenshotPaths.length || files.length
+      ? { attachments: [
+          ...files.map((f) => ({ id: "at_" + randomUUID(), name: f.name, kind: f.kind, size: "", path: f.path })),
+          ...screenshotPaths.map((path: string, i: number) => ({ id: "at_" + randomUUID(), name: screenshotPaths.length > 1 ? `Screenshot ${i + 1}` : "Screenshot", kind: "image", size: "", path })),
+        ] }
       : {}),
   };
   const { error } = await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment });
