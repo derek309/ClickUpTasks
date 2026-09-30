@@ -289,6 +289,13 @@ export function isMessageConversationTask(title: string | null | undefined): boo
   if (!title) return true;
   return !NON_MESSAGE_CONVERSATION_TITLES.some((p) => p.test(title));
 }
+// The Conversation task a client's email, text or call raises: "Reply to X".
+// The one kind that closes itself once a teammate answers (closeAnsweredReplyTask
+// in inboundIngest.ts). A booked meeting or a claimed listing is not answered by
+// sending an email, so those stay open until a person closes them.
+export function isReplyTask(t: { priority?: string | null; title?: string | null }): boolean {
+  return t.priority === "conversation" && /^Reply to /.test(t.title ?? "");
+}
 /** How long a newly won business's trial runs, in days — the window that
  * opens the moment the deal actually closes (card on file), and the source
  * of Client.trialEndsAt. One constant so the length is changed in one
@@ -2287,6 +2294,58 @@ export function htmlToText(html: string): string {
  *  literal "<" is not a real-world case worth guarding against. */
 export function looksLikeHtml(body: string): boolean {
   return /^\s*<[a-z][\s\S]*>/i.test(body);
+}
+
+/** The start of the mention email's footer line. The email route writes it and
+ *  replyOnly cuts at it, for a mail app that quotes without marking the quote. */
+export const MENTION_EMAIL_FOOTER = "Reply to this email and your answer lands on the task";
+
+/** The answer alone, without the email it answers. Gmail's text body carries
+ *  the whole quoted original under the reply, so without this every reply
+ *  became the answer plus the mention email, as one comment. Cuts at the first
+ *  line that starts a quote in any of the common shapes:
+ *    Gmail, Apple Mail  "On Mon, Sep 29, 2026 at 10:00 AM Derek <d@x> wrote:"
+ *                       (Gmail wraps it over two lines when it is long)
+ *    any client         a line starting with ">"
+ *    Outlook            "-----Original Message-----", or a rule of underscores
+ *                       followed by "From:"
+ *    unmarked           our own footer sentence */
+export function replyOnly(text: string): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const wrote = /^On\s.+\swrote:\s*$/;
+  const cut = lines.findIndex((line, i) => {
+    const l = line.trim();
+    return wrote.test(l)
+      || (/^On\s/.test(l) && wrote.test(`${l} ${(lines[i + 1] ?? "").trim()}`))
+      || l.startsWith(">")
+      || /^-{2,}\s*Original Message\s*-{2,}$/i.test(l)
+      || (/^_{10,}$/.test(l) && /^From:/i.test((lines[i + 1] ?? "").trim()))
+      || l.startsWith(MENTION_EMAIL_FOOTER);
+  });
+  return (cut === -1 ? lines : lines.slice(0, cut)).join("\n").trim();
+}
+
+/** What the client last said on each task, for tasks where they spoke last.
+ *  The list row shows it under the title, so "Reply to Matt" says what Matt
+ *  wants without opening it (Derek, 2026-09-30: "add a preview so we can see
+ *  what the message is"). A task the team has already answered has no entry:
+ *  the line is there to say someone is waiting, not to repeat history. A call
+ *  has no words to show, so it neither gives a preview nor counts as an answer. */
+export function unansweredPreviewByTask(messages: Message[]): Map<string, string> {
+  const latest = new Map<string, Message>();
+  for (const m of messages) {
+    if (!m.taskId || m.channel === "call") continue;
+    const seen = latest.get(m.taskId);
+    if (!seen || m.at > seen.at) latest.set(m.taskId, m);
+  }
+  const previews = new Map<string, string>();
+  for (const [taskId, m] of latest) {
+    if (m.direction !== "inbound") continue;
+    const said = replyOnly(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body).replace(/\s+/g, " ").trim().slice(0, 140);
+    const preview = [m.subject?.trim(), said].filter(Boolean).join(": ");
+    if (preview) previews.set(taskId, preview);
+  }
+  return previews;
 }
 
 /** Plain text (as returned by the AI drafter, or a legacy plain body) into

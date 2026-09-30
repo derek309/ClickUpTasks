@@ -13,6 +13,7 @@ import { tokenForLocation } from "./ghlTokens";
 import { TASK_FILES_BUCKET } from "./db";
 import { appendSignatureHtml } from "./emailSignature";
 import { ghlReplyFields } from "./ghlReply";
+import { closeAnsweredReplyTask } from "./ghlConversationTask";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -180,5 +181,6 @@ async function insertSentMessage(input: ScheduledSendInput, contactId: string, g
     subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId, rfc822_message_id: rfc822,
     created_by: input.createdBy, read: true, attachments: input.attachments, cc: input.cc, bcc: input.bcc,
   });
+  await closeAnsweredReplyTask(input.taskId, new Date().toISOString(), input.createdBy, input.channel === "sms" ? "text" : "email");
   return { ok: true, messageId };
 }

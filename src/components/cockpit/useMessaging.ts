@@ -13,7 +13,7 @@ import { mergeFetched } from "@/lib/localTaskWrites";
 import type { Attachment, Client, Contact, Message, MessageChannel, ScheduledMessage } from "@/lib/data";
 import { newId } from "./ui";
 
-export function useMessaging({ meId, messages, setMessages, loading, openTaskId, conversationContactId, contactForClient, clientById, pushToast }: {
+export function useMessaging({ meId, messages, setMessages, loading, openTaskId, conversationContactId, contactForClient, clientById, pushToast, onAnswered }: {
   meId: string;
   messages: Message[];
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -25,6 +25,9 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
   contactForClient: (clientId: string) => Contact | null;
   clientById: (id: string) => Client | null;
   pushToast: (text: string) => void;
+  /** An email or text went out from this task. Cockpit closes a "Reply to X"
+   *  task with it, the same as answering from Gmail does on the server. */
+  onAnswered?: (taskId: string) => void;
 }) {
   // GoHighLevel messages (email now, sms later) -------------------------
   // Same target-resolution shape as ghlTargetFor above, but keyed directly off
@@ -110,6 +113,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
           };
           setMessages((ms) => [...ms, gm]);
           insertMessage(gm);
+          if (taskId) onAnswered?.(taskId);
           return;
         }
         // 501 → fall through to the GHL path below.
@@ -132,6 +136,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       };
       setMessages((ms) => [...ms, m]);
       insertMessage(m);
+      if (taskId) onAnswered?.(taskId);
     } catch {
       pushToast("Failed to send message.");
     } finally {

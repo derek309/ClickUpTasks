@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase, advanceDue, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
-import { resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
+import { isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -293,5 +293,8 @@ async function taskForConversation(contactId: string, conversationId: string | n
     .eq("contact_id", contactId).eq("ghl_conversation_id", conversationId)
     .not("task_id", "is", null)
     .order("created_at", { ascending: false }).limit(1);
-  return (data?.[0]?.task_id as string | undefined) ?? null;
+  const taskId = (data?.[0]?.task_id as string | undefined) ?? null;
+  // Same rule as resolveTaskForThread: a reply task that closed itself does
+  // not get the next message, a fresh one does.
+  return taskId && !(await isClosedReplyTask(taskId)) ? taskId : null;
 }

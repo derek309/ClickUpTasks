@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  isReplyTask,
+  unansweredPreviewByTask,
+  type Message,
   todayIso,
   formatDue,
   isOverdue,
@@ -1192,5 +1195,48 @@ describe("nextDueAhead (catching up a recurrence)", () => {
       expect(nextDueAhead(start, rec, undefined, undefined, undefined, undefined, undefined, TODAY))
         .toBe(advanceDue(start, rec));
     }
+  });
+});
+
+describe("isReplyTask", () => {
+  it("is the Conversation task a client's message raises, and nothing else", () => {
+    expect(isReplyTask({ priority: "conversation", title: "Reply to Matt Von Bergen" })).toBe(true);
+    expect(isReplyTask({ priority: "conversation", title: "Meeting with Matt Von Bergen" })).toBe(false);
+    expect(isReplyTask({ priority: "normal", title: "Reply to the city about permits" })).toBe(false);
+  });
+});
+
+describe("unansweredPreviewByTask", () => {
+  const msg = (o: Partial<Message>): Message => ({
+    id: "m", contactId: "c", clientId: "cl", taskId: "t_1", channel: "email", direction: "inbound", subject: null, body: "",
+    ghlMessageId: null, createdBy: null, at: "2026-09-30T02:00:00Z", read: false, attachments: [], cc: [], bcc: [], ...o,
+  });
+
+  it("shows the subject and what the client said, on one line", () => {
+    const p = unansweredPreviewByTask([msg({ subject: "Scrimmage", body: "Hey guys,\n\nWe would like to schedule a scrimmage." })]);
+    expect(p.get("t_1")).toBe("Scrimmage: Hey guys, We would like to schedule a scrimmage.");
+  });
+
+  it("leaves out the email being replied to", () => {
+    const body = "Yes, Tuesday works.\n\nOn Mon, Sep 29, 2026 at 10:00 AM Derek <d@x.com> wrote:\n> Does Tuesday work?";
+    expect(unansweredPreviewByTask([msg({ body })]).get("t_1")).toBe("Yes, Tuesday works.");
+  });
+
+  it("reads an HTML body as text", () => {
+    expect(unansweredPreviewByTask([msg({ body: "<p>Looks <b>great</b></p>" })]).get("t_1")).toBe("Looks great");
+  });
+
+  it("uses the newest message, and says nothing once the team has answered", () => {
+    const earlier = msg({ body: "First", at: "2026-09-29T10:00:00Z" });
+    const later = msg({ id: "m2", body: "Second", at: "2026-09-29T12:00:00Z" });
+    expect(unansweredPreviewByTask([later, earlier]).get("t_1")).toBe("Second");
+    const answer = msg({ id: "m3", direction: "outbound", body: "On it", at: "2026-09-29T13:00:00Z" });
+    expect(unansweredPreviewByTask([earlier, later, answer]).has("t_1")).toBe(false);
+  });
+
+  it("ignores calls and messages that are on no task", () => {
+    const call = msg({ id: "m2", channel: "call", direction: "outbound", body: "Call, 2 min", at: "2026-09-30T03:00:00Z" });
+    expect(unansweredPreviewByTask([msg({ body: "Call me" }), call]).get("t_1")).toBe("Call me");
+    expect(unansweredPreviewByTask([msg({ taskId: null, body: "Hello" })]).size).toBe(0);
   });
 });

@@ -23,7 +23,10 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask }: {
+  /** The client's last message on each task still waiting on an answer, shown
+   *  under the title (data.ts unansweredPreviewByTask). */
+  previewByTask?: Map<string, string>;
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -235,7 +238,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)}
+                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -257,8 +260,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
+function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; preview?: string; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -430,6 +433,12 @@ function TaskRow({ task, meId, colCount, cols, showClient, showCrumb, onOpenClie
                 one essay of a title cannot own the screen; the full text is
                 in the title attribute and the task is one click away. */}
             <span className={`line-clamp-2 min-w-0 break-words text-[16px] font-medium leading-snug sm:text-[15px] ${isDone ? "text-muted line-through" : ""}`} title={task.title}>{shownTitle}</span>
+            {/* What the client said, so a "Reply to Matt" row answers "about
+                what?" without being opened. One line on a desktop, two on a
+                phone, where one line is the subject and nothing else. It is a
+                glance; the whole message is in the task. Words only, in
+                keeping with the no icon rule below. */}
+            {preview && !isDone && <span className="line-clamp-2 min-w-0 break-words text-[16px] leading-snug text-muted sm:line-clamp-1 sm:text-[13px]" title={preview}>{preview}</span>}
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
                 on tasks list view"). A repeat arrow, a paperclip, a comment
                 bubble and a subtask count on every row is four pieces of

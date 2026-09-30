@@ -1,7 +1,7 @@
 // Shared "one open top-tier task per GHL contact thread" logic — used by the
 // inbound webhook (messages, calls) and the appointment sync poll. Server-only.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { titleCase, conversationSignalRank, todayPacific, toPacificDate } from "./data";
+import { titleCase, conversationSignalRank, isReplyTask, todayPacific, toPacificDate } from "./data";
 import { resolveNotifyRecipient } from "./waitingNotify";
 
 // PostgREST PARSES the `.or()` string below — a value carrying its own filter
@@ -248,4 +248,54 @@ export async function upsertConversationTask(
     return null;
   }
   return newTaskId;
+}
+
+// A "Reply to X" task exists to say a client is waiting, so it stops being true
+// the moment a teammate answers. It used to stay open until someone ticked it,
+// and an emailed reply is answered in Gmail, so the task sat there going
+// overdue for work already done (Derek, 2026-09-30: "useful but also creating
+// noise"). Called wherever an answer is recorded: the Gmail Sent pass, a
+// scheduled send, a pull from GoHighLevel. Sending from the app closes it
+// through patchTask instead (Cockpit), so the list updates at once.
+//
+// `answeredAt` is what makes this safe to call for old mail: the Sent pass
+// looks two days back and the GoHighLevel pull reads history, so an answer only
+// counts when it is newer than the client's last message on the task.
+//
+// The event line is deliberately not the "changed status from X to Done"
+// sentence: that one feeds the Finished feed (see finishKindOf), which is for
+// work worth knowing about, and a reply task closing is housekeeping.
+export async function closeAnsweredReplyTask(taskId: string | null, answeredAt: string, by: string | null, how: "email" | "text" | "GoHighLevel"): Promise<boolean> {
+  if (!taskId) return false;
+  const { data: task } = await supabaseAdmin.from("tasks").select("title, priority, status").eq("id", taskId).maybeSingle();
+  if (!task || !isReplyTask(task) || task.status === "done") return false;
+  const { data: lastIn } = await supabaseAdmin
+    .from("messages").select("created_at").eq("task_id", taskId).eq("direction", "inbound")
+    .order("created_at", { ascending: false }).limit(1);
+  const lastInAt = lastIn?.[0]?.created_at as string | undefined;
+  if (lastInAt && new Date(answeredAt).getTime() <= new Date(lastInAt).getTime()) return false;
+
+  const comment = {
+    id: "cm_" + crypto.randomUUID(), authorId: by ?? SYSTEM_AUTHOR_ID, at: new Date().toISOString(), kind: "event" as const,
+    body: by ? `answered by ${how}, which closed this task` : "closed this task: a reply went out from GoHighLevel",
+  };
+  await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment });
+  // updated_by null, after the RPC stamped it with the author: the app skips
+  // live updates stamped with the viewer's own id, and the person who answered
+  // from Gmail is the one looking at the list.
+  const { error } = await supabaseAdmin.from("tasks").update({ status: "done", updated_by: null }).eq("id", taskId);
+  if (error) { console.error("[ghlConversationTask] closeAnsweredReplyTask: update failed", error); return false; }
+  // Answered, so it is nobody's "Needs your reply" any more.
+  await supabaseAdmin.from("notifications").update({ read: true }).eq("task_id", taskId).eq("kind", "message").eq("read", false);
+  return true;
+}
+
+// A thread stays bound to the task it was last seen on, which for a reply task
+// that has closed itself would put the client's next message on a finished
+// task nobody is looking at. Both thread lookups (Gmail's and GoHighLevel's)
+// ask this and fall back to a fresh reply task. A finished ordinary task keeps
+// its thread, as it always has.
+export async function isClosedReplyTask(taskId: string): Promise<boolean> {
+  const { data: task } = await supabaseAdmin.from("tasks").select("title, priority, status").eq("id", taskId).maybeSingle();
+  return !!task && isReplyTask(task) && task.status === "done";
 }

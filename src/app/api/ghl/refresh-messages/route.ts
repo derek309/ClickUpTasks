@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
-import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { closeAnsweredReplyTask, resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { normalizeBody, DEDUP_WINDOW_MS } from "@/lib/inboundIngest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -201,6 +201,10 @@ export async function POST(req: NextRequest) {
       if (rows.length) {
         const { error } = await supabaseAdmin.from("messages").insert(rows);
         if (!error) inserted += rows.length;
+        // A text or email answered from inside GoHighLevel only reaches the
+        // app through this pull, so this is where it closes the reply task.
+        const answeredAt = !error && taskId ? rows.filter((r) => r.direction === "outbound" && r.channel !== "call" && r.task_id === taskId).map((r) => r.created_at as string).sort().at(-1) : undefined;
+        if (answeredAt) await closeAnsweredReplyTask(taskId, answeredAt, null, "GoHighLevel");
       }
       // Heal the rows that were already here. Every message stored before
       // ghl_conversation_id existed has no thread key, so a reply to it still

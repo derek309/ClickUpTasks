@@ -7,7 +7,7 @@
 // webhook (which stays untouched) — same behavior, different entry point.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { titleCase, todayPacific } from "@/lib/data";
-import { SAFE_CONTACT_ID } from "@/lib/ghlConversationTask";
+import { SAFE_CONTACT_ID, closeAnsweredReplyTask, isClosedReplyTask } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
@@ -72,7 +72,10 @@ async function resolveTaskForThread(contactId: string, gmailThreadId: string | n
   const { data } = await supabaseAdmin
     .from("messages").select("task_id").eq("contact_id", contactId).eq("gmail_thread_id", gmailThreadId)
     .not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
-  return (data?.[0]?.task_id as string | undefined) ?? null;
+  const taskId = (data?.[0]?.task_id as string | undefined) ?? null;
+  // A reply task that closed itself is finished with: the next message on its
+  // thread raises a fresh one rather than landing where nobody is looking.
+  return taskId && !(await isClosedReplyTask(taskId)) ? taskId : null;
 }
 
 // The contact's open Conversation-priority ("Reply to X") task, if one exists.
@@ -326,8 +329,9 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 // the task its Gmail thread already belongs to, else the contact's open
 // "Reply to X" task. Until then 107 of 123 sent emails in two weeks were
 // visible only on the client. Still deliberately quiet: it never creates a
-// task, never moves one's dates or stage, and fires no notification — the
-// team sending something is not news, unlike an inbound reply.
+// task and fires no notification — the team sending something is not news,
+// unlike an inbound reply. The one thing it does change is a "Reply to X" task
+// it answers, which closes (see closeAnsweredReplyTask).
 export async function ingestOutboundMessage(opts: {
   contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; createdBy: string; at?: string;
 }): Promise<boolean> {
@@ -343,5 +347,6 @@ export async function ingestOutboundMessage(opts: {
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure
+  await closeAnsweredReplyTask(taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
   return true;
 }

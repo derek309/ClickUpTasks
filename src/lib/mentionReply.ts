@@ -11,37 +11,12 @@
 // (inboundIngest.ts), which resolves a task the same way. Two mechanisms for
 // "an email came back, put it where it belongs" would be one too many.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { plainTextToHtml } from "./data";
+import { MENTION_EMAIL_FOOTER, plainTextToHtml, replyOnly } from "./data";
 import { canActOnTask } from "./taskAccess";
 
-/** The start of the mention email's footer line. The email route writes it and
- *  replyOnly cuts at it, for a mail app that quotes without marking the quote. */
-export const MENTION_EMAIL_FOOTER = "Reply to this email and your answer lands on the task";
-
-/** The answer alone, without the email it answers. Gmail's text body carries
- *  the whole quoted original under the reply, so without this every reply
- *  became the answer plus the mention email, as one comment. Cuts at the first
- *  line that starts a quote in any of the common shapes:
- *    Gmail, Apple Mail  "On Mon, Sep 29, 2026 at 10:00 AM Derek <d@x> wrote:"
- *                       (Gmail wraps it over two lines when it is long)
- *    any client         a line starting with ">"
- *    Outlook            "-----Original Message-----", or a rule of underscores
- *                       followed by "From:"
- *    unmarked           our own footer sentence */
-export function replyOnly(text: string): string {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  const wrote = /^On\s.+\swrote:\s*$/;
-  const cut = lines.findIndex((line, i) => {
-    const l = line.trim();
-    return wrote.test(l)
-      || (/^On\s/.test(l) && wrote.test(`${l} ${(lines[i + 1] ?? "").trim()}`))
-      || l.startsWith(">")
-      || /^-{2,}\s*Original Message\s*-{2,}$/i.test(l)
-      || (/^_{10,}$/.test(l) && /^From:/i.test((lines[i + 1] ?? "").trim()))
-      || l.startsWith(MENTION_EMAIL_FOOTER);
-  });
-  return (cut === -1 ? lines : lines.slice(0, cut)).join("\n").trim();
-}
+// Both live in data.ts now: the task list's message preview cuts quoted text
+// the same way, and this file is server only.
+export { MENTION_EMAIL_FOOTER, replyOnly };
 
 /** A From address as a literal ilike pattern: case blind, but _ and % match
  *  only themselves. Unescaped, they are wildcards, and an address with an

@@ -33,9 +33,13 @@ function builder(table: string) {
   return b;
 }
 
-vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
+const rpcs: { fn: string; args: any }[] = [];
+vi.mock("./supabaseAdmin", () => ({
+  supabaseAdmin: { from: (t: string) => builder(t), rpc: (fn: string, args: unknown) => { rpcs.push({ fn, args }); return Promise.resolve({ error: null }); } },
+  adminConfigured: true,
+}));
 
-const { ingestOutboundMessage } = await import("./inboundIngest");
+const { ingestOutboundMessage, ingestInboundMessage } = await import("./inboundIngest");
 
 const has = (c: Call, key: string) => c.filters.some(([k]) => k === key);
 const baseOpts = {
@@ -46,9 +50,13 @@ const baseOpts = {
   gmailMessageId: "gm_1", gmailThreadId: "th_1", createdBy: "u_derek", at: "2026-09-11T15:00:00Z",
 };
 
-function setup(o: { threadTask?: string | null; conversationTask?: string | null; alreadyIngested?: boolean }) {
+type TaskRow = { title: string; priority: string; status: string };
+function setup(o: { threadTask?: string | null; conversationTask?: string | null; alreadyIngested?: boolean; tasks?: Record<string, TaskRow>; lastInbound?: string }) {
   calls.length = 0;
+  rpcs.length = 0;
   answer = (c) => {
+    if (c.table === "tasks" && has(c, "id")) return o.tasks?.[c.filters.find(([k]) => k === "id")![1] as string] ?? null;
+    if (c.table === "messages" && c.cols === "created_at") return o.lastInbound ? [{ created_at: o.lastInbound }] : [];
     if (c.table === "clients") return [{ id: "cl_tracked" }];
     if (c.table === "messages" && has(c, "gmail_message_id")) return o.alreadyIngested ? [{ id: "m_old" }] : [];
     if (c.table === "messages" && c.cols === "body, created_at") return [];
@@ -100,5 +108,63 @@ describe("a reply sent from Gmail lands on a task", () => {
     setup({ alreadyIngested: true, threadTask: "t_thread" });
     expect(await ingestOutboundMessage(baseOpts)).toBe(false);
     expect(inserted()).toBeUndefined();
+  });
+});
+
+const replyTask = (status = "todo"): TaskRow => ({ title: "Reply to Brian Goodell", priority: "conversation", status });
+const closes = () => taskWrites().filter((c) => (c.payload as { status?: string }).status === "done");
+
+// Derek, 2026-09-30: the reply tasks are "useful but also creating noise",
+// because the email is answered in Gmail and the task stays open regardless.
+describe("answering from Gmail closes the Reply to task", () => {
+  it("closes it, says why in its activity, and clears the unread reply", async () => {
+    setup({ conversationTask: "t_conv", tasks: { t_conv: replyTask() }, lastInbound: "2026-09-11T14:00:00Z" });
+    await ingestOutboundMessage(baseOpts);
+    expect(closes().map((c) => c.filters)).toEqual([[["id", "t_conv"]]]);
+    expect(rpcs).toHaveLength(1);
+    expect(rpcs[0].args.comment).toMatchObject({ authorId: "u_derek", kind: "event", body: "answered by email, which closed this task" });
+    expect(calls.some((c) => c.table === "notifications" && c.op === "update" && has(c, "task_id"))).toBe(true);
+  });
+
+  it("does not close it for a sent email older than the client's last message", async () => {
+    setup({ conversationTask: "t_conv", tasks: { t_conv: replyTask() }, lastInbound: "2026-09-11T16:00:00Z" });
+    await ingestOutboundMessage(baseOpts);
+    expect(inserted()?.task_id).toBe("t_conv");
+    expect(taskWrites()).toEqual([]);
+    expect(rpcs).toEqual([]);
+  });
+
+  it("never closes an ordinary task, or a meeting, that the thread belongs to", async () => {
+    for (const row of [{ title: "Build the homepage", priority: "normal", status: "todo" }, { title: "Meeting with Brian Goodell", priority: "conversation", status: "todo" }]) {
+      setup({ threadTask: "t_thread", tasks: { t_thread: row } });
+      await ingestOutboundMessage(baseOpts);
+      expect(taskWrites()).toEqual([]);
+    }
+  });
+
+  it("files a reply on the open Reply to task when the thread's own one has closed", async () => {
+    setup({ threadTask: "t_old", conversationTask: "t_conv", tasks: { t_old: replyTask("done"), t_conv: replyTask() } });
+    await ingestOutboundMessage(baseOpts);
+    expect(inserted()?.task_id).toBe("t_conv");
+  });
+});
+
+describe("a client's next message after the Reply to task closed", () => {
+  const inbound = { contact: baseOpts.contact, channel: "email" as const, subject: "Re: Bulk Customers", body: "One more thing", gmailMessageId: "gm_2", gmailThreadId: "th_1" };
+  const newTasks = () => calls.filter((c) => c.table === "tasks" && c.op === "insert");
+
+  it("raises a fresh Reply to task instead of landing on the closed one", async () => {
+    setup({ threadTask: "t_old", tasks: { t_old: replyTask("done") } });
+    expect(await ingestInboundMessage(inbound)).toBe(true);
+    expect(newTasks()).toHaveLength(1);
+    expect(newTasks()[0].payload).toMatchObject({ title: "Reply to Brian Goodell", priority: "conversation" });
+    expect(taskWrites().some((c) => c.op === "update" && c.filters.some(([k, v]) => k === "id" && v === "t_old"))).toBe(false);
+  });
+
+  it("still lands on an ordinary task the thread belongs to, finished or not", async () => {
+    setup({ threadTask: "t_thread", tasks: { t_thread: { title: "Build the homepage", priority: "normal", status: "done" } } });
+    await ingestInboundMessage(inbound);
+    expect(newTasks()).toEqual([]);
+    expect(taskWrites().map((c) => c.filters)).toEqual([[["id", "t_thread"]]]);
   });
 });
