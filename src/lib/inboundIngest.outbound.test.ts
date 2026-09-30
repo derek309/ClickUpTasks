@@ -22,6 +22,8 @@ function builder(table: string) {
     not: (k: string, _o: string, v: unknown) => { call.filters.push([`not:${k}`, v]); return b; },
     is: (k: string, v: unknown) => { call.filters.push([`is:${k}`, v]); return b; },
     gt: (k: string, v: unknown) => { call.filters.push([`gt:${k}`, v]); return b; },
+    gte: (k: string, v: unknown) => { call.filters.push([`gte:${k}`, v]); return b; },
+    lte: (k: string, v: unknown) => { call.filters.push([`lte:${k}`, v]); return b; },
     or: (expr: string) => { call.filters.push(["or", expr]); return b; },
     contains: (k: string, v: unknown) => { call.filters.push([`contains:${k}`, v]); return b; },
     order: () => b,

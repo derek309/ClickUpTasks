@@ -21,7 +21,7 @@ import {
   mentionCandidates, applyMention,
 } from "@/lib/data";
 import { safeMessageHtml } from "@/lib/safeHtml";
-import { I, Avatar, CollapsibleText, newId } from "./ui";
+import { I, Avatar, CollapsibleText, newId, NotInGhlChip } from "./ui";
 import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { SchedulePopover } from "./SchedulePopover";
@@ -701,8 +701,9 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
                             {m.attachments && m.attachments.length > 0 && (
                               <div className="mt-1.5"><AttachmentThumbs items={m.attachments} onOpen={onOpenFile} /></div>
                             )}
-                            <div className="mt-1 flex items-center gap-2 text-[12px] text-muted">
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted">
                               <span>{timeAgo(m.at)}</span>
+                              <NotInGhlChip m={m} className="text-[11px]" />
                               {m.direction === "outbound" && m.createdBy && (
                                 <span className="inline-flex items-center gap-1"><Avatar id={m.createdBy} size={14} /> {userById(m.createdBy)?.name ?? "Unknown"}</span>
                               )}

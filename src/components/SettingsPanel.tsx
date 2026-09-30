@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { type Client } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
+import { GhlRecordPanel } from "./GhlRecordPanel";
 
 export default function SettingsPanel({
   clients,
@@ -241,6 +242,11 @@ export default function SettingsPanel({
               <div className={`mt-1.5 break-all text-[15px] ${granolaStatus.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{granolaStatus.msg}</div>
             )}
           </div>
+
+          <div className="mb-3 mt-6 flex items-center gap-2">
+            <span className="text-[15px] font-semibold">GoHighLevel record</span>
+          </div>
+          <GhlRecordPanel />
 
           <div className="mb-3 mt-6 flex items-center gap-2">
             <span className="text-[15px] font-semibold">Data cleanup</span>

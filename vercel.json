@@ -5,6 +5,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/ghl/pull-messages",
+      "schedule": "7-59/15 * * * *"
+    },
+    {
       "path": "/api/cron/send-scheduled",
       "schedule": "*/15 * * * *"
     },

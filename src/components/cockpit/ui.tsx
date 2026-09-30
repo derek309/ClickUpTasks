@@ -3,7 +3,7 @@
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
 import { useEffect, useRef, useState } from "react";
-import { users, userById, labelById, prettyLinkName, linkSpans, type Attachment, type TaskStatus, type Priority } from "@/lib/data";
+import { users, userById, labelById, prettyLinkName, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -579,3 +579,17 @@ export const DIR_ROW = "group flex min-h-[38px] cursor-pointer items-center gap-
 // leaving someone to re-set every task by hand. Toasts carrying an action
 // stay on screen longer (see pushToast) so there's time to actually hit it.
 export type Toast = { id: string; text: string; action?: { label: string; run: () => void }; secondaryAction?: { label: string; run: () => void } };
+
+/** On a message GoHighLevel has no copy of an hour after it was seen (data.ts
+ *  ghlConfirmState). GoHighLevel is the record, so this is worth a glance:
+ *  usually whoever sent or received it has not connected Gmail sync there. */
+export function NotInGhlChip({ m, className = "" }: { m: Pick<Message, "channel" | "ghlMessageId" | "at">; className?: string }) {
+  if (ghlConfirmState(m) !== "missing") return null;
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-[5px] bg-danger-soft px-1.5 py-0 font-semibold text-danger ${className}`}
+      title="GoHighLevel has no copy of this yet. Check that whoever sent or received it has Gmail sync connected in their GoHighLevel profile.">
+      Not in GoHighLevel
+    </span>
+  );
+}

@@ -1,0 +1,144 @@
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
+import { authorizeCron } from "@/lib/cronAuth";
+import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
+import { createLocator } from "@/lib/ghlLocate";
+import { pullContactConversations } from "@/lib/ghlPull";
+import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { isRealGhlId } from "@/lib/ghlMatch";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+// The 15 minute GoHighLevel pull (Derek, 2026-09-30: GoHighLevel is the record
+// of every client communication). Runs 7 minutes after each Gmail poll, so
+// the email that poll stored is there to be confirmed. Two kinds of contact
+// are pulled:
+//
+// 1. Every contact whose GoHighLevel conversation had a message in the window,
+//    per connected sub-account. This is the only way a text or call reaches
+//    the app now that no webhook workflow runs: a list built from local
+//    messages can never find a message the app has not seen.
+// 2. Every contact with a local email, text or call in the window that
+//    GoHighLevel has not confirmed yet, whose sub-account is found by asking
+//    each token (lib/ghlLocate).
+//
+// Each goes through lib/ghlPull, which stamps GoHighLevel ids on the rows it
+// pairs, stores what is new, and raises reply tasks for unanswered texts and
+// missed calls.
+//
+// Trigger: Vercel cron (vercel.json), or an admin, who may POST { days } (up
+// to 30) to catch up once.
+export const maxDuration = 120;
+
+const DAY = 24 * 60 * 60 * 1000;
+const API = "https://services.leadconnectorhq.com";
+
+export async function GET(req: NextRequest) {
+  return run(req, 2);
+}
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({} as any));
+  const days = typeof body?.days === "number" && body.days > 0 ? Math.min(Math.floor(body.days), 30) : 2;
+  return run(req, days);
+}
+
+async function run(req: NextRequest, days: number) {
+  if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
+  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const started = Date.now();
+  const sinceMs = started - days * DAY;
+  const errors: string[] = [];
+  const rejectedTokens: string[] = [];
+  // ghl contact id → location it was found in.
+  const work = new Map<string, string>();
+
+  // 1. Recent conversations, newest first, per sub-account.
+  for (const locationId of await configuredLocations()) {
+    const token = await tokenForLocation(locationId);
+    if (!token) continue;
+    const headers = { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" };
+    let startAfterDate: number | undefined;
+    for (let page = 0; page < 5; page++) {
+      const q = new URLSearchParams({ locationId, sortBy: "last_message_date", sort: "desc", limit: "100" });
+      if (startAfterDate) q.set("startAfterDate", String(startAfterDate));
+      let res: Response;
+      try {
+        res = await fetch(`${API}/conversations/search?${q}`, { headers, signal: AbortSignal.timeout(15000) });
+      } catch (e) {
+        errors.push(`${locationId}: ${e instanceof Error ? e.message : "search failed"}`);
+        break;
+      }
+      if (res.status === 401) { rejectedTokens.push(locationId); break; }
+      if (!res.ok) { errors.push(`${locationId}: search ${res.status}`); break; }
+      const convs: any[] = (await res.json())?.conversations ?? [];
+      let reachedOld = false;
+      for (const c of convs) {
+        const last = Number(c?.lastMessageDate);
+        if (!Number.isFinite(last) || last < sinceMs) { reachedOld = true; continue; }
+        if (c?.contactId && !work.has(c.contactId)) work.set(c.contactId, locationId);
+      }
+      if (reachedOld || convs.length < 100) break;
+      startAfterDate = Number(convs[convs.length - 1]?.lastMessageDate) || undefined;
+      if (!startAfterDate) break;
+    }
+  }
+
+  // 2. Local messages GoHighLevel has not confirmed yet.
+  const { data: pendingRows } = await supabaseAdmin
+    .from("messages").select("contact_id, ghl_message_id")
+    .in("channel", ["email", "sms", "call"])
+    .gte("created_at", new Date(sinceMs).toISOString())
+    .not("contact_id", "is", null)
+    .limit(5000);
+  const pendingContactIds = [...new Set((pendingRows ?? []).filter((r: any) => !isRealGhlId(r.ghl_message_id)).map((r: any) => r.contact_id as string))];
+
+  // Both lists as local contacts.
+  const byGhl = new Map<string, { id: string; client_id: string; ghl_contact_id: string }>();
+  const ghlIds = [...work.keys()];
+  for (let i = 0; i < ghlIds.length; i += 200) {
+    const { data } = await supabaseAdmin.from("contacts").select("id, client_id, ghl_contact_id").in("ghl_contact_id", ghlIds.slice(i, i + 200));
+    for (const c of data ?? []) if (!byGhl.has(c.ghl_contact_id as string)) byGhl.set(c.ghl_contact_id as string, c as any);
+  }
+  const unknownInGhl = ghlIds.filter((g) => !byGhl.has(g)).length;
+  let noGhlId = 0, notFound = 0;
+  if (pendingContactIds.length) {
+    const { data } = await supabaseAdmin.from("contacts").select("id, client_id, ghl_contact_id").in("id", pendingContactIds);
+    const { locationForContact } = createLocator();
+    for (const c of data ?? []) {
+      const g = c.ghl_contact_id as string | null;
+      if (!g) { noGhlId++; continue; }
+      if (work.has(g)) continue;
+      const loc = await locationForContact(g);
+      if (!loc) { notFound++; continue; }
+      work.set(g, loc);
+      byGhl.set(g, c as any);
+    }
+  }
+
+  let contacts = 0, stamped = 0, inserted = 0, tasksRaised = 0, held = 0, left = 0;
+  for (const [ghlContactId, locationId] of work) {
+    const c = byGhl.get(ghlContactId);
+    if (!c) continue;
+    // Leave room to answer before Vercel cuts the run off; the next run
+    // picks up whoever was left.
+    if (Date.now() - started > (maxDuration - 20) * 1000) { left++; continue; }
+    try {
+      const clientId = await resolveTrackedClientId(c.id, c.client_id);
+      const r = await pullContactConversations({ contactId: c.id, clientId, locationId, ghlContactId, sinceMs, raiseTasks: true });
+      contacts++;
+      stamped += r.stamped; inserted += r.inserted; tasksRaised += r.tasksRaised; held += r.held;
+    } catch (e) {
+      errors.push(`${c.id}: ${e instanceof Error ? e.message : "pull failed"}`);
+    }
+  }
+
+  const out = {
+    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left,
+    unknownInGhl, noGhlId, notFound,
+    ...(rejectedTokens.length ? { rejectedTokens } : {}),
+    ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
+  };
+  console.log("[ghl/pull-messages]", JSON.stringify(out));
+  return NextResponse.json(out);
+}

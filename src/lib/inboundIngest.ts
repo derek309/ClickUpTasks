@@ -12,6 +12,7 @@ import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
+import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -129,7 +130,7 @@ async function upsertConversationTask(contact: Contact, ghlContactId: string | n
 
 // Returns the recipient list so the caller can hand it straight to
 // sendInboundReplyEmail without recomputing followers + admins.
-async function notifyInbound(contact: Contact, taskId: string | null, text: string): Promise<string[]> {
+export async function notifyInbound(contact: Contact, taskId: string | null, text: string): Promise<string[]> {
   const [{ data: client }, { data: admins }] = await Promise.all([
     supabaseAdmin.from("clients").select("assigned_to").eq("id", contact.client_id).maybeSingle(),
     supabaseAdmin.from("profiles").select("member_id").eq("role", "admin"),
@@ -258,6 +259,35 @@ export async function sendInboundReplyEmail(opts: {
   }
 }
 
+// GoHighLevel's copy of this email may already be stored: the GoHighLevel
+// pull (lib/ghlPull) inserts an email it cannot pair with a Gmail row once it
+// is 20 minutes old, and a Gmail poll that failed a run would then find it.
+// Pair with that row instead of storing the email twice: the Gmail ids are
+// stamped on it, which is the same pairing the pull does from its side.
+async function claimGhlCopy(contactId: string, direction: "inbound" | "outbound", opts: {
+  subject?: string | null; body: string; at?: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null;
+}): Promise<{ id: string; task_id: string | null } | null> {
+  if (!opts.gmailMessageId) return null;
+  const at = opts.at ? new Date(opts.at).getTime() : Date.now();
+  const { data } = await supabaseAdmin
+    .from("messages").select("id, body, subject, created_at, task_id")
+    .eq("contact_id", contactId).eq("channel", "email").eq("direction", direction)
+    .is("gmail_message_id", null).not("ghl_message_id", "is", null)
+    .gte("created_at", new Date(at - MATCH_WINDOW_MS).toISOString())
+    .lte("created_at", new Date(at + MATCH_WINDOW_MS).toISOString());
+  const rows = (data ?? []) as { id: string; body: string | null; subject: string | null; created_at: string; task_id: string | null }[];
+  const id = matchGhlToLocal(
+    { channel: "email", direction, body: opts.body, subject: opts.subject, at },
+    rows.map((r) => ({ id: r.id, channel: "email", direction, body: r.body, subject: r.subject, at: new Date(r.created_at).getTime() })),
+  );
+  if (!id) return null;
+  const { data: updated, error } = await supabaseAdmin
+    .from("messages").update({ gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null })
+    .eq("id", id).is("gmail_message_id", null).select("id, task_id");
+  const row = (updated as { id: string; task_id: string | null }[] | null)?.[0];
+  return error || !row ? null : row;
+}
+
 // Ingest one inbound message. Deduped on gmail_message_id — a message already
 // pulled (or the app's own sent copy) is skipped. Returns true if a new
 // message was ingested.
@@ -271,15 +301,21 @@ export async function ingestInboundMessage(opts: {
     const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
     if (dupe && dupe.length > 0) return false;
   }
-  const messageId = "msg_" + crypto.randomUUID();
-  const { error } = await supabaseAdmin.from("messages").insert({
-    id: messageId, contact_id: contact.id, client_id: contact.client_id, channel, direction: "inbound",
-    subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: null,
-    ...(opts.at ? { created_at: opts.at } : {}),
-  });
-  if (error) {
-    // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
-    return false;
+  // GoHighLevel's copy got here first: that row becomes this message, and the
+  // task and notification below still happen, since the pull leaves emails to
+  // this path and raised nothing for it.
+  const ghlCopy = channel === "email" ? await claimGhlCopy(contact.id, "inbound", { subject, body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822 }) : null;
+  const messageId = ghlCopy?.id ?? "msg_" + crypto.randomUUID();
+  if (!ghlCopy) {
+    const { error } = await supabaseAdmin.from("messages").insert({
+      id: messageId, contact_id: contact.id, client_id: contact.client_id, channel, direction: "inbound",
+      subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: null,
+      ...(opts.at ? { created_at: opts.at } : {}),
+    });
+    if (error) {
+      // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
+      return false;
+    }
   }
   // A reply within a thread that started from a specific task's own email tab
   // (ticket-style) lands back on that same task, bumped to today so it
@@ -315,7 +351,7 @@ export async function ingestInboundMessage(opts: {
 // can fetch the contact's existing outbound rows ONCE and match in-memory,
 // rather than re-querying per message the way the one-shot `isDuplicateOutboundBody`
 // convenience below does (fine for its single-message call site, wrong for a loop).
-export const normalizeBody = (s: string) => (s || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+export { normalizeBody };
 export const DEDUP_WINDOW_MS = 10 * 60 * 1000;
 export async function isDuplicateOutboundBody(contactId: string, body: string, dateAdded: string): Promise<boolean> {
   const { data: outRows } = await supabaseAdmin.from("messages").select("body, created_at").eq("contact_id", contactId).eq("direction", "outbound");
@@ -342,6 +378,13 @@ export async function ingestOutboundMessage(opts: {
   if (dupe && dupe.length > 0) return false;
   if (await isDuplicateOutboundBody(contact.id, opts.body, opts.at ?? new Date().toISOString())) return false;
   const taskId = (await resolveTaskForThread(contact.id, opts.gmailThreadId)) ?? (await findOpenConversationTask(contact.id));
+  // Already stored from GoHighLevel: pair with it rather than add a twin.
+  const ghlCopy = await claimGhlCopy(contact.id, "outbound", { subject: opts.subject, body: opts.body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822 });
+  if (ghlCopy) {
+    if (!ghlCopy.task_id && taskId) await supabaseAdmin.from("messages").update({ task_id: taskId, created_by: opts.createdBy }).eq("id", ghlCopy.id);
+    await closeAnsweredReplyTask(ghlCopy.task_id ?? taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
+    return true;
+  }
   const { error } = await supabaseAdmin.from("messages").insert({
     id: "msg_" + crypto.randomUUID(), contact_id: contact.id, client_id: contact.client_id,
     channel: opts.channel, direction: "outbound", task_id: taskId,

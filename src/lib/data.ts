@@ -580,6 +580,27 @@ export interface Message {
   bcc: string[];
 }
 
+/** GoHighLevel is the record of every client conversation (Derek,
+ *  2026-09-30). A message is confirmed there once the 15 minute pull stamps
+ *  its GoHighLevel id on the row (lib/ghlPull). Only messages from the day
+ *  that shipped can be flagged: older history predates Gmail sync, and a wall
+ *  of flags on it would say nothing. */
+export const GHL_CONFIRM_SINCE = "2026-09-30T07:00:00Z";
+/** How long a message gets to show up in GoHighLevel before it is flagged:
+ *  Gmail sync files it within seconds and the pull runs every 15 minutes. */
+export const GHL_CONFIRM_GRACE_MS = 60 * 60 * 1000;
+
+/** "missing": an email, text or call from launch day on, over an hour old,
+ *  that GoHighLevel has no copy of. "pending": still inside the hour.
+ *  Null for anything the check does not cover (chat, older history). */
+export function ghlConfirmState(m: Pick<Message, "channel" | "ghlMessageId" | "at">, now = Date.now()): "confirmed" | "pending" | "missing" | null {
+  if (m.channel !== "email" && m.channel !== "sms" && m.channel !== "call") return null;
+  const at = new Date(m.at).getTime();
+  if (!Number.isFinite(at) || at < new Date(GHL_CONFIRM_SINCE).getTime()) return null;
+  if (m.ghlMessageId && !m.ghlMessageId.startsWith("synthetic:")) return "confirmed";
+  return now - at > GHL_CONFIRM_GRACE_MS ? "missing" : "pending";
+}
+
 /** A composed SMS/email held for a future send time — see
  * supabase/scheduled-messages.sql and src/lib/sendMessageServer.ts (the cron
  * that fires these). On success it becomes a real Message row; this is only

@@ -15,7 +15,7 @@ import {
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
   TaskAction, TaskActionKind, TASK_ACTION_META, splitQuotedEmail, tidyEmailText,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
+import { I, Avatar, CollapsibleText, LinkedText, newId, NotInGhlChip } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { SchedulePopover } from "./SchedulePopover";
@@ -876,6 +876,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
               {!email && <span className={`font-medium ${CHANNEL_TONE[m.channel === "sms" ? "sms" : "chat"].label}`}>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
               <span>· {timeAgo(m.at)}</span>
+              <NotInGhlChip m={m} className="text-[16px]" />
               {dupeCount && dupeCount > 1 && (
                 <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[16px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
               )}

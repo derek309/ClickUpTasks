@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
-import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
+import { createLocator } from "@/lib/ghlLocate";
+import { pullContactConversations } from "@/lib/ghlPull";
 
 // Give historical GoHighLevel messages their conversation id.
 //
@@ -11,8 +12,8 @@ import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 // bind themselves; three thousand old ones cannot.
 //
 // The id can only come from GoHighLevel — the API does not hand it back for a
-// message we already have — so this walks each contact through the same
-// refresh the client-level button runs, which now heals old rows as it reads.
+// message we already have — so this walks each contact through the same pull
+// the client-level button runs (lib/ghlPull), which heals old rows as it reads.
 // Doing it that way rather than reimplementing the walk means there is one
 // piece of GHL paging in this codebase, not two that drift.
 //
@@ -76,47 +77,13 @@ export async function POST(req: NextRequest) {
     if (!byContact.has(cid)) byContact.set(cid, r.client_id as string);
   }
 
-  // Which sub-account each contact actually lives in.
-  //
-  // Not from clients.ghl_location_id: that field is a real location id on the
-  // sub-account rows, and on ordinary clients it has been repurposed to hold
-  // the company name shown on the Clients board ("BibBoards", "eXp Realty").
-  // Reading it as a location id is why the first run reported forty three
-  // clients as having no token — they were never in a sub-account by that
-  // name, and the question was wrong rather than the data.
-  //
-  // api/ghl/contact solved this already: a Private Integration token is scoped
-  // to one location and GET /contacts/{id} takes no location, so asking each
-  // connected token in turn and seeing which one knows the contact identifies
-  // the location. Read-only, so trying several is harmless — the same
-  // reasoning that route sets out, and the reason this does not guess for
-  // anything that writes.
+  // Which sub-account each contact actually lives in: asked of each token,
+  // never read from clients.ghl_location_id (see lib/ghlLocate).
   const contactIds = [...byContact.keys()];
   const { data: contactRows } = await supabaseAdmin
     .from("contacts").select("id, ghl_contact_id").in("id", contactIds);
   const ghlContactOf = new Map((contactRows ?? []).map((r) => [r.id as string, r.ghl_contact_id as string | null]));
-  const locations = await configuredLocations();
-
-  async function locationForContact(ghlContactId: string): Promise<string | null> {
-    for (const loc of locations) {
-      const token = await tokenForLocation(loc);
-      if (!token) continue;
-      try {
-        const res = await fetch(`https://services.leadconnectorhq.com/contacts/${encodeURIComponent(ghlContactId)}`, {
-          headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" },
-          signal: AbortSignal.timeout(8000),
-        });
-        // A 404 means this location genuinely does not have the contact, so
-        // keep asking. Anything else is inconclusive and also worth moving on
-        // from — the next run will try again.
-        if (res.ok) {
-          const json = await res.json().catch(() => null);
-          if (json?.contact) return loc;
-        }
-      } catch { /* network or timeout: treat as not found here */ }
-    }
-    return null;
-  }
+  const { locationForContact } = createLocator();
 
   const reachable: { contactId: string; clientId: string; ghlContactId: string; locationId: string }[] = [];
   let noIds = 0;
@@ -129,22 +96,14 @@ export async function POST(req: NextRequest) {
     reachable.push({ contactId, clientId, ghlContactId, locationId });
   }
 
-  const origin = req.nextUrl.origin;
-  const auth = req.headers.get("authorization") ?? "";
   const results: { contactId: string; bound?: number; error?: string }[] = [];
   let bound = 0;
 
   for (const { contactId, clientId, ghlContactId, locationId } of reachable) {
     try {
-      const res = await fetch(`${origin}/api/ghl/refresh-messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: auth },
-        body: JSON.stringify({ clientId, contactId, locationId, ghlContactId }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) { results.push({ contactId, error: String(j?.error ?? res.status) }); continue; }
-      bound += j?.bound ?? 0;
-      results.push({ contactId, bound: j?.bound ?? 0 });
+      const r = await pullContactConversations({ contactId, clientId, locationId, ghlContactId, raiseTasks: false });
+      bound += r.bound;
+      results.push({ contactId, bound: r.bound });
     } catch (e) {
       results.push({ contactId, error: e instanceof Error ? e.message : "request failed" });
     }

@@ -1,25 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { tokenForLocation } from "@/lib/ghlTokens";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
-import { closeAnsweredReplyTask, resolveTrackedClientId } from "@/lib/ghlConversationTask";
-import { normalizeBody, DEDUP_WINDOW_MS } from "@/lib/inboundIngest";
+import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { pullContactConversations, GhlApiError } from "@/lib/ghlPull";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-// A TYPE_CALL message carries no body/subject — meta.call.duration (seconds)
-// and meta.call.status are all GHL gives us (confirmed live; no transcript,
-// no recording URL inline — those need separate calls we deliberately don't
-// make, since only "a call happened" was asked for, not the recording).
-function formatCallBody(m: any): string {
-  const status: string = m?.meta?.call?.status ?? m?.status ?? "";
-  if (/missed|no-?answer|voicemail/i.test(status)) return "Missed call";
-  const secs = Number(m?.meta?.call?.duration);
-  if (!Number.isFinite(secs) || secs <= 0) return "Call";
-  const mins = Math.floor(secs / 60), rem = secs % 60;
-  return `Call · ${mins > 0 ? `${mins}m ` : ""}${rem}s`;
-}
 
 // Backfills any GoHighLevel messages for a contact that our webhook never
 // captured (webhook downtime, a message sent directly in GHL's own UI
@@ -64,168 +50,13 @@ export async function POST(req: NextRequest) {
   if (!(await isClientVisible(caller, clientId)))
     return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
-  // Wrap the whole GHL/DB flow so a thrown error (network blip, unexpected
-  // response) surfaces its real message to the toast instead of an opaque 500.
+  // The pull itself lives in lib/ghlPull, shared with the 15 minute timer.
+  // No sinceMs: a refresh reads the recent history of every conversation.
   try {
-  const token = await tokenForLocation(locationId);
-  if (!token) return NextResponse.json({ error: "No GoHighLevel token configured for this sub-account yet." }, { status: 501 });
-  const headers = { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" };
-
-  const searchRes = await fetch(`https://services.leadconnectorhq.com/conversations/search?locationId=${encodeURIComponent(locationId)}&contactId=${encodeURIComponent(ghlContactId)}&limit=10`, { headers });
-  if (!searchRes.ok) { const text = await searchRes.text().catch(() => ""); return NextResponse.json({ error: `GoHighLevel API ${searchRes.status}: ${text.slice(0, 240)}` }, { status: 502 }); }
-  const conversations: any[] = (await searchRes.json())?.conversations ?? [];
-  if (!conversations.length) return NextResponse.json({ inserted: 0 });
-
-  // Skip messages we already have (webhook-captured rows use a different id
-  // scheme than the deterministic one below, so this dedups by ghl_message_id
-  // rather than relying on an upsert's ON CONFLICT target).
-  const { data: existingRows } = await supabaseAdmin.from("messages").select("ghl_message_id").eq("contact_id", contactId).not("ghl_message_id", "is", null);
-  const known = new Set((existingRows ?? []).map((r) => r.ghl_message_id as string));
-
-  // Scope backfilled rows to this contact's open Interaction task, same as
-  // the webhook does for a freshly-inbound message (see message task-scope:
-  // TaskDrawer's Activity feed filters messages by task_id, so a reply sent
-  // directly in GHL — the whole point of this route — would otherwise never
-  // show up there even after a successful backfill).
-  // Conversations already being worked on a real task. Read up front, one
-  // query for the contact, rather than per message.
-  const convTaskIds = new Map<string, string>();
-  {
-    const { data: bound } = await supabaseAdmin
-      .from("messages").select("ghl_conversation_id, task_id, created_at")
-      .eq("contact_id", contactId).not("ghl_conversation_id", "is", null).not("task_id", "is", null)
-      .order("created_at", { ascending: false }).limit(200);
-    for (const r of bound ?? []) {
-      const cid = r.ghl_conversation_id as string;
-      if (!convTaskIds.has(cid)) convTaskIds.set(cid, r.task_id as string);
-    }
-  }
-  const { data: openTask } = await supabaseAdmin.from("tasks").select("id").eq("contact_id", contactId).eq("priority", "conversation").neq("status", "done").limit(1).maybeSingle();
-  const taskId: string | null = openTask?.id ?? null;
-
-  // Emails sent through Google Workspace (the per-teammate "from" path) are
-  // stored locally with no ghl_message_id, so `known` can't catch the copy GHL
-  // imports via 2-way sync — that would double-post the sent email in the
-  // Journal. Guard by matching an incoming OUTBOUND message against an existing
-  // local outbound row by contact + normalized body within a time window.
-  const { data: outRows } = await supabaseAdmin.from("messages").select("body, created_at").eq("contact_id", contactId).eq("direction", "outbound");
-  const localOutbound = (outRows ?? []).map((r) => ({ body: normalizeBody(r.body as string), at: new Date(r.created_at as string).getTime() }));
-  const isDupOutbound = (body: string, dateAdded: string) => {
-    const nb = normalizeBody(body); const t = new Date(dateAdded).getTime();
-    return localOutbound.some((o) => o.body === nb && Math.abs(o.at - t) <= DEDUP_WINDOW_MS);
-  };
-
-  let inserted = 0;
-  // Pre-existing rows given their conversation id for the first time.
-  let bound = 0;
-  for (const conv of conversations) {
-    let lastMessageId: string | undefined;
-    for (let page = 0; page < 5; page++) { // ~100 messages per conversation, plenty for a manual refresh
-      const q = new URLSearchParams({ limit: "20" });
-      if (lastMessageId) q.set("lastMessageId", lastMessageId);
-      const msgRes = await fetch(`https://services.leadconnectorhq.com/conversations/${encodeURIComponent(conv.id)}/messages?${q}`, { headers });
-      if (!msgRes.ok) break;
-      const msgJson = await msgRes.json();
-      // GHL nests the page: { messages: { messages: [...], nextPage, lastMessageId } }.
-      // Tolerate a flat { messages: [...], nextPage, lastMessageId } too.
-      const container = msgJson?.messages;
-      const messages: any[] = Array.isArray(container) ? container : (Array.isArray(container?.messages) ? container.messages : []);
-      const nextPage = Array.isArray(container) ? msgJson?.nextPage : container?.nextPage;
-      const pageLastId = Array.isArray(container) ? msgJson?.lastMessageId : container?.lastMessageId;
-
-      const rows = messages
-        .filter((m) => m?.id && !known.has(m.id))
-        .map((m) => {
-          // GHL's real messageType values are "TYPE_SMS"/"TYPE_EMAIL"/"TYPE_CALL"
-          // (confirmed against a live conversations/{id}/messages response) —
-          // NOT the bare "SMS"/"Email" this used to check, which meant this
-          // backfill silently matched nothing at all until now.
-          const channel = m.messageType === "TYPE_SMS" ? "sms" : m.messageType === "TYPE_EMAIL" ? "email" : m.messageType === "TYPE_CALL" ? "call" : null;
-          if (!channel || !m.dateAdded) return null;
-          // Don't re-import an outbound email we already sent via Google.
-          if (m.direction !== "inbound" && isDupOutbound(m.body ?? "", m.dateAdded)) return null;
-          return {
-            id: "msg_ghl_" + m.id,
-            contact_id: contactId,
-            client_id: clientId,
-            channel,
-            direction: m.direction === "inbound" ? "inbound" : "outbound",
-            // GHL's GET messages response wasn't confirmed to include a
-            // subject field for email-type messages — falls back to null
-            // (same as any message with no subject) rather than guessing.
-            subject: m.subject ?? null,
-            // A call carries no body/subject from GHL — meta.call.duration/
-            // status is all there is, so the "content" is a short synthesized
-            // summary instead of a real message body.
-            body: channel === "call" ? formatCallBody(m) : (m.body ?? ""),
-            ghl_message_id: m.id,
-            // The thread key. Stored so the next message on this conversation
-            // can find whatever task it landed on last time, instead of every
-            // reply falling to a generic Conversation task.
-            ghl_conversation_id: conv.id ?? null,
-            created_by: null,
-            created_at: m.dateAdded,
-            // A task already bound to this conversation wins over the open
-            // Conversation task: if this exchange is being worked somewhere,
-            // that is where the rest of it belongs.
-            task_id: convTaskIds.get(conv.id) ?? taskId,
-          };
-        })
-        .filter((r): r is NonNullable<typeof r> => r !== null);
-
-      // GHL's conversations/{id}/messages response omits `body` on a large
-      // share of email messages (237 of 707 synced emails as of 2026-08-12;
-      // our own sends are never blank), which rendered as empty cards in the
-      // feed. The content lives behind a SEPARATE per-email endpoint keyed on
-      // its own id — confirmed live: the conversation message id is rejected
-      // ("Email message does not exist with id ..."), while
-      // meta.email.messageIds[0] returns 200 with the body under
-      // `emailMessage.body`. messageIds is an array because GHL groups a
-      // thread under one conversation message; [0] is the one this row
-      // represents.
-      await Promise.all(rows.map(async (r) => {
-        if (r.channel !== "email" || r.body) return;
-        const src = messages.find((m) => m.id === r.ghl_message_id);
-        const emailId = src?.meta?.email?.messageIds?.[0];
-        if (typeof emailId !== "string" || !emailId) return;
-        try {
-          const er = await fetch(`https://services.leadconnectorhq.com/conversations/messages/email/${encodeURIComponent(emailId)}`, { headers });
-          if (!er.ok) return; // leave it blank; the feed labels that honestly
-          const em = (await er.json())?.emailMessage;
-          if (typeof em?.body === "string" && em.body) r.body = em.body;
-          if (!r.subject && typeof em?.subject === "string") r.subject = em.subject;
-        } catch { /* network hiccup — blank body is still a valid row */ }
-      }));
-
-      rows.forEach((r) => known.add(r.ghl_message_id));
-      if (rows.length) {
-        const { error } = await supabaseAdmin.from("messages").insert(rows);
-        if (!error) inserted += rows.length;
-        // A text or email answered from inside GoHighLevel only reaches the
-        // app through this pull, so this is where it closes the reply task.
-        const answeredAt = !error && taskId ? rows.filter((r) => r.direction === "outbound" && r.channel !== "call" && r.task_id === taskId).map((r) => r.created_at as string).sort().at(-1) : undefined;
-        if (answeredAt) await closeAnsweredReplyTask(taskId, answeredAt, null, "GoHighLevel");
-      }
-      // Heal the rows that were already here. Every message stored before
-      // ghl_conversation_id existed has no thread key, so a reply to it still
-      // falls through to a generic Conversation task. We are holding the
-      // conversation this page came from, which is the only place that id can
-      // come from — the API never sent it to us again for a message we
-      // already had. Refreshing a client now backfills it.
-      const seenIds = messages.map((m: any) => m.id).filter(Boolean);
-      if (seenIds.length && conv.id) {
-        const { data: healed } = await supabaseAdmin
-          .from("messages").update({ ghl_conversation_id: conv.id })
-          .in("ghl_message_id", seenIds).is("ghl_conversation_id", null)
-          .select("id");
-        bound += healed?.length ?? 0;
-      }
-      if (!nextPage || !pageLastId) break;
-      lastMessageId = pageLastId;
-    }
-  }
-  return NextResponse.json({ inserted, bound });
+    const r = await pullContactConversations({ contactId, clientId, locationId, ghlContactId, raiseTasks: false });
+    return NextResponse.json({ inserted: r.inserted, stamped: r.stamped, bound: r.bound });
   } catch (e) {
+    if (e instanceof GhlApiError && e.status === 501) return NextResponse.json({ error: e.message }, { status: 501 });
     return NextResponse.json({ error: e instanceof Error ? e.message : "Failed to refresh messages." }, { status: 502 });
   }
 }
