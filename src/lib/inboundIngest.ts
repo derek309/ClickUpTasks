@@ -308,7 +308,7 @@ export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
   subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
   /** Whose Gmail it came into, for that person's Inbox. */
-  mailboxMemberId?: string | null; fromName?: string | null; fromAddress?: string | null; files?: GmailFile[];
+  mailboxMemberId?: string | null; fromName?: string | null; fromAddress?: string | null; files?: GmailFile[]; others?: string[];
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
@@ -333,6 +333,7 @@ export async function ingestInboundMessage(opts: {
       ...(opts.mailboxMemberId ? { mailbox_member_id: opts.mailboxMemberId } : {}),
       ...(opts.fromAddress ? { peer_name: opts.fromName || null, peer_address: opts.fromAddress } : {}),
       ...(opts.files?.length ? { attachments: gmailFilesToAttachments(opts.files) } : {}),
+      ...(opts.others?.length ? { cc: opts.others } : {}),
     });
     if (error) {
       // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
@@ -452,7 +453,7 @@ export async function ingestStrangerEmail(opts: {
   mailboxMemberId: string; direction: "inbound" | "outbound";
   peerName?: string | null; peerAddress: string;
   subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
-  files?: GmailFile[];
+  files?: GmailFile[]; others?: string[];
 }): Promise<boolean> {
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
   if (dupe && dupe.length > 0) return false;
@@ -473,6 +474,7 @@ export async function ingestStrangerEmail(opts: {
     mailbox_member_id: opts.mailboxMemberId, peer_name: opts.peerName || null, peer_address: opts.peerAddress.toLowerCase(),
     read: opts.direction === "outbound",
     attachments: gmailFilesToAttachments(opts.files),
+    ...(opts.others?.length ? { cc: opts.others } : {}),
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   return !error;

@@ -125,7 +125,7 @@ export default function InboxView(p: InboxViewProps) {
   });
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 text-[16px]">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden text-[16px]">
       {/* Folders */}
       <nav className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r bg-background/40 p-3 md:flex">
         <button onClick={() => { setComposeNew(true); setOpenKey(null); setFolder("inbox"); }} className="mb-3 h-11 rounded-lg bg-accent font-semibold text-white">＋ New email</button>
@@ -137,7 +137,7 @@ export default function InboxView(p: InboxViewProps) {
         </div>
       </nav>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Phone: folders as a menu */}
         <div className="flex gap-2 border-b p-3 md:hidden">
           <button onClick={() => { setComposeNew(true); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
@@ -266,6 +266,11 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
+  // An email's reply box opens from Reply, Reply all or Forward, above the
+  // message it answers, so it is clear what is being answered (Derek,
+  // 2026-10-01). A draft already started opens it as a reply.
+  const lastFromThem = t.messages.find((m) => m.direction === "inbound") ?? t.messages[0];
+  const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => (readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null));
   const [blockOpen, setBlockOpen] = useState(false);
   const domain = t.channel === "email" && t.peerAddress?.includes("@") ? "@" + t.peerAddress.split("@")[1] : null;
   const blockIt = async (address: string) => {
@@ -339,9 +344,21 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         <div className="min-w-0 px-5 py-5 lg:overflow-y-auto lg:px-7">
           <h1 className="mb-4 text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || (t.channel === "email" ? t.peerName : `${CHANNEL_LABEL[t.channel]} with ${t.peerName}`)}</h1>
           {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
-          <Composer key={t.key} p={p} t={t} onSent={() => { onDraft(); }} onDraft={onDraft} />
+          {!isEmailThread(t) && <Composer key={t.key} p={p} t={t} onSent={() => { onDraft(); }} onDraft={onDraft} />}
+          {isEmailThread(t) && !compose && (
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setCompose({ mode: "reply", m: lastFromThem })} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">↩ Reply</button>
+              <button onClick={() => setCompose({ mode: "replyAll", m: lastFromThem })} className="h-10 rounded-lg border px-4 font-semibold hover:bg-background">↩↩ Reply all</button>
+              <button onClick={() => setCompose({ mode: "forward", m: t.messages[0] })} className="h-10 rounded-lg border px-4 font-semibold hover:bg-background">→ Forward</button>
+            </div>
+          )}
           <div className="mt-5 space-y-3">
-            {t.messages.map((m) => <MessageCard key={m.id} m={m} t={t} p={p} />)}
+            {t.messages.map((m) => (
+              <div key={m.id} className="space-y-3">
+                {compose?.m.id === m.id && <Composer key={`${t.key}:${compose.mode}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} />}
+                <MessageCard m={m} t={t} p={p} onAction={isEmailThread(t) ? (mode) => setCompose({ mode, m }) : undefined} />
+              </div>
+            ))}
           </div>
         </div>
         <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} />
@@ -364,7 +381,8 @@ function Menu({ children, onClose }: { children: React.ReactNode; onClose: () =>
   );
 }
 
-function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProps }) {
+type ComposeMode = "reply" | "replyAll" | "forward";
+function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: InboxViewProps; onAction?: (mode: ComposeMode) => void }) {
   const mine = m.direction === "outbound";
   const who = mine ? (p.team.find((x) => x.id === m.createdBy)?.name ?? "You") : t.peerName;
   return (
@@ -374,7 +392,14 @@ function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProp
         <b>{who}</b>
         <span className="text-muted">{new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
         {m.channel !== t.channel && <span className="text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</span>}
-        {(m.cc?.length ?? 0) > 0 && <span className="text-[14px] text-muted">CC {m.cc.join(", ")}</span>}
+        {(m.cc?.length ?? 0) > 0 && <span className="text-[14px] text-muted">{m.direction === "inbound" ? "Also to" : "CC"} {m.cc.join(", ")}</span>}
+        {onAction && (
+          <span className="ml-auto flex gap-1">
+            <button onClick={() => onAction("reply")} title="Reply" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">↩ Reply</button>
+            <button onClick={() => onAction("replyAll")} title="Reply all" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">↩↩ All</button>
+            <button onClick={() => onAction("forward")} title="Forward" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">→ Forward</button>
+          </span>
+        )}
       </div>
       {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} /> : <EmailBody body={m.body} />}
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
@@ -388,6 +413,14 @@ function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProp
 // scripts off, so nothing in an email can run; links open in a new tab. A
 // plain text email, or one Gmail will not hand over, falls back to the text.
 const HTML_CACHE = new Map<string, string | null>();
+// Mail programs pad with rows of empty paragraphs and line breaks; one blank
+// line between parts is plenty.
+const BLANK = String.raw`(?:\s|&nbsp;|&#160;|<br\s*\/?>)*`;
+function tidyEmailHtml(html: string): string {
+  return html
+    .replace(new RegExp(String.raw`(?:<(p|div)[^>]*>${BLANK}<\/\1>\s*){2,}`, "gi"), "<br>")
+    .replace(/(?:<br\s*\/?>\s*(?:&nbsp;|&#160;)?\s*){3,}/gi, "<br><br>");
+}
 const QUOTE_CSS = ".gmail_quote,.gmail_extra,blockquote,.yahoo_quoted,#appendonsend,#divRplyFwdMsg,#divRplyFwdMsg~*,hr#stopSpelling~*{display:none!important}";
 function EmailHtml({ m }: { m: Message }) {
   const [html, setHtml] = useState<string | null | undefined>(HTML_CACHE.has(m.id) ? HTML_CACHE.get(m.id) : undefined);
@@ -402,7 +435,7 @@ function EmailHtml({ m }: { m: Message }) {
       .then((r) => (r.ok ? r.json() : { html: null }))
       .then((j: { html: string | null }) => {
         // Belt and braces on top of the sandbox: nothing that runs or submits.
-        const clean = j.html ? j.html.replace(/<(script|iframe|object|embed|form)[\s\S]*?<\/\1>/gi, "").replace(/<(script|iframe|object|embed|meta[^>]*http-equiv)[^>]*>/gi, "") : null;
+        const clean = j.html ? tidyEmailHtml(j.html.replace(/<(script|iframe|object|embed|form)[\s\S]*?<\/\1>/gi, "").replace(/<(script|iframe|object|embed|meta[^>]*http-equiv)[^>]*>/gi, "")) : null;
         HTML_CACHE.set(m.id, clean);
         if (live) setHtml(clean);
       }, () => { HTML_CACHE.set(m.id, null); if (live) setHtml(null); });
@@ -411,6 +444,12 @@ function EmailHtml({ m }: { m: Message }) {
   const fit = () => {
     const doc = frame.current?.contentDocument;
     if (!doc) return;
+    // Never smaller than 16px to read: an email that sets 10 or 11pt text
+    // (Outlook does) is lifted; anything larger keeps its own size.
+    doc.body?.querySelectorAll<HTMLElement>("p,span,div,td,li,a,font,b,strong,em,i").forEach((el) => {
+      const px = parseFloat(doc.defaultView?.getComputedStyle(el).fontSize ?? "16");
+      if (px && px < 15 && el.textContent?.trim()) el.style.fontSize = "16px";
+    });
     const size = () => setHeight(Math.min(6000, Math.max(60, doc.documentElement.scrollHeight)));
     size();
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", size, { once: true }));
@@ -546,11 +585,20 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
-function Composer({ p, t, onSent, onDraft }: { p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void }) {
+function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose }: {
+  p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
+  mode?: ComposeMode; answering?: Message; onClose?: () => void;
+}) {
   const email = isEmailThread(t);
-  const [text, setText] = useState(() => readDraft(p.me.id, t.key));
-  const [ccOpen, setCcOpen] = useState(false);
-  const [cc, setCc] = useState(""); const [bcc, setBcc] = useState("");
+  const forward = mode === "forward";
+  const fromLabel = (m: Message) => (m.direction === "outbound" ? "you" : t.peerName.split(/\s+/)[0]);
+  const when = (m: Message) => new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const [text, setText] = useState(() => readDraft(p.me.id, t.key) || (forward && answering ? `\n\nForwarded message from ${answering.direction === "outbound" ? p.me.name : t.peerName}, ${when(answering)}:\n${answering.body}` : ""));
+  // Reply all: everyone else who was on it, besides the person you answer.
+  const allOthers = (answering?.cc ?? []).filter((a) => a && a !== t.peerAddress);
+  const [to, setTo] = useState(forward ? "" : t.peerAddress ?? "");
+  const [ccOpen, setCcOpen] = useState(mode === "replyAll" && allOthers.length > 0);
+  const [cc, setCc] = useState(mode === "replyAll" ? allOthers.join(", ") : ""); const [bcc, setBcc] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [note, setNote] = useState<{ kind: "ai" | "nudge" | "error"; text: string; before?: string } | null>(null);
   const [busy, setBusy] = useState<"improve" | "send" | null>(null);
@@ -586,7 +634,8 @@ function Composer({ p, t, onSent, onDraft }: { p: InboxViewProps; t: InboxThread
     if (t.channel === "chat") return p.onSendChat(t, body);
     await p.inbox.send({
       threadKey: t.key.startsWith("gm:") || t.key.startsWith("ghl:") ? t.key : null,
-      to: email ? (t.peerAddress ?? undefined) : undefined,
+      to: email ? (to.trim() || undefined) : undefined,
+      ...(forward && t.subject ? { subject: /^fwd?:/i.test(t.subject) ? t.subject : `Fwd: ${t.subject}` } : {}),
       cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean),
       body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })),
     });
@@ -628,11 +677,23 @@ function Composer({ p, t, onSent, onDraft }: { p: InboxViewProps; t: InboxThread
 
   const from = email ? `From ${p.me.email ?? "your Gmail"}` : t.channel === "chat" ? "Reply in the task chat (the client sees it in their portal)" : t.channel === "call" ? "Text them back" : `Reply by ${CHANNEL_LABEL[t.channel]}`;
   return (
-    <div className="rounded-xl bg-surface p-3 ring-1 ring-[var(--border)]">
+    <div className="rounded-xl bg-surface p-3 ring-2 ring-accent/40">
+      {answering && (
+        <div className="mb-2 flex items-start gap-3 rounded-lg bg-background px-3 py-2">
+          <span className="min-w-0 flex-1">
+            <b>{mode === "forward" ? "Forwarding" : mode === "replyAll" ? "Replying to everyone on" : "Replying to"} {fromLabel(answering)}, {when(answering)}</b>
+            <span className="block truncate text-muted">{(answering.body || "").replace(/\s+/g, " ").slice(0, 160)}</span>
+          </span>
+          {onClose && <button onClick={onClose} title="Close (your draft is kept)" aria-label="Close" className="text-muted hover:text-foreground">✕</button>}
+        </div>
+      )}
       <div className="mb-1 text-muted">{from}</div>
       {email && (
         <div className="flex flex-wrap items-center gap-2 border-b py-1.5">
-          <span className="w-11 text-muted">To</span><span className="min-w-0 flex-1 truncate">{t.peerAddress}</span>
+          <span className="w-11 text-muted">To</span>
+          {forward
+            ? <input autoFocus value={to} onChange={(e) => setTo(e.target.value)} placeholder="Who to forward it to" className="h-8 min-w-0 flex-1 bg-transparent outline-none" />
+            : <span className="min-w-0 flex-1 truncate">{t.peerAddress}</span>}
           <button onClick={() => setCcOpen(!ccOpen)} className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">CC / BCC</button>
         </div>
       )}
@@ -652,7 +713,7 @@ function Composer({ p, t, onSent, onDraft }: { p: InboxViewProps; t: InboxThread
           </>}
         </div>
       )}
-      <textarea value={text} onChange={(e) => change(e.target.value)} placeholder={`Write to ${t.peerName.split(/\s+/)[0]}`} rows={4}
+      <textarea autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={4}
         className="mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none" />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">

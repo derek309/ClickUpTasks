@@ -115,7 +115,7 @@ async function run(req: NextRequest, days: number) {
             ghlContactId: contact.ghl_contact_id ?? null,
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
-            mailboxMemberId: memberId, fromName: em.fromName || null, fromAddress: em.fromEmail, files: em.attachments,
+            mailboxMemberId: memberId, fromName: em.fromName || null, fromAddress: em.fromEmail, files: em.attachments, others: em.others,
           });
           if (did) ingested++;
         } catch (e) {
@@ -133,7 +133,7 @@ async function run(req: NextRequest, days: number) {
           if (await ingestStrangerEmail({
             mailboxMemberId: memberId, direction: "inbound", peerName: em.fromName || null, peerAddress: em.fromEmail,
             subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
-            files: em.attachments,
+            files: em.attachments, others: em.others,
           })) strangers++;
         } catch (e) {
           errors.push(`stranger ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
