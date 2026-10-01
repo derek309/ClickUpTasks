@@ -1,9 +1,11 @@
 "use client";
 
 // Each person's Inbox settings (the Settings page at the bottom of the Inbox's
-// folder list). Kept in this browser for now; the email signature is the one
-// setting shared with the rest of the app and lives on the profile.
-import { useCallback, useState } from "react";
+// folder list). Saved to their own row (supabase/inbox-prefs.sql) so the phone
+// and the laptop agree, with this browser's copy as the instant start and the
+// fallback before that table exists. The email signature lives on the profile.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export type InboxPrefs = {
   byDay: boolean;
@@ -39,10 +41,28 @@ export function useInboxPrefs(member: string) {
   const [prefs, setPrefsState] = useState<InboxPrefs>(() => {
     try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(key(member)) || "{}") }; } catch { return DEFAULT_PREFS; }
   });
+  // The saved copy wins over this browser's, once it arrives.
+  useEffect(() => {
+    let live = true;
+    supabase.from("inbox_prefs").select("prefs").eq("member_id", member).maybeSingle().then(({ data }) => {
+      if (!live || !data?.prefs) return;
+      setPrefsState((p) => {
+        const n = { ...p, ...(data.prefs as Partial<InboxPrefs>) };
+        try { localStorage.setItem(key(member), JSON.stringify(n)); } catch { /* ignore */ }
+        return n;
+      });
+    });
+    return () => { live = false; };
+  }, [member]);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setPrefs = useCallback((patch: Partial<InboxPrefs>) => {
     setPrefsState((p) => {
       const n = { ...p, ...patch };
       try { localStorage.setItem(key(member), JSON.stringify(n)); } catch { /* private window: this session only */ }
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        supabase.from("inbox_prefs").upsert({ member_id: member, prefs: n, updated_at: new Date().toISOString() }, { onConflict: "member_id" }).then(() => {});
+      }, 600);
       return n;
     });
   }, [member]);
