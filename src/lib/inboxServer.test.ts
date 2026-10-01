@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: {}, adminConfigured: true }));
 vi.mock("./extensionApi", () => ({ isClientVisible: async () => false }));
-const { parseThreadKey, canUseThread, peerOf, linkedTaskId, GHL_SEND_TYPE } = await import("./inboxServer");
+const { parseThreadKey, canUseThread, peerOf, linkedTaskId, GHL_SEND_TYPE, escapeLike } = await import("./inboxServer");
 
 const va = { id: "u1", memberId: "m_justin", email: "justin@clickuplocal.com", role: "va" as const, canSendMessages: true };
 
@@ -43,5 +43,10 @@ describe("Inbox conversations on the server", () => {
   it("answers a missed call by text", () => {
     expect(GHL_SEND_TYPE.call).toBe("SMS");
     expect(GHL_SEND_TYPE.fb).toBe("FB");
+  });
+
+  it("treats % and _ in an address as letters, not wildcards", () => {
+    expect(escapeLike("a_b%c@x.com")).toBe("a\\_b\\%c@x.com");
+    expect(escapeLike("pam@kp.org")).toBe("pam@kp.org");
   });
 });

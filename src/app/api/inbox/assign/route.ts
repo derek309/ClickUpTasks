@@ -48,5 +48,12 @@ export async function POST(req: NextRequest) {
     .update({ assigned_member_id: memberId, assigned_ghl_user_id: ghlUserId, updated_at: new Date().toISOString() })
     .eq("ghl_contact_id", conv.ghl_contact_id ?? "-").eq("location_id", conv.location_id);
   await supabaseAdmin.from("ghl_conversations").update({ assigned_member_id: memberId, assigned_ghl_user_id: ghlUserId }).eq("id", ref.id);
+  // What GoHighLevel said before, so the 15 minute pull keeps this choice
+  // until GoHighLevel shows a change of its own (lib/ghlPull withLocalAssign).
+  // Its own write: before supabase/inbox-audit.sql the columns are missing.
+  // A second assign before GoHighLevel caught up keeps the first "before".
+  const mark = { local_assign_from: (conv.local_assign_from as string | null | undefined) ?? (conv.assigned_ghl_user_id as string | null) ?? "", assigned_at: new Date().toISOString() };
+  if (conv.ghl_contact_id) await supabaseAdmin.from("ghl_conversations").update(mark).eq("ghl_contact_id", conv.ghl_contact_id).eq("location_id", conv.location_id);
+  else await supabaseAdmin.from("ghl_conversations").update(mark).eq("id", ref.id);
   return NextResponse.json({ ok: true, memberId });
 }

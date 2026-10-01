@@ -8,7 +8,8 @@ import { tokenForLocation } from "@/lib/ghlTokens";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { plainTextToHtml } from "@/lib/data";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
-import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId, peerOf, GHL_SEND_TYPE } from "@/lib/inboxServer";
+import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId, peerOf, GHL_SEND_TYPE, escapeLike } from "@/lib/inboxServer";
+import { isClientVisible } from "@/lib/extensionApi";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -65,6 +66,11 @@ export async function POST(req: NextRequest) {
   const taskId = linkedTaskId(rows);
 
   if (!ref || ref.kind === "gm") return sendEmail(caller, b, text, rows, peer, taskId);
+  // A GoHighLevel conversation with only email in it is answered by email,
+  // from the caller's Gmail, rather than turned away.
+  if (conv && !rows.some((r) => GHL_SEND_TYPE[r.channel as string]) && conv.email) {
+    return sendEmail(caller, { ...b, to: (b.to ?? "").trim() || (conv.email as string) }, text, [], peer, taskId);
+  }
   return sendGhl(caller, b, text, rows, conv, peer, taskId);
 }
 
@@ -79,8 +85,13 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   // A new email to a known contact still belongs to their client.
   let contactId = peer.contactId, clientId = peer.clientId;
   if (!rows.length) {
-    const { data: c } = await supabaseAdmin.from("contacts").select("id, client_id").ilike("email", to).limit(1).maybeSingle();
+    const { data: c } = await supabaseAdmin.from("contacts").select("id, client_id").ilike("email", escapeLike(to)).limit(1).maybeSingle();
     if (c) { contactId = c.id as string; clientId = c.client_id as string; }
+    // The same per-client rule as replying in their conversation.
+    if (clientId && clientId !== peer.clientId) {
+      const denied = await canCallerMessageClient(caller, clientId);
+      if (denied) return NextResponse.json({ error: denied }, { status: 403 });
+    }
   }
 
   const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").eq("id", caller.id).maybeSingle();
@@ -90,8 +101,12 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   const stored: { id: string; name: string; kind: "doc" | "image" | "pdf"; size: string; path: string }[] = [];
   let total = 0;
   for (const a of (b.attachments ?? []).slice(0, 10)) {
-    // Only files this person uploaded for the Inbox, or this client's own.
-    const okPath = a?.path && !a.path.includes("..") && (a.path.startsWith(`inbox/${caller.memberId}/`) || (clientId && a.path.startsWith(`messages/${clientId}/`)));
+    // Only files this person uploaded for the Inbox, or the client's own
+    // when it is this conversation's client or one the caller can see.
+    if (!a?.path || a.path.includes("..")) continue;
+    const okPath = a.path.startsWith(`inbox/${caller.memberId}/`)
+      || (!!clientId && a.path.startsWith(`messages/${clientId}/`)
+        && (caller.role === "admin" || (clientId === peer.clientId && rows.length > 0) || (await isClientVisible(caller, clientId))));
     if (!okPath) continue;
     const { data: file } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).download(a.path);
     if (!file) continue;
@@ -105,8 +120,17 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   }
 
   // Answer the newest message the other person sent, so it threads.
+  // Read from the mailbox the email is in: an admin answering a teammate's
+  // email still threads it for the person receiving it.
   const answer = rows.find((r) => r.direction === "inbound") ?? rows[0];
-  const replyTo = answer ? await readReplyHeaders(sender, { gmailMessageId: answer.gmail_message_id, rfc822: answer.rfc822_message_id }).catch(() => null) : null;
+  let headerMailbox = sender;
+  if (answer?.mailbox_member_id && answer.mailbox_member_id !== caller.memberId) {
+    const { data: owner } = await supabaseAdmin.from("profiles").select("email").eq("member_id", answer.mailbox_member_id).maybeSingle();
+    if (owner?.email) headerMailbox = owner.email as string;
+  }
+  const headers = answer ? await readReplyHeaders(headerMailbox, { gmailMessageId: answer.gmail_message_id, rfc822: answer.rfc822_message_id }).catch(() => null) : null;
+  // A thread id belongs to one mailbox, so it is only kept for the caller's own.
+  const replyTo = headers && headerMailbox !== sender ? { ...headers, threadId: null } : headers;
   const firstSubject = [...rows].reverse().find((r) => r.subject)?.subject as string | undefined;
   const subject = (b.subject?.trim() || (firstSubject ? (/^re:/i.test(firstSubject) ? firstSubject : `Re: ${firstSubject}`) : "")).slice(0, 200);
 
@@ -133,7 +157,9 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
 
 async function sendGhl(caller: any, b: Body, text: string, rows: any[], conv: any, peer: ReturnType<typeof peerOf>, taskId: string | null) {
   if (!conv) return NextResponse.json({ error: "That conversation hasn't synced from GoHighLevel yet. Try again in a few minutes." }, { status: 404 });
-  const channel = (rows[0]?.channel as string) ?? "sms";
+  // The newest row on a channel that can be answered (a GoHighLevel
+  // conversation can hold email too).
+  const channel = (rows.find((r) => GHL_SEND_TYPE[r.channel as string])?.channel as string) ?? "sms";
   const type = GHL_SEND_TYPE[channel];
   if (!type) return NextResponse.json({ error: "Reply to this one from GoHighLevel." }, { status: 400 });
   const token = await tokenForLocation(conv.location_id as string);

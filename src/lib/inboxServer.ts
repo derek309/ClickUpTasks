@@ -67,3 +67,7 @@ export function peerOf(rows: any[], conv?: any | null): { contactId: string | nu
 /** GoHighLevel's message type for a reply on each of its channels. A missed
  *  call is answered by text. */
 export const GHL_SEND_TYPE: Record<string, string> = { sms: "SMS", call: "SMS", fb: "FB", ig: "IG", web: "Live_Chat", gbp: "GMB" };
+
+/** An address used with ilike as a case-blind equals: its % and _ are
+ *  letters, not wildcards, so "a_b@x.com" never matches "axb@x.com". */
+export const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);

@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { createLocator } from "@/lib/ghlLocate";
-import { pullContactConversations, pullStrangerConversation, ghlUsersToMembers, ghlConversationRow } from "@/lib/ghlPull";
+import { pullContactConversations, pullStrangerConversation, ghlUsersToMembers, ghlConversationRow, strangerNeedsPull, withLocalAssign } from "@/lib/ghlPull";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { isRealGhlId } from "@/lib/ghlMatch";
 
@@ -128,30 +128,34 @@ async function run(req: NextRequest, days: number) {
     }
   }
 
-  // Who each conversation belongs to, for the Inbox.
+  // Who each conversation belongs to, for the Inbox. One someone assigned in
+  // the Inbox keeps that until GoHighLevel shows a change of its own.
+  let toSave: Record<string, unknown>[] = convRows;
   for (let i = 0; i < convRows.length; i += 200) {
-    const { error } = await supabaseAdmin.from("ghl_conversations").upsert(convRows.slice(i, i + 200), { onConflict: "id" });
+    const slice = convRows.slice(i, i + 200);
+    const { data: marked, error: markErr } = await supabaseAdmin.from("ghl_conversations")
+      .select("id, local_assign_from, assigned_ghl_user_id, assigned_member_id")
+      .in("id", slice.map((r) => r.id)).not("local_assign_from", "is", null);
+    // Before supabase/inbox-audit.sql the column is missing: save as before.
+    if (markErr) { toSave = convRows; break; }
+    if (i === 0) toSave = [];
+    const byId = new Map(((marked ?? []) as any[]).map((r) => [r.id as string, r]));
+    toSave.push(...slice.map((r) => withLocalAssign(r, byId.get(r.id))));
+  }
+  for (let i = 0; i < toSave.length; i += 200) {
+    const { error } = await supabaseAdmin.from("ghl_conversations").upsert(toSave.slice(i, i + 200), { onConflict: "id" });
     if (error) { errors.push(`conversations: ${error.message}`); break; }
   }
 
-  let contacts = 0, stamped = 0, inserted = 0, tasksRaised = 0, held = 0, left = 0, strangers = 0;
-  // People who are not contacts yet: their conversations go to the Inbox only.
-  for (const ghlContactId of ghlIds.filter((g) => !byGhl.has(g))) {
-    if (Date.now() - started > (maxDuration - 40) * 1000) { left++; continue; }
-    for (const { conv, token } of convsByContact.get(ghlContactId) ?? []) {
-      try {
-        strangers += await pullStrangerConversation({ conv, token, sinceMs });
-      } catch (e) {
-        errors.push(`stranger ${conv.id}: ${e instanceof Error ? e.message : "pull failed"}`);
-      }
-    }
-  }
+  let contacts = 0, stamped = 0, inserted = 0, tasksRaised = 0, held = 0, left = 0, strangers = 0, strangersSkipped = 0;
+  // Known contacts first: a client's text matters more than a Facebook lead,
+  // and the strangers get whatever time is left.
   for (const [ghlContactId, locationId] of work) {
     const c = byGhl.get(ghlContactId);
     if (!c) continue;
     // Leave room to answer before Vercel cuts the run off; the next run
     // picks up whoever was left.
-    if (Date.now() - started > (maxDuration - 20) * 1000) { left++; continue; }
+    if (Date.now() - started > (maxDuration - 40) * 1000) { left++; continue; }
     try {
       const clientId = await resolveTrackedClientId(c.id, c.client_id);
       const r = await pullContactConversations({ contactId: c.id, clientId, locationId, ghlContactId, sinceMs, raiseTasks: true });
@@ -162,8 +166,31 @@ async function run(req: NextRequest, days: number) {
     }
   }
 
+  // People who are not contacts yet: their conversations go to the Inbox
+  // only. One already stored up to its newest message is not read again.
+  const strangerConvs = ghlIds.filter((g) => !byGhl.has(g)).flatMap((g) => convsByContact.get(g) ?? []);
+  const newestStored = new Map<string, number>();
+  const strangerIds = strangerConvs.map(({ conv }) => conv.id as string);
+  for (let i = 0; i < strangerIds.length; i += 200) {
+    const { data } = await supabaseAdmin.from("messages").select("ghl_conversation_id, created_at")
+      .in("ghl_conversation_id", strangerIds.slice(i, i + 200)).gte("created_at", new Date(sinceMs).toISOString()).limit(5000);
+    for (const r of (data ?? []) as any[]) {
+      const t = new Date(r.created_at).getTime();
+      if (t > (newestStored.get(r.ghl_conversation_id) ?? 0)) newestStored.set(r.ghl_conversation_id, t);
+    }
+  }
+  for (const { conv, token } of strangerConvs) {
+    if (!strangerNeedsPull(Number(conv?.lastMessageDate), newestStored.get(conv.id))) { strangersSkipped++; continue; }
+    if (Date.now() - started > (maxDuration - 20) * 1000) { left++; continue; }
+    try {
+      strangers += await pullStrangerConversation({ conv, token, sinceMs });
+    } catch (e) {
+      errors.push(`stranger ${conv.id}: ${e instanceof Error ? e.message : "pull failed"}`);
+    }
+  }
+
   const out = {
-    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers,
+    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers, strangersSkipped,
     unknownInGhl, noGhlId, notFound,
     ...(rejectedTokens.length ? { rejectedTokens } : {}),
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),

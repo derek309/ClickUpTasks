@@ -48,7 +48,7 @@ vi.mock("./inboundIngest", () => ({
 const clientAnsweredOnTask = vi.fn(async () => {});
 vi.mock("./clientAnswered", () => ({ clientAnsweredOnTask: (...a: any[]) => (clientAnsweredOnTask as any)(...a) }));
 
-const { pullContactConversations } = await import("./ghlPull");
+const { pullContactConversations, strangerNeedsPull, withLocalAssign } = await import("./ghlPull");
 
 const NOW = Date.parse("2026-10-01T18:00:00Z");
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
@@ -56,6 +56,8 @@ const MIN = 60 * 1000;
 
 type Setup = {
   ghl: any[];
+  /** Rows already stored under these GoHighLevel ids (any contact, or none). */
+  stored?: { id: string; ghl_message_id: string; contact_id: string | null }[];
   local?: { id: string; channel: string; direction: string; body: string; subject?: string | null; created_at: string; ghl_message_id?: string | null }[];
   convTask?: string;
   openTask?: string;
@@ -67,7 +69,7 @@ function setup(s: Setup) {
   for (const f of [upsertConversationTask, closeAnsweredReplyTask, notifyInbound, sendInboundReplyEmail, clientAnsweredOnTask]) f.mockClear();
   answer = (c) => {
     if (c.table === "messages" && c.op === "update") return c.cols === "id" && c.payload?.ghl_message_id ? [{ id: "stamped" }] : [];
-    if (c.table === "messages" && c.cols === "ghl_message_id") return [];
+    if (c.table === "messages" && c.cols === "id, ghl_message_id, contact_id") return s.stored ?? [];
     if (c.table === "messages" && c.cols?.startsWith("id, channel")) return (s.local ?? []).map((r) => ({ subject: null, ghl_message_id: null, ...r }));
     if (c.table === "messages" && c.cols?.startsWith("ghl_conversation_id")) return s.convTask ? [{ ghl_conversation_id: "conv1", task_id: s.convTask, created_at: iso(DAY) }] : [];
     if (c.table === "messages" && c.cols === "created_at") return s.lastOutbound ? [{ created_at: s.lastOutbound }] : [];
@@ -201,5 +203,46 @@ describe("the GoHighLevel pull", () => {
     setup({ ghl: [sms("old", "inbound", 3 * DAY)] });
     await pullContactConversations(opts());
     expect(inserts()).toHaveLength(0);
+  });
+
+  it("never stores a stranger's message twice once they are a contact, and moves their rows over", async () => {
+    setup({
+      ghl: [sms("fb1", "inbound", 2 * 60 * MIN, "Hi, is the page done?"), sms("new1", "inbound", 30 * MIN, "Hello?")],
+      stored: [{ id: "msg_ghl_fb1", ghl_message_id: "fb1", contact_id: null }],
+    });
+    const r = await pullContactConversations(opts(false));
+    expect(inserts().map((x: any) => x.id)).toEqual(["msg_ghl_new1"]);
+    expect(r.inserted).toBe(1);
+    const adopt = calls.find((c) => c.table === "messages" && c.op === "update" && c.payload?.contact_id === "ct1");
+    expect(adopt?.payload).toEqual({ contact_id: "ct1", client_id: "cl_ct1" });
+    expect(adopt?.filters).toContainEqual(["is:contact_id", null]);
+  });
+});
+
+describe("pulling strangers only when something is new", () => {
+  it("reads a conversation with a message newer than the newest stored", () => {
+    expect(strangerNeedsPull(2000, 1000)).toBe(true);
+    expect(strangerNeedsPull(1000, 1000)).toBe(false);
+    expect(strangerNeedsPull(1000, undefined)).toBe(true);
+    expect(strangerNeedsPull(NaN, 1000)).toBe(true);
+  });
+});
+
+describe("an assignment made in the Inbox", () => {
+  const ghl = { id: "c1", assigned_ghl_user_id: "gh_old", assigned_member_id: "m_derek" };
+  it("holds while GoHighLevel still shows the owner from before", () => {
+    const local = { local_assign_from: "gh_old", assigned_ghl_user_id: "gh_justin", assigned_member_id: "m_justin" };
+    expect(withLocalAssign(ghl, local)).toMatchObject({ assigned_member_id: "m_justin", assigned_ghl_user_id: "gh_justin", local_assign_from: "gh_old" });
+  });
+  it("holds from nobody too", () => {
+    const local = { local_assign_from: "", assigned_ghl_user_id: "gh_justin", assigned_member_id: "m_justin" };
+    expect(withLocalAssign({ ...ghl, assigned_ghl_user_id: null, assigned_member_id: null }, local).assigned_member_id).toBe("m_justin");
+  });
+  it("gives way once GoHighLevel shows a change of its own", () => {
+    const local = { local_assign_from: "gh_old", assigned_ghl_user_id: "gh_justin", assigned_member_id: "m_justin" };
+    expect(withLocalAssign({ ...ghl, assigned_ghl_user_id: "gh_mich", assigned_member_id: "m_mich" }, local)).toMatchObject({ assigned_member_id: "m_mich", local_assign_from: null });
+  });
+  it("leaves an unmarked conversation as GoHighLevel says", () => {
+    expect(withLocalAssign(ghl, undefined)).toEqual({ ...ghl, local_assign_from: null });
   });
 });

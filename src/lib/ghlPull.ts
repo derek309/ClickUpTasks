@@ -150,9 +150,22 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
     }
   }
 
-  // ── What the app already has for this contact ──────────────────────────
-  const { data: existingRows } = await supabaseAdmin.from("messages").select("ghl_message_id").eq("contact_id", o.contactId).not("ghl_message_id", "is", null);
-  const known = new Set((existingRows ?? []).map((r: any) => r.ghl_message_id as string));
+  // ── What the app already has ───────────────────────────────────────────
+  // Looked up by GoHighLevel id across every row, not only this contact's: a
+  // person stored by the Inbox before they were a contact has rows with no
+  // contact, and storing those ids again would fail the whole insert below.
+  const known = new Set<string>();
+  const fetchedIds = [...new Set(fetched.map((f) => f.m.id as string))];
+  for (let i = 0; i < fetchedIds.length; i += 200) {
+    const { data } = await supabaseAdmin.from("messages").select("id, ghl_message_id, contact_id").in("ghl_message_id", fetchedIds.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) known.add(r.ghl_message_id as string);
+  }
+  // Those stranger rows, and the rest of their conversations, now belong to
+  // this contact and client.
+  if (conversations.length) {
+    await supabaseAdmin.from("messages").update({ contact_id: o.contactId, client_id: o.clientId })
+      .in("ghl_conversation_id", conversations.map((c) => c.id as string)).is("contact_id", null);
+  }
   const fresh = fetched.filter((f) => !known.has(f.m.id));
 
   // Rows GoHighLevel has not confirmed yet: the ones a fetched message may be
@@ -292,14 +305,23 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
   }
 
   if (toInsert.length) {
-    const rows = toInsert.map((t) => t.row);
-    const { error } = await supabaseAdmin.from("messages").insert(rows);
+    let rows = toInsert.map((t) => t.row);
+    let { error } = await supabaseAdmin.from("messages").insert(rows);
+    if (error && rows.length > 1) {
+      // One row that clashes must not cost the others: store them one by one.
+      console.error("[ghlPull] batch insert failed, retrying one by one", o.contactId, error.message);
+      const ok: typeof rows = [];
+      for (const r of rows) if (!(await supabaseAdmin.from("messages").insert(r)).error) ok.push(r);
+      rows = ok;
+      error = ok.length ? null : error;
+      raise = raise.filter(({ row }) => ok.includes(row));
+    }
     if (!error) {
       result.inserted += rows.length;
       rows.forEach((r) => known.add(r.ghl_message_id));
       // A text or email answered from inside GoHighLevel only reaches the
       // app through this pull, so this is where it closes the reply task.
-      const answeredAt = openTaskId ? toInsert.filter(({ row: r, f }) => r.direction === "outbound" && r.channel !== "call" && r.task_id === openTaskId && !isAutomated(f.m)).map(({ row: r }) => r.created_at as string).sort().at(-1) : undefined;
+      const answeredAt = openTaskId ? toInsert.filter(({ row: r, f }) => rows.includes(r) && r.direction === "outbound" && r.channel !== "call" && r.task_id === openTaskId && !isAutomated(f.m)).map(({ row: r }) => r.created_at as string).sort().at(-1) : undefined;
       if (answeredAt) await closeAnsweredReplyTask(openTaskId, answeredAt, null, "GoHighLevel");
     } else {
       console.error("[ghlPull] insert failed", o.contactId, error.message);
@@ -436,4 +458,25 @@ export function ghlConversationRow(c: any, locationId: string, members: Map<stri
     last_message_at: Number.isFinite(last) ? new Date(last).toISOString() : null,
     updated_at: new Date().toISOString(),
   };
+}
+
+/** A stranger's GoHighLevel conversation needs reading only when it has a
+ *  message newer than the newest one stored for it. */
+export function strangerNeedsPull(lastMessageDate: number, newestStored: number | undefined): boolean {
+  if (!Number.isFinite(lastMessageDate) || newestStored === undefined) return true;
+  return lastMessageDate > newestStored;
+}
+
+/** Someone assigned this conversation in the Inbox. GoHighLevel may still show
+ *  the owner it had then (local_assign_from, "" for nobody): our choice holds.
+ *  Once GoHighLevel shows anyone else, its answer wins and the mark clears. */
+export function withLocalAssign<T extends { assigned_ghl_user_id: string | null; assigned_member_id: string | null }>(
+  row: T,
+  local: { local_assign_from: string | null; assigned_ghl_user_id: string | null; assigned_member_id: string | null } | undefined,
+): T & { local_assign_from: string | null } {
+  if (!local || local.local_assign_from === null) return { ...row, local_assign_from: null };
+  if ((row.assigned_ghl_user_id ?? "") === local.local_assign_from) {
+    return { ...row, assigned_ghl_user_id: local.assigned_ghl_user_id, assigned_member_id: local.assigned_member_id, local_assign_from: local.local_assign_from };
+  }
+  return { ...row, local_assign_from: null };
 }

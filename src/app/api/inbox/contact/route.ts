@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isClientVisible } from "@/lib/extensionApi";
-import { parseThreadKey, threadRows, canUseThread, ghlConversation, peerOf } from "@/lib/inboxServer";
+import { parseThreadKey, threadRows, canUseThread, ghlConversation, peerOf, escapeLike } from "@/lib/inboxServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {
     if (!email) return NextResponse.json({ error: "There's no email address to save." }, { status: 400 });
-    const { data: existing } = await supabaseAdmin.from("contacts").select("id").ilike("email", email).limit(1).maybeSingle();
+    const { data: existing } = await supabaseAdmin.from("contacts").select("id").ilike("email", escapeLike(email)).limit(1).maybeSingle();
     contactId = (existing?.id as string | undefined) ?? `ct_mail_${crypto.randomUUID()}`;
     if (!existing) {
       const { error } = await supabaseAdmin.from("contacts").insert({ id: contactId, client_id: null, name: peer.name || email, email });

@@ -10,6 +10,8 @@ import { parseThreadKey, threadRows, canUseThread } from "@/lib/inboxServer";
 // Inbox Settings; the browser only calls this when they are on. Only email in
 // the caller's own mailbox is touched. Best effort: a Gmail hiccup never
 // stops the Inbox, and the response says how many it moved.
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,22 +19,23 @@ export async function POST(req: NextRequest) {
   const change = (["read", "unread", "archive", "unarchive", "star", "unstar"] as const).find((c) => c === b.change) ?? null;
   if (!change) return NextResponse.json({ error: "Unknown change." }, { status: 400 });
   const refs = (b.threadKeys ?? []).slice(0, 100).map(parseThreadKey).filter((r): r is { kind: "gm"; id: string } => r?.kind === "gm");
-  const emails = new Map<string, string | null>();
+  const emails = new Map<string, Promise<string | null>>();
+  const mailboxOf = (member: string) => {
+    if (!emails.has(member)) emails.set(member, Promise.resolve(supabaseAdmin.from("profiles").select("email").eq("member_id", member).maybeSingle()).then(({ data }) => (data?.email as string | null) ?? null));
+    return emails.get(member)!;
+  };
   let moved = 0;
   const failed: string[] = [];
-  for (const ref of refs) {
+  const one = async (ref: { kind: "gm"; id: string }) => {
     const rows = await threadRows(ref, caller);
-    if (!rows.length || !(await canUseThread(caller, ref, rows))) continue;
+    if (!rows.length || !(await canUseThread(caller, ref, rows))) return;
     const owner = rows.find((r) => r.mailbox_member_id)?.mailbox_member_id as string | undefined;
-    if (!owner) continue;
-    if (!emails.has(owner)) {
-      const { data } = await supabaseAdmin.from("profiles").select("email").eq("member_id", owner).maybeSingle();
-      emails.set(owner, (data?.email as string | null) ?? null);
-    }
-    const mailbox = emails.get(owner);
-    if (!mailbox) continue;
+    const mailbox = owner ? await mailboxOf(owner) : null;
+    if (!mailbox) return;
     try { await setGmailThreadLabels(mailbox, ref.id, change); moved++; }
     catch (e) { failed.push(e instanceof Error ? e.message : "failed"); }
-  }
+  };
+  // Five at a time: archiving fifty at once finishes well inside the limit.
+  for (let i = 0; i < refs.length; i += 5) await Promise.all(refs.slice(i, i + 5).map(one));
   return NextResponse.json({ ok: true, moved, ...(failed.length ? { failed: failed.slice(0, 3) } : {}) });
 }
