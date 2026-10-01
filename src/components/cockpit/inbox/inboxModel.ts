@@ -30,6 +30,8 @@ export type InboxThread = {
   starred: boolean;
   /** You wrote last. */
   sentLast: boolean;
+  /** They have written at least once. Only you so far: it lives in Sent. */
+  hasInbound: boolean;
   hasFiles: boolean;
   /** How many messages, for "Pam Macias 3". */
   count: number;
@@ -82,6 +84,7 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
       unread: !!lastInbound && inboundAt > time(st?.readAt),
       snoozed, snoozedUntil: snoozed ? st!.snoozedUntil : null, done, trashed, starred: !!st?.starredAt,
       sentLast: latest.direction === "outbound",
+      hasInbound: !!lastInbound,
       hasFiles: msgs.some((m) => m.attachments?.length),
       count: msgs.length,
     });
@@ -99,6 +102,8 @@ export function inFolder(t: InboxThread, f: Folder, hasDraft: (key: string) => b
   if (f === "done") return t.done;
   if (f === "snoozed") return t.snoozed;
   if (t.done || t.snoozed) return false;
+  // Like Gmail: an email only you have written so far is in Sent, not here.
+  if (!t.hasInbound) return false;
   if (f === "inbox") return true;
   if (f === "social") return SOCIAL.includes(t.channel);
   return t.channel === f;

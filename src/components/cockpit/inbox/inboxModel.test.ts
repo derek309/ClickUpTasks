@@ -123,3 +123,15 @@ describe("day dividers", () => {
     expect(dayLabel(new Date(2025, 8, 19, 15).toISOString(), now)).toMatch(/2025/);
   });
 });
+
+describe("only you have written", () => {
+  it("is in Sent, not the Inbox, until they reply", () => {
+    const mine = [msg({ id: "o1", gmailThreadId: "to", direction: "outbound" })];
+    const t = buildThreads(mine, new Map(), { now: NOW })[0];
+    expect(inFolder(t, "inbox", none)).toBe(false);
+    expect(inFolder(t, "email", none)).toBe(false);
+    expect(inFolder(t, "sent", none)).toBe(true);
+    const replied = buildThreads([...mine, msg({ id: "i1", gmailThreadId: "to", at: "2026-10-01T17:30:00Z" })], new Map(), { now: NOW })[0];
+    expect(inFolder(replied, "inbox", none)).toBe(true);
+  });
+});
