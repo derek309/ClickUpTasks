@@ -271,18 +271,57 @@ export function createServer(opts = {}) {
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
       // Project instructions for an outside person (supabase/task-briefs.sql), if
       // any. Before that SQL is run the table is missing, which is simply none.
-      const briefRow = await sb(`task_briefs?select=title,body,due_on&task_id=eq.${enc(id)}&limit=1`).then((r) => r?.[0] ?? null, () => null);
+      // Always printed, "(none)" included, so Claude never has to guess whether
+      // there are any. In the same markdown set_project_instructions takes.
+      const briefRow = await sb(`task_briefs?select=body&task_id=eq.${enc(id)}&limit=1`).then((r) => r?.[0] ?? null, () => null);
+      const instructions = docHtmlToText(briefRow?.body || "");
       const text = [
         brief(t),
         t.description ? `\nDescription:\n${stripHtml(t.description)}` : "",
-        briefRow && stripHtml(briefRow.body || "").trim()
-          ? `\nProject instructions for an outside person${briefRow.title ? ` ("${briefRow.title}")` : ""}${briefRow.due_on ? `, due back ${briefRow.due_on}` : ""}:\n${stripHtml(briefRow.body)}`
-          : "",
+        `\nProject instructions:\n${instructions || "(none)"}`,
         checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
         links ? `\nLinks:\n${links}` : "",
         comments ? `\nRecent comments:\n${comments}` : "",
       ].filter(Boolean).join("\n");
       return { content: [{ type: "text", text }] };
+    });
+
+  // The task's Project instructions: the brief for a designer, contractor or
+  // teammate doing the work (task_briefs, the same row the app's Project
+  // instructions box edits; supabase/task-briefs.sql). Only the text: the link,
+  // its expiry, the switches and the files stay in the app. The same gate as the
+  // app (reviewTask in taskDocumentServer.ts): never a private or Personal task.
+  // docTextToHtml escapes everything and emits only allowlisted tags; the app's
+  // sanitizer runs again on its next save and on the outside page.
+  server.tool("set_project_instructions",
+    "Set a task's Project instructions (the brief for a designer, contractor or teammate doing the work). Pass the whole text every time. Use this instead of the task description for instructions. Simple markdown: \"## \" heading, \"### \" subheading, \"- \" bullets, \"1. \" numbered, **bold**, *italic*, [label](https://url); a blank line starts a new paragraph. An empty body clears the text (the share link and files stay).",
+    {
+      task_id: z.string(),
+      body: z.string().describe("the whole instructions, in the simple markdown above; \"\" clears them"),
+    },
+    async ({ task_id, body }) => {
+      const t = await loadTask(task_id, "id,title,client_id");
+      if (!t) return noTask(task_id);
+      if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return { content: [{ type: "text", text: "A private or Personal task can't have project instructions." }] };
+      const html = body.trim() ? docTextToHtml(body) : "";
+      if (html.length > 200_000) return { content: [{ type: "text", text: "These instructions are too long." }] };
+      const now = new Date().toISOString();
+      const find = () => sb(`task_briefs?select=id&task_id=eq.${enc(task_id)}&limit=1`).then((r) => r?.[0] ?? null);
+      const update = (row) => sb(`task_briefs?id=eq.${enc(row.id)}`, "PATCH", { body: html, updated_by: ME, updated_at: now });
+      const existing = await find();
+      if (existing) await update(existing);
+      else if (html) {
+        // One row per task (a unique index). Made at the same moment in the
+        // app, the insert is refused and the row the app made gets the text.
+        try {
+          await sb("task_briefs", "POST", { id: `tbr_${globalThis.crypto.randomUUID()}`, task_id, body: html, created_by: ME, updated_by: ME, created_at: now, updated_at: now });
+        } catch (e) {
+          const winner = await find();
+          if (!winner) throw e;
+          await update(winner);
+        }
+      }
+      return { content: [{ type: "text", text: `Updated project instructions on ${t.title}` }] };
     });
 
   server.tool("create_task",

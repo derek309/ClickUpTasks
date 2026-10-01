@@ -15,7 +15,7 @@ app). The tool definitions live in `core.mjs`, shared by two transports:
 
 ## Tools
 
-Tasks: `list_my_tasks`, `list_client_tasks`, `get_task`, `create_task`,
+Tasks: `list_my_tasks`, `list_client_tasks`, `get_task`, `set_project_instructions`, `create_task`,
 `update_task`, `delete_task`, `set_task_status`, `add_comment`, `draft_email`,
 `check_item`, `add_checklist_items`, `list_members`, `list_clients`,
 `list_projects`, `list_notes`, `add_note`, `list_links`, `get_client_link`,
