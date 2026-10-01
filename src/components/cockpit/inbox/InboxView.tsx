@@ -59,6 +59,11 @@ const AVATAR = ["#1b3a5c", "#0f766e", "#b45309", "#7c3aed", "#be185d", "#2563eb"
 const initials = (name: string) => (name.includes("@") || /^\+?\d/.test(name) ? name.replace(/^\+/, "")[0] ?? "?" : name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("")).toUpperCase();
 const avatarColor = (name: string) => AVATAR[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR.length];
 const isEmailThread = (t: InboxThread) => t.channel === "email";
+// Browsers only show the permission prompt for a click, so it is asked from
+// one: turning alerts on, or the first click in the Inbox.
+export const askAlertPermission = () => {
+  try { if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission(); } catch { /* not supported */ }
+};
 const isTyping = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 
 export default function InboxView(p: InboxViewProps) {
@@ -84,7 +89,7 @@ export default function InboxView(p: InboxViewProps) {
     if (folder === "settings") return [];
     if (q.trim()) return inbox.threads.filter((t) => matchesSearch(t, q, p.clientName(t.clientId)));
     return inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
-  }, [inbox.threads, folder, q, drafts, p]);
+  }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
 
   const count = (f: Folder) => f === "drafts" ? drafts.size : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
@@ -138,7 +143,7 @@ export default function InboxView(p: InboxViewProps) {
   });
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden text-[16px]">
+    <div onClickCapture={prefs.popup ? askAlertPermission : undefined} className="flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden text-[16px]">
       {/* Folders */}
       <nav className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r bg-background/40 p-3 md:flex">
         <button onClick={() => { setComposeNew({}); setOpenKey(null); setFolder("inbox"); }} className="mb-3 h-11 rounded-lg bg-accent font-semibold text-white">＋ New message</button>
@@ -417,7 +422,7 @@ function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: Inb
           </span>
         )}
       </div>
-      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} />
+      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} p={p} />
         : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} />
         : <EmailBody body={m.body} />}
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
@@ -466,7 +471,17 @@ function CallPlayer({ m }: { m: Message }) {
 // quoted underneath folded behind "•••". It sits in a sandboxed frame with
 // scripts off, so nothing in an email can run; links open in a new tab. A
 // plain text email, or one Gmail will not hand over, falls back to the text.
+// The last 100 emails opened, so going back to one is instant.
 const HTML_CACHE = new Map<string, string | null>();
+const cacheHtml = (id: string, html: string | null) => {
+  HTML_CACHE.set(id, html);
+  if (HTML_CACHE.size > 100) HTML_CACHE.delete(HTML_CACHE.keys().next().value!);
+};
+// Pictures loaded from the sender's server tell them you opened the email,
+// and from where (Derek, 2026-10-01: hidden until you ask). The frame's own
+// rule blocks them, CSS backgrounds included; pictures sent inside the email
+// still show.
+const REMOTE_IMAGES = /<img[^>]+src\s*=\s*["']?https?:|url\(\s*["']?https?:|background\s*=\s*["']?https?:/i;
 // Mail programs pad with rows of empty paragraphs and line breaks; one blank
 // line between parts is plenty.
 const BLANK = String.raw`(?:\s|&nbsp;|&#160;|<br\s*\/?>)*`;
@@ -476,10 +491,11 @@ function tidyEmailHtml(html: string): string {
     .replace(/(?:<br\s*\/?>\s*(?:&nbsp;|&#160;)?\s*){3,}/gi, "<br><br>");
 }
 const QUOTE_CSS = ".gmail_quote,.gmail_extra,blockquote,.yahoo_quoted,#appendonsend,#divRplyFwdMsg,#divRplyFwdMsg~*,hr#stopSpelling~*{display:none!important}";
-function EmailHtml({ m }: { m: Message }) {
+function EmailHtml({ m, p }: { m: Message; p: InboxViewProps }) {
   const [html, setHtml] = useState<string | null | undefined>(HTML_CACHE.has(m.id) ? HTML_CACHE.get(m.id) : undefined);
   const [quoted, setQuoted] = useState(false);
   const [asText, setAsText] = useState(false);
+  const [imagesOn, setImagesOn] = useState(false);
   const [height, setHeight] = useState(120);
   const frame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
@@ -490,9 +506,9 @@ function EmailHtml({ m }: { m: Message }) {
       .then((j: { html: string | null }) => {
         // Belt and braces on top of the sandbox: nothing that runs or submits.
         const clean = j.html ? tidyEmailHtml(j.html.replace(/<(script|iframe|object|embed|form)[\s\S]*?<\/\1>/gi, "").replace(/<(script|iframe|object|embed|meta[^>]*http-equiv)[^>]*>/gi, "")) : null;
-        HTML_CACHE.set(m.id, clean);
+        cacheHtml(m.id, clean);
         if (live) setHtml(clean);
-      }, () => { HTML_CACHE.set(m.id, null); if (live) setHtml(null); });
+      }, () => { cacheHtml(m.id, null); if (live) setHtml(null); });
     return () => { live = false; };
   }, [m.id]);
   const fit = () => {
@@ -504,6 +520,9 @@ function EmailHtml({ m }: { m: Message }) {
       const px = parseFloat(doc.defaultView?.getComputedStyle(el).fontSize ?? "16");
       if (px && px < 15 && el.textContent?.trim()) el.style.fontSize = "16px";
     });
+    // Links open in a new tab that cannot reach back into this one, and do
+    // not tell the site where they came from.
+    doc.querySelectorAll("a[href]").forEach((a) => { a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener noreferrer"); });
     const size = () => setHeight(Math.min(6000, Math.max(60, doc.documentElement.scrollHeight)));
     size();
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", size, { once: true }));
@@ -516,11 +535,23 @@ function EmailHtml({ m }: { m: Message }) {
     </>
   );
   const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg/i.test(html);
-  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
+  const sender = (m.peerAddress ?? "").toLowerCase();
+  const remote = REMOTE_IMAGES.test(html);
+  // Your own sent mail shows as it is.
+  const showImages = !remote || m.direction !== "inbound" || imagesOn || (!!sender && (p.prefs.imageSenders ?? []).includes(sender));
+  const csp = showImages ? "" : `<meta http-equiv="Content-Security-Policy" content="img-src data: blob:">`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
   return (
     <>
+      {!showImages && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-background px-3 py-2 text-muted">
+          <span>Pictures are hidden so the sender can&apos;t tell you opened this.</span>
+          <button onClick={() => setImagesOn(true)} className="font-semibold text-accent hover:underline">Show pictures</button>
+          {sender && <button onClick={() => p.setPrefs({ imageSenders: [...(p.prefs.imageSenders ?? []), sender] })} className="font-semibold text-accent hover:underline">Always show from {sender}</button>}
+        </div>
+      )}
       <div className="overflow-hidden bg-white">
-        <iframe ref={frame} title="Email" srcDoc={doc} onLoad={fit} style={{ height }}
+        <iframe key={showImages ? "on" : "off"} ref={frame} title="Email" srcDoc={doc} onLoad={fit} style={{ height }}
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0" />
       </div>
       <div className="mt-2 flex flex-wrap gap-4">
@@ -779,7 +810,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           </>}
         </div>
       )}
-      <textarea autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={4}
+      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={4}
         className="mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none" />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">
@@ -1084,7 +1115,7 @@ function InboxSettings(p: InboxViewProps) {
         </Box>
         <Box title="Alerts">
           <Switch on={prefs.badge} set={(v) => setPrefs({ badge: v })} label="Unread count in the sidebar" />
-          <Switch on={prefs.popup} set={(v) => setPrefs({ popup: v })} label="Pop up for new messages" help="A browser alert while ClickUpTasks is open in another tab" />
+          <Switch on={prefs.popup} set={(v) => { setPrefs({ popup: v }); if (v) askAlertPermission(); }} label="Pop up for new messages" help="A browser alert while ClickUpTasks is open in another tab" />
           <Switch on={prefs.sound} set={(v) => setPrefs({ sound: v })} label="Play a sound" />
         </Box>
         <Box title="Where messages come from" help="Your Gmail is read every 15 minutes, and GoHighLevel 7 minutes after. Tokens are in Settings, Integrations.">
@@ -1110,7 +1141,17 @@ function usePresence(me: { id: string; name: string }, threadKey: string): strin
     ch.on("presence", { event: "sync" }, sync).subscribe(async (status) => {
       if (status === "SUBSCRIBED") await ch.track({ name: me.name.split(/\s+/)[0], thread: threadKey, typing: false });
     });
-    const onInput = (e: Event) => { if ((e.target as HTMLElement)?.tagName === "TEXTAREA") ch.track({ name: me.name.split(/\s+/)[0], thread: threadKey, typing: !!(e.target as HTMLTextAreaElement).value.trim() }); };
+    // Only this conversation's reply box counts, and only a change between
+    // typing and not typing is sent, never every key.
+    let typing = false;
+    const onInput = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el?.tagName !== "TEXTAREA" || el.getAttribute("data-inbox-composer") !== threadKey) return;
+      const now = !!(el as HTMLTextAreaElement).value.trim();
+      if (now === typing) return;
+      typing = now;
+      ch.track({ name: me.name.split(/\s+/)[0], thread: threadKey, typing });
+    };
     document.addEventListener("input", onInput);
     return () => { document.removeEventListener("input", onInput); supabase.removeChannel(ch); };
   }, [me.id, me.name, threadKey]);

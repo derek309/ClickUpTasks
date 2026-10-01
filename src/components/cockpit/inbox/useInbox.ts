@@ -11,7 +11,7 @@ import { supabase, authedFetch } from "@/lib/supabase";
 import { rowToMessage } from "@/lib/db";
 import type { Message, Task } from "@/lib/data";
 import { threadKeyOf as thKey, isBlocked } from "@/lib/inbox";
-import { buildThreads, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
+import { buildThreads, mergeById, mergeStates, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -45,12 +45,29 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // GoHighLevel conversations you assigned to a teammate: out of your list at once.
+  const [handedOff, setHandedOff] = useState<Set<string>>(new Set());
 
-  const myTaskIds = useMemo(() => new Set(tasks.filter((t) => t.assigneeId === meMemberId).map((t) => t.id)), [tasks, meMemberId]);
+  // Your task ids as one string, so a change to any task (a title, a due
+  // date, a teammate's edit) does not read the whole Inbox again: only a
+  // task becoming or leaving yours does.
+  const myTaskKey = useMemo(() => tasks.filter((t) => t.assigneeId === meMemberId).map((t) => t.id).sort().join(","), [tasks, meMemberId]);
+  const myTaskIds = useMemo(() => new Set(myTaskKey ? myTaskKey.split(",") : []), [myTaskKey]);
 
+  // When each conversation's state was last changed here: a read that began
+  // before that change must not put the old state back.
+  const touchedRef = useRef(new Map<string, number>());
+  // When the last read began; the two minute refresh asks only for what
+  // changed since then.
+  const lastReadRef = useRef<number | null>(null);
   type Loaded = Awaited<ReturnType<typeof fetchInbox>>;
   const apply = useCallback((r: Loaded) => {
-    setLoaded(r.messages); setConvs(r.convs); setStates(r.states); setBlocks(r.blocks); setError(null); setLoading(false);
+    if (r.partial) setLoaded((prev) => mergeById(prev, r.messages));
+    else setLoaded(r.messages);
+    setConvs(r.convs);
+    setStates((cur) => mergeStates(cur, r.states, touchedRef.current, r.startedAt));
+    setBlocks(r.blocks); setError(null); setLoading(false);
+    lastReadRef.current = r.startedAt;
   }, []);
   const fail = useCallback((e: any) => { setError(e?.message ?? "The Inbox could not load."); setLoading(false); }, []);
   const load = useCallback(() => fetchInbox(meMemberId, myTaskIds).then(apply, fail), [meMemberId, myTaskIds, apply, fail]);
@@ -61,11 +78,20 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     return () => { live = false; };
   }, [meMemberId, myTaskIds, apply, fail]);
   // A new GoHighLevel conversation is only known after the next read, and a
-  // snooze ends with the clock: both are picked up every two minutes.
+  // snooze ends with the clock: both are picked up every two minutes. Each
+  // refresh reads only messages changed since the last read (a minute of
+  // overlap); every tenth is a full read, which also catches a conversation
+  // that became yours.
+  const ticks = useRef(0);
   useEffect(() => {
-    const id = setInterval(() => { setNow(Date.now()); load(); }, 120_000);
+    const id = setInterval(() => {
+      setNow(Date.now());
+      const full = ++ticks.current % 10 === 0 || lastReadRef.current === null;
+      const since = full ? undefined : new Date(lastReadRef.current! - 60_000).toISOString();
+      fetchInbox(meMemberId, myTaskIds, since).then(apply, fail);
+    }, 120_000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [meMemberId, myTaskIds, apply, fail]);
 
   // Live messages that belong here.
   const live = useMemo(() => liveMessages.filter((m) =>
@@ -79,10 +105,11 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     for (const m of live) byId.set(m.id, m);
     for (const m of extraMessages ?? []) byId.set(m.id, m);
     for (const m of older) if (!byId.has(m.id)) byId.set(m.id, m);
-    // Blocked senders stay out, except what is already in the Trash.
+    // Blocked senders stay out, except what is already in the Trash, and so
+    // does a conversation you just handed to someone else.
     return buildThreads([...byId.values()], states, { now, nameOf, convs })
-      .filter((t) => t.trashed || !isBlocked(t.peerAddress, blocks));
-  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks]);
+      .filter((t) => (t.trashed || !isBlocked(t.peerAddress, blocks)) && !(t.ghlConversationId && handedOff.has(t.ghlConversationId)));
+  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -90,24 +117,27 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const writeState = useCallback(async (keys: string[], patch: Partial<Pick<InboxState, "readAt" | "snoozedUntil" | "doneAt" | "trashedAt" | "starredAt">>) => {
     const at = new Date().toISOString();
     const before = keys.map((k) => statesRef.current.get(k) ?? null);
-    setStates((s) => {
-      const n = new Map(s);
-      for (const k of keys) n.set(k, { ...(s.get(k) ?? { threadKey: k, readAt: null, snoozedUntil: null, doneAt: null, updatedAt: null }), ...patch, updatedAt: at });
-      return n;
-    });
+    // The ref moves now, not after the next render, so a second action right
+    // behind this one builds on it instead of writing the old state back.
+    const next = new Map(statesRef.current);
+    for (const k of keys) {
+      next.set(k, { ...(next.get(k) ?? { threadKey: k, readAt: null, snoozedUntil: null, doneAt: null, updatedAt: null }), ...patch, updatedAt: at });
+      touchedRef.current.set(k, Date.now());
+    }
+    statesRef.current = next;
+    setStates(next);
     const rows = keys.map((k) => {
-      const cur = { ...(statesRef.current.get(k) ?? {}), ...patch } as Partial<InboxState>;
+      const cur = next.get(k)!;
       return { member_id: meMemberId, thread_key: k, read_at: cur.readAt ?? null, snoozed_until: cur.snoozedUntil ?? null, done_at: cur.doneAt ?? null, ...(cur.trashedAt !== undefined ? { trashed_at: cur.trashedAt } : {}), ...(cur.starredAt !== undefined ? { starred_at: cur.starredAt } : {}), updated_at: at };
     });
     const { error: e } = await supabase.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
     if (e) pushToast(`Couldn't save that: ${e.message}`);
     // Undo puts back exactly what was there.
     return async () => {
-      setStates((s) => {
-        const n = new Map(s);
-        keys.forEach((k, i) => { const b = before[i]; if (b) n.set(k, b); else n.delete(k); });
-        return n;
-      });
+      const n = new Map(statesRef.current);
+      keys.forEach((k, i) => { const b = before[i]; if (b) n.set(k, b); else n.delete(k); touchedRef.current.set(k, Date.now()); });
+      statesRef.current = n;
+      setStates(n);
       await supabase.from("inbox_state").upsert(keys.map((k, i) => {
         const b = before[i];
         return { member_id: meMemberId, thread_key: k, read_at: b?.readAt ?? null, snoozed_until: b?.snoozedUntil ?? null, done_at: b?.doneAt ?? null, ...(b?.trashedAt !== undefined ? { trashed_at: b?.trashedAt ?? null } : {}), ...(b?.starredAt !== undefined ? { starred_at: b?.starredAt ?? null } : {}), updated_at: new Date().toISOString() };
@@ -178,7 +208,9 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const assign = useCallback(async (threadKey: string, memberId: string | null) => {
     await post("/api/inbox/assign", { threadKey, memberId });
     if (memberId !== meMemberId && memberId) {
-      setConvs((c) => { const n = new Map(c); n.delete(threadKey.slice(4)); return n; });
+      const id = threadKey.slice(4);
+      setConvs((c) => { const n = new Map(c); n.delete(id); return n; });
+      setHandedOff((h) => new Set(h).add(id));
     }
   }, [post, meMemberId]);
   // Search past the 30 days loaded: what it finds joins the list.
@@ -205,7 +237,8 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve };
 }
 
-async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
+async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {
+  const startedAt = Date.now();
   const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
   // Admins can read every conversation, so whose it is gets decided here.
   const { data: convRows, error: cErr } = await supabase.from("ghl_conversations")
@@ -214,25 +247,42 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
   const mine = (convRows ?? []).filter((c: any) => !c.assigned_member_id || c.assigned_member_id === meMemberId);
   const convs = new Map<string, GhlConv>(mine.map((c: any) => [c.id, { id: c.id, assignedMemberId: c.assigned_member_id, contactName: c.contact_name, phone: c.phone, email: c.email, locationId: c.location_id }]));
 
-  const reads: PromiseLike<any>[] = [
-    supabase.from("messages").select("*").eq("mailbox_member_id", meMemberId).gte("created_at", since).order("created_at", { ascending: false }).limit(2000),
+  // A refresh asks only for rows changed since the last read.
+  const changed = (q: any) => (changedSince ? q.gte("updated_at", changedSince) : q);
+  const reads: Promise<{ data: any[]; error: any }>[] = [
+    // Your mail, every page of it: the database hands back 1,000 rows at most.
+    allPages((from, to) => changed(supabase.from("messages").select("*").eq("mailbox_member_id", meMemberId).gte("created_at", since)).order("created_at", { ascending: false }).range(from, to)),
   ];
   const ids = [...convs.keys()];
-  for (let i = 0; i < ids.length; i += CHUNK) reads.push(supabase.from("messages").select("*").in("ghl_conversation_id", ids.slice(i, i + CHUNK)).gte("created_at", since).limit(2000));
+  for (let i = 0; i < ids.length; i += CHUNK) reads.push(allPages((from, to) => changed(supabase.from("messages").select("*").in("ghl_conversation_id", ids.slice(i, i + CHUNK)).gte("created_at", since)).order("created_at", { ascending: false }).range(from, to)));
   const taskIds = [...myTaskIds];
-  for (let i = 0; i < taskIds.length; i += CHUNK) reads.push(supabase.from("messages").select("*").eq("channel", "chat").in("task_id", taskIds.slice(i, i + CHUNK)).gte("created_at", since).limit(1000));
-  reads.push(supabase.from("inbox_state").select("*").eq("member_id", meMemberId));
+  for (let i = 0; i < taskIds.length; i += CHUNK) reads.push(allPages((from, to) => changed(supabase.from("messages").select("*").eq("channel", "chat").in("task_id", taskIds.slice(i, i + CHUNK)).gte("created_at", since)).order("created_at", { ascending: false }).range(from, to)));
+  const stateRes = await supabase.from("inbox_state").select("*").eq("member_id", meMemberId);
   // Read on its own: a missing table (before inbox-blocks.sql) just means none.
   const blockRes = await supabase.from("inbox_blocks").select("address").eq("member_id", meMemberId);
 
   const results = await Promise.all(reads);
-  const stateRes = results.pop();
   const firstErr = results.find((r) => r.error)?.error ?? stateRes.error;
   if (firstErr) throw firstErr;
   return {
     messages: results.flatMap((r) => (r.data ?? []).map(rowToMessage)) as Message[],
+    partial: !!changedSince,
+    startedAt,
     convs,
     states: new Map<string, InboxState>((stateRes.data ?? []).map((r: any) => [r.thread_key, rowToState(r)])),
     blocks: ((blockRes.data ?? []) as any[]).map((r) => r.address as string),
   };
+}
+
+const PAGE = 1000;
+/** Every page of a query, 1,000 rows at a time (up to 10,000). */
+async function allPages(page: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>): Promise<{ data: any[]; error: any }> {
+  const out: any[] = [];
+  for (let from = 0; from < 10 * PAGE; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    out.push(...(data ?? []));
+    if ((data ?? []).length < PAGE) break;
+  }
+  return { data: out, error: null };
 }

@@ -135,3 +135,20 @@ describe("only you have written", () => {
     expect(inFolder(replied, "inbox", none)).toBe(true);
   });
 });
+
+describe("refreshing the Inbox", () => {
+  it("lays changed rows over the loaded ones", async () => {
+    const { mergeById } = await import("./inboxModel");
+    const out = mergeById([{ id: "a", v: 1 }, { id: "b", v: 1 }], [{ id: "b", v: 2 }, { id: "c", v: 1 }]);
+    expect(out).toEqual([{ id: "a", v: 1 }, { id: "b", v: 2 }, { id: "c", v: 1 }]);
+  });
+  it("keeps a change made here after the read began", async () => {
+    const { mergeStates } = await import("./inboxModel");
+    const st = (k: string, doneAt: string | null) => ({ threadKey: k, readAt: null, snoozedUntil: null, doneAt, updatedAt: null });
+    const cur = new Map([["gm:1", st("gm:1", "2026-10-01T10:00:00Z")], ["gm:2", st("gm:2", null)]]);
+    const read = new Map([["gm:1", st("gm:1", null)], ["gm:2", st("gm:2", "2026-10-01T09:00:00Z")]]);
+    const out = mergeStates(cur, read, new Map([["gm:1", 2000], ["gm:2", 500]]), 1000);
+    expect(out.get("gm:1")?.doneAt).toBe("2026-10-01T10:00:00Z");
+    expect(out.get("gm:2")?.doneAt).toBe("2026-10-01T09:00:00Z");
+  });
+});

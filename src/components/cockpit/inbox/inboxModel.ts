@@ -208,3 +208,24 @@ export function dayLabel(iso: string, now = new Date()): string {
   if (days === 1) return "Yesterday";
   return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
 }
+
+/** A refresh's changed rows laid over what is loaded: a changed row replaces
+ *  its old copy, a new one joins. */
+export function mergeById<T extends { id: string }>(prev: T[], changed: T[]): T[] {
+  if (!changed.length) return prev;
+  const byId = new Map(prev.map((m) => [m.id, m]));
+  for (const m of changed) byId.set(m.id, m);
+  return [...byId.values()];
+}
+
+/** States from a read, except where this browser changed one after that read
+ *  began: the local change is newer, so it stays. */
+export function mergeStates(cur: Map<string, InboxState>, read: Map<string, InboxState>, touched: Map<string, number>, readStartedAt: number): Map<string, InboxState> {
+  const out = new Map(read);
+  for (const [k, at] of touched) {
+    if (at < readStartedAt) continue;
+    const local = cur.get(k);
+    if (local) out.set(k, local); else out.delete(k);
+  }
+  return out;
+}

@@ -22,6 +22,8 @@ export type InboxPrefs = {
   gmailRead: boolean;
   /** Done archives the email in Gmail (out of its inbox, never deleted). */
   gmailArchive: boolean;
+  /** Senders whose pictures always show (lower case addresses). */
+  imageSenders: string[];
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {
@@ -32,7 +34,7 @@ export const DEFAULT_PREFS: InboxPrefs = {
     { name: "Call me", text: "Easier to talk this through. Can you give me a call when you have 5 minutes?" },
   ],
   undoSeconds: 5, aiNudge: true, badge: true, popup: true, sound: false,
-  gmailRead: true, gmailArchive: true,
+  gmailRead: true, gmailArchive: true, imageSenders: [],
 };
 
 const key = (member: string) => `inboxPrefs:${member}`;

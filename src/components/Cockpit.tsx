@@ -1643,12 +1643,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);
   // Task chats in the Inbox: your mentions, comments on your tasks and a
   // client's review notes, as messages on that task's chat conversation.
-  const inboxTaskNotes = useMemo(() => notifications
+  const inboxTaskNotes = useMemo(() => { const taskById = new Map(tasks.map((t) => [t.id, t])); return notifications
     .filter((n) => n.recipientId === me.id && n.taskId && !/^\d+[a-z] ago$/.test(n.at))
     .flatMap((n): Message[] => {
       const kind = inboxKind({ text: n.text, actor_id: n.actorId ?? null });
       if (kind !== "mention" && kind !== "comment" && kind !== "client_review") return [];
-      const task = tasks.find((t) => t.id === n.taskId);
+      const task = taskById.get(n.taskId!);
       if (!task) return [];
       const said = latestCommentBy(task.comments, n.actorId ?? null, kind === "client_review");
       return [{
@@ -1658,7 +1658,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         peerName: kind === "client_review" ? (clientById(task.clientId)?.name ?? "Client") : (userById(n.actorId ?? "")?.name ?? "Teammate"),
         peerAddress: null,
       }];
-    }), [notifications, me.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps -- clientById/userById read state already listed
+    }); }, [notifications, me.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps -- clientById/userById read state already listed
   const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxTaskNotes, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, pushToast });
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
@@ -1670,7 +1670,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (!seen || !inboxPrefs.popup || typeof Notification === "undefined") return;
     const fresh = unread.filter((t) => !seen.has(`${t.key}|${t.latest.id}`) && t.latest.direction === "inbound");
     if (!fresh.length || !document.hidden) return;
-    if (Notification.permission === "default") { Notification.requestPermission(); return; }
+    // Permission is asked from a click (askAlertPermission in the Inbox).
     if (Notification.permission !== "granted") return;
     const t = fresh[0];
     const n = new Notification(`${t.peerName}`, { body: (t.subject ? `${t.subject}: ` : "") + t.latest.body.replace(/\s+/g, " ").slice(0, 140), tag: t.key });
