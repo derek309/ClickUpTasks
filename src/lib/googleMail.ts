@@ -164,7 +164,9 @@ export async function readReplyHeaders(mailbox: string, find: { gmailMessageId?:
 
 export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean; rfc822: string; attachments?: GmailFile[];
   /** Everyone else it went to (To and CC, minus the mailbox itself), for Reply all. */
-  others?: string[] };
+  others?: string[];
+  /** Still unread in Gmail. Read there: the Inbox marks it read too. */
+  unread?: boolean };
 
 /** A file on an email, left in Gmail and fetched when someone opens it
  *  (api/inbox/attachment), so a photo shows as a preview in the Inbox
@@ -366,6 +368,7 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
       auto,
       rfc822: h("message-id"),
       attachments: gmailFiles(m.payload),
+      unread: Array.isArray(m.labelIds) ? m.labelIds.includes("UNREAD") : undefined,
       others: [...new Set([...`${h("to")},${h("cc")}`.matchAll(/[^<>@\s,"]+@[^<>\s,"]+/g)].map((x) => x[0].toLowerCase()))]
         .filter((a) => a !== userEmail.toLowerCase() && a !== fromEmail).slice(0, 20),
     });

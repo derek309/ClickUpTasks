@@ -70,6 +70,14 @@ export default function InboxView(p: InboxViewProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [composeNew, setComposeNew] = useState<false | { to?: string; body?: string }>(false);
   const [drafts, setDrafts] = useState<Set<string>>(() => draftKeys(p.me.id));
+  // A search also looks past the 30 days loaded, once you stop typing.
+  const searchOlder = inbox.searchOlder;
+  const [searchingOlder, setSearchingOlder] = useState(false);
+  useEffect(() => {
+    if (q.trim().length < 3) return;
+    const id = setTimeout(async () => { setSearchingOlder(true); await searchOlder(q); setSearchingOlder(false); }, 450);
+    return () => clearTimeout(id);
+  }, [q, searchOlder]);
   const refreshDrafts = useCallback(() => setDrafts(draftKeys(p.me.id)), [p.me.id]);
 
   const visible = useMemo(() => {
@@ -169,7 +177,7 @@ export default function InboxView(p: InboxViewProps) {
                 </>}
                 <button onClick={() => p.setPrefs({ unreadOnly: !p.prefs.unreadOnly })} aria-pressed={p.prefs.unreadOnly}
                   className={`h-10 rounded-lg border px-3 font-semibold ${p.prefs.unreadOnly ? "border-accent bg-accent-soft text-accent" : "hover:bg-background"}`}>{p.prefs.unreadOnly ? "● Unread only" : "Show: All"}</button>
-                <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
+                <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}${searchingOlder ? ", searching older…" : ""}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
                 <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setOpenKey(null); }} placeholder="Search people, words, files" aria-label="Search the Inbox"
                   className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent sm:w-72" />
               </div>
@@ -409,8 +417,46 @@ function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: Inb
           </span>
         )}
       </div>
-      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} /> : <EmailBody body={m.body} />}
+      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} />
+        : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} />
+        : <EmailBody body={m.body} />}
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
+    </div>
+  );
+}
+
+// A call: what happened, and for a voicemail (or any recorded call) its
+// recording and transcript, read from GoHighLevel when asked for.
+function CallPlayer({ m }: { m: Message }) {
+  const [audio, setAudio] = useState<string | null>(null);
+  const [lines, setLines] = useState<string[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"audio" | "text" | null>(null);
+  useEffect(() => () => { if (audio) URL.revokeObjectURL(audio); }, [audio]);
+  const play = async () => {
+    setBusy("audio"); setNote(null);
+    const res = await authedFetch(`/api/inbox/call?message=${encodeURIComponent(m.id)}&part=audio`).catch(() => null);
+    if (res?.ok) setAudio(URL.createObjectURL(await res.blob()));
+    else setNote((await res?.json().catch(() => null))?.error ?? "Couldn't load the recording.");
+    setBusy(null);
+  };
+  const transcript = async () => {
+    setBusy("text"); setNote(null);
+    const j = await authedFetch(`/api/inbox/call?message=${encodeURIComponent(m.id)}&part=transcript`).then((r) => r.json()).catch(() => null);
+    const got: string[] = (j?.lines ?? []).map((l: { text: string }) => l.text);
+    if (got.length) setLines(got); else setNote(j?.note ?? j?.error ?? "No transcript for this call.");
+    setBusy(null);
+  };
+  return (
+    <div className="space-y-2">
+      <p className="font-semibold">📞 {m.body || "Call"}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {audio ? <audio src={audio} controls autoPlay className="h-10 max-w-full" />
+          : <button onClick={play} disabled={busy !== null} className="h-10 rounded-lg bg-accent px-4 font-semibold text-white disabled:opacity-60">{busy === "audio" ? "Loading…" : "▶ Play recording"}</button>}
+        {!lines && <button onClick={transcript} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{busy === "text" ? "Loading…" : "Show transcript"}</button>}
+      </div>
+      {note && <p className="text-muted">{note}</p>}
+      {lines && <div className="space-y-1.5 rounded-lg bg-background px-3 py-2.5 leading-relaxed">{lines.map((l, i) => <p key={i}>{l}</p>)}</div>}
     </div>
   );
 }

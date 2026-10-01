@@ -47,7 +47,9 @@ const EMAIL_HOLD_MS = 20 * 60 * 1000;
 // make, since only "a call happened" was asked for, not the recording).
 export function formatCallBody(m: any): string {
   const status: string = m?.meta?.call?.status ?? m?.status ?? "";
-  if (/missed|no-?answer|voicemail/i.test(status)) return "Missed call";
+  // A voicemail has a recording to play (api/inbox/call); a missed call does not.
+  if (/voicemail/i.test(status)) return "Voicemail";
+  if (/missed|no-?answer/i.test(status)) return "Missed call";
   const secs = Number(m?.meta?.call?.duration);
   if (!Number.isFinite(secs) || secs <= 0) return "Call";
   const mins = Math.floor(secs / 60), rem = secs % 60;
@@ -264,7 +266,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
       ...fetched.filter((f) => f.m.direction !== "inbound" && !isAutomated(f.m)).map((f) => f.at),
     );
     raise = toInsert.filter(({ row, f }) => row.direction === "inbound"
-      && (row.channel === "sms" || (row.channel === "call" && row.body === "Missed call"))
+      && (row.channel === "sms" || (row.channel === "call" && (row.body === "Missed call" || row.body === "Voicemail")))
       && f.at > lastOutAt);
   }
 

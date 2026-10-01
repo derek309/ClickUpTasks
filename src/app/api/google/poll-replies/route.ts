@@ -67,7 +67,7 @@ async function run(req: NextRequest, days: number) {
   // A catch-up reads more than one poll's worth.
   const max = days > 2 ? 200 : 25;
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
-  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0;
+  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0;
   const errors: string[] = [];
 
   // Each teammate's Block sender list: their blocked strangers are not kept.
@@ -85,6 +85,11 @@ async function run(req: NextRequest, days: number) {
       continue;
     }
     const mentionThreads = await tasksForMentionThreads(emails.map((em) => em.threadId));
+    // Read in Gmail: read in this teammate's Inbox too (Derek, 2026-10-01).
+    if (memberId) {
+      try { readInGmail += await markReadFromGmail(memberId, emails); }
+      catch (e) { errors.push(`${mailbox} read state: ${e instanceof Error ? e.message : "failed"}`); }
+    }
     for (const em of emails) {
       scanned++;
       // A teammate answering a mention email, checked before anything else:
@@ -192,7 +197,33 @@ async function run(req: NextRequest, days: number) {
 
   return NextResponse.json({
     ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, skippedAuto, mentionReplies,
-    sentScanned, sentMatched, sentIngested, strangerReplies,
+    sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
+}
+
+// A conversation whose emails here are all read in Gmail is read in the
+// teammate's Inbox as of the newest of them. Only moves read_at forward, and
+// only touches read_at, so snooze, archive and trash are left as they are.
+async function markReadFromGmail(memberId: string, emails: { threadId: string; internalDate: string; unread?: boolean }[]): Promise<number> {
+  const byThread = new Map<string, { newest: number; anyUnread: boolean }>();
+  for (const em of emails) {
+    if (!em.threadId || em.unread === undefined) continue;
+    const t = byThread.get(em.threadId) ?? { newest: 0, anyUnread: false };
+    t.newest = Math.max(t.newest, new Date(em.internalDate).getTime());
+    t.anyUnread = t.anyUnread || em.unread;
+    byThread.set(em.threadId, t);
+  }
+  const read = [...byThread].filter(([, t]) => !t.anyUnread && t.newest > 0);
+  if (!read.length) return 0;
+  const keys = read.map(([id]) => `gm:${id}`);
+  const { data: have } = await supabaseAdmin.from("inbox_state").select("thread_key, read_at").eq("member_id", memberId).in("thread_key", keys);
+  const readAt = new Map((have ?? []).map((r: any) => [r.thread_key as string, r.read_at ? new Date(r.read_at).getTime() : 0]));
+  const rows = read
+    .filter(([id, t]) => (readAt.get(`gm:${id}`) ?? 0) < t.newest)
+    .map(([id, t]) => ({ member_id: memberId, thread_key: `gm:${id}`, read_at: new Date(t.newest).toISOString() }));
+  if (!rows.length) return 0;
+  const { error } = await supabaseAdmin.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
+  if (error) throw new Error(error.message);
+  return rows.length;
 }

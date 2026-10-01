@@ -40,6 +40,8 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
   const [blocks, setBlocks] = useState<string[]>([]);
+  // Older than 30 days, brought in by a search.
+  const [older, setOlder] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -76,10 +78,11 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     for (const m of loaded) byId.set(m.id, m);
     for (const m of live) byId.set(m.id, m);
     for (const m of extraMessages ?? []) byId.set(m.id, m);
+    for (const m of older) if (!byId.has(m.id)) byId.set(m.id, m);
     // Blocked senders stay out, except what is already in the Trash.
     return buildThreads([...byId.values()], states, { now, nameOf, convs })
       .filter((t) => t.trashed || !isBlocked(t.peerAddress, blocks));
-  }, [loaded, live, extraMessages, states, now, nameOf, convs, blocks]);
+  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -178,6 +181,15 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
       setConvs((c) => { const n = new Map(c); n.delete(threadKey.slice(4)); return n; });
     }
   }, [post, meMemberId]);
+  // Search past the 30 days loaded: what it finds joins the list.
+  const searchOlder = useCallback(async (q: string) => {
+    if (q.trim().length < 3) return 0;
+    const res = await authedFetch(`/api/inbox/search?q=${encodeURIComponent(q.trim())}`).catch(() => null);
+    if (!res?.ok) return 0;
+    const rows = ((await res.json())?.messages ?? []).map(rowToMessage) as Message[];
+    setOlder((o) => { const ids = new Set(o.map((m) => m.id)); return [...o, ...rows.filter((m) => !ids.has(m.id))]; });
+    return rows.length;
+  }, []);
   const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string }) => {
     const j = await post("/api/inbox/contact", { threadKey, ...to });
     load();
@@ -190,7 +202,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   }, [post, load]);
   const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
 
-  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
