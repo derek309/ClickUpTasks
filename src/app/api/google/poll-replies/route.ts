@@ -24,13 +24,17 @@ import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionRe
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  return run(req);
+  return run(req, 2);
 }
+// An admin may POST { days } (up to 30) once, to fill the Inbox with recent
+// mail when it first goes live; the timer always reads two days.
 export async function POST(req: NextRequest) {
-  return run(req);
+  const body = await req.clone().json().catch(() => ({} as any));
+  const days = typeof body?.days === "number" && body.days > 0 ? Math.min(Math.floor(body.days), 30) : 2;
+  return run(req, days);
 }
 
-async function run(req: NextRequest) {
+async function run(req: NextRequest, days: number) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -57,8 +61,10 @@ async function run(req: NextRequest) {
   // an unmatched email is surfaced in the Inbox exactly once, not each run.
   // category:primary keeps Gmail's own Promotions/Social/Updates tabs (where
   // newsletters + notifications live) out of what we scan.
-  const query = "in:inbox category:primary newer_than:2d -from:me";
-  const sentQuery = "in:sent newer_than:2d";
+  const query = `in:inbox category:primary newer_than:${days}d -from:me`;
+  const sentQuery = `in:sent newer_than:${days}d`;
+  // A catch-up reads more than one poll's worth.
+  const max = days > 2 ? 200 : 25;
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
   let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0;
   const errors: string[] = [];
@@ -67,7 +73,7 @@ async function run(req: NextRequest) {
     const memberId = memberIdByMailbox.get(mailbox) ?? null;
     let emails;
     try {
-      emails = await readInboundGmail(mailbox, query);
+      emails = await readInboundGmail(mailbox, query, max);
     } catch (e) {
       errors.push(`${mailbox}: ${e instanceof Error ? e.message : "read failed"}`);
       continue;
@@ -138,7 +144,7 @@ async function run(req: NextRequest) {
     if (createdBy) {
       let sent: SentEmail[];
       try {
-        sent = await readSentGmail(mailbox, sentQuery);
+        sent = await readSentGmail(mailbox, sentQuery, max);
       } catch (e) {
         errors.push(`${mailbox} (sent): ${e instanceof Error ? e.message : "read failed"}`);
         sent = [];
