@@ -368,7 +368,8 @@ function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProp
   const mine = m.direction === "outbound";
   const who = mine ? (p.team.find((x) => x.id === m.createdBy)?.name ?? "You") : t.peerName;
   return (
-    <div className={`rounded-xl px-4 py-3.5 ring-1 ring-[var(--border)] ${mine ? "bg-background/50" : "bg-surface"}`}>
+    // White like the email inside it; yours are told apart by a blue edge, not a tint.
+    <div className="rounded-xl bg-surface px-4 py-3.5 ring-1 ring-[var(--border)]" style={mine ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
       <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
         <b>{who}</b>
         <span className="text-muted">{new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
@@ -425,7 +426,7 @@ function EmailHtml({ m }: { m: Message }) {
   const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
   return (
     <>
-      <div className="overflow-hidden rounded-lg bg-white">
+      <div className="overflow-hidden bg-white">
         <iframe ref={frame} title="Email" srcDoc={doc} onLoad={fit} style={{ height }}
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0" />
       </div>
