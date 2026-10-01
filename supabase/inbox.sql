@@ -9,16 +9,22 @@ alter table messages add column if not exists mailbox_member_id text;
 create index if not exists messages_mailbox_idx on messages (mailbox_member_id, created_at desc)
   where mailbox_member_id is not null;
 
--- 2. A stranger's email is a real message before anyone makes them a contact.
+-- 2. A stranger's email is a real message before anyone makes them a contact,
+--    so the row itself says who the other person is.
 alter table messages alter column contact_id drop not null;
 alter table messages alter column client_id drop not null;
+alter table messages add column if not exists peer_name text;     -- the other person's name
+alter table messages add column if not exists peer_address text;  -- their email or phone
+create index if not exists messages_gmail_thread_idx on messages (gmail_thread_id) where gmail_thread_id is not null;
 
 -- 3. GoHighLevel conversations, with who they are assigned to on our roster.
 create table if not exists ghl_conversations (
   id text primary key,                 -- GoHighLevel conversation id
   location_id text not null,
   ghl_contact_id text,
+  assigned_ghl_user_id text,           -- GoHighLevel's own user id
   assigned_member_id text,             -- our roster id; null = unassigned
+  channel_type text,                   -- GoHighLevel's conversation type (TYPE_PHONE, TYPE_FB_MESSENGER...)
   contact_name text,
   phone text,
   email text,
@@ -78,6 +84,7 @@ create policy messages_update on messages for update to authenticated
 -- Read back: one row per check, each should say true.
 select 'mailbox column' as check, exists (select 1 from information_schema.columns where table_name = 'messages' and column_name = 'mailbox_member_id') as ok
 union all select 'contact_id nullable', (select is_nullable = 'YES' from information_schema.columns where table_name = 'messages' and column_name = 'contact_id')
+union all select 'peer columns', exists (select 1 from information_schema.columns where table_name = 'messages' and column_name = 'peer_address')
 union all select 'client_id nullable', (select is_nullable = 'YES' from information_schema.columns where table_name = 'messages' and column_name = 'client_id')
 union all select 'ghl_conversations', exists (select 1 from information_schema.tables where table_name = 'ghl_conversations')
 union all select 'inbox_state', exists (select 1 from information_schema.tables where table_name = 'inbox_state')
