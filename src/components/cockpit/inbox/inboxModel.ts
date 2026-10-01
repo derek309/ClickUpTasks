@@ -152,7 +152,7 @@ export const CHANNEL_LABEL: Record<MessageChannel, string> = {
   email: "Email", sms: "Text", call: "Call", chat: "Task chat", fb: "Facebook", ig: "Instagram", web: "Website chat", gbp: "Google Business",
 };
 export const CHANNEL_ICON: Record<MessageChannel, string> = {
-  email: "✉️", sms: "💬", call: "📞", chat: "🗂️", fb: "ⓕ", ig: "📸", web: "🌐", gbp: "🅶",
+  email: "✉️", sms: "💬", call: "📞", chat: "🗂️", fb: "📘", ig: "📸", web: "🌐", gbp: "🏪",
 };
 
 // ── Reading an email ──────────────────────────────────────────────────────

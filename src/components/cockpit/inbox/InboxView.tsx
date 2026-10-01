@@ -296,12 +296,12 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex flex-wrap gap-2 border-b px-4 py-2.5">
-        <button onClick={back} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button>
-        <button onClick={done} title="Out of your Inbox and your Gmail inbox; never deleted" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">🗄 Archive</button>
-        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} className={`h-10 rounded-lg border px-3 font-semibold hover:bg-background ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★ Starred" : "☆ Star"}</button>
+      <div className="relative flex flex-wrap gap-1.5 border-b px-3 py-2.5 sm:gap-2 sm:px-4">
+        <button onClick={back} title="Back" aria-label="Back" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">←<span className="hidden sm:inline"> Back</span></button>
+        <button onClick={done} title="Archive: out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">🗄<span className="hidden sm:inline"> Archive</span></button>
+        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} aria-label={t.starred ? "Starred" : "Star"} title={t.starred ? "Starred" : "Star"} className={`h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3 ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★" : "☆"}<span className="hidden sm:inline">{t.starred ? " Starred" : " Star"}</span></button>
         <div className="relative">
-          <button onClick={() => setSnoozeOpen(!snoozeOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">⏰ Snooze</button>
+          <button onClick={() => setSnoozeOpen(!snoozeOpen)} title="Snooze" aria-label="Snooze" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">⏰<span className="hidden sm:inline"> Snooze</span></button>
           {snoozeOpen && (
             <Menu onClose={() => setSnoozeOpen(false)}>
               {([["1h", "In 1 hour"], ["3h", "In 3 hours"], ["tomorrow", "Tomorrow, 9 AM"], ["monday", "Monday, 9 AM"]] as const).map(([k, l]) => (
@@ -310,11 +310,11 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             </Menu>
           )}
         </div>
-        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark as unread</button>
-        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">{t.trashed ? "↩ Restore" : "🗑 Delete"}</button>
+        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} title="Mark as unread" aria-label="Mark as unread" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">✉<span className="hidden sm:inline"> Mark as unread</span></button>
+        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} aria-label={t.trashed ? "Restore" : "Delete"} className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">{t.trashed ? "↩" : "🗑"}<span className="hidden sm:inline">{t.trashed ? " Restore" : " Delete"}</span></button>
         {t.peerAddress && !t.trashed && (
           <div className="relative">
-            <button onClick={() => setBlockOpen(!blockOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">⛔ Block</button>
+            <button onClick={() => setBlockOpen(!blockOpen)} title="Block sender" aria-label="Block sender" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">⛔<span className="hidden sm:inline"> Block</span></button>
             {blockOpen && (
               <Menu onClose={() => setBlockOpen(false)}>
                 <button onClick={() => blockIt(t.peerAddress!)} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Block {t.peerAddress}</button>
@@ -328,7 +328,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         )}
         {isGhl && (
           <div className="relative">
-            <button onClick={() => setAssignOpen(!assignOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">👤 Assign</button>
+            <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">👤<span className="hidden sm:inline"> Assign</span></button>
             {assignOpen && (
               <Menu onClose={() => setAssignOpen(false)}>
                 {[...p.team.map((m) => ({ id: m.id as string | null, name: m.id === p.me.id ? `${m.name} (you)` : m.name })), { id: null, name: "Unassigned, everyone sees it" }].map((m) => (
@@ -906,7 +906,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: st
   };
   const row = "flex items-center gap-3 border-b py-2";
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-5 py-5 lg:px-7">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-5 lg:px-7">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <button onClick={onClose} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button>
         <h1 className="text-[26px] font-extrabold">New message</h1>
@@ -915,8 +915,8 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: st
           <button onClick={() => { setKind("text"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "text" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>💬 Text</button>
         </span>
       </div>
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex min-h-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-h-0 min-w-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
           <div className="mb-1 text-muted">{kind === "email" ? "From your Gmail" : "From the contact's GoHighLevel number"}</div>
           <div className={`relative ${row}`}>
             <span className="w-16 shrink-0 text-muted">To</span>
@@ -958,7 +958,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: st
             <button disabled={busy !== null || !to || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
           </div>
         </div>
-        <aside className="space-y-3">
+        <aside className="min-w-0 space-y-3">
           <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
             <div className="mb-2 text-[14px] font-bold tracking-wide text-accent">LINK TO A TASK</div>
             {task ? (
