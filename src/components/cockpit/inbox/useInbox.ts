@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase, authedFetch } from "@/lib/supabase";
 import { rowToMessage } from "@/lib/db";
 import type { Message, Task } from "@/lib/data";
-import { threadKeyOf as thKey } from "@/lib/inbox";
+import { threadKeyOf as thKey, isBlocked } from "@/lib/inbox";
 import { buildThreads, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,6 +34,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
+  const [blocks, setBlocks] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -42,7 +43,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
 
   type Loaded = Awaited<ReturnType<typeof fetchInbox>>;
   const apply = useCallback((r: Loaded) => {
-    setLoaded(r.messages); setConvs(r.convs); setStates(r.states); setError(null); setLoading(false);
+    setLoaded(r.messages); setConvs(r.convs); setStates(r.states); setBlocks(r.blocks); setError(null); setLoading(false);
   }, []);
   const fail = useCallback((e: any) => { setError(e?.message ?? "The Inbox could not load."); setLoading(false); }, []);
   const load = useCallback(() => fetchInbox(meMemberId, myTaskIds).then(apply, fail), [meMemberId, myTaskIds, apply, fail]);
@@ -69,8 +70,10 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
     const byId = new Map<string, Message>();
     for (const m of loaded) byId.set(m.id, m);
     for (const m of live) byId.set(m.id, m);
-    return buildThreads([...byId.values()], states, { now, nameOf, convs });
-  }, [loaded, live, states, now, nameOf, convs]);
+    // Blocked senders stay out, except what is already in the Trash.
+    return buildThreads([...byId.values()], states, { now, nameOf, convs })
+      .filter((t) => t.trashed || !isBlocked(t.peerAddress, blocks));
+  }, [loaded, live, states, now, nameOf, convs, blocks]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -115,6 +118,19 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
     const gmailNote = results.find((r: any) => r?.note && keys.some((k) => k.startsWith("gm:")))?.note as string | undefined;
     return { undo: async () => { await undoState(); await Promise.all(keys.map((k) => authedFetch("/api/inbox/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadKey: k, restore: !restore }) }).catch(() => null))); }, gmailNote };
   }, [writeState]);
+  // Block sender: an address, a phone or "@domain". Their conversations go to
+  // the Trash and nothing more from them shows here.
+  const block = useCallback(async (address: string) => {
+    const a = address.trim().toLowerCase();
+    if (!a) return;
+    const { error: e } = await supabase.from("inbox_blocks").upsert({ member_id: meMemberId, address: a }, { onConflict: "member_id,address" });
+    if (e) throw new Error(e.message);
+    setBlocks((b) => (b.includes(a) ? b : [...b, a]));
+  }, [meMemberId]);
+  const unblock = useCallback(async (address: string) => {
+    await supabase.from("inbox_blocks").delete().eq("member_id", meMemberId).eq("address", address);
+    setBlocks((b) => b.filter((x) => x !== address));
+  }, [meMemberId]);
   const snooze = useCallback((keys: string[], until: Date) => writeState(keys, { snoozedUntil: until.toISOString(), doneAt: null }), [writeState]);
 
   // ── Server actions ──────────────────────────────────────────────────────
@@ -141,7 +157,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
   }, [post, load]);
   const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
 
-  return { threads, loading, error, reload: load, isAdmin, convs, markRead, markUnread, markDone, trash, snooze, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, snooze, linkTask, assign, send, improve };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
@@ -161,6 +177,8 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
   const taskIds = [...myTaskIds];
   for (let i = 0; i < taskIds.length; i += CHUNK) reads.push(supabase.from("messages").select("*").eq("channel", "chat").in("task_id", taskIds.slice(i, i + CHUNK)).gte("created_at", since).limit(1000));
   reads.push(supabase.from("inbox_state").select("*").eq("member_id", meMemberId));
+  // Read on its own: a missing table (before inbox-blocks.sql) just means none.
+  const blockRes = await supabase.from("inbox_blocks").select("address").eq("member_id", meMemberId);
 
   const results = await Promise.all(reads);
   const stateRes = results.pop();
@@ -170,5 +188,6 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
     messages: results.flatMap((r) => (r.data ?? []).map(rowToMessage)) as Message[],
     convs,
     states: new Map<string, InboxState>((stateRes.data ?? []).map((r: any) => [r.thread_key, rowToState(r)])),
+    blocks: ((blockRes.data ?? []) as any[]).map((r) => r.address as string),
   };
 }

@@ -5,6 +5,7 @@ import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
+import { isBlocked } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -69,6 +70,11 @@ async function run(req: NextRequest, days: number) {
   let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0;
   const errors: string[] = [];
 
+  // Each teammate's Block sender list: their blocked strangers are not kept.
+  const { data: blockRows } = await supabaseAdmin.from("inbox_blocks").select("member_id, address");
+  const blocksBy = new Map<string, string[]>();
+  for (const r of blockRows ?? []) blocksBy.set(r.member_id as string, [...(blocksBy.get(r.member_id as string) ?? []), r.address as string]);
+
   for (const mailbox of mailboxes) {
     const memberId = memberIdByMailbox.get(mailbox) ?? null;
     let emails;
@@ -122,7 +128,7 @@ async function run(req: NextRequest, days: number) {
         // stays in Gmail: people, not robots (Derek, 2026-10-01).
         if (em.auto) { skippedAuto++; continue; }
         unmatched++;
-        if (!memberId) continue;
+        if (!memberId || isBlocked(em.fromEmail, blocksBy.get(memberId) ?? [])) continue;
         try {
           if (await ingestStrangerEmail({
             mailboxMemberId: memberId, direction: "inbound", peerName: em.fromName || null, peerAddress: em.fromEmail,

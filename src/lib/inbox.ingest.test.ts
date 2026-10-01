@@ -161,3 +161,15 @@ describe("an email stored before the Inbox", () => {
     expect(fill?.filters).toContainEqual(["is:mailbox_member_id", null]);
   });
 });
+
+describe("Block sender", () => {
+  it("matches an address, a domain, or a phone written another way", async () => {
+    const { isBlocked } = await import("./inbox");
+    expect(isBlocked("Notices@kp.org", ["@kp.org"])).toBe(true);
+    expect(isBlocked("a@b.co", ["a@b.co"])).toBe(true);
+    expect(isBlocked("+1 (541) 555-0142", ["5415550142"])).toBe(true);
+    expect(isBlocked("pam@example.com", ["@kp.org"])).toBe(false);
+    expect(isBlocked("x5415550142@y.com", ["5415550142"])).toBe(false);
+    expect(isBlocked(null, ["@kp.org"])).toBe(false);
+  });
+});

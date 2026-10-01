@@ -254,6 +254,17 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
+  const [blockOpen, setBlockOpen] = useState(false);
+  const domain = t.channel === "email" && t.peerAddress?.includes("@") ? "@" + t.peerAddress.split("@")[1] : null;
+  const blockIt = async (address: string) => {
+    setBlockOpen(false);
+    try {
+      await p.inbox.block(address);
+      const { undo } = await p.inbox.trash([t.key]);
+      back();
+      p.pushToast(`Blocked ${address}. Nothing more from them shows here.`, { label: "Undo", run: async () => { await p.inbox.unblock(address); await undo(); } });
+    } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't block them."); }
+  };
   const typing = usePresence(p.me, t.key);
   const isGhl = t.key.startsWith("ghl:");
   const snooze = async (preset: "1h" | "3h" | "tomorrow" | "monday") => {
@@ -280,6 +291,20 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         </div>
         <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark as unread</button>
         <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">{t.trashed ? "↩ Restore" : "🗑 Delete"}</button>
+        {t.peerAddress && !t.trashed && (
+          <div className="relative">
+            <button onClick={() => setBlockOpen(!blockOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">⛔ Block</button>
+            {blockOpen && (
+              <Menu onClose={() => setBlockOpen(false)}>
+                <button onClick={() => blockIt(t.peerAddress!)} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Block {t.peerAddress}</button>
+                {domain && !/@(gmail|yahoo|hotmail|outlook|icloud|aol|me|msn|live)\./i.test(domain) && (
+                  <button onClick={() => blockIt(domain)} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Block everyone at {domain.slice(1)}</button>
+                )}
+                <div className="px-3 pb-1 pt-2 text-[14px] text-muted">Moves this to Trash. Undo any time in Settings.</div>
+              </Menu>
+            )}
+          </div>
+        )}
         {isGhl && (
           <div className="relative">
             <button onClick={() => setAssignOpen(!assignOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">👤 Assign</button>
@@ -690,6 +715,14 @@ function InboxSettings(p: InboxViewProps) {
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, like Running late" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="The reply" rows={2} className="rounded-lg border bg-surface px-3 py-2 outline-none focus:border-accent" />
           <button disabled={!name.trim() || !text.trim()} onClick={() => { setPrefs({ replies: [...prefs.replies, { name: name.trim(), text: text.trim() }] }); setName(""); setText(""); }} className="h-10 rounded-lg border font-semibold hover:bg-background disabled:opacity-50">＋ Add saved reply</button>
+        </Box>
+        <Box title="Blocked senders" help="Nothing from these shows in your Inbox. Block someone from the ⛔ Block button on their message.">
+          {p.inbox.blocks.length ? p.inbox.blocks.map((b) => (
+            <div key={b} className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2">
+              <span className="break-all">{b.startsWith("@") ? `Everyone at ${b.slice(1)}` : b}</span>
+              <button onClick={() => p.inbox.unblock(b)} className="h-9 shrink-0 rounded-md border px-3 font-semibold hover:bg-surface">Unblock</button>
+            </div>
+          )) : <div className="text-muted">Nobody blocked.</div>}
         </Box>
         <Box title="Sending">
           <div className="flex flex-wrap items-center justify-between gap-3 py-1.5">

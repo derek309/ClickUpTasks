@@ -20,3 +20,17 @@ export function threadKeyOf(m: Pick<Message, "id" | "channel" | "taskId" | "gmai
 export function raiseReplyTasks(): boolean {
   return (process.env.INBOX_REPLY_TASKS ?? "").trim().toLowerCase() !== "off";
 }
+
+/** An address or phone in a block list: an exact address, a "@domain" entry,
+ *  or the same phone number written another way. */
+export function isBlocked(address: string | null | undefined, blocks: Iterable<string>): boolean {
+  const a = (address ?? "").trim().toLowerCase();
+  if (!a) return false;
+  const digits = a.replace(/\D/g, "").slice(-10);
+  for (const b of blocks) {
+    if (b === a) return true;
+    if (b.startsWith("@") && a.endsWith(b)) return true;
+    if (!a.includes("@") && digits.length === 10 && b.replace(/\D/g, "").slice(-10) === digits) return true;
+  }
+  return false;
+}
