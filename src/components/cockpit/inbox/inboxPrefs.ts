@@ -14,6 +14,10 @@ export type InboxPrefs = {
   badge: boolean;
   popup: boolean;
   sound: boolean;
+  /** Opening a message marks it read in Gmail; Mark as unread puts it back. */
+  gmailRead: boolean;
+  /** Done archives the email in Gmail (out of its inbox, never deleted). */
+  gmailArchive: boolean;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {
@@ -24,6 +28,7 @@ export const DEFAULT_PREFS: InboxPrefs = {
     { name: "Call me", text: "Easier to talk this through. Can you give me a call when you have 5 minutes?" },
   ],
   undoSeconds: 5, aiNudge: true, badge: true, popup: true, sound: false,
+  gmailRead: true, gmailArchive: true,
 };
 
 const key = (member: string) => `inboxPrefs:${member}`;

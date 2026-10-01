@@ -1638,8 +1638,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The Inbox. Loaded whatever page is open, so the sidebar can count it.
   const clientNames = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
   const inboxNameOf = useCallback((m: Message) => (m.clientId ? clientNames.get(m.clientId) ?? null : null), [clientNames]);
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, tasks, nameOf: inboxNameOf, pushToast });
   const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
+  const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, pushToast });
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
   const alertedRef = useRef<Set<string> | null>(null);

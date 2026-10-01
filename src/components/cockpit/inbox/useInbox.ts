@@ -25,12 +25,14 @@ export type UseInboxDeps = {
   liveMessages: Message[];
   tasks: Task[];
   nameOf: (m: Message) => string | null;
+  /** Keep Gmail in step (Inbox Settings): read state, and Done as archive. */
+  gmailSync: { read: boolean; archive: boolean };
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
 };
 
 const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, updatedAt: r.updated_at });
 
-export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pushToast }: UseInboxDeps) {
+export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gmailSync, pushToast }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
@@ -106,9 +108,25 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, pus
     };
   }, [meMemberId, pushToast]);
 
-  const markRead = useCallback((keys: string[]) => writeState(keys, { readAt: new Date().toISOString() }), [writeState]);
-  const markUnread = useCallback((keys: string[]) => writeState(keys, { readAt: null }), [writeState]);
-  const markDone = useCallback((keys: string[]) => { const at = new Date().toISOString(); return writeState(keys, { doneAt: at, readAt: at, snoozedUntil: null }); }, [writeState]);
+  // The same change in Gmail, for emails, when the person has it switched on.
+  // Fire and forget: the Inbox never waits on Gmail.
+  const toGmail = useCallback((keys: string[], change: "read" | "unread" | "archive" | "unarchive") => {
+    const gm = keys.filter((k) => k.startsWith("gm:"));
+    if (!gm.length) return;
+    authedFetch("/api/inbox/gmail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadKeys: gm, change }) }).catch(() => null);
+  }, []);
+  const withGmail = useCallback(async (keys: string[], undo: () => Promise<void>, change: "read" | "unread" | "archive" | null, reverse: "read" | "unread" | "unarchive" | null) => {
+    if (change) toGmail(keys, change);
+    return async () => { await undo(); if (reverse) toGmail(keys, reverse); };
+  }, [toGmail]);
+  const markRead = useCallback(async (keys: string[]) => withGmail(keys, await writeState(keys, { readAt: new Date().toISOString() }), gmailSync.read ? "read" : null, gmailSync.read ? "unread" : null), [writeState, withGmail, gmailSync.read]);
+  const markUnread = useCallback(async (keys: string[]) => withGmail(keys, await writeState(keys, { readAt: null }), gmailSync.read ? "unread" : null, gmailSync.read ? "read" : null), [writeState, withGmail, gmailSync.read]);
+  const markDone = useCallback(async (keys: string[]) => {
+    const at = new Date().toISOString();
+    const undo = await writeState(keys, { doneAt: at, readAt: at, snoozedUntil: null });
+    // Done archives (which also marks read); with only read on, it marks read.
+    return withGmail(keys, undo, gmailSync.archive ? "archive" : gmailSync.read ? "read" : null, gmailSync.archive ? "unarchive" : null);
+  }, [writeState, withGmail, gmailSync.archive, gmailSync.read]);
   // Delete: the Inbox's Trash, and Gmail's for an email (30 days there).
   const trash = useCallback(async (keys: string[], restore = false) => {
     const at = new Date().toISOString();

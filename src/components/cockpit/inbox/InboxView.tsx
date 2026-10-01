@@ -716,6 +716,10 @@ function InboxSettings(p: InboxViewProps) {
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="The reply" rows={2} className="rounded-lg border bg-surface px-3 py-2 outline-none focus:border-accent" />
           <button disabled={!name.trim() || !text.trim()} onClick={() => { setPrefs({ replies: [...prefs.replies, { name: name.trim(), text: text.trim() }] }); setName(""); setText(""); }} className="h-10 rounded-lg border font-semibold hover:bg-background disabled:opacity-50">＋ Add saved reply</button>
         </Box>
+        <Box title="Gmail" help="Keeps your Gmail in step with this Inbox, so its unread count matches. Texts and GoHighLevel messages are never changed.">
+          <Switch on={prefs.gmailRead} set={(v) => setPrefs({ gmailRead: v })} label="Mark read in Gmail too" help="Opening a message here marks it read there; Mark as unread puts it back" />
+          <Switch on={prefs.gmailArchive} set={(v) => setPrefs({ gmailArchive: v })} label="Done archives the email in Gmail" help="It leaves your Gmail inbox but is never deleted; Undo puts it back" />
+        </Box>
         <Box title="Blocked senders" help="Nothing from these shows in your Inbox. Block someone from the ⛔ Block button on their message.">
           {p.inbox.blocks.length ? p.inbox.blocks.map((b) => (
             <div key={b} className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2">
