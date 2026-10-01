@@ -541,7 +541,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const brief = await liveBrief(task.id);
-      if (!brief) return `"${task.title}" has no project instructions yet. write_project_instructions makes them.`;
+      if (!brief) return `"${task.title}" has no project instructions yet. set_project_instructions writes them.`;
       const [link, { data: files }] = await Promise.all([
         briefLinkState(brief.id as string, origin),
         supabaseAdmin.from("task_brief_files").select("id, name, size_bytes, from_outside, added_by_label, created_at, moved_at")
@@ -563,14 +563,13 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       ].filter((l) => l !== "").join("\n");
     },
 
-    async writeProjectInstructions(taskId: string, html: string | undefined, change: { title?: string; due?: string | null; showBusiness?: boolean; uploadsOpen?: boolean }): Promise<string> {
+    async updateProjectInstructions(taskId: string, change: { title?: string; due?: string | null; showBusiness?: boolean; uploadsOpen?: boolean }): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const existed = !!(await liveBrief(task.id));
       const made = await createBrief(task, actor, "blank");
       if (!made.ok) return made.error;
       const input: Record<string, unknown> = {};
-      if (html !== undefined) input.body = html;
       if (change.title !== undefined) input.title = change.title;
       if (change.due !== undefined) input.due = change.due;
       if (change.showBusiness !== undefined) input.showBusiness = change.showBusiness;
@@ -579,15 +578,15 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         const r = await saveBrief(task.id, actor, input);
         if (!r.ok) return r.error;
       }
-      await event(task.id, `${await actor.label()} ${existed ? "updated" : "wrote"} the project instructions`);
-      return `${existed ? "Updated" : "Created"} the project instructions on "${task.title}". Nobody outside sees them until a link is made (get_project_instructions_link with new).`;
+      await event(task.id, `${await actor.label()} ${existed ? "updated" : "started"} the project instructions`);
+      return `${existed ? "Updated" : "Created"} the project instructions on "${task.title}". set_project_instructions writes the text. Nobody outside sees them until a link is made (get_project_instructions_link with new).`;
     },
 
     async getProjectInstructionsLink(taskId: string, opts: { fresh?: boolean; extend?: boolean; days?: number }): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const brief = await liveBrief(task.id);
-      if (!brief) return `"${task.title}" has no project instructions yet. write_project_instructions makes them.`;
+      if (!brief) return `"${task.title}" has no project instructions yet. set_project_instructions writes them.`;
       const id = brief.id as string;
       const days = cleanLinkDays(opts.days);
       const warn = "Anyone with it can read the instructions and send files back, without signing in. It never shows the client's contact or acts as the client.";

@@ -655,25 +655,21 @@ export function createServer(opts = {}) {
     // Project instructions for an outside person (a Fiverr designer, say), apart
     // from the reviews: they never go to the client and act as nobody.
     server.tool("get_project_instructions",
-      "Read a task's project instructions for an outside person (a Fiverr designer or other third party): the text, due date, whether the outside link is on (and the link), the files sent with them, and the files the person sent back (with ids for put_sent_back_in_image_review). Never shown to the client.",
+      "Read a task's project instructions for an outside person (a Fiverr designer or other third party) with everything around them: the text, name, due date, whether the outside link is on (and the link), the files sent with them, and the files the person sent back (with ids for put_sent_back_in_image_review). Never shown to the client.",
       { task_id: z.string() },
       async ({ task_id }) => reply(await services.getProjectInstructions(task_id)));
 
-    server.tool("write_project_instructions",
-      `Create a task's project instructions for an outside person, or change them. Separate from the client document; the client never sees them. Write only what the outside person needs (the job, sizes and format, what must be on it, look and feel, what to send back) and NEVER the client's phone, email or contact name. Pass the WHOLE text each time you pass body (read it with get_project_instructions first when editing). ${DOC_TEXT} Nothing leaves until a link is made.`,
+    server.tool("update_project_instructions",
+      "Change a task's project instructions other than their text (set_project_instructions writes the text): their name, the due date, and the two switches on the outside page. Makes the instructions when the task has none.",
       {
         task_id: z.string(),
-        body: z.string().optional().describe("the whole instructions, in the simple markdown described above; omit to keep them"),
-        title: z.string().optional().describe("their name, like \"Grand opening postcard\"; omit to keep it"),
+        title: z.string().optional().describe("their name, like \"Grand opening postcard\"; \"\" goes back to Project instructions"),
         due: z.string().nullable().optional().describe("yyyy-mm-dd, when the person should send it back; null clears it"),
         show_business: z.boolean().optional().describe("whether the outside page names the client's business (default on)"),
         files_back: z.boolean().optional().describe("whether the person can send files back through the link (default on)"),
       },
-      async ({ task_id, body, title, due, show_business, files_back }) => {
-        const html = body === undefined ? undefined : docTextToHtml(body);
-        if (html !== undefined && !docHtmlToText(html)) return reply("The instructions are empty.");
-        return reply(await services.writeProjectInstructions(task_id, html, { title, due, showBusiness: show_business, uploadsOpen: files_back }));
-      });
+      async ({ task_id, title, due, show_business, files_back }) =>
+        reply(await services.updateProjectInstructions(task_id, { title, due, showBusiness: show_business, uploadsOpen: files_back })));
 
     server.tool("get_project_instructions_link",
       "The outside link to a task's project instructions, to paste to the outside person. With new: true, makes a fresh one (any old one stops) that works for days (7, 14 or 30, default 14). With extend: true, keeps the same link working for days more from today. Making a link sends nothing; only share it with the person doing the work.",

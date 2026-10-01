@@ -39,7 +39,8 @@ with its own `html` and `label`, and `image_labels` and `pin.image` work for pag
 
 Project instructions (hosted only), for an outside person such as a Fiverr
 designer, apart from the reviews and never shown to the client (Derek,
-2026-09-30): `get_project_instructions`, `write_project_instructions`,
+2026-09-30): `get_project_instructions`, `update_project_instructions`
+(name, due date, switches; `set_project_instructions` writes the text),
 `get_project_instructions_link` (`new` makes one for 7, 14 or 30 days,
 `extend` keeps it longer), `turn_off_project_instructions_link`,
 `put_sent_back_in_image_review` (images the person sent back become the image

@@ -14,7 +14,7 @@ const REVIEW_TOOLS = [
   "list_reviews", "get_review", "get_client_document", "create_review", "update_review", "write_document", "write_client_document",
   "start_image_upload", "add_review_version", "use_version", "remove_version", "send_for_review", "get_review_link",
   "revoke_review_link", "add_review_comment", "update_review_comment", "delete_review_comment", "delete_review", "restore_review",
-  "get_project_instructions", "write_project_instructions", "get_project_instructions_link", "turn_off_project_instructions_link",
+  "get_project_instructions", "update_project_instructions", "get_project_instructions_link", "turn_off_project_instructions_link",
   "put_sent_back_in_image_review",
 ];
 
@@ -111,17 +111,13 @@ describe("review tools over MCP", () => {
 });
 
 describe("project instructions tools over MCP", () => {
-  it("writes them from markdown, passes only what was given, and refuses empty text", async () => {
-    const writeProjectInstructions = vi.fn(async () => "Created.");
-    const client = await connect({ writeProjectInstructions });
-    await call(client, "write_project_instructions", { task_id: "t_1", body: "## The job\n\nA postcard", title: "Postcard", due: "2026-10-06" });
-    expect(writeProjectInstructions).toHaveBeenCalledWith("t_1", "<h2>The job</h2><p>A postcard</p>",
-      { title: "Postcard", due: "2026-10-06", showBusiness: undefined, uploadsOpen: undefined });
-    await call(client, "write_project_instructions", { task_id: "t_1", show_business: false });
-    expect(writeProjectInstructions).toHaveBeenLastCalledWith("t_1", undefined,
-      { title: undefined, due: undefined, showBusiness: false, uploadsOpen: undefined });
-    expect(await call(client, "write_project_instructions", { task_id: "t_1", body: "  " })).toBe("The instructions are empty.");
-    expect(writeProjectInstructions).toHaveBeenCalledTimes(2);
+  it("changes the name, date and switches only, passing just what was given", async () => {
+    const updateProjectInstructions = vi.fn(async () => "Updated.");
+    const client = await connect({ updateProjectInstructions });
+    await call(client, "update_project_instructions", { task_id: "t_1", title: "Postcard", due: "2026-10-06" });
+    expect(updateProjectInstructions).toHaveBeenCalledWith("t_1", { title: "Postcard", due: "2026-10-06", showBusiness: undefined, uploadsOpen: undefined });
+    await call(client, "update_project_instructions", { task_id: "t_1", show_business: false });
+    expect(updateProjectInstructions).toHaveBeenLastCalledWith("t_1", { title: undefined, due: undefined, showBusiness: false, uploadsOpen: undefined });
   });
 
   it("makes a link only when asked, for the days picked", async () => {
