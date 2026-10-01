@@ -44,6 +44,7 @@ export type InboxViewProps = {
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
   { id: "inbox", label: "Inbox", icon: "📥" }, { id: "drafts", label: "Drafts", icon: "📝" },
   { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "📤" }, { id: "done", label: "Done", icon: "✓" },
+  { id: "trash", label: "Trash", icon: "🗑" },
 ];
 const FILTERS: { id: Folder; label: string; icon: string }[] = [
   { id: "email", label: "Email", icon: "✉️" }, { id: "sms", label: "Texts", icon: "💬" },
@@ -80,6 +81,12 @@ export default function InboxView(p: InboxViewProps) {
     const undo = await inbox.markDone(keys);
     undoToast(keys.length > 1 ? `${keys.length} marked done` : "Marked done", undo);
   };
+  // Delete: to the Trash here, and to Gmail's Trash for an email.
+  const del = async (keys: string[], restore = false) => {
+    const { undo, gmailNote } = await inbox.trash(keys, restore);
+    const what = keys.length > 1 ? `${keys.length} conversations` : "Conversation";
+    undoToast(restore ? `${what} restored` : `${what} moved to Trash${gmailNote ? ` (Gmail: ${gmailNote})` : ""}`, undo);
+  };
   const openThread = (t: InboxThread) => {
     setOpenKey(t.key); setCursor(t.key); setComposeNew(false);
     if (t.unread) inbox.markRead([t.key]);
@@ -105,6 +112,7 @@ export default function InboxView(p: InboxViewProps) {
       else if ((k === " " || k === "enter") && !openKey && cursor) { e.preventDefault(); const t = visible.find((x) => x.key === cursor); if (t) openThread(t); }
       else if (k === "escape" && openKey) back();
       else if (k === "e" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); done([key]); }
+      else if (k === "d" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); del([key]); }
       else if (k === "r" && open) { e.preventDefault(); if (open.unread) inbox.markRead([open.key]); else inbox.markUnread([open.key]); }
       else if (k === "s" && open) { e.preventDefault(); setSnoozeOpen(true); }
       else if (k === "t" && open) { e.preventDefault(); linkSearchRef.current?.focus(); }
@@ -138,7 +146,7 @@ export default function InboxView(p: InboxViewProps) {
 
         {folder === "settings" ? <InboxSettings {...p} />
           : composeNew ? <NewEmail p={p} onClose={() => setComposeNew(false)} />
-          : open ? <ThreadView p={p} t={open} back={back} done={() => { back(); done([open.key]); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
+          : open ? <ThreadView p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
           : (
             <>
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
@@ -148,6 +156,7 @@ export default function InboxView(p: InboxViewProps) {
                 {selected.size > 0 && <>
                   <button onClick={async () => { const undo = await inbox.markRead([...selected]); setSelected(new Set()); undoToast(`${selected.size} marked read`, undo); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark read</button>
                   <button onClick={() => { done([...selected]); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Done</button>
+                  <button onClick={() => { del([...selected], folder === "trash"); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">{folder === "trash" ? "Restore" : "🗑 Delete"}</button>
                 </>}
                 <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
                 <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setOpenKey(null); }} placeholder="Search people, words, files" aria-label="Search the Inbox"
@@ -157,7 +166,7 @@ export default function InboxView(p: InboxViewProps) {
                 {inbox.error && <div className="m-4 rounded-lg bg-danger-soft p-3 text-danger">{inbox.error}</div>}
                 {!inbox.loading && !visible.length && (
                   <div className="px-6 py-16 text-center text-muted">
-                    <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : "Nothing here"}</div>
+                    <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : folder === "trash" ? "Trash is empty" : "Nothing here"}</div>
                     {folder === "inbox" && !q && <div className="mt-1">Every message is answered, snoozed or done.</div>}
                   </div>
                 )}
@@ -175,7 +184,7 @@ export default function InboxView(p: InboxViewProps) {
                 })}
               </div>
               <div className="hidden gap-4 border-t bg-background/40 px-5 py-2 text-[14px] text-muted lg:flex">
-                <span><Kbd>J</Kbd> Next</span><span><Kbd>K</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Done</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
+                <span><Kbd>J</Kbd> Next</span><span><Kbd>K</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Done</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
               </div>
             </>
           )}
@@ -240,8 +249,8 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
 }
 
 // ── An open conversation ──────────────────────────────────────────────────
-function ThreadView({ p, t, back, done, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft }: {
-  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void;
+function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft }: {
+  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void;
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
@@ -270,6 +279,7 @@ function ThreadView({ p, t, back, done, snoozeOpen, setSnoozeOpen, linkSearchRef
           )}
         </div>
         <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark as unread</button>
+        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">{t.trashed ? "↩ Restore" : "🗑 Delete"}</button>
         {isGhl && (
           <div className="relative">
             <button onClick={() => setAssignOpen(!assignOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">👤 Assign</button>

@@ -5,7 +5,7 @@
 import type { Message, MessageChannel } from "@/lib/data";
 import { threadKeyOf } from "@/lib/inbox";
 
-export type InboxState = { threadKey: string; readAt: string | null; snoozedUntil: string | null; doneAt: string | null; updatedAt: string | null };
+export type InboxState = { threadKey: string; readAt: string | null; snoozedUntil: string | null; doneAt: string | null; trashedAt?: string | null; updatedAt: string | null };
 export type GhlConv = { id: string; assignedMemberId: string | null; contactName: string | null; phone: string | null; email: string | null; locationId: string };
 
 export type InboxThread = {
@@ -25,6 +25,8 @@ export type InboxThread = {
   snoozed: boolean;
   snoozedUntil: string | null;
   done: boolean;
+  /** Deleted: in the Inbox's Trash (and Gmail's). */
+  trashed: boolean;
   /** You wrote last. */
   sentLast: boolean;
   hasFiles: boolean;
@@ -32,7 +34,7 @@ export type InboxThread = {
   count: number;
 };
 
-export type Folder = "inbox" | "drafts" | "snoozed" | "sent" | "done" | "email" | "sms" | "social" | "call" | "chat";
+export type Folder = "inbox" | "drafts" | "snoozed" | "sent" | "done" | "trash" | "email" | "sms" | "social" | "call" | "chat";
 export const SOCIAL: MessageChannel[] = ["fb", "ig", "web", "gbp"];
 
 const time = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
@@ -64,8 +66,9 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
     const named = msgs.map((m) => opts.nameOf?.(m)).find(Boolean);
     const inboundAt = time(lastInbound?.at);
     // A new message from them brings a conversation back from Done or Snoozed.
-    const done = !!st?.doneAt && inboundAt <= time(st.doneAt);
-    const snoozed = !done && !!st?.snoozedUntil && time(st.snoozedUntil) > now && inboundAt <= time(st.updatedAt);
+    const trashed = !!st?.trashedAt && inboundAt <= time(st.trashedAt);
+    const done = !trashed && !!st?.doneAt && inboundAt <= time(st.doneAt);
+    const snoozed = !done && !trashed && !!st?.snoozedUntil && time(st.snoozedUntil) > now && inboundAt <= time(st.updatedAt);
     out.push({
       key, messages: msgs, latest, channel: latest.channel,
       subject: [...msgs].reverse().find((m) => m.subject)?.subject ?? null,
@@ -76,7 +79,7 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
       taskId: msgs.find((m) => m.taskId)?.taskId ?? null,
       ghlConversationId: latest.ghlConversationId ?? null,
       unread: !!lastInbound && inboundAt > time(st?.readAt),
-      snoozed, snoozedUntil: snoozed ? st!.snoozedUntil : null, done,
+      snoozed, snoozedUntil: snoozed ? st!.snoozedUntil : null, done, trashed,
       sentLast: latest.direction === "outbound",
       hasFiles: msgs.some((m) => m.attachments?.length),
       count: msgs.length,
@@ -86,6 +89,8 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
 }
 
 export function inFolder(t: InboxThread, f: Folder, hasDraft: (key: string) => boolean): boolean {
+  if (f === "trash") return t.trashed;
+  if (t.trashed) return false;
   if (f === "drafts") return hasDraft(t.key);
   if (f === "sent") return t.sentLast;
   if (f === "done") return t.done;
@@ -105,8 +110,8 @@ export function matchesSearch(t: InboxThread, q: string, clientName?: string | n
   return words.every((w) => hay.includes(w));
 }
 
-export function whereIs(t: InboxThread): "Inbox" | "Done" | "Snoozed" {
-  return t.done ? "Done" : t.snoozed ? "Snoozed" : "Inbox";
+export function whereIs(t: InboxThread): "Inbox" | "Done" | "Snoozed" | "Trash" {
+  return t.trashed ? "Trash" : t.done ? "Done" : t.snoozed ? "Snoozed" : "Inbox";
 }
 
 /** Today / Yesterday / Earlier this week / Older, for Group by day. */

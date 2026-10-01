@@ -22,6 +22,9 @@ export const googleConfigured = Boolean(SA_EMAIL && SA_KEY);
 const GMAIL_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+// Trash and read state for the Inbox. Must be added to the service account's
+// domain-wide delegation in the Workspace Admin console, beside the two above.
+const GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 const GMAIL_LIST = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -411,4 +414,15 @@ export async function readSentGmail(userEmail: string, query: string, max = 25):
     });
   }
   return out;
+}
+
+/** Move a conversation to Gmail's Trash, or back out of it. Throws when the
+ *  service account lacks gmail.modify (the Inbox then says so). */
+export async function trashGmailThread(mailbox: string, threadId: string, restore = false): Promise<void> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_MODIFY_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken().catch(() => ({ token: null as string | null }));
+  if (!token) throw new Error("Gmail permission to move mail to Trash isn't set up yet.");
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}/${restore ? "untrash" : "trash"}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Gmail ${restore ? "restore" : "trash"} failed (${res.status})`);
 }

@@ -78,3 +78,15 @@ describe("Inbox conversations", () => {
     expect([mon.getDay(), mon.getDate(), mon.getHours()]).toEqual([1, 5, 9]);
   });
 });
+
+describe("Delete", () => {
+  const one = [msg({ id: "z", gmailThreadId: "tz", at: "2026-10-01T17:00:00Z" })];
+  it("moves a conversation to Trash and out of every other folder", () => {
+    const s = new Map([["gm:tz", st({ threadKey: "gm:tz", trashedAt: "2026-10-01T17:10:00Z", doneAt: "2026-10-01T17:05:00Z" })]]);
+    const t = buildThreads(one, s, { now: NOW })[0];
+    expect(inFolder(t, "trash", none)).toBe(true);
+    expect(inFolder(t, "inbox", none)).toBe(false);
+    expect(inFolder(t, "done", none)).toBe(false);
+    expect(inFolder(t, "email", none)).toBe(false);
+  });
+});
