@@ -112,3 +112,14 @@ describe("Star", () => {
     expect(inFolder(t, "inbox", none)).toBe(true);
   });
 });
+
+describe("day dividers", () => {
+  it("says Today, Yesterday, then the date", async () => {
+    const { dayLabel } = await import("./inboxModel");
+    const now = new Date(2026, 9, 1, 15, 0);
+    expect(dayLabel(new Date(2026, 9, 1, 9).toISOString(), now)).toBe("Today");
+    expect(dayLabel(new Date(2026, 8, 30, 16).toISOString(), now)).toBe("Yesterday");
+    expect(dayLabel(new Date(2026, 8, 19, 15).toISOString(), now)).toMatch(/Sep 19/);
+    expect(dayLabel(new Date(2025, 8, 19, 15).toISOString(), now)).toMatch(/2025/);
+  });
+});

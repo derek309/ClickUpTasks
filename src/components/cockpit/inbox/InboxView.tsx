@@ -11,7 +11,7 @@ import { splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Ta
 import { authedFetch, supabase } from "@/lib/supabase";
 import SignaturePanel from "../../SignaturePanel";
 import {
-  CHANNEL_ICON, CHANNEL_LABEL, bodyParts, isLinkHeavy, dayGroup, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
+  CHANNEL_ICON, CHANNEL_LABEL, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
   type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
@@ -353,8 +353,13 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             </div>
           )}
           <div className="mt-5 space-y-3">
-            {t.messages.map((m) => (
+            {t.messages.map((m, i) => (
               <div key={m.id} className="space-y-3">
+                {(i === 0 || dayLabel(t.messages[i - 1].at) !== dayLabel(m.at)) && (
+                  <div className="flex items-center gap-3 pt-2 text-[14px] font-bold uppercase tracking-wider text-muted" role="separator">
+                    <span className="h-px flex-1 bg-[var(--border)]" />{dayLabel(m.at)}<span className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+                )}
                 {compose?.m.id === m.id && <Composer key={`${t.key}:${compose.mode}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} />}
                 <MessageCard m={m} t={t} p={p} onAction={isEmailThread(t) ? (mode) => setCompose({ mode, m }) : undefined} />
               </div>

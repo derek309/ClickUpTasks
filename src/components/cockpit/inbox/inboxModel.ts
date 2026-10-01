@@ -192,3 +192,14 @@ export function isLinkHeavy(text: string): boolean {
   const urls = [...text.matchAll(URL_RE)].reduce((n, m) => n + m[0].length, 0);
   return urls > 200 && urls > text.length * 0.25;
 }
+
+/** The divider between messages from different days in a conversation:
+ *  Today, Yesterday, Tue, Sep 30; a year shows only when it is not this one. */
+export function dayLabel(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(now) - start(d)) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
