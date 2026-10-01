@@ -122,7 +122,7 @@ export default function InboxView(p: InboxViewProps) {
   });
 
   return (
-    <div className="flex h-full min-h-0 text-[16px]">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 text-[16px]">
       {/* Folders */}
       <nav className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r bg-background/40 p-3 md:flex">
         <button onClick={() => { setComposeNew(true); setOpenKey(null); setFolder("inbox"); }} className="mb-3 h-11 rounded-lg bg-accent font-semibold text-white">＋ New email</button>
@@ -577,7 +577,7 @@ function Composer({ p, t, onSent, onDraft }: { p: InboxViewProps; t: InboxThread
         </div>
         <button onClick={improve} disabled={busy !== null || !text.trim()} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : "✨ Improve with AI"}</button>
         <span className="flex-1" />
-        {!email && t.channel !== "chat" && <span className="tabular-nums text-muted">{text.length} / 160</span>}
+        {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">
           <button onClick={() => send()} disabled={busy !== null || !text.trim()} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
           {p.onSchedule && t.clientId && <>
