@@ -106,6 +106,8 @@ export default function InboxView(p: InboxViewProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey || folder === "settings") return;
+      // A task open over the Inbox has the keys; Escape closes it, not this.
+      if (document.querySelector(".inbox-slide")) return;
       const k = e.key.toLowerCase();
       if (k === "j") { e.preventDefault(); step(1); }
       else if (k === "k") { e.preventDefault(); step(-1); }

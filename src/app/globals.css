@@ -173,3 +173,8 @@ textarea:focus-visible,
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* A task opened from the Inbox slides in from the right (TaskDrawer slideOver). */
+@keyframes inbox-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.inbox-slide { animation: inbox-slide-in 0.22s ease-out; }
+@media (prefers-reduced-motion: reduce) { .inbox-slide { animation: none; } }
