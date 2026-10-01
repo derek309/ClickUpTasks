@@ -159,7 +159,41 @@ export async function readReplyHeaders(mailbox: string, find: { gmailMessageId?:
   return null;
 }
 
-export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean; rfc822: string };
+export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean; rfc822: string; attachments?: GmailFile[] };
+
+/** A file on an email, left in Gmail and fetched when someone opens it
+ *  (api/inbox/attachment), so a photo shows as a preview in the Inbox
+ *  (Derek, 2026-10-01: "show a preview if there are images"). */
+export type GmailFile = { name: string; mimeType: string; bytes: number; gmailAttachmentId: string; inline: boolean };
+
+export function gmailFiles(payload: any): GmailFile[] {
+  const out: GmailFile[] = [];
+  const walk = (part: any) => {
+    if (!part) return;
+    const id = part.body?.attachmentId;
+    if (id && (part.filename || String(part.mimeType ?? "").startsWith("image/"))) {
+      const headers: any[] = part.headers ?? [];
+      const inline = headers.some((x) => x.name?.toLowerCase() === "content-id") && !part.filename;
+      out.push({ name: part.filename || "image", mimeType: part.mimeType || "application/octet-stream", bytes: Number(part.body?.size) || 0, gmailAttachmentId: id, inline });
+    }
+    for (const p of part.parts ?? []) walk(p);
+  };
+  walk(payload);
+  // A signature logo or tracking pixel is not something anyone sent you.
+  return out.filter((f) => !(f.inline && f.bytes < 15_000)).slice(0, 20);
+}
+
+/** One file's bytes from a teammate's Gmail. */
+export async function readGmailAttachment(mailbox: string, gmailMessageId: string, attachmentId: string): Promise<Buffer> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const res = await fetch(`${GMAIL_LIST}/${encodeURIComponent(gmailMessageId)}/attachments/${encodeURIComponent(attachmentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Gmail attachment failed (${res.status})`);
+  const data = String((await res.json())?.data ?? "");
+  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+}
 
 // Walk a Gmail message payload for the best text body — prefer text/plain,
 // fall back to the first text/html (stripped), then the snippet.
@@ -326,12 +360,13 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
       auto,
       rfc822: h("message-id"),
+      attachments: gmailFiles(m.payload),
     });
   }
   return out;
 }
 
-export type SentEmail = { gmailId: string; threadId: string; toEmails: string[]; subject: string; body: string; internalDate: string; rfc822: string };
+export type SentEmail = { gmailId: string; threadId: string; toEmails: string[]; subject: string; body: string; internalDate: string; rfc822: string; attachments?: GmailFile[] };
 
 // Read recent SENT email for a teammate (same DWD impersonation/scope as
 // readInboundGmail) — a reply they sent directly from their own Gmail
@@ -372,6 +407,7 @@ export async function readSentGmail(userEmail: string, query: string, max = 25):
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
       rfc822: h("message-id"),
+      attachments: gmailFiles(m.payload),
     });
   }
   return out;

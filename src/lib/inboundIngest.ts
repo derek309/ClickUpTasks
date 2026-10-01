@@ -14,6 +14,18 @@ import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
+import type { GmailFile } from "@/lib/googleMail";
+
+/** An email's files as the row's attachments: each stays in Gmail and is
+ *  fetched when opened (api/inbox/attachment), so a photo can be previewed. */
+export function gmailFilesToAttachments(files: GmailFile[] | undefined) {
+  return (files ?? []).map((f) => ({
+    id: "at_gm_" + f.gmailAttachmentId.slice(-24), name: f.name,
+    kind: f.mimeType.startsWith("image/") ? "image" : f.mimeType === "application/pdf" ? "pdf" : /sheet|excel|csv/.test(f.mimeType) ? "sheet" : "doc",
+    size: f.bytes >= 1_000_000 ? `${(f.bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(f.bytes / 1000))} KB`,
+    gmailAttachmentId: f.gmailAttachmentId, mimeType: f.mimeType,
+  }));
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -296,7 +308,7 @@ export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
   subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
   /** Whose Gmail it came into, for that person's Inbox. */
-  mailboxMemberId?: string | null; fromName?: string | null; fromAddress?: string | null;
+  mailboxMemberId?: string | null; fromName?: string | null; fromAddress?: string | null; files?: GmailFile[];
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
@@ -316,6 +328,7 @@ export async function ingestInboundMessage(opts: {
       ...(opts.at ? { created_at: opts.at } : {}),
       ...(opts.mailboxMemberId ? { mailbox_member_id: opts.mailboxMemberId } : {}),
       ...(opts.fromAddress ? { peer_name: opts.fromName || null, peer_address: opts.fromAddress } : {}),
+      ...(opts.files?.length ? { attachments: gmailFilesToAttachments(opts.files) } : {}),
     });
     if (error) {
       // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
@@ -381,7 +394,7 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 export async function ingestOutboundMessage(opts: {
   contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; createdBy: string; at?: string;
   /** Who it went to, for the Inbox row. */
-  toAddress?: string | null;
+  toAddress?: string | null; files?: GmailFile[];
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
@@ -402,6 +415,7 @@ export async function ingestOutboundMessage(opts: {
     ...(opts.at ? { created_at: opts.at } : {}),
     mailbox_member_id: opts.createdBy,
     ...(opts.toAddress ? { peer_address: opts.toAddress } : {}),
+    ...(opts.files?.length ? { attachments: gmailFilesToAttachments(opts.files) } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure
   await closeAnsweredReplyTask(taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
@@ -418,6 +432,7 @@ export async function ingestStrangerEmail(opts: {
   mailboxMemberId: string; direction: "inbound" | "outbound";
   peerName?: string | null; peerAddress: string;
   subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
+  files?: GmailFile[];
 }): Promise<boolean> {
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
   if (dupe && dupe.length > 0) return false;
@@ -437,6 +452,7 @@ export async function ingestStrangerEmail(opts: {
     created_by: opts.direction === "outbound" ? opts.mailboxMemberId : null,
     mailbox_member_id: opts.mailboxMemberId, peer_name: opts.peerName || null, peer_address: opts.peerAddress.toLowerCase(),
     read: opts.direction === "outbound",
+    attachments: gmailFilesToAttachments(opts.files),
     ...(opts.at ? { created_at: opts.at } : {}),
   });
   return !error;

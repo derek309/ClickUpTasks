@@ -710,6 +710,9 @@ export interface Attachment {
   kind: "pdf" | "image" | "doc" | "sheet" | "link";
   size: string;
   path?: string; // Supabase Storage object path; absent = metadata-only (not stored)
+  /** A file left on an email in Gmail, opened through api/inbox/attachment. */
+  gmailAttachmentId?: string;
+  mimeType?: string;
   url?: string; // for kind "link" — a drive/website URL rather than a stored file
   /** Which Vault folder this attachment has been filed into, if any — see
    * VaultFolder. Unset = "Unfiled". Purely organizational, doesn't move the

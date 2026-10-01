@@ -72,6 +72,17 @@ export const channelOf = (m: any): GhlChannel | null => CHANNEL_BY_TYPE[m?.messa
 // close a reply task or count as a reply, and the timer does not store them.
 export const isAutomated = (m: any) => m?.direction !== "inbound" && (m?.source === "workflow" || m?.source === "campaign" || (m?.direction !== "outbound"));
 
+/** Photos and files on a GoHighLevel message: it gives plain links, which
+ *  the Inbox shows as previews (images) or file chips. */
+export function ghlAttachments(m: any) {
+  const urls: string[] = (Array.isArray(m?.attachments) ? m.attachments : []).filter((u: unknown): u is string => typeof u === "string" && /^https:\/\//.test(u)).slice(0, 20);
+  return urls.map((url, i) => {
+    const name = decodeURIComponent(url.split("?")[0].split("/").pop() || `file-${i + 1}`);
+    const image = /\.(jpe?g|png|gif|webp|heic)$/i.test(name);
+    return { id: `at_ghl_${String(m.id).slice(-12)}_${i}`, name, kind: image ? "image" : /\.pdf$/i.test(name) ? "pdf" : "doc", size: "", url, ...(image ? { mimeType: "image/*" } : {}) };
+  });
+}
+
 export type PullOpts = {
   contactId: string;
   /** The client rows are filed under (the tracked client, or the sub-account). */
@@ -230,6 +241,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
         ghl_conversation_id: f.conv,
         created_by: null,
         created_at: new Date(f.at).toISOString(),
+        attachments: ghlAttachments(f.m),
         // A task already bound to this conversation wins over the open
         // Conversation task (unless it is a reply task that closed itself).
         // With reply tasks off, only a conversation already linked to a task.
@@ -365,6 +377,7 @@ export async function pullStrangerConversation(o: {
         peer_name: conv.fullName || conv.contactName || null,
         peer_address: conv.phone || conv.email || null,
         read: m.direction !== "inbound",
+        attachments: ghlAttachments(m),
       });
     }
     const nextPage = Array.isArray(container) ? json?.nextPage : container?.nextPage;

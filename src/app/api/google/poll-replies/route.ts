@@ -103,7 +103,7 @@ async function run(req: NextRequest) {
             ghlContactId: contact.ghl_contact_id ?? null,
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
-            mailboxMemberId: memberId, fromName: em.fromName || null, fromAddress: em.fromEmail,
+            mailboxMemberId: memberId, fromName: em.fromName || null, fromAddress: em.fromEmail, files: em.attachments,
           });
           if (did) ingested++;
         } catch (e) {
@@ -121,6 +121,7 @@ async function run(req: NextRequest) {
           if (await ingestStrangerEmail({
             mailboxMemberId: memberId, direction: "inbound", peerName: em.fromName || null, peerAddress: em.fromEmail,
             subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+            files: em.attachments,
           })) strangers++;
         } catch (e) {
           errors.push(`stranger ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
@@ -154,6 +155,7 @@ async function run(req: NextRequest) {
             if (await ingestStrangerEmail({
               mailboxMemberId: createdBy, direction: "outbound", peerAddress: em.toEmails[0] ?? "",
               subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+              files: em.attachments,
             })) strangerReplies++;
           } catch (e) {
             errors.push(`stranger sent ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
@@ -166,7 +168,7 @@ async function run(req: NextRequest) {
             contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, createdBy, at: em.internalDate,
-            toAddress: em.toEmails[0] ?? null,
+            toAddress: em.toEmails[0] ?? null, files: em.attachments,
           });
           if (did) sentIngested++;
         } catch (e) {
