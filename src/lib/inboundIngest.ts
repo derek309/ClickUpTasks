@@ -314,7 +314,11 @@ export async function ingestInboundMessage(opts: {
   const { channel, subject, body } = opts;
   if (opts.gmailMessageId) {
     const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
-    if (dupe && dupe.length > 0) return false;
+    if (dupe && dupe.length > 0) {
+      // Stored before the Inbox: say whose mailbox it is in, so it shows there.
+      if (opts.mailboxMemberId) await fillInboxFields(dupe[0].id as string, opts.mailboxMemberId, opts.fromAddress ? { peer_name: opts.fromName || null, peer_address: opts.fromAddress } : {}, opts.files);
+      return false;
+    }
   }
   // GoHighLevel's copy got here first: that row becomes this message, and the
   // task and notification below still happen, since the pull leaves emails to
@@ -398,7 +402,10 @@ export async function ingestOutboundMessage(opts: {
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
-  if (dupe && dupe.length > 0) return false;
+  if (dupe && dupe.length > 0) {
+    await fillInboxFields(dupe[0].id as string, opts.createdBy, opts.toAddress ? { peer_address: opts.toAddress } : {}, opts.files);
+    return false;
+  }
   if (await isDuplicateOutboundBody(contact.id, opts.body, opts.at ?? new Date().toISOString())) return false;
   const taskId = (await resolveTaskForThread(contact.id, opts.gmailThreadId)) ?? (await findOpenConversationTask(contact.id));
   // Already stored from GoHighLevel: pair with it rather than add a twin.
@@ -420,6 +427,19 @@ export async function ingestOutboundMessage(opts: {
   if (error) return false; // unique-index hit (already ingested) — not a real failure
   await closeAnsweredReplyTask(taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
   return true;
+}
+
+// A row stored before the Inbox existed gets its mailbox (and who the other
+// person is, and its files) the next time the Gmail poll sees it. Only blanks
+// are filled: a row that already has a mailbox keeps it.
+async function fillInboxFields(id: string, mailboxMemberId: string, peer: Record<string, string | null>, files?: GmailFile[]) {
+  const { data } = await supabaseAdmin.from("messages")
+    .update({ mailbox_member_id: mailboxMemberId, ...peer })
+    .eq("id", id).is("mailbox_member_id", null).select("id");
+  // Files only where the row has none: one sent from the app keeps its own.
+  if (data?.length && files?.length) {
+    await supabaseAdmin.from("messages").update({ attachments: gmailFilesToAttachments(files) }).eq("id", id).eq("attachments", "[]");
+  }
 }
 
 // An email to or from someone who is not a contact yet, for the Inbox of the

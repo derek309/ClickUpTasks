@@ -145,3 +145,19 @@ describe("threadKeyOf", () => {
     expect(threadKeyOf(base)).toBe("msg:m1");
   });
 });
+
+describe("an email stored before the Inbox", () => {
+  it("gets its mailbox filled in when the poll sees it again, and is not stored twice", async () => {
+    setup({ dupe: true });
+    const did = await ingestInboundMessage({
+      contact: { id: "abc123", name: "Pam Macias", client_id: "sub_account" }, channel: "email",
+      subject: "Hi", body: "Hello", gmailMessageId: "gm_old", gmailThreadId: "th_old",
+      mailboxMemberId: "u_derek", fromName: "Pam Macias", fromAddress: "pam@example.com",
+    });
+    expect(did).toBe(false);
+    expect(inserts("messages")).toEqual([]);
+    const fill = calls.find((c) => c.table === "messages" && c.op === "update");
+    expect((fill?.payload as any)?.mailbox_member_id).toBe("u_derek");
+    expect(fill?.filters).toContainEqual(["is:mailbox_member_id", null]);
+  });
+});
