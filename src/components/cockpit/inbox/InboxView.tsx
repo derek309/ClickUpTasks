@@ -7,11 +7,11 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Attachment, Message, Task } from "@/lib/data";
+import { splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import SignaturePanel from "../../SignaturePanel";
 import {
-  CHANNEL_ICON, CHANNEL_LABEL, dayGroup, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
+  CHANNEL_ICON, CHANNEL_LABEL, bodyParts, isLinkHeavy, dayGroup, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
   type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
@@ -214,7 +214,9 @@ function Avatar({ t, size = 40 }: { t: InboxThread; size?: number }) {
 }
 
 function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: InboxThread; p: InboxViewProps; active: boolean; checked: boolean; draft: boolean; where: string | null; onCheck: (v: boolean) => void; onOpen: () => void }) {
-  const preview = (t.latest.body || "").replace(/\s+/g, " ").trim();
+  // Words first: links in the preview are just noise.
+  const preview = bodyParts(splitQuotedEmail(t.latest.body || "").visible || t.latest.body || "")
+    .map((x) => ("text" in x ? x.text : "")).join(" ").replace(/\s+/g, " ").replace(/\[\s*\]/g, "").trim();
   const client = p.clientName(t.clientId);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
   return (
@@ -362,9 +364,40 @@ function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProp
         {m.channel !== t.channel && <span className="text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</span>}
         {(m.cc?.length ?? 0) > 0 && <span className="text-[14px] text-muted">CC {m.cc.join(", ")}</span>}
       </div>
-      <p className="whitespace-pre-wrap break-words leading-relaxed">{m.body || <span className="text-muted">(no text)</span>}</p>
+      <EmailBody body={m.body} />
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
     </div>
+  );
+}
+
+// What the person wrote, readable: tracking links show as their website,
+// earlier messages quoted underneath fold away, and the email exactly as it
+// came is one click off (Derek, 2026-10-01: "emails that look like all links").
+function EmailBody({ body }: { body: string }) {
+  const [original, setOriginal] = useState(false);
+  const [quoted, setQuoted] = useState(false);
+  const text = useMemo(() => tidyEmailText(body || ""), [body]);
+  const split = useMemo(() => splitQuotedEmail(text), [text]);
+  if (!text) return <p className="text-muted">(no text)</p>;
+  if (original) return (
+    <>
+      <p className="whitespace-pre-wrap break-all font-mono text-[14px] leading-relaxed">{body}</p>
+      <button onClick={() => setOriginal(false)} className="mt-2 font-semibold text-accent hover:underline">Show it tidied</button>
+    </>
+  );
+  const shown = quoted ? text : split.visible || text;
+  return (
+    <>
+      <p className="whitespace-pre-wrap break-words leading-relaxed">
+        {bodyParts(shown).map((part, i) => "url" in part
+          ? <a key={i} href={part.url} target="_blank" rel="noopener noreferrer nofollow" title={part.url} className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-accent-soft px-1.5 py-0.5 align-baseline text-[15px] font-semibold text-accent hover:underline">🔗 {part.label}</a>
+          : <span key={i}>{part.text}</span>)}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-4">
+        {split.quoted && split.visible && <button onClick={() => setQuoted(!quoted)} className="font-semibold text-accent hover:underline">{quoted ? "Hide earlier messages" : "Show earlier messages"}</button>}
+        {isLinkHeavy(text) && <button onClick={() => setOriginal(true)} className="font-semibold text-muted hover:underline">Show original</button>}
+      </div>
+    </>
   );
 }
 

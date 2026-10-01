@@ -151,3 +151,41 @@ export const CHANNEL_LABEL: Record<MessageChannel, string> = {
 export const CHANNEL_ICON: Record<MessageChannel, string> = {
   email: "✉️", sms: "💬", call: "📞", chat: "🗂️", fb: "ⓕ", ig: "📸", web: "🌐", gbp: "🅶",
 };
+
+// ── Reading an email ──────────────────────────────────────────────────────
+// An HTML email flattened to text is mostly tracking links, each hundreds of
+// characters long (Derek, 2026-10-01: "emails that look like all links"). A
+// link shows as its website instead, and runs of the same link collapse.
+export type BodyPart = { text: string } | { url: string; label: string };
+const URL_RE = /\[?<?(https?:\/\/[^\s<>"\]]+)>?\]?/g;
+
+export function linkLabel(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "link"; }
+}
+
+export function bodyParts(text: string): BodyPart[] {
+  const out: BodyPart[] = [];
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push({ text: text.slice(last, at) });
+    const url = m[1].replace(/[),.;:!?]+$/, "");
+    // Punctuation after a link belongs to the sentence, not the link.
+    const tail = m[1].length - url.length;
+    const prev = out[out.length - 1];
+    const label = linkLabel(url);
+    // The same site twice in a row, with only space between: once is enough.
+    const before = out[out.length - 2];
+    if (!(prev && "text" in prev && !prev.text.trim() && before && "url" in before && before.label === label)) out.push({ url, label });
+    else out.pop();
+    last = at + m[0].length - (m[0].endsWith(m[1]) ? tail : 0);
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/** True when an email is mostly links, so "Show original" is worth offering. */
+export function isLinkHeavy(text: string): boolean {
+  const urls = [...text.matchAll(URL_RE)].reduce((n, m) => n + m[0].length, 0);
+  return urls > 200 && urls > text.length * 0.25;
+}

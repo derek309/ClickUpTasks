@@ -90,3 +90,14 @@ describe("Delete", () => {
     expect(inFolder(t, "email", none)).toBe(false);
   });
 });
+
+describe("reading an email full of links", () => {
+  it("shows each link as its website, and collapses repeats", async () => {
+    const { bodyParts } = await import("./inboxModel");
+    const parts = bodyParts("Hi [https://email.email.clickuplocal.com/c/eJx0" + "x".repeat(400) + "] there https://www.kp.org/a?b=1 https://www.kp.org/c, bye");
+    expect(parts).toEqual([
+      { text: "Hi " }, { url: "https://email.email.clickuplocal.com/c/eJx0" + "x".repeat(400), label: "email.email.clickuplocal.com" },
+      { text: " there " }, { url: "https://www.kp.org/a?b=1", label: "kp.org" }, { text: ", bye" },
+    ]);
+  });
+});
