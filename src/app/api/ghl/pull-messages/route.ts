@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { createLocator } from "@/lib/ghlLocate";
-import { pullContactConversations } from "@/lib/ghlPull";
+import { pullContactConversations, pullStrangerConversation, ghlUsersToMembers, ghlConversationRow } from "@/lib/ghlPull";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { isRealGhlId } from "@/lib/ghlMatch";
 
@@ -52,12 +52,20 @@ async function run(req: NextRequest, days: number) {
   const rejectedTokens: string[] = [];
   // ghl contact id → location it was found in.
   const work = new Map<string, string>();
+  // Every recent conversation, for the Inbox: who it is assigned to, and the
+  // ones whose person is not a contact yet (pulled on their own below).
+  const convRows: ReturnType<typeof ghlConversationRow>[] = [];
+  const convsByContact = new Map<string, { conv: any; token: string }[]>();
+  const { data: team } = await supabaseAdmin.from("profiles").select("email, member_id");
+  const memberByEmail = new Map<string, string>();
+  for (const p of team ?? []) if (p.email && p.member_id) memberByEmail.set(String(p.email).toLowerCase(), p.member_id as string);
 
   // 1. Recent conversations, newest first, per sub-account.
   for (const locationId of await configuredLocations()) {
     const token = await tokenForLocation(locationId);
     if (!token) continue;
     const headers = { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" };
+    const members = await ghlUsersToMembers(locationId, token, memberByEmail);
     let startAfterDate: number | undefined;
     for (let page = 0; page < 5; page++) {
       const q = new URLSearchParams({ locationId, sortBy: "last_message_date", sort: "desc", limit: "100" });
@@ -77,6 +85,10 @@ async function run(req: NextRequest, days: number) {
         const last = Number(c?.lastMessageDate);
         if (!Number.isFinite(last) || last < sinceMs) { reachedOld = true; continue; }
         if (c?.contactId && !work.has(c.contactId)) work.set(c.contactId, locationId);
+        if (c?.id) {
+          convRows.push(ghlConversationRow(c, locationId, members));
+          if (c?.contactId) convsByContact.set(c.contactId, [...(convsByContact.get(c.contactId) ?? []), { conv: c, token }]);
+        }
       }
       if (reachedOld || convs.length < 100) break;
       startAfterDate = Number(convs[convs.length - 1]?.lastMessageDate) || undefined;
@@ -116,7 +128,24 @@ async function run(req: NextRequest, days: number) {
     }
   }
 
-  let contacts = 0, stamped = 0, inserted = 0, tasksRaised = 0, held = 0, left = 0;
+  // Who each conversation belongs to, for the Inbox.
+  for (let i = 0; i < convRows.length; i += 200) {
+    const { error } = await supabaseAdmin.from("ghl_conversations").upsert(convRows.slice(i, i + 200), { onConflict: "id" });
+    if (error) { errors.push(`conversations: ${error.message}`); break; }
+  }
+
+  let contacts = 0, stamped = 0, inserted = 0, tasksRaised = 0, held = 0, left = 0, strangers = 0;
+  // People who are not contacts yet: their conversations go to the Inbox only.
+  for (const ghlContactId of ghlIds.filter((g) => !byGhl.has(g))) {
+    if (Date.now() - started > (maxDuration - 40) * 1000) { left++; continue; }
+    for (const { conv, token } of convsByContact.get(ghlContactId) ?? []) {
+      try {
+        strangers += await pullStrangerConversation({ conv, token, sinceMs });
+      } catch (e) {
+        errors.push(`stranger ${conv.id}: ${e instanceof Error ? e.message : "pull failed"}`);
+      }
+    }
+  }
   for (const [ghlContactId, locationId] of work) {
     const c = byGhl.get(ghlContactId);
     if (!c) continue;
@@ -134,7 +163,7 @@ async function run(req: NextRequest, days: number) {
   }
 
   const out = {
-    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left,
+    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers,
     unknownInGhl, noGhlId, notFound,
     ...(rejectedTokens.length ? { rejectedTokens } : {}),
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),

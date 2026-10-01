@@ -150,7 +150,8 @@ export const rowToTaskAction = (r: any): TaskAction => ({
 });
 
 export const rowToMessage = (r: any): Message => ({
-  id: r.id, contactId: r.contact_id, clientId: r.client_id, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
+  id: r.id, contactId: r.contact_id ?? "", clientId: r.client_id ?? "",
+  mailboxMemberId: r.mailbox_member_id ?? null, peerName: r.peer_name ?? null, peerAddress: r.peer_address ?? null, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, ghlConversationId: r.ghl_conversation_id ?? null, gmailMessageId: r.gmail_message_id ?? null, gmailThreadId: r.gmail_thread_id ?? null, rfc822MessageId: r.rfc822_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],
@@ -383,11 +384,13 @@ export async function fetchAll(since?: SyncMarks) {
     fetchAllRows("client_notes", "created_at", false, false, changed("client_notes") ?? undefined),
     // The last 60 days, and anything unread whatever its age so the unread
     // markers stay right. Every message for every client was 4 MB.
+    // Client messages only: an Inbox email from someone who is not a contact
+    // yet has no client, and the Inbox loads its own (supabase/inbox.sql).
     changed("messages")
-      ? fetchAllRows("messages", "created_at", true, false, changed("messages")!)
+      ? fetchAllRows("messages", "created_at", true, false, (q) => changed("messages")!(q).not("client_id", "is", null))
       : eitherOf(
-        fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince)),
-        fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false)),
+        fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince).not("client_id", "is", null)),
+        fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false).not("client_id", "is", null)),
       ),
     fetchAllRows("task_templates", "created_at"),
     fetchAllRows("vault_folders", "created_at"),

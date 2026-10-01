@@ -528,7 +528,9 @@ export function normalizeState(state: string): string {
   return (US_STATE_ABBR[s] ?? state.trim()).toUpperCase();
 }
 
-export type MessageChannel = "email" | "sms" | "call" | "chat";
+/** fb, ig, web (website chat) and gbp (Google Business) come from GoHighLevel's
+ *  other inboxes and are shown in the Inbox (supabase/inbox.sql). */
+export type MessageChannel = "email" | "sms" | "call" | "chat" | "fb" | "ig" | "web" | "gbp";
 export type MessageDirection = "outbound" | "inbound";
 
 /** A single email/SMS with a Contact, sent or received via GoHighLevel's
@@ -578,6 +580,12 @@ export interface Message {
   attachments: Attachment[];
   cc: string[];  // email addresses — email channel only
   bcc: string[];
+  /** Whose Gmail this came into (roster id). Null for GoHighLevel and portal chat. */
+  mailboxMemberId?: string | null;
+  /** The other person, stored on the row so a stranger's message (no contact
+   *  yet, contactId "") still says who it is from. */
+  peerName?: string | null;
+  peerAddress?: string | null;
 }
 
 /** GoHighLevel is the record of every client conversation (Derek,

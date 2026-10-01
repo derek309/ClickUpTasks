@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
-import { ingestInboundMessage, ingestOutboundMessage } from "@/lib/inboundIngest";
+import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -60,11 +60,11 @@ async function run(req: NextRequest) {
   const query = "in:inbox category:primary newer_than:2d -from:me";
   const sentQuery = "in:sent newer_than:2d";
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
-  let sentScanned = 0, sentMatched = 0, sentIngested = 0;
+  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0;
   const errors: string[] = [];
-  const unmatchedRows: any[] = [];
 
   for (const mailbox of mailboxes) {
+    const memberId = memberIdByMailbox.get(mailbox) ?? null;
     let emails;
     try {
       emails = await readInboundGmail(mailbox, query);
@@ -103,19 +103,28 @@ async function run(req: NextRequest) {
             ghlContactId: contact.ghl_contact_id ?? null,
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+            mailboxMemberId: memberId, fromName: em.fromName || null, fromAddress: em.fromEmail,
           });
           if (did) ingested++;
         } catch (e) {
           errors.push(`ingest ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
         }
       } else {
-        // Not in the system → surface in the Inbox so it's not lost; the team
-        // can read it and add them as a client or respond. But skip obvious
-        // automated/bulk mail (newsletters, no-reply, notifications) — only
-        // real person-to-person unknown email is worth surfacing.
+        // Not a contact yet → into this teammate's Inbox as a stranger, so it
+        // is not lost; from there they can answer it, add the person or link
+        // it to a task. Automated mail (newsletters, no-reply, notifications)
+        // stays in Gmail: people, not robots (Derek, 2026-10-01).
         if (em.auto) { skippedAuto++; continue; }
         unmatched++;
-        unmatchedRows.push({ id: em.gmailId, from_email: em.fromEmail, from_name: em.fromName || null, subject: em.subject || null, body: em.body || null, at: em.internalDate });
+        if (!memberId) continue;
+        try {
+          if (await ingestStrangerEmail({
+            mailboxMemberId: memberId, direction: "inbound", peerName: em.fromName || null, peerAddress: em.fromEmail,
+            subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+          })) strangers++;
+        } catch (e) {
+          errors.push(`stranger ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+        }
       }
     }
 
@@ -133,16 +142,31 @@ async function run(req: NextRequest) {
         errors.push(`${mailbox} (sent): ${e instanceof Error ? e.message : "read failed"}`);
         sent = [];
       }
+      const strangerThreads = await strangerThreadsIn(createdBy, sent.map((em) => em.threadId));
       for (const em of sent) {
         sentScanned++;
         const contact = em.toEmails.map((e) => byEmail.get(e)).find(Boolean);
-        if (!contact) continue;
+        if (!contact) {
+          // The teammate answering a stranger's email from Gmail: it joins
+          // that conversation in their Inbox. Mail to anyone else is theirs.
+          if (!em.threadId || !strangerThreads.has(em.threadId)) continue;
+          try {
+            if (await ingestStrangerEmail({
+              mailboxMemberId: createdBy, direction: "outbound", peerAddress: em.toEmails[0] ?? "",
+              subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+            })) strangerReplies++;
+          } catch (e) {
+            errors.push(`stranger sent ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+          }
+          continue;
+        }
         sentMatched++;
         try {
           const did = await ingestOutboundMessage({
             contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, createdBy, at: em.internalDate,
+            toAddress: em.toEmails[0] ?? null,
           });
           if (did) sentIngested++;
         } catch (e) {
@@ -152,20 +176,9 @@ async function run(req: NextRequest) {
     }
   }
 
-  // Park unknown-but-real senders for triage in the Inbox (read → add as client
-  // / dismiss). Deduped on the Gmail id so the re-poll never re-adds one; a row
-  // deleted when acted on won't reappear because the same message stays out of
-  // newer_than:2d before long, and add-as-client makes them a known contact.
-  let surfaced = 0;
-  if (unmatchedRows.length) {
-    const { error, count } = await supabaseAdmin.from("inbound_unmatched").upsert(unmatchedRows, { onConflict: "id", ignoreDuplicates: true, count: "exact" });
-    if (error) errors.push(`unmatched park: ${error.message}`);
-    else surfaced = count ?? 0;
-  }
-
   return NextResponse.json({
-    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, surfaced, skippedAuto, mentionReplies,
-    sentScanned, sentMatched, sentIngested,
+    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, skippedAuto, mentionReplies,
+    sentScanned, sentMatched, sentIngested, strangerReplies,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
 }

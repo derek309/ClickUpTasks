@@ -13,6 +13,7 @@ import { APP_URL } from "@/lib/appUrl";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch";
+import { raiseReplyTasks } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -265,7 +266,7 @@ export async function sendInboundReplyEmail(opts: {
 // Pair with that row instead of storing the email twice: the Gmail ids are
 // stamped on it, which is the same pairing the pull does from its side.
 async function claimGhlCopy(contactId: string, direction: "inbound" | "outbound", opts: {
-  subject?: string | null; body: string; at?: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null;
+  subject?: string | null; body: string; at?: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null; mailboxMemberId?: string | null;
 }): Promise<{ id: string; task_id: string | null } | null> {
   if (!opts.gmailMessageId) return null;
   const at = opts.at ? new Date(opts.at).getTime() : Date.now();
@@ -282,7 +283,7 @@ async function claimGhlCopy(contactId: string, direction: "inbound" | "outbound"
   );
   if (!id) return null;
   const { data: updated, error } = await supabaseAdmin
-    .from("messages").update({ gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null })
+    .from("messages").update({ gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, ...(opts.mailboxMemberId ? { mailbox_member_id: opts.mailboxMemberId } : {}) })
     .eq("id", id).is("gmail_message_id", null).select("id, task_id");
   const row = (updated as { id: string; task_id: string | null }[] | null)?.[0];
   return error || !row ? null : row;
@@ -294,6 +295,8 @@ async function claimGhlCopy(contactId: string, direction: "inbound" | "outbound"
 export async function ingestInboundMessage(opts: {
   contact: Contact; ghlContactId?: string | null; channel: "email" | "sms";
   subject?: string | null; body: string; gmailMessageId?: string | null; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
+  /** Whose Gmail it came into, for that person's Inbox. */
+  mailboxMemberId?: string | null; fromName?: string | null; fromAddress?: string | null;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { channel, subject, body } = opts;
@@ -304,13 +307,15 @@ export async function ingestInboundMessage(opts: {
   // GoHighLevel's copy got here first: that row becomes this message, and the
   // task and notification below still happen, since the pull leaves emails to
   // this path and raised nothing for it.
-  const ghlCopy = channel === "email" ? await claimGhlCopy(contact.id, "inbound", { subject, body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822 }) : null;
+  const ghlCopy = channel === "email" ? await claimGhlCopy(contact.id, "inbound", { subject, body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822, mailboxMemberId: opts.mailboxMemberId }) : null;
   const messageId = ghlCopy?.id ?? "msg_" + crypto.randomUUID();
   if (!ghlCopy) {
     const { error } = await supabaseAdmin.from("messages").insert({
       id: messageId, contact_id: contact.id, client_id: contact.client_id, channel, direction: "inbound",
       subject: subject?.trim() || null, body, gmail_message_id: opts.gmailMessageId ?? null, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: null,
       ...(opts.at ? { created_at: opts.at } : {}),
+      ...(opts.mailboxMemberId ? { mailbox_member_id: opts.mailboxMemberId } : {}),
+      ...(opts.fromAddress ? { peer_name: opts.fromName || null, peer_address: opts.fromAddress } : {}),
     });
     if (error) {
       // A unique-index hit (e.g. gmail_message_id) means it was already ingested.
@@ -323,9 +328,12 @@ export async function ingestInboundMessage(opts: {
   // generic per-contact Conversation task.
   let taskId = await resolveTaskForThread(contact.id, opts.gmailThreadId);
   if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific(), updated_by: null }).eq("id", taskId);
-  else taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
+  else if (raiseReplyTasks()) taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   await clientAnsweredOnTask(taskId, "reply");
+  // With reply tasks off, a message on no task is news only in the Inbox:
+  // no bell and no email about it.
+  if (!taskId && !raiseReplyTasks()) return true;
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, 80);
   const text = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
@@ -372,6 +380,8 @@ export async function isDuplicateOutboundBody(contactId: string, body: string, d
 // it answers, which closes (see closeAnsweredReplyTask).
 export async function ingestOutboundMessage(opts: {
   contact: Contact; channel: "email"; subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; createdBy: string; at?: string;
+  /** Who it went to, for the Inbox row. */
+  toAddress?: string | null;
 }): Promise<boolean> {
   const contact = { ...opts.contact, client_id: await resolveOrPromoteTrackedClient(opts.contact) };
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
@@ -379,7 +389,7 @@ export async function ingestOutboundMessage(opts: {
   if (await isDuplicateOutboundBody(contact.id, opts.body, opts.at ?? new Date().toISOString())) return false;
   const taskId = (await resolveTaskForThread(contact.id, opts.gmailThreadId)) ?? (await findOpenConversationTask(contact.id));
   // Already stored from GoHighLevel: pair with it rather than add a twin.
-  const ghlCopy = await claimGhlCopy(contact.id, "outbound", { subject: opts.subject, body: opts.body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822 });
+  const ghlCopy = await claimGhlCopy(contact.id, "outbound", { subject: opts.subject, body: opts.body, at: opts.at, gmailMessageId: opts.gmailMessageId, gmailThreadId: opts.gmailThreadId, rfc822: opts.rfc822, mailboxMemberId: opts.createdBy });
   if (ghlCopy) {
     if (!ghlCopy.task_id && taskId) await supabaseAdmin.from("messages").update({ task_id: taskId, created_by: opts.createdBy }).eq("id", ghlCopy.id);
     await closeAnsweredReplyTask(ghlCopy.task_id ?? taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
@@ -390,8 +400,54 @@ export async function ingestOutboundMessage(opts: {
     channel: opts.channel, direction: "outbound", task_id: taskId,
     subject: opts.subject?.trim() || null, body: opts.body, gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null, created_by: opts.createdBy,
     ...(opts.at ? { created_at: opts.at } : {}),
+    mailbox_member_id: opts.createdBy,
+    ...(opts.toAddress ? { peer_address: opts.toAddress } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure
   await closeAnsweredReplyTask(taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
   return true;
+}
+
+// An email to or from someone who is not a contact yet, for the Inbox of the
+// teammate whose Gmail it is in (Derek, 2026-10-01: strangers come in too,
+// robots do not; the caller skips automated mail). It has no client and no
+// task until someone adds the person or links the conversation, and it rings
+// nothing: the Inbox itself is the alert. Deduped on the Gmail id. Returns
+// true when a row was stored.
+export async function ingestStrangerEmail(opts: {
+  mailboxMemberId: string; direction: "inbound" | "outbound";
+  peerName?: string | null; peerAddress: string;
+  subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
+}): Promise<boolean> {
+  const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
+  if (dupe && dupe.length > 0) return false;
+  // A conversation someone already linked to a task keeps collecting there.
+  let taskId: string | null = null;
+  if (opts.gmailThreadId) {
+    const { data } = await supabaseAdmin.from("messages").select("task_id")
+      .eq("gmail_thread_id", opts.gmailThreadId).eq("mailbox_member_id", opts.mailboxMemberId)
+      .not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
+    taskId = (data?.[0]?.task_id as string | undefined) ?? null;
+  }
+  const { error } = await supabaseAdmin.from("messages").insert({
+    id: "msg_" + crypto.randomUUID(), contact_id: null, client_id: null, task_id: taskId,
+    channel: "email", direction: opts.direction,
+    subject: opts.subject?.trim() || null, body: opts.body,
+    gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null,
+    created_by: opts.direction === "outbound" ? opts.mailboxMemberId : null,
+    mailbox_member_id: opts.mailboxMemberId, peer_name: opts.peerName || null, peer_address: opts.peerAddress.toLowerCase(),
+    read: opts.direction === "outbound",
+    ...(opts.at ? { created_at: opts.at } : {}),
+  });
+  return !error;
+}
+
+/** Gmail threads in a mailbox that already hold a stranger's email: the
+ *  teammate's own replies on those threads belong in the Inbox too. */
+export async function strangerThreadsIn(mailboxMemberId: string, threadIds: string[]): Promise<Set<string>> {
+  const ids = [...new Set(threadIds.filter(Boolean))];
+  if (!ids.length) return new Set();
+  const { data } = await supabaseAdmin.from("messages").select("gmail_thread_id")
+    .eq("mailbox_member_id", mailboxMemberId).is("contact_id", null).in("gmail_thread_id", ids);
+  return new Set((data ?? []).map((r: any) => r.gmail_thread_id as string));
 }

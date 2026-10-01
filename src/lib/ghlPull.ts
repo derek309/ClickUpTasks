@@ -23,6 +23,7 @@ import { closeAnsweredReplyTask, isClosedReplyTask, resolveOrPromoteTrackedClien
 import { notifyInbound, sendInboundReplyEmail } from "@/lib/inboundIngest";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { matchGhlToLocal, isRealGhlId, MATCH_WINDOW_MS, type MatchCandidate } from "@/lib/ghlMatch";
+import { raiseReplyTasks } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -54,9 +55,15 @@ export function formatCallBody(m: any): string {
 }
 
 // GHL's real messageType values are "TYPE_SMS"/"TYPE_EMAIL"/"TYPE_CALL"
-// (confirmed against a live conversations/{id}/messages response).
-const channelOf = (m: any): "sms" | "email" | "call" | null =>
-  m?.messageType === "TYPE_SMS" ? "sms" : m?.messageType === "TYPE_EMAIL" ? "email" : m?.messageType === "TYPE_CALL" ? "call" : null;
+// (confirmed against a live conversations/{id}/messages response). Facebook,
+// Instagram, website chat and Google Business messages are GoHighLevel's
+// other inboxes, brought in for the Inbox (Derek, 2026-10-01).
+export type GhlChannel = "sms" | "email" | "call" | "fb" | "ig" | "web" | "gbp";
+const CHANNEL_BY_TYPE: Record<string, GhlChannel> = {
+  TYPE_SMS: "sms", TYPE_EMAIL: "email", TYPE_CALL: "call",
+  TYPE_FACEBOOK: "fb", TYPE_INSTAGRAM: "ig", TYPE_LIVE_CHAT: "web", TYPE_GMB: "gbp",
+};
+export const channelOf = (m: any): GhlChannel | null => CHANNEL_BY_TYPE[m?.messageType as string] ?? null;
 
 // Sent by a GoHighLevel workflow or campaign rather than a person. Counted
 // live 2026-09-30 in the Directory sub-account: of 990 recent messages, 809
@@ -81,7 +88,7 @@ export type PullOpts = {
 };
 export type PullResult = { inserted: number; stamped: number; bound: number; tasksRaised: number; held: number };
 
-type GhlMsg = { m: any; conv: string; channel: "sms" | "email" | "call"; at: number };
+type GhlMsg = { m: any; conv: string; channel: GhlChannel; at: number };
 
 export async function pullContactConversations(o: PullOpts): Promise<PullResult> {
   const now = o.now ?? Date.now();
@@ -225,7 +232,8 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
         created_at: new Date(f.at).toISOString(),
         // A task already bound to this conversation wins over the open
         // Conversation task (unless it is a reply task that closed itself).
-        task_id: convTaskIds.get(f.conv) ?? openTaskId,
+        // With reply tasks off, only a conversation already linked to a task.
+        task_id: convTaskIds.get(f.conv) ?? (raiseReplyTasks() ? openTaskId : null),
       },
     });
   }
@@ -235,7 +243,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
   // outbound, in GoHighLevel or in the app, is newer. Reading two days of
   // history must not raise a task for an exchange that already finished.
   let raise: typeof toInsert = [];
-  if (o.raiseTasks) {
+  if (o.raiseTasks && raiseReplyTasks()) {
     const { data: lastOut } = await supabaseAdmin
       .from("messages").select("created_at").eq("contact_id", o.contactId).eq("direction", "outbound")
       .order("created_at", { ascending: false }).limit(1);
@@ -317,4 +325,100 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
     result.bound += healed?.length ?? 0;
   }
   return result;
+}
+
+// ── People who are not contacts yet ──────────────────────────────────────
+// A GoHighLevel conversation whose contact the app does not know (a Facebook
+// lead, a website chat, a text from a new number) still belongs in the Inbox
+// (Derek, 2026-10-01). Its messages are stored with no contact and no client,
+// keyed on the GoHighLevel conversation, and say who the person is on the row.
+// Email is left to the Gmail poll, which reads every teammate's mail directly.
+// Nothing is raised or rung: the Inbox is the alert.
+export async function pullStrangerConversation(o: {
+  conv: any; token: string; sinceMs: number;
+}): Promise<number> {
+  const headers = { Authorization: `Bearer ${o.token}`, Version: "2021-04-15", Accept: "application/json" };
+  const conv = o.conv;
+  const rows: Record<string, any>[] = [];
+  let lastMessageId: string | undefined;
+  for (let page = 0; page < 3; page++) {
+    const q = new URLSearchParams({ limit: "20" });
+    if (lastMessageId) q.set("lastMessageId", lastMessageId);
+    const res = await fetch(`${API}/conversations/${encodeURIComponent(conv.id)}/messages?${q}`, { headers, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) break;
+    const json = await res.json();
+    const container = json?.messages;
+    const messages: any[] = Array.isArray(container) ? container : (Array.isArray(container?.messages) ? container.messages : []);
+    let older = false;
+    for (const m of messages) {
+      const channel = channelOf(m);
+      const at = m?.dateAdded ? new Date(m.dateAdded).getTime() : NaN;
+      if (!m?.id || !channel || channel === "email" || !Number.isFinite(at)) continue;
+      if (at < o.sinceMs) { older = true; continue; }
+      if (isAutomated(m)) continue;
+      rows.push({
+        id: "msg_ghl_" + m.id, contact_id: null, client_id: null, task_id: null,
+        channel, direction: m.direction === "inbound" ? "inbound" : "outbound",
+        subject: null, body: channel === "call" ? formatCallBody(m) : (m.body ?? ""),
+        ghl_message_id: m.id, ghl_conversation_id: conv.id, created_by: null,
+        created_at: new Date(at).toISOString(),
+        peer_name: conv.fullName || conv.contactName || null,
+        peer_address: conv.phone || conv.email || null,
+        read: m.direction !== "inbound",
+      });
+    }
+    const nextPage = Array.isArray(container) ? json?.nextPage : container?.nextPage;
+    const pageLastId = Array.isArray(container) ? json?.lastMessageId : container?.lastMessageId;
+    if (older || !nextPage || !pageLastId) break;
+    lastMessageId = pageLastId;
+  }
+  if (!rows.length) return 0;
+  // A conversation someone linked to a task keeps collecting there.
+  const { data: linked } = await supabaseAdmin.from("messages").select("task_id")
+    .eq("ghl_conversation_id", conv.id).not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
+  const taskId = (linked?.[0]?.task_id as string | undefined) ?? null;
+  const { data: have } = await supabaseAdmin.from("messages").select("ghl_message_id").in("ghl_message_id", rows.map((r) => r.ghl_message_id));
+  const known = new Set((have ?? []).map((r: any) => r.ghl_message_id as string));
+  const fresh = rows.filter((r) => !known.has(r.ghl_message_id)).map((r) => ({ ...r, task_id: taskId }));
+  if (!fresh.length) return 0;
+  const { error } = await supabaseAdmin.from("messages").insert(fresh);
+  if (error) { console.error("[ghlPull] stranger insert failed", conv.id, error.message); return 0; }
+  return fresh.length;
+}
+
+/** GoHighLevel user id → our roster id, matched by email, for one sub-account.
+ *  Needs users.readonly on the Private Integration; without it every
+ *  conversation reads as unassigned, so it shows for the whole team. */
+export async function ghlUsersToMembers(locationId: string, token: string, memberByEmail: Map<string, string>): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const res = await fetch(`${API}/users/?locationId=${encodeURIComponent(locationId)}`, {
+      headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json" }, signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return out;
+    for (const u of ((await res.json())?.users ?? []) as any[]) {
+      const member = memberByEmail.get(String(u?.email ?? "").toLowerCase());
+      if (u?.id && member) out.set(u.id as string, member);
+    }
+  } catch { /* unassigned for everyone this run */ }
+  return out;
+}
+
+/** The row kept for each conversation: who it is assigned to on our roster
+ *  decides whose Inbox shows it (assigned to you, or to nobody). */
+export function ghlConversationRow(c: any, locationId: string, members: Map<string, string>) {
+  const assigned = typeof c?.assignedTo === "string" && c.assignedTo ? c.assignedTo as string : null;
+  const last = Number(c?.lastMessageDate);
+  return {
+    id: c.id as string, location_id: locationId, ghl_contact_id: c?.contactId ?? null,
+    // Assigned to someone not on our roster (an outside GoHighLevel user):
+    // kept out of everyone's Inbox. Only when the user list loaded, though;
+    // without it nothing can be told apart, so it shows for the whole team.
+    assigned_ghl_user_id: assigned,
+    assigned_member_id: assigned ? members.get(assigned) ?? (members.size ? `ghl:${assigned}` : null) : null,
+    channel_type: c?.type ?? null,
+    contact_name: c?.fullName || c?.contactName || null, phone: c?.phone || null, email: c?.email || null,
+    last_message_at: Number.isFinite(last) ? new Date(last).toISOString() : null,
+    updated_at: new Date().toISOString(),
+  };
 }
