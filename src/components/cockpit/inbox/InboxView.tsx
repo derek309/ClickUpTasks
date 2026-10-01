@@ -228,11 +228,7 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
   return (
     <div onClick={onOpen} className={`grid cursor-pointer grid-cols-[20px_40px_minmax(0,1fr)] items-center gap-3.5 border-b px-5 py-3 ${active ? "bg-accent-soft" : "hover:bg-background/60"}`}
       style={t.unread ? { boxShadow: "inset 3px 0 0 #2563eb" } : undefined}>
-      <span className="flex flex-col items-center gap-1">
-        <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-[18px] w-[18px]" checked={checked} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(e.target.checked)} />
-        <button onClick={(e) => { e.stopPropagation(); p.inbox.star([t.key], !t.starred); }} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
-          className={`text-[18px] leading-none ${t.starred ? "text-[#d97706]" : "text-muted/50 hover:text-[#d97706]"}`}>{t.starred ? "★" : "☆"}</button>
-      </span>
+      <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-[18px] w-[18px]" checked={checked} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(e.target.checked)} />
       <Avatar t={t} />
       <div className="grid min-w-0 gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -241,6 +237,8 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
           <span className={`ml-auto flex shrink-0 items-center gap-1.5 tabular-nums ${t.unread ? "font-bold text-[#2563eb]" : "text-muted"}`}>
             {t.hasFiles && <span title="Has attachments">📎</span>}
             {t.snoozed && t.snoozedUntil ? `⏰ ${shortTime(t.snoozedUntil)}` : shortTime(t.latest.at)}
+            <button onClick={(e) => { e.stopPropagation(); p.inbox.star([t.key], !t.starred); }} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
+              className={`ml-1 text-[20px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "text-muted/50 hover:text-[#d97706]"}`}>{t.starred ? "★" : "☆"}</button>
           </span>
         </div>
         <div className="truncate text-muted">
