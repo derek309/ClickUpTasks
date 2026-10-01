@@ -446,3 +446,45 @@ export async function setGmailThreadLabels(mailbox: string, threadId: string, ch
   });
   if (!res.ok) throw new Error(`Gmail ${change} failed (${res.status})`);
 }
+
+/** An email as it was sent: its HTML, with photos it carries inline
+ *  ("cid:" images) turned into data URIs so they show. Null when it has no
+ *  HTML part (a plain text email). For the Inbox's reading view (Derek,
+ *  2026-10-01: "show it like Gmail"). */
+export async function readGmailHtml(mailbox: string, gmailMessageId: string): Promise<string | null> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const auth = { Authorization: `Bearer ${token}` };
+  const res = await fetch(`${GMAIL_LIST}/${encodeURIComponent(gmailMessageId)}?format=full`, { headers: auth });
+  if (!res.ok) throw new Error(`Gmail read failed (${res.status})`);
+  const m = await res.json();
+  const b64 = (d: string) => Buffer.from(d.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  let html: string | null = null;
+  const inline: { cid: string; mime: string; data?: string; attachmentId?: string; size: number }[] = [];
+  const walk = (part: any) => {
+    if (!part) return;
+    if (!html && part.mimeType === "text/html" && part.body?.data) html = b64(part.body.data).toString("utf8");
+    const cid = (part.headers ?? []).find((h: any) => h.name?.toLowerCase() === "content-id")?.value?.replace(/[<>]/g, "");
+    if (cid && String(part.mimeType ?? "").startsWith("image/")) inline.push({ cid, mime: part.mimeType, data: part.body?.data, attachmentId: part.body?.attachmentId, size: Number(part.body?.size) || 0 });
+    for (const p of part.parts ?? []) walk(p);
+  };
+  walk(m.payload);
+  if (!html) return null;
+  let out: string = html;
+  let budget = 4_000_000;
+  for (const img of inline.slice(0, 12)) {
+    if (img.size > budget) continue;
+    let data = img.data;
+    if (!data && img.attachmentId) {
+      const a = await fetch(`${GMAIL_LIST}/${encodeURIComponent(gmailMessageId)}/attachments/${encodeURIComponent(img.attachmentId)}`, { headers: auth });
+      if (a.ok) data = (await a.json())?.data;
+    }
+    if (!data) continue;
+    budget -= img.size;
+    const uri = `data:${img.mime};base64,${b64(data).toString("base64")}`;
+    out = out.split(`cid:${img.cid}`).join(uri);
+  }
+  return out;
+}

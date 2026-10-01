@@ -375,9 +375,65 @@ function MessageCard({ m, t, p }: { m: Message; t: InboxThread; p: InboxViewProp
         {m.channel !== t.channel && <span className="text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</span>}
         {(m.cc?.length ?? 0) > 0 && <span className="text-[14px] text-muted">CC {m.cc.join(", ")}</span>}
       </div>
-      <EmailBody body={m.body} />
+      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} /> : <EmailBody body={m.body} />}
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
     </div>
+  );
+}
+
+// The email as it was sent, laid out the way Gmail shows it (Derek,
+// 2026-10-01): its own fonts, buttons and photos, with earlier messages
+// quoted underneath folded behind "•••". It sits in a sandboxed frame with
+// scripts off, so nothing in an email can run; links open in a new tab. A
+// plain text email, or one Gmail will not hand over, falls back to the text.
+const HTML_CACHE = new Map<string, string | null>();
+const QUOTE_CSS = ".gmail_quote,.gmail_extra,blockquote,.yahoo_quoted,#appendonsend,#divRplyFwdMsg,#divRplyFwdMsg~*,hr#stopSpelling~*{display:none!important}";
+function EmailHtml({ m }: { m: Message }) {
+  const [html, setHtml] = useState<string | null | undefined>(HTML_CACHE.has(m.id) ? HTML_CACHE.get(m.id) : undefined);
+  const [quoted, setQuoted] = useState(false);
+  const [asText, setAsText] = useState(false);
+  const [height, setHeight] = useState(120);
+  const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    if (HTML_CACHE.has(m.id)) return;
+    let live = true;
+    authedFetch(`/api/inbox/html?message=${encodeURIComponent(m.id)}`)
+      .then((r) => (r.ok ? r.json() : { html: null }))
+      .then((j: { html: string | null }) => {
+        // Belt and braces on top of the sandbox: nothing that runs or submits.
+        const clean = j.html ? j.html.replace(/<(script|iframe|object|embed|form)[\s\S]*?<\/\1>/gi, "").replace(/<(script|iframe|object|embed|meta[^>]*http-equiv)[^>]*>/gi, "") : null;
+        HTML_CACHE.set(m.id, clean);
+        if (live) setHtml(clean);
+      }, () => { HTML_CACHE.set(m.id, null); if (live) setHtml(null); });
+    return () => { live = false; };
+  }, [m.id]);
+  const fit = () => {
+    const doc = frame.current?.contentDocument;
+    if (!doc) return;
+    const size = () => setHeight(Math.min(6000, Math.max(60, doc.documentElement.scrollHeight)));
+    size();
+    doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", size, { once: true }));
+  };
+  if (html === undefined) return <p className="text-muted">Loading the email…</p>;
+  if (html === null || asText) return (
+    <>
+      <EmailBody body={m.body} />
+      {html && <button onClick={() => setAsText(false)} className="mt-2 font-semibold text-accent hover:underline">Show the email</button>}
+    </>
+  );
+  const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg/i.test(html);
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
+  return (
+    <>
+      <div className="overflow-hidden rounded-lg bg-white">
+        <iframe ref={frame} title="Email" srcDoc={doc} onLoad={fit} style={{ height }}
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0" />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-4">
+        {hasQuote && <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide earlier messages" : "Show earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>}
+        <button onClick={() => setAsText(true)} className="font-semibold text-muted hover:underline">Show as text</button>
+      </div>
+    </>
   );
 }
 
