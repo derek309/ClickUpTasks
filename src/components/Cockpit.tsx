@@ -101,6 +101,7 @@ import InboxView from "./cockpit/inbox/InboxView";
 import { useInbox } from "./cockpit/inbox/useInbox";
 import { useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
 import type { InboxThread } from "./cockpit/inbox/inboxModel";
+import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
 
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
@@ -1640,7 +1641,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const inboxNameOf = useCallback((m: Message) => (m.clientId ? clientNames.get(m.clientId) ?? null : null), [clientNames]);
   const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, pushToast });
+  // Task chats in the Inbox: your mentions, comments on your tasks and a
+  // client's review notes, as messages on that task's chat conversation.
+  const inboxTaskNotes = useMemo(() => notifications
+    .filter((n) => n.recipientId === me.id && n.taskId && !/^\d+[a-z] ago$/.test(n.at))
+    .flatMap((n): Message[] => {
+      const kind = inboxKind({ text: n.text, actor_id: n.actorId ?? null });
+      if (kind !== "mention" && kind !== "comment" && kind !== "client_review") return [];
+      const task = tasks.find((t) => t.id === n.taskId);
+      if (!task) return [];
+      const said = latestCommentBy(task.comments, n.actorId ?? null, kind === "client_review");
+      return [{
+        id: `note_${n.id}`, contactId: "", clientId: task.clientId, taskId: task.id, channel: "chat", direction: "inbound",
+        subject: task.title, body: said ? `${n.text}\n\n${said}` : n.text, ghlMessageId: null, createdBy: n.actorId ?? null, at: n.at,
+        read: n.read, attachments: [], cc: [], bcc: [],
+        peerName: kind === "client_review" ? (clientById(task.clientId)?.name ?? "Client") : (userById(n.actorId ?? "")?.name ?? "Teammate"),
+        peerAddress: null,
+      }];
+    }), [notifications, me.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps -- clientById/userById read state already listed
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxTaskNotes, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, pushToast });
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
   const alertedRef = useRef<Set<string> | null>(null);
@@ -2536,7 +2555,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               prefs={inboxPrefs} setPrefs={setInboxPrefs} clientName={(id) => (id ? clientById(id)?.name ?? null : null)}
               tasks={tasks} onOpenTask={(id) => setOpenTaskId(id)} onNewTask={newTaskFromThread}
               onUpload={uploadOneImage} onSignedUrl={(path) => signedUrlForFile(path)}
-              onSendChat={async (t, body) => { if (t.clientId) await sendMessage(t.clientId, "chat", "", body, [], [], [], t.taskId); }}
+              onSendChat={async (t, body) => {
+                // A teammate's note is answered on the task, for the team; a
+                // client's portal chat is answered in the portal.
+                if (t.latest.id.startsWith("note_") && t.latest.peerName !== clientById(t.clientId ?? "")?.name) { if (t.taskId) addComment(t.taskId, body); return; }
+                if (t.clientId) await sendMessage(t.clientId, "chat", "", body, [], [], [], t.taskId);
+              }}
+              clients={workableClients.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name))} canAdmin={canAdmin}
+              contacts={contacts}
               onSchedule={(t, body, at) => (t.clientId && canMessageClient(t.clientId) ? scheduleMessage(t.clientId, t.channel === "email" ? "email" : "sms", t.subject ? (/^re:/i.test(t.subject) ? t.subject : `Re: ${t.subject}`) : "", body, at.toISOString(), [], [], [], t.taskId, undefined, t.messages.find((m) => m.direction === "inbound")?.id ?? null) : Promise.reject(new Error("Send later works on a client's conversation."))) as Promise<void>}
               pushToast={pushToast} />
           </div>

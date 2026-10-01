@@ -7,6 +7,7 @@ import { sentRfc822 } from "@/lib/sendMessageServer";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { plainTextToHtml } from "@/lib/data";
+import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId, peerOf, GHL_SEND_TYPE } from "@/lib/inboxServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,6 +34,8 @@ const cleanList = (l: unknown) => (Array.isArray(l) ? l : []).map((e) => String(
 
 type Body = {
   threadKey?: string | null; channel?: string; to?: string; cc?: string[]; bcc?: string[];
+  /** A new text: the contact to text (their GoHighLevel contact). */
+  contactId?: string;
   subject?: string; body?: string; attachments?: { path: string; name: string }[];
 };
 
@@ -44,6 +47,7 @@ export async function POST(req: NextRequest) {
   const text = (b.body ?? "").trim();
   if (!text) return NextResponse.json({ error: "Write something first." }, { status: 400 });
 
+  if (!b.threadKey && b.channel === "sms") return sendNewText(caller, b, text);
   const ref = b.threadKey ? parseThreadKey(b.threadKey) : null;
   if (b.threadKey && !ref) return NextResponse.json({ error: "Unknown conversation." }, { status: 400 });
   const rows = ref ? await threadRows(ref, caller) : [];
@@ -143,6 +147,9 @@ async function sendGhl(caller: any, b: Body, text: string, rows: any[], conv: an
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
+    // Meta's rule, not ours: a business may only reply on Facebook or
+    // Instagram within 24 hours of the person's last message.
+    if (/24 hours/i.test(t)) return NextResponse.json({ error: `${channel === "ig" ? "Instagram" : "Facebook"} only allows a reply within 24 hours of their last message. Email or text them instead.` }, { status: 409 });
     return NextResponse.json({ error: `GoHighLevel didn't send it (${res.status}). ${t.slice(0, 200)}` }, { status: 502 });
   }
   const json: any = await res.json().catch(() => ({}));
@@ -157,4 +164,44 @@ async function sendGhl(caller: any, b: Body, text: string, rows: any[], conv: an
   const { error } = await supabaseAdmin.from("messages").insert(row);
   if (error) console.error("[inbox/send] stored copy failed", error.message);
   return NextResponse.json({ ok: true, messageId: row.id, threadKey: `ghl:${conv.id}` });
+}
+
+// A new text to any GoHighLevel contact, from New message. Sent from that
+// contact's sub-account number; the reply comes back on the same conversation.
+async function sendNewText(caller: any, b: Body, text: string) {
+  const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, phone, ghl_contact_id, client_id").eq("id", b.contactId ?? "-").maybeSingle();
+  if (!contact?.ghl_contact_id) return NextResponse.json({ error: "Pick a contact from GoHighLevel to text." }, { status: 400 });
+  if (!contact.phone) return NextResponse.json({ error: `${contact.name} has no phone number in GoHighLevel.` }, { status: 400 });
+  const tracked = await resolveTrackedClientId(contact.id as string, (contact.client_id as string | null) ?? "");
+  if (tracked && tracked.startsWith("cl_")) {
+    const denied = await canCallerMessageClient(caller, tracked);
+    if (denied) return NextResponse.json({ error: denied }, { status: 403 });
+  }
+  const { data: sub } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id ?? "-").maybeSingle();
+  const locationId = sub?.ghl_location_id as string | undefined;
+  const token = locationId ? await tokenForLocation(locationId) : null;
+  if (!token) return NextResponse.json({ error: "No GoHighLevel token for that contact's sub-account." }, { status: 501 });
+  const { data: prof } = await supabaseAdmin.from("profiles").select("ghl_user_id").eq("id", caller.id).maybeSingle();
+  const res = await fetch("https://services.leadconnectorhq.com/conversations/messages", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "SMS", contactId: contact.ghl_contact_id, message: text, ...(prof?.ghl_user_id ? { userId: prof.ghl_user_id } : {}) }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    return NextResponse.json({ error: `GoHighLevel didn't send it (${res.status}). ${t.slice(0, 200)}` }, { status: 502 });
+  }
+  const json: any = await res.json().catch(() => ({}));
+  const ghlMessageId: string | null = json?.messageId ?? json?.message?.id ?? null;
+  const convId: string | null = json?.conversationId ?? null;
+  const row = {
+    id: ghlMessageId ? `msg_ghl_${ghlMessageId}` : "msg_" + crypto.randomUUID(),
+    contact_id: contact.id, client_id: tracked || contact.client_id, task_id: null,
+    channel: "sms", direction: "outbound", subject: null, body: text,
+    ghl_message_id: ghlMessageId, ghl_conversation_id: convId, created_by: caller.memberId,
+    peer_name: contact.name, peer_address: contact.phone, read: true,
+  };
+  const { error } = await supabaseAdmin.from("messages").insert(row);
+  if (error) console.error("[inbox/send] stored copy failed", error.message);
+  return NextResponse.json({ ok: true, messageId: row.id, threadKey: convId ? `ghl:${convId}` : null });
 }

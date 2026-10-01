@@ -39,6 +39,11 @@ export type InboxViewProps = {
   /** Send later, for a client's conversation (the app's scheduled sends). */
   onSchedule: ((t: InboxThread, body: string, at: Date) => Promise<void>) | null;
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
+  /** For Add to a client and a new text. */
+  clients: { id: string; name: string }[];
+  canAdmin: boolean;
+  /** Everyone in GoHighLevel, for New message. */
+  contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null }[];
 };
 
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
@@ -63,7 +68,7 @@ export default function InboxView(p: InboxViewProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [composeNew, setComposeNew] = useState(false);
+  const [composeNew, setComposeNew] = useState<false | { to?: string; body?: string }>(false);
   const [drafts, setDrafts] = useState<Set<string>>(() => draftKeys(p.me.id));
   const refreshDrafts = useCallback(() => setDrafts(draftKeys(p.me.id)), [p.me.id]);
 
@@ -128,7 +133,7 @@ export default function InboxView(p: InboxViewProps) {
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden text-[16px]">
       {/* Folders */}
       <nav className="hidden w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r bg-background/40 p-3 md:flex">
-        <button onClick={() => { setComposeNew(true); setOpenKey(null); setFolder("inbox"); }} className="mb-3 h-11 rounded-lg bg-accent font-semibold text-white">＋ New email</button>
+        <button onClick={() => { setComposeNew({}); setOpenKey(null); setFolder("inbox"); }} className="mb-3 h-11 rounded-lg bg-accent font-semibold text-white">＋ New message</button>
         {FOLDERS.map((f) => <FolderButton key={f.id} f={f} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
         <div className="mx-3 mb-1 mt-4 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>
         {FILTERS.map((f) => <FolderButton key={f.id} f={f} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
@@ -140,7 +145,7 @@ export default function InboxView(p: InboxViewProps) {
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Phone: folders as a menu */}
         <div className="flex gap-2 border-b p-3 md:hidden">
-          <button onClick={() => { setComposeNew(true); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
+          <button onClick={() => { setComposeNew({}); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
           <select aria-label="Folder" value={folder} onChange={(e) => { setFolder(e.target.value as Folder | "settings"); setOpenKey(null); }} className="h-11 min-w-0 flex-1 rounded-lg border bg-surface px-3 font-semibold">
             {[...FOLDERS, ...FILTERS].map((f) => <option key={f.id} value={f.id}>{f.label}{count(f.id) ? ` (${count(f.id)})` : ""}</option>)}
             <option value="settings">Settings</option>
@@ -148,8 +153,8 @@ export default function InboxView(p: InboxViewProps) {
         </div>
 
         {folder === "settings" ? <InboxSettings {...p} />
-          : composeNew ? <NewEmail p={p} onClose={() => setComposeNew(false)} />
-          : open ? <ThreadView p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
+          : composeNew ? <NewMessage key={JSON.stringify(composeNew)} p={p} start={composeNew} onClose={() => setComposeNew(false)} />
+          : open ? <ThreadView emailInstead={(to, body) => { setOpenKey(null); setComposeNew({ to, body }); }} p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
           : (
             <>
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
@@ -259,8 +264,8 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
 }
 
 // ── An open conversation ──────────────────────────────────────────────────
-function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft }: {
-  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void;
+function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft, emailInstead }: {
+  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void; emailInstead: (to: string, body: string) => void;
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
@@ -342,7 +347,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         <div className="min-w-0 px-5 py-5 lg:overflow-y-auto lg:px-7">
           <h1 className="mb-4 text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || (t.channel === "email" ? t.peerName : `${CHANNEL_LABEL[t.channel]} with ${t.peerName}`)}</h1>
           {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
-          {!isEmailThread(t) && <Composer key={t.key} p={p} t={t} onSent={() => { onDraft(); }} onDraft={onDraft} />}
+          {!isEmailThread(t) && <Composer key={t.key} p={p} t={t} onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} />}
           {isEmailThread(t) && !compose && (
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setCompose({ mode: "reply", m: lastFromThem })} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">↩ Reply</button>
@@ -588,10 +593,16 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
-function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose }: {
+function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
-  mode?: ComposeMode; answering?: Message; onClose?: () => void;
+  mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
 }) {
+  // Facebook and Instagram only let a business reply within 24 hours of the
+  // person's last message (Meta's rule). Said before you type, not after.
+  const lastIn = t.messages.find((m) => m.direction === "inbound");
+  const [openedAt] = useState(() => Date.now());
+  const metaClosed = (t.channel === "fb" || t.channel === "ig") && !!lastIn && openedAt - new Date(lastIn.at).getTime() > 24 * 3_600_000;
+  const altEmail = (t.ghlConversationId ? p.inbox.convs.get(t.ghlConversationId)?.email : null) ?? (t.peerAddress?.includes("@") ? t.peerAddress : null);
   const email = isEmailThread(t);
   const forward = mode === "forward";
   const fromLabel = (m: Message) => (m.direction === "outbound" ? "you" : t.peerName.split(/\s+/)[0]);
@@ -691,6 +702,12 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose }:
         </div>
       )}
       <div className="mb-1 text-muted">{from}</div>
+      {metaClosed && (
+        <div className="mb-2 flex flex-wrap items-center gap-3 rounded-lg bg-highlight-soft px-3 py-2.5 font-semibold text-highlight">
+          {t.channel === "ig" ? "Instagram" : "Facebook"} only allows a reply within 24 hours of their last message, and that was {shortTime(lastIn!.at)}.
+          {altEmail && emailInstead && <button onClick={() => emailInstead(altEmail, text)} className="h-9 rounded-md px-3 ring-1 ring-current">✉️ Email them instead</button>}
+        </div>
+      )}
       {email && (
         <div className="flex flex-wrap items-center gap-2 border-b py-1.5">
           <span className="w-11 text-muted">To</span>
@@ -744,7 +761,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose }:
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">
-          <button onClick={() => send()} disabled={busy !== null || !text.trim()} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
+          <button onClick={() => send()} disabled={busy !== null || !text.trim() || metaClosed} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
           {p.onSchedule && t.clientId && <>
             <button onClick={() => setLaterOpen(!laterOpen)} aria-label="Send later" className="h-10 rounded-r-lg border-l border-white/30 bg-accent px-2.5 text-white">▾</button>
             {laterOpen && (
@@ -804,42 +821,159 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         <div className="mb-1 text-[14px] font-bold tracking-wide text-accent">FROM</div>
         <b className="block text-[18px]">{t.peerName}</b>
         {t.peerAddress && t.peerAddress !== t.peerName && <div className="break-all text-muted">{t.peerAddress}</div>}
-        {client ? <div className="text-muted">🏢 {client}</div> : <div className="mt-1 rounded-md bg-highlight-soft px-2 py-1 font-semibold text-highlight">Not a contact yet</div>}
+        {client ? <div className="text-muted">🏢 {client}</div> : <AddToClient p={p} t={t} />}
         <div className="mt-1 text-muted">{CHANNEL_ICON[t.channel]} {CHANNEL_LABEL[t.channel]}</div>
       </div>
     </aside>
   );
 }
 
-// ── New email to anyone ───────────────────────────────────────────────────
-function NewEmail({ p, onClose }: { p: InboxViewProps; onClose: () => void }) {
-  const [to, setTo] = useState(""); const [cc, setCc] = useState(""); const [subject, setSubject] = useState(""); const [body, setBody] = useState("");
+// Someone who wrote in but is not a contact yet: put them on a client you
+// have, or make a new one (admins). Their messages move onto it, and what they
+// send next lands there by itself.
+function AddToClient({ p, t }: { p: InboxViewProps; t: InboxThread }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const send = async () => {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = words.length ? p.clients.filter((c) => words.every((w) => c.name.toLowerCase().includes(w))).slice(0, 6) : [];
+  const add = async (to: { clientId?: string; newClientName?: string }, label: string) => {
     setBusy(true);
-    try { await p.inbox.send({ to, cc: cc.split(/[,\s]+/).filter(Boolean), subject, body }); p.pushToast("Sent"); onClose(); }
-    catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
+    try { await p.inbox.addContact(t.key, to); p.pushToast(`Added to ${label}`); setOpen(false); }
+    catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't add them."); }
     finally { setBusy(false); }
   };
+  if (!open) return (
+    <div className="mt-1 grid gap-2">
+      <div className="rounded-md bg-highlight-soft px-2 py-1 font-semibold text-highlight">Not a contact yet</div>
+      <button onClick={() => setOpen(true)} className="h-10 rounded-lg bg-accent font-bold text-white">＋ Add to a client</button>
+    </div>
+  );
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 lg:px-7">
-      <div className="mb-4 flex items-center gap-3"><button onClick={onClose} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button><h1 className="text-[26px] font-extrabold">New email</h1></div>
-      <div className="max-w-3xl rounded-xl bg-surface p-3 ring-1 ring-[var(--border)]">
-        <div className="mb-1 text-muted">From {p.me.email ?? "your Gmail"}</div>
-        <label className="flex items-center gap-2 border-b py-1.5"><span className="w-16 text-muted">To</span><input autoFocus value={to} onChange={(e) => setTo(e.target.value)} placeholder="name@example.com" className="h-8 min-w-0 flex-1 bg-transparent outline-none" /></label>
-        <label className="flex items-center gap-2 border-b py-1.5"><span className="w-16 text-muted">CC</span><input value={cc} onChange={(e) => setCc(e.target.value)} className="h-8 min-w-0 flex-1 bg-transparent outline-none" /></label>
-        <label className="flex items-center gap-2 border-b py-1.5"><span className="w-16 text-muted">Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} className="h-8 min-w-0 flex-1 bg-transparent outline-none" /></label>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} placeholder="Write your email" className="mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none" />
-        <div className="flex flex-wrap items-center gap-2 border-t pt-2.5">
-          <button disabled={busy || !body.trim()} onClick={async () => { const r = await p.inbox.improve(body, "email").catch(() => null); if (r?.changed) setBody(r.text); p.pushToast(r ? (r.changed ? "Fixed spelling and grammar" : "Looks good already") : "Couldn't improve it"); }} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">✨ Improve with AI</button>
-          <span className="flex-1" />
-          <button disabled={busy || !to.trim() || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Sending…" : "Send"}</button>
-        </div>
-      </div>
+    <div className="mt-2 grid gap-2">
+      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your clients" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+      {hits.map((c) => <button key={c.id} disabled={busy} onClick={() => add({ clientId: c.id }, c.name)} className="rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">🏢 {c.name}</button>)}
+      {p.canAdmin && <button disabled={busy} onClick={() => add({ newClientName: q.trim() || t.peerName }, q.trim() || t.peerName)} className="h-10 rounded-lg border font-semibold hover:bg-background">＋ New client “{q.trim() || t.peerName}”</button>}
+      <button onClick={() => setOpen(false)} className="text-muted hover:underline">Cancel</button>
     </div>
   );
 }
 
+// ── A new message: an email or a text to anyone in GoHighLevel ────────────
+// Search every contact by name, email, company or phone, or type any email
+// address (Derek, 2026-10-01). Fills the page; CC, BCC, files, and the task
+// it belongs to, so the conversation lands there from the first message.
+type Pick = { contactId?: string; name: string; address: string };
+function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: string; body?: string }; onClose: () => void }) {
+  const [kind, setKind] = useState<"email" | "text">("email");
+  const [to, setTo] = useState<Pick | null>(start.to ? { name: start.to, address: start.to } : null);
+  const [q, setQ] = useState("");
+  const [ccOpen, setCcOpen] = useState(false);
+  const [cc, setCc] = useState(""); const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState(""); const [body, setBody] = useState(start.body ?? "");
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [task, setTask] = useState<Task | null>(null);
+  const [taskQ, setTaskQ] = useState("");
+  const [busy, setBusy] = useState<"send" | "ai" | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = useMemo(() => {
+    if (!words.length) return [];
+    const digits = q.replace(/\D/g, "");
+    return p.contacts.filter((c) => (kind === "email" ? !!c.email : !!c.phone) && words.every((w) =>
+      `${c.name} ${c.email ?? ""} ${c.company ?? ""}`.toLowerCase().includes(w) || (digits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(digits))))
+      .slice(0, 8);
+  }, [q, kind, p.contacts]); // eslint-disable-line react-hooks/exhaustive-deps
+  const typedEmail = kind === "email" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q.trim()) ? q.trim() : null;
+  const taskHits = taskQ.trim() ? p.tasks.filter((t) => t.status !== "done" && `${t.title} ${p.clientName(t.clientId) ?? ""}`.toLowerCase().includes(taskQ.trim().toLowerCase())).slice(0, 6) : [];
+
+  const upload = async (list: FileList | null) => {
+    for (const f of Array.from(list ?? [])) { const a = await p.onUpload(`inbox/${p.me.id}`, f); if (a) setFiles((x) => [...x, a]); }
+  };
+  const send = async () => {
+    if (!to || !body.trim()) return;
+    setBusy("send");
+    try {
+      const r = kind === "email"
+        ? await p.inbox.send({ to: to.address, cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean), subject, body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })) })
+        : await p.inbox.send({ channel: "sms", contactId: to.contactId, body });
+      if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
+      p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
+      onClose();
+    } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
+    finally { setBusy(null); }
+  };
+  const row = "flex items-center gap-3 border-b py-2";
+  return (
+    <div className="flex min-h-0 flex-1 flex-col px-5 py-5 lg:px-7">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <button onClick={onClose} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button>
+        <h1 className="text-[26px] font-extrabold">New message</h1>
+        <span className="inline-flex gap-1 rounded-lg bg-background p-1">
+          <button onClick={() => { setKind("email"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "email" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>✉️ Email</button>
+          <button onClick={() => { setKind("text"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "text" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>💬 Text</button>
+        </span>
+      </div>
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-h-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+          <div className="mb-1 text-muted">{kind === "email" ? "From your Gmail" : "From the contact's GoHighLevel number"}</div>
+          <div className={`relative ${row}`}>
+            <span className="w-16 shrink-0 text-muted">To</span>
+            {to ? (
+              <span className="flex min-w-0 flex-1 items-center gap-2"><span className="truncate rounded-full bg-accent-soft px-3 py-1 font-semibold text-accent">{to.name}{to.name !== to.address ? ` · ${to.address}` : ""}</span><button onClick={() => setTo(null)} aria-label="Remove" className="text-muted">✕</button></span>
+            ) : (
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "email" ? "Search contacts, or type an email" : "Search contacts by name or phone"}
+                onKeyDown={(e) => { if (e.key === "Enter" && typedEmail) { setTo({ name: typedEmail, address: typedEmail }); setQ(""); } }}
+                className="h-9 min-w-0 flex-1 bg-transparent outline-none" />
+            )}
+            {kind === "email" && <button onClick={() => setCcOpen(!ccOpen)} className="shrink-0 rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">CC / BCC</button>}
+            {!to && (hits.length > 0 || typedEmail) && (
+              <div className="absolute left-16 right-0 top-full z-30 mt-1 max-h-80 overflow-y-auto rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                {typedEmail && <button onClick={() => { setTo({ name: typedEmail, address: typedEmail }); setQ(""); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Send to <b>{typedEmail}</b></button>}
+                {hits.map((c) => (
+                  <button key={c.id} onClick={() => { setTo({ contactId: c.id, name: c.name, address: (kind === "email" ? c.email : c.phone) ?? "" }); setQ(""); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                    <b className="block">{c.name}{c.company && c.company !== c.name ? <span className="font-normal text-muted"> · {c.company}</span> : null}</b>
+                    <span className="text-[14px] text-muted">{kind === "email" ? c.email : c.phone}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {kind === "email" && ccOpen && <>
+            <label className={row}><span className="w-16 shrink-0 text-muted">CC</span><input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Add people, separated by commas" className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>
+            <label className={row}><span className="w-16 shrink-0 text-muted">BCC</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Add people, separated by commas" className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>
+          </>}
+          {kind === "email" && <label className={row}><span className="w-16 shrink-0 text-muted">Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>}
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder={kind === "email" ? "Write your email" : "Write a text"} className="min-h-48 w-full flex-1 resize-none bg-transparent py-3 leading-relaxed outline-none" />
+          {files.length > 0 && <div className="flex flex-wrap gap-2 pb-2">{files.map((f) => <span key={f.id} className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 ring-1 ring-[var(--border)]">{f.kind === "image" ? "🖼️" : "📄"} {f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`Remove ${f.name}`} className="text-muted">✕</button></span>)}</div>}
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            {kind === "email" && <>
+              <button onClick={() => fileRef.current?.click()} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
+              <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
+            </>}
+            <button disabled={busy !== null || !body.trim()} onClick={async () => { setBusy("ai"); const r = await p.inbox.improve(body, kind === "email" ? "email" : "sms").catch(() => null); setBusy(null); if (r?.changed) setBody(r.text); p.pushToast(r ? (r.changed ? "Fixed spelling and grammar" : "Looks good already") : "Couldn't improve it"); }} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Improving…" : "✨ Improve with AI"}</button>
+            <span className="flex-1" />
+            {kind === "text" && <span className="tabular-nums text-muted">{body.length} / 160</span>}
+            <button disabled={busy !== null || !to || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
+          </div>
+        </div>
+        <aside className="space-y-3">
+          <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+            <div className="mb-2 text-[14px] font-bold tracking-wide text-accent">LINK TO A TASK</div>
+            {task ? (
+              <div className="flex items-start gap-2 rounded-lg bg-success-soft px-3 py-2.5"><span className="min-w-0 flex-1"><b className="block">{task.title}</b><span className="text-[14px] text-muted">{p.clientName(task.clientId)}</span></span><button onClick={() => setTask(null)} aria-label="Remove" className="text-muted">✕</button></div>
+            ) : <>
+              <p className="mb-2 text-muted">Optional. Replies land on the task too.</p>
+              <input value={taskQ} onChange={(e) => setTaskQ(e.target.value)} placeholder="Search tasks" className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+              <div className="mt-1.5 space-y-1">{taskHits.map((t) => <button key={t.id} onClick={() => { setTask(t); setTaskQ(""); }} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">{t.title}<span className="block text-[14px] text-muted">{p.clientName(t.clientId)}</span></button>)}</div>
+            </>}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
 
 function Switch({ on, set, label, help }: { on: boolean; set: (v: boolean) => void; label: string; help?: string }) {
   return (

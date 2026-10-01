@@ -23,6 +23,9 @@ export type UseInboxDeps = {
   isAdmin: boolean;
   /** The app's live messages (realtime inserts land here first). */
   liveMessages: Message[];
+  /** Task chat notes made from your notifications (mentions, comments, client
+   *  reviews), shown as messages on the task's chat conversation. */
+  extraMessages?: Message[];
   tasks: Task[];
   nameOf: (m: Message) => string | null;
   /** Keep Gmail in step (Inbox Settings): read state, and Done as archive. */
@@ -32,7 +35,7 @@ export type UseInboxDeps = {
 
 const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, starredAt: r.starred_at, updatedAt: r.updated_at });
 
-export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gmailSync, pushToast }: UseInboxDeps) {
+export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, pushToast }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
@@ -72,10 +75,11 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
     const byId = new Map<string, Message>();
     for (const m of loaded) byId.set(m.id, m);
     for (const m of live) byId.set(m.id, m);
+    for (const m of extraMessages ?? []) byId.set(m.id, m);
     // Blocked senders stay out, except what is already in the Trash.
     return buildThreads([...byId.values()], states, { now, nameOf, convs })
       .filter((t) => t.trashed || !isBlocked(t.peerAddress, blocks));
-  }, [loaded, live, states, now, nameOf, convs, blocks]);
+  }, [loaded, live, extraMessages, states, now, nameOf, convs, blocks]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -174,14 +178,19 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
       setConvs((c) => { const n = new Map(c); n.delete(threadKey.slice(4)); return n; });
     }
   }, [post, meMemberId]);
-  const send = useCallback(async (body: { threadKey?: string | null; to?: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; attachments?: { path: string; name: string }[] }) => {
+  const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string }) => {
+    const j = await post("/api/inbox/contact", { threadKey, ...to });
+    load();
+    return j as { clientId: string; contactId: string };
+  }, [post, load]);
+  const send = useCallback(async (body: { threadKey?: string | null; channel?: "sms"; contactId?: string; to?: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; attachments?: { path: string; name: string }[] }) => {
     const j = await post("/api/inbox/send", body);
     load();
-    return j as { messageId: string; threadKey: string };
+    return j as { messageId: string; threadKey: string | null };
   }, [post, load]);
   const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
 
-  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, linkTask, assign, send, improve };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
