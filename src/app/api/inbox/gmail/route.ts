@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = (await req.json().catch(() => ({}))) as { threadKeys?: string[]; change?: string };
-  const change = b.change === "read" || b.change === "unread" || b.change === "archive" || b.change === "unarchive" ? b.change : null;
+  const change = (["read", "unread", "archive", "unarchive", "star", "unstar"] as const).find((c) => c === b.change) ?? null;
   if (!change) return NextResponse.json({ error: "Unknown change." }, { status: 400 });
   const refs = (b.threadKeys ?? []).slice(0, 100).map(parseThreadKey).filter((r): r is { kind: "gm"; id: string } => r?.kind === "gm");
   const emails = new Map<string, string | null>();

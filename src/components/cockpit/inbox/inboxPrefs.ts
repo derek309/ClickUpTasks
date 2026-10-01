@@ -7,6 +7,8 @@ import { useCallback, useState } from "react";
 
 export type InboxPrefs = {
   byDay: boolean;
+  /** Only conversations with something unread (the switch above the list). */
+  unreadOnly: boolean;
   showClientAndTask: boolean;
   replies: { name: string; text: string }[];
   undoSeconds: 0 | 5 | 10 | 30;
@@ -21,7 +23,7 @@ export type InboxPrefs = {
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {
-  byDay: false, showClientAndTask: false,
+  byDay: false, unreadOnly: false, showClientAndTask: false,
   replies: [
     { name: "Got it", text: "Got it, thanks! I'll take care of this today and let you know when it's done." },
     { name: "Link coming", text: "I'll send you a link to look it over by end of day tomorrow." },

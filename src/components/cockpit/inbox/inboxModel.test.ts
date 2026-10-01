@@ -101,3 +101,14 @@ describe("reading an email full of links", () => {
     ]);
   });
 });
+
+describe("Star", () => {
+  it("shows in Starred and stays where it was", () => {
+    const one = [msg({ id: "s1", gmailThreadId: "ts" })];
+    const s = new Map([["gm:ts", st({ threadKey: "gm:ts", starredAt: "2026-10-01T17:10:00Z" })]]);
+    const t = buildThreads(one, s, { now: NOW })[0];
+    expect(t.starred).toBe(true);
+    expect(inFolder(t, "starred", none)).toBe(true);
+    expect(inFolder(t, "inbox", none)).toBe(true);
+  });
+});

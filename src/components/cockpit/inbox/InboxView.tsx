@@ -42,8 +42,8 @@ export type InboxViewProps = {
 };
 
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
-  { id: "inbox", label: "Inbox", icon: "📥" }, { id: "drafts", label: "Drafts", icon: "📝" },
-  { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "📤" }, { id: "done", label: "Done", icon: "✓" },
+  { id: "inbox", label: "Inbox", icon: "📥" }, { id: "starred", label: "Starred", icon: "⭐" }, { id: "drafts", label: "Drafts", icon: "📝" },
+  { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "📤" }, { id: "done", label: "Archive", icon: "🗄" },
   { id: "trash", label: "Trash", icon: "🗑" },
 ];
 const FILTERS: { id: Folder; label: string; icon: string }[] = [
@@ -70,7 +70,7 @@ export default function InboxView(p: InboxViewProps) {
   const visible = useMemo(() => {
     if (folder === "settings") return [];
     if (q.trim()) return inbox.threads.filter((t) => matchesSearch(t, q, p.clientName(t.clientId)));
-    return inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)));
+    return inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
   }, [inbox.threads, folder, q, drafts, p]);
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
 
@@ -79,7 +79,7 @@ export default function InboxView(p: InboxViewProps) {
   const undoToast = (text: string, undo: () => Promise<void> | void) => p.pushToast(text, { label: "Undo", run: () => { undo(); } });
   const done = async (keys: string[]) => {
     const undo = await inbox.markDone(keys);
-    undoToast(keys.length > 1 ? `${keys.length} marked done` : "Marked done", undo);
+    undoToast(keys.length > 1 ? `${keys.length} archived` : "Archived", undo);
   };
   // Delete: to the Trash here, and to Gmail's Trash for an email.
   const del = async (keys: string[], restore = false) => {
@@ -100,7 +100,7 @@ export default function InboxView(p: InboxViewProps) {
   };
   const back = () => { if (openKey) setCursor(openKey); setOpenKey(null); setComposeNew(false); };
 
-  // Left hand keys, as in Gmail: J next, K previous, E done, R read, S snooze, T link.
+  // Left hand keys, as in Gmail: J next, K previous, E archive, R read, S snooze, T link, F star.
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const linkSearchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -118,6 +118,7 @@ export default function InboxView(p: InboxViewProps) {
       else if (k === "r" && open) { e.preventDefault(); if (open.unread) inbox.markRead([open.key]); else inbox.markUnread([open.key]); }
       else if (k === "s" && open) { e.preventDefault(); setSnoozeOpen(true); }
       else if (k === "t" && open) { e.preventDefault(); linkSearchRef.current?.focus(); }
+      else if (k === "f" && (open || cursor)) { e.preventDefault(); const t = open ?? visible.find((x) => x.key === cursor); if (t) inbox.star([t.key], !t.starred); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -157,9 +158,12 @@ export default function InboxView(p: InboxViewProps) {
                 <button onClick={() => inbox.reload()} title="Refresh" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">↻</button>
                 {selected.size > 0 && <>
                   <button onClick={async () => { const undo = await inbox.markRead([...selected]); setSelected(new Set()); undoToast(`${selected.size} marked read`, undo); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark read</button>
-                  <button onClick={() => { done([...selected]); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Done</button>
+                  <button onClick={() => { done([...selected]); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">🗄 Archive</button>
+                  <button onClick={() => { inbox.star([...selected], true); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">☆ Star</button>
                   <button onClick={() => { del([...selected], folder === "trash"); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">{folder === "trash" ? "Restore" : "🗑 Delete"}</button>
                 </>}
+                <button onClick={() => p.setPrefs({ unreadOnly: !p.prefs.unreadOnly })} aria-pressed={p.prefs.unreadOnly}
+                  className={`h-10 rounded-lg border px-3 font-semibold ${p.prefs.unreadOnly ? "border-accent bg-accent-soft text-accent" : "hover:bg-background"}`}>{p.prefs.unreadOnly ? "● Unread only" : "Show: All"}</button>
                 <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
                 <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setOpenKey(null); }} placeholder="Search people, words, files" aria-label="Search the Inbox"
                   className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent sm:w-72" />
@@ -169,7 +173,7 @@ export default function InboxView(p: InboxViewProps) {
                 {!inbox.loading && !visible.length && (
                   <div className="px-6 py-16 text-center text-muted">
                     <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : folder === "trash" ? "Trash is empty" : "Nothing here"}</div>
-                    {folder === "inbox" && !q && <div className="mt-1">Every message is answered, snoozed or done.</div>}
+                    {folder === "inbox" && !q && <div className="mt-1">{p.prefs.unreadOnly ? "Nothing unread." : "Every message is answered, snoozed or archived."}</div>}
                   </div>
                 )}
                 {visible.map((t, i) => {
@@ -186,7 +190,7 @@ export default function InboxView(p: InboxViewProps) {
                 })}
               </div>
               <div className="hidden gap-4 border-t bg-background/40 px-5 py-2 text-[14px] text-muted lg:flex">
-                <span><Kbd>J</Kbd> Next</span><span><Kbd>K</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Done</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
+                <span><Kbd>J</Kbd> Next</span><span><Kbd>K</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Archive</span><span><Kbd>F</Kbd> Star</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
               </div>
             </>
           )}
@@ -224,7 +228,11 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
   return (
     <div onClick={onOpen} className={`grid cursor-pointer grid-cols-[20px_40px_minmax(0,1fr)] items-center gap-3.5 border-b px-5 py-3 ${active ? "bg-accent-soft" : "hover:bg-background/60"}`}
       style={t.unread ? { boxShadow: "inset 3px 0 0 #2563eb" } : undefined}>
-      <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-[18px] w-[18px]" checked={checked} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(e.target.checked)} />
+      <span className="flex flex-col items-center gap-1">
+        <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-[18px] w-[18px]" checked={checked} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(e.target.checked)} />
+        <button onClick={(e) => { e.stopPropagation(); p.inbox.star([t.key], !t.starred); }} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
+          className={`text-[18px] leading-none ${t.starred ? "text-[#d97706]" : "text-muted/50 hover:text-[#d97706]"}`}>{t.starred ? "★" : "☆"}</button>
+      </span>
       <Avatar t={t} />
       <div className="grid min-w-0 gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
@@ -282,7 +290,8 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative flex flex-wrap gap-2 border-b px-4 py-2.5">
         <button onClick={back} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button>
-        <button onClick={done} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">✓ Done</button>
+        <button onClick={done} title="Out of your Inbox and your Gmail inbox; never deleted" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">🗄 Archive</button>
+        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} className={`h-10 rounded-lg border px-3 font-semibold hover:bg-background ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★ Starred" : "☆ Star"}</button>
         <div className="relative">
           <button onClick={() => setSnoozeOpen(!snoozeOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">⏰ Snooze</button>
           {snoozeOpen && (
@@ -753,7 +762,7 @@ function InboxSettings(p: InboxViewProps) {
         </Box>
         <Box title="Gmail" help="Keeps your Gmail in step with this Inbox, so its unread count matches. Texts and GoHighLevel messages are never changed.">
           <Switch on={prefs.gmailRead} set={(v) => setPrefs({ gmailRead: v })} label="Mark read in Gmail too" help="Opening a message here marks it read there; Mark as unread puts it back" />
-          <Switch on={prefs.gmailArchive} set={(v) => setPrefs({ gmailArchive: v })} label="Done archives the email in Gmail" help="It leaves your Gmail inbox but is never deleted; Undo puts it back" />
+          <Switch on={prefs.gmailArchive} set={(v) => setPrefs({ gmailArchive: v })} label="Archive here archives in Gmail too" help="It leaves your Gmail inbox but is never deleted; Undo puts it back" />
         </Box>
         <Box title="Blocked senders" help="Nothing from these shows in your Inbox. Block someone from the ⛔ Block button on their message.">
           {p.inbox.blocks.length ? p.inbox.blocks.map((b) => (

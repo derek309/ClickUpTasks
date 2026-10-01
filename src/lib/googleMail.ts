@@ -430,7 +430,7 @@ export async function trashGmailThread(mailbox: string, threadId: string, restor
 /** Read state and archive for a conversation in Gmail, kept in step with the
  *  Inbox: read removes UNREAD, unread adds it, archive removes INBOX and
  *  unarchive puts it back. Needs gmail.modify (granted 2026-10-01). */
-export async function setGmailThreadLabels(mailbox: string, threadId: string, change: "read" | "unread" | "archive" | "unarchive"): Promise<void> {
+export async function setGmailThreadLabels(mailbox: string, threadId: string, change: "read" | "unread" | "archive" | "unarchive" | "star" | "unstar"): Promise<void> {
   if (!googleConfigured) throw new Error("Google Workspace is not configured.");
   const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_MODIFY_SCOPE], subject: mailbox });
   const { token } = await jwt.getAccessToken();
@@ -438,6 +438,8 @@ export async function setGmailThreadLabels(mailbox: string, threadId: string, ch
   const body = change === "read" ? { removeLabelIds: ["UNREAD"] }
     : change === "unread" ? { addLabelIds: ["UNREAD"] }
     : change === "archive" ? { removeLabelIds: ["INBOX", "UNREAD"] }
+    : change === "star" ? { addLabelIds: ["STARRED"] }
+    : change === "unstar" ? { removeLabelIds: ["STARRED"] }
     : { addLabelIds: ["INBOX"] };
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}/modify`, {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body),

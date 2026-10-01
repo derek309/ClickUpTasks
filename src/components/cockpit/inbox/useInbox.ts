@@ -30,7 +30,7 @@ export type UseInboxDeps = {
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
 };
 
-const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, updatedAt: r.updated_at });
+const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, starredAt: r.starred_at, updatedAt: r.updated_at });
 
 export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gmailSync, pushToast }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
@@ -80,7 +80,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
   useEffect(() => { statesRef.current = states; }, [states]);
-  const writeState = useCallback(async (keys: string[], patch: Partial<Pick<InboxState, "readAt" | "snoozedUntil" | "doneAt" | "trashedAt">>) => {
+  const writeState = useCallback(async (keys: string[], patch: Partial<Pick<InboxState, "readAt" | "snoozedUntil" | "doneAt" | "trashedAt" | "starredAt">>) => {
     const at = new Date().toISOString();
     const before = keys.map((k) => statesRef.current.get(k) ?? null);
     setStates((s) => {
@@ -90,7 +90,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
     });
     const rows = keys.map((k) => {
       const cur = { ...(statesRef.current.get(k) ?? {}), ...patch } as Partial<InboxState>;
-      return { member_id: meMemberId, thread_key: k, read_at: cur.readAt ?? null, snoozed_until: cur.snoozedUntil ?? null, done_at: cur.doneAt ?? null, ...(cur.trashedAt !== undefined ? { trashed_at: cur.trashedAt } : {}), updated_at: at };
+      return { member_id: meMemberId, thread_key: k, read_at: cur.readAt ?? null, snoozed_until: cur.snoozedUntil ?? null, done_at: cur.doneAt ?? null, ...(cur.trashedAt !== undefined ? { trashed_at: cur.trashedAt } : {}), ...(cur.starredAt !== undefined ? { starred_at: cur.starredAt } : {}), updated_at: at };
     });
     const { error: e } = await supabase.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
     if (e) pushToast(`Couldn't save that: ${e.message}`);
@@ -103,14 +103,14 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
       });
       await supabase.from("inbox_state").upsert(keys.map((k, i) => {
         const b = before[i];
-        return { member_id: meMemberId, thread_key: k, read_at: b?.readAt ?? null, snoozed_until: b?.snoozedUntil ?? null, done_at: b?.doneAt ?? null, ...(b?.trashedAt !== undefined ? { trashed_at: b?.trashedAt ?? null } : {}), updated_at: new Date().toISOString() };
+        return { member_id: meMemberId, thread_key: k, read_at: b?.readAt ?? null, snoozed_until: b?.snoozedUntil ?? null, done_at: b?.doneAt ?? null, ...(b?.trashedAt !== undefined ? { trashed_at: b?.trashedAt ?? null } : {}), ...(b?.starredAt !== undefined ? { starred_at: b?.starredAt ?? null } : {}), updated_at: new Date().toISOString() };
       }), { onConflict: "member_id,thread_key" });
     };
   }, [meMemberId, pushToast]);
 
   // The same change in Gmail, for emails, when the person has it switched on.
   // Fire and forget: the Inbox never waits on Gmail.
-  const toGmail = useCallback((keys: string[], change: "read" | "unread" | "archive" | "unarchive") => {
+  const toGmail = useCallback((keys: string[], change: "read" | "unread" | "archive" | "unarchive" | "star" | "unstar") => {
     const gm = keys.filter((k) => k.startsWith("gm:"));
     if (!gm.length) return;
     authedFetch("/api/inbox/gmail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ threadKeys: gm, change }) }).catch(() => null);
@@ -127,6 +127,12 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
     // Done archives (which also marks read); with only read on, it marks read.
     return withGmail(keys, undo, gmailSync.archive ? "archive" : gmailSync.read ? "read" : null, gmailSync.archive ? "unarchive" : null);
   }, [writeState, withGmail, gmailSync.archive, gmailSync.read]);
+  // Star, here and on the email in Gmail.
+  const star = useCallback(async (keys: string[], on: boolean) => {
+    const undo = await writeState(keys, { starredAt: on ? new Date().toISOString() : null });
+    toGmail(keys, on ? "star" : "unstar");
+    return async () => { await undo(); toGmail(keys, on ? "unstar" : "star"); };
+  }, [writeState, toGmail]);
   // Delete: the Inbox's Trash, and Gmail's for an email (30 days there).
   const trash = useCallback(async (keys: string[], restore = false) => {
     const at = new Date().toISOString();
@@ -175,7 +181,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, tasks, nameOf, gma
   }, [post, load]);
   const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
 
-  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, snooze, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, linkTask, assign, send, improve };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>) {
