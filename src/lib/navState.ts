@@ -9,6 +9,7 @@
 // query string: shareable links, refresh-safe, and back/forward navigation.
 //   ?view=work|clients|personal|settings   the special boards
 //   ?view=inbox&dm=<userId>                a DM thread
+//   ?view=mail                             the Inbox (email, texts, task chats)
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?assignee=<id>|all            All Tasks scoped to one person or everyone
 //                                  (the default "mine" is never encoded)
@@ -23,7 +24,7 @@
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
 export type NavSub = "reviews" | "drafts" | "completed";
-export type NavState = { view: "work" | "personal" | "inbox" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
+export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
@@ -59,7 +60,7 @@ export function parseSearch(search: string): NavState {
   const tab = p.get("tab");
   const sub = p.get("sub");
   return {
-    view: v === "work" || v === "personal" || v === "inbox" || v === "clients" || v === "projects" || v === "settings" ? v : null,
+    view: v === "work" || v === "personal" || v === "inbox" || v === "mail" || v === "clients" || v === "projects" || v === "settings" ? v : null,
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),
@@ -77,12 +78,13 @@ export function parseSearch(search: string): NavState {
 
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
-export const NAV_KEY_VIEWS: Record<string, "dashboard" | "alltasks" | "clients" | "projects" | "personal"> = {
+export const NAV_KEY_VIEWS: Record<string, "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox"> = {
   "1": "dashboard",
   "2": "alltasks",
   "3": "clients",
   "4": "projects",
   "5": "personal",
+  "6": "inbox",
 };
 
 // The first half of a deep link to a direct message, for notification emails:

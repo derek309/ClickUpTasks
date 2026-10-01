@@ -22,7 +22,7 @@ export type UseClientAdminDeps = {
   setInboxView: React.Dispatch<React.SetStateAction<boolean>>;
   setDmUserId: React.Dispatch<React.SetStateAction<string | null>>;
   setSettingsView: React.Dispatch<React.SetStateAction<boolean>>;
-  setDirView: React.Dispatch<React.SetStateAction<"clients" | "projects" | null>>;
+  setDirView: React.Dispatch<React.SetStateAction<"clients" | "projects" | "inbox" | null>>;
   setAddClientOpen: React.Dispatch<React.SetStateAction<boolean>>;
   pushToast: (text: string, action?: { label: string; run: () => void; }, secondaryAction?: { label: string; run: () => void; }) => void;
   clientById: (id: string) => Client | null;

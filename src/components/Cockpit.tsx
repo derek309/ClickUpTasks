@@ -54,7 +54,7 @@ import {
   unansweredPreviewByTask,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { upsertTask, seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -97,6 +97,10 @@ import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
+import InboxView from "./cockpit/inbox/InboxView";
+import { useInbox } from "./cockpit/inbox/useInbox";
+import { useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
+import type { InboxThread } from "./cockpit/inbox/inboxModel";
 
 
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
@@ -160,7 +164,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // nav links). A distinct mode like inbox/personal — when set, the main pane
   // shows the directory instead of a client/task view. clearViews() below
   // resets it alongside the others.
-  const [dirView, setDirView] = useState<"clients" | "projects" | null>(null);
+  // "inbox" is the Inbox (every email, text and task chat, 2026-10-01), a
+  // full page like the directories, so it shares their flag.
+  const [dirView, setDirView] = useState<"clients" | "projects" | "inbox" | null>(null);
   // Dashboard's own Work/Completed split — Completed relocated here from the
   // Clients directory (Derek: "makes more sense there") — see the myWork
   // content branch below. The Activity tab (notifications inbox) was cut
@@ -289,11 +295,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // set identical state by construction rather than by two hand-maintained
   // copies that quietly drift — and so adding a view later is one edit, not
   // five. NAV_KEY_VIEWS maps the number keys onto these.
-  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal") => {
+  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox") => {
     setMyWork(view === "dashboard");
     setPersonalView(view === "personal");
     setInboxView(false);
-    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : null);
+    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : view === "inbox" ? "inbox" : null);
     setDmUserId(null);
     setSettingsView(false);
 
@@ -672,7 +678,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
-    view: settingsView ? "settings" : dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
+    view: settingsView ? "settings" : dirView === "inbox" ? "mail" : dirView ?? (myWork ? "work" : personalView ? "personal" : inboxView ? "inbox" : null),
     client: activeClient, project: activeProject, task: openTaskId,
     clientTab, vaultFolder: null, // read from an old folder link on load, never written as you browse
     dm: inboxView ? dmUserId : null,
@@ -686,7 +692,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // bare view=inbox with no dm (an old bookmark) must not open a blank page.
     setInboxView(s.view === "inbox" && !!s.dm);
     setDmUserId(s.view === "inbox" ? s.dm : null);
-    setDirView(s.view === "clients" || s.view === "projects" ? s.view : null);
+    setDirView(s.view === "clients" || s.view === "projects" ? s.view : s.view === "mail" ? "inbox" : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
@@ -1629,6 +1635,44 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // What the client last said, under the title of each task still waiting on us.
   const previewByTask = useMemo(() => unansweredPreviewByTask(messages), [messages]);
 
+  // The Inbox. Loaded whatever page is open, so the sidebar can count it.
+  const clientNames = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
+  const inboxNameOf = useCallback((m: Message) => (m.clientId ? clientNames.get(m.clientId) ?? null : null), [clientNames]);
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, tasks, nameOf: inboxNameOf, pushToast });
+  const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
+  const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed).length, [inbox.threads]);
+  // A browser alert for a new message while ClickUpTasks is in another tab.
+  const alertedRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const unread = inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed);
+    const seen = alertedRef.current;
+    alertedRef.current = new Set(unread.map((t) => `${t.key}|${t.latest.id}`));
+    if (!seen || !inboxPrefs.popup || typeof Notification === "undefined") return;
+    const fresh = unread.filter((t) => !seen.has(`${t.key}|${t.latest.id}`) && t.latest.direction === "inbound");
+    if (!fresh.length || !document.hidden) return;
+    if (Notification.permission === "default") { Notification.requestPermission(); return; }
+    if (Notification.permission !== "granted") return;
+    const t = fresh[0];
+    const n = new Notification(`${t.peerName}`, { body: (t.subject ? `${t.subject}: ` : "") + t.latest.body.replace(/\s+/g, " ").slice(0, 140), tag: t.key });
+    n.onclick = () => { window.focus(); goToViewRef.current("inbox"); n.close(); };
+    if (inboxPrefs.sound) { try { new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAABErAAABAAgAZGF0YQAAAAA=").play().catch(() => {}); } catch { /* no sound */ } }
+  }, [inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
+  const newTaskFromThread = async (t: InboxThread): Promise<string | null> => {
+    const first = t.peerName.split(/\s+/)[0];
+    const project = t.clientId ? projectsForClient(t.clientId)[0] : null;
+    const clientId = project ? t.clientId! : PERSONAL_PROJECT_ID;
+    const task: Task = {
+      id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? clientId : PERSONAL_PROJECT_ID,
+      title: t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`, description: "",
+      status: "todo", priority: "normal", assigneeId: me.id, contactId: t.contactId, due: TODAY,
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: !project, subtasks: [], attachments: [], comments: [],
+      createdAt: new Date().toISOString(), createdBy: me.id,
+    };
+    setTasks((ts) => [...ts, task]);
+    upsertTask(task, me.id);
+    return task.id;
+  };
+
   // The start load holds open tasks and the last 30 days of finished ones
   // (db.ts fetchAll). The rest load when something shows finished work: the
   // Finished log, lists showing done tasks, ⌘K search (everyone's), or one
@@ -1821,7 +1865,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
-  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
@@ -2146,6 +2190,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               open all day; the directory of every client is still there, one
               click back through a client's breadcrumb, and adding a client now
               happens here so there was nothing left to come to it for. */}
+          <SideItem active={dirView === "inbox"} title="Your email, texts and task chats (press 6)" onClick={() => goToView("inbox")}><span className="text-muted">📥</span> <span>Inbox</span>{inboxPrefs.badge && inboxUnread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{inboxUnread}</span>}</SideItem>
           <SideItem active={myWork} title="Clients (press 1)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
@@ -2315,7 +2360,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
                 {/* Same star as the Clients directory row — pinning to the
                     sidebar shouldn't require leaving the client's own page
@@ -2334,7 +2379,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">All clients</button>
                   <span>›</span>
                 </>)}
-                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private — only the two of you can see this" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private — only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
               </p>
             </>)}
           </div>
@@ -2484,6 +2529,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
+        ) : dirView === "inbox" ? (
+          <div className="flex min-h-0 flex-1 bg-surface">
+            <InboxView inbox={inbox} me={{ id: me.id, name: me.name }} team={users.map((u) => ({ id: u.id, name: u.name }))}
+              prefs={inboxPrefs} setPrefs={setInboxPrefs} clientName={(id) => (id ? clientById(id)?.name ?? null : null)}
+              tasks={tasks} onOpenTask={(id) => setOpenTaskId(id)} onNewTask={newTaskFromThread}
+              onUpload={uploadOneImage} onSignedUrl={(path) => signedUrlForFile(path)}
+              onSendChat={async (t, body) => { if (t.clientId) await sendMessage(t.clientId, "chat", "", body, [], [], [], t.taskId); }}
+              onSchedule={(t, body, at) => (t.clientId && canMessageClient(t.clientId) ? scheduleMessage(t.clientId, t.channel === "email" ? "email" : "sms", t.subject ? (/^re:/i.test(t.subject) ? t.subject : `Re: ${t.subject}`) : "", body, at.toISOString(), [], [], [], t.taskId, undefined, t.messages.find((m) => m.direction === "inbound")?.id ?? null) : Promise.reject(new Error("Send later works on a client's conversation."))) as Promise<void>}
+              pushToast={pushToast} />
+          </div>
         ) : dirView === "clients" ? (
           <ClientsDirectory clients={sortedClients} clientCompany={(c) => clientCompany(c)} taskCount={clientTaskCount} tasksByClient={openTasksByClient} starred={starred} onToggleStar={toggleStar}
             onOpen={(id) => { setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
