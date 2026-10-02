@@ -654,14 +654,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Waiting on the client is not an owner option. It is a stage, set from
           the status chip, and it keeps the owner (Derek, 2026-09-10). */}
       <label className={`${chip} max-w-[280px]`}>
-        <span className="shrink-0 text-muted">Owner</span>
+        <span className="hidden shrink-0 text-muted sm:inline">Owner</span>
         <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={chipSelect}>
           <option value="">Unassigned</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
       </label>
       <label className={`${chip} ${task.priority === "urgent" ? "text-danger" : ""}`} style={task.priority === "urgent" ? tint(PRIORITY_META.urgent.color) : undefined}>
-        <span className={task.priority === "urgent" ? "" : "text-muted"}>Priority</span>
+        <span className={`hidden sm:inline ${task.priority === "urgent" ? "" : "text-muted"}`}>Priority</span>
         <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} aria-label="Priority" className={`${chipSelect} ${task.priority === "urgent" ? "font-semibold" : ""}`}>
           {manualPriorityOptions(task.priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
         </select>

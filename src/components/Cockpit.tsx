@@ -2300,11 +2300,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           pinned and shrinking the list's scroll area). Views with their own
           internal scroll (Journal, Vault, directories) are flex-1 min-h-0, so
           they still scroll inside and this overflow never engages for them. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background">
+      {/* Nothing at the top of a page may shrink (headers, the links row, the
+          list tabs): in this scrolling column a long list squeezed them to a
+          sliver on phones (Derek, 2026-10-02). Views that scroll inside
+          themselves are flex-1 and keep shrinking. */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background [&>:not(.flex-1)]:shrink-0">
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}
-        <header className="relative z-10 flex flex-col gap-2 overflow-x-hidden border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
+        <header className="relative z-10 flex shrink-0 flex-col gap-2 overflow-x-hidden border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
@@ -2368,7 +2372,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : null}
         </header>
 
-        <header className="relative z-10 hidden flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3">
+        <header className="relative z-10 hidden shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3">
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>

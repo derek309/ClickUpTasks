@@ -166,7 +166,8 @@ export default function InboxView(p: InboxViewProps) {
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Phone: folders as a menu */}
-        <div className="flex gap-2 border-b p-3 md:hidden">
+        {/* Hidden while a conversation is open: it is the list's, and the phone needs the room. */}
+        <div className={`gap-2 border-b p-3 md:hidden ${open || composeNew ? "hidden" : "flex"}`}>
           <button onClick={() => { setComposeNew({}); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
           <select aria-label="Folder" value={folder} onChange={(e) => { setFolder(e.target.value as Folder | "settings"); setOpenKey(null); }} className="h-11 min-w-0 flex-1 rounded-lg border bg-surface px-3 font-semibold">
             {[...FOLDERS, ...FILTERS].map((f) => <option key={f.id} value={f.id}>{f.label}{count(f.id) ? ` (${count(f.id)})` : ""}</option>)}
@@ -464,7 +465,7 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
   const mine = g.side === "mine";
   const last = g.messages[g.messages.length - 1];
   return (
-    <div className={`mt-2.5 flex w-fit max-w-[85%] flex-col gap-[3px] sm:max-w-[75%] ${mine ? "ml-auto items-end" : "items-start"}`}>
+    <div className={`mt-2.5 flex w-fit flex-col gap-[3px] ${g.messages.some((m) => m.channel === "call") ? "max-w-full" : "max-w-[85%] sm:max-w-[75%]"} ${mine ? "ml-auto items-end" : "items-start"}`}>
       {g.who && <div className="px-3 font-semibold text-muted">{g.who}</div>}
       {g.messages.map((m, i) => {
         // Bubbles in a run hug each other: the corners between them tighten.
@@ -475,7 +476,7 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
         return (
           <div key={m.id} className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
             {m.channel === "call" && m.ghlMessageId && m.ghlConversationId
-              ? <div className="w-max max-w-full rounded-2xl bg-surface px-3 py-1.5 ring-1 ring-[var(--border)]"><CallPlayer m={m} peerName={t.peerName} /></div>
+              ? <div className="w-[min(22rem,calc(100vw-2.5rem))] max-w-full rounded-2xl bg-surface px-3 py-1.5 ring-1 ring-[var(--border)]"><CallPlayer m={m} peerName={t.peerName} /></div>
               : (m.body?.trim() || other) && (
                 <div className={`whitespace-pre-wrap rounded-[20px] px-3.5 py-2 [overflow-wrap:anywhere] ${corners} ${mine ? "bg-accent text-white" : "bg-background text-foreground"}`}>
                   {other}<ChatText text={m.body ?? ""} />
@@ -568,9 +569,9 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
       </div>
       {compose?.m.id === last.id ? composer(last) : (
         <div className="flex flex-wrap gap-2 pt-4">
-          <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-4 font-bold text-white">↩ Reply</button>
-          <button onClick={() => setCompose({ mode: "replyAll", m: last })} className="h-9 rounded-full px-4 font-semibold ring-1 ring-[var(--border)] hover:bg-background">↩↩ Reply all</button>
-          <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-4 font-semibold ring-1 ring-[var(--border)] hover:bg-background">→ Forward</button>
+          <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
+          <button onClick={() => setCompose({ mode: "replyAll", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
+          <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">→ Forward</button>
         </div>
       )}
     </div>
@@ -607,9 +608,9 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
           <span className="block truncate text-muted">{open ? to : snippet}</span>
         </span>
         <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-          <span className="mr-1 whitespace-nowrap text-muted">{open ? fullTime(m.at) : shortTime(m.at)}</span>
+          <span className="mr-1 whitespace-nowrap text-muted">{open ? <><span className="sm:hidden">{shortTime(m.at)}</span><span className="hidden sm:inline">{fullTime(m.at)}</span></> : shortTime(m.at)}</span>
           {open && <>
-            <button onClick={pin} title="Add this email to the task" aria-label="Add this email to the task" className="h-8 rounded-md px-1.5 text-muted hover:bg-background">📌</button>
+            <button onClick={pin} title="Add this email to the task" aria-label="Add this email to the task" className="hidden h-8 rounded-md px-1.5 text-muted hover:bg-background sm:inline-block">📌</button>
             <button onClick={() => onAnswer("reply")} title="Reply to this email" aria-label="Reply to this email" className="h-8 rounded-md px-1.5 font-semibold text-muted hover:bg-background">↩</button>
             <span className="relative">
               <button onClick={() => setMenu(!menu)} aria-label="More" title="More" className="h-8 rounded-md px-1.5 font-bold text-muted hover:bg-background">⋯</button>
@@ -845,9 +846,9 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
     <>
       {!showImages && (
         <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-background px-3 py-2 text-muted">
-          <span>Pictures are hidden so the sender can&apos;t tell you opened this.</span>
-          <button onClick={() => setImagesOn(true)} className="font-semibold text-accent hover:underline">Show pictures</button>
-          {sender && <button onClick={() => p.setPrefs({ imageSenders: [...(p.prefs.imageSenders ?? []), sender] })} className="font-semibold text-accent hover:underline">Always show from {sender}</button>}
+          <span><span className="sm:hidden">Pictures hidden.</span><span className="hidden sm:inline">Pictures are hidden so the sender can&apos;t tell you opened this.</span></span>
+          <button onClick={() => setImagesOn(true)} className="font-semibold text-accent hover:underline">Show<span className="hidden sm:inline"> pictures</span></button>
+          {sender && <button onClick={() => p.setPrefs({ imageSenders: [...(p.prefs.imageSenders ?? []), sender] })} title={`Always show pictures from ${sender}`} className="font-semibold text-accent hover:underline">Always<span className="hidden sm:inline"> show from {sender}</span></button>}
         </div>
       )}
       <div className="overflow-hidden bg-white">
