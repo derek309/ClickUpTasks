@@ -56,16 +56,19 @@ async function run(req: NextRequest, days: number) {
   // ones whose person is not a contact yet (pulled on their own below).
   const convRows: ReturnType<typeof ghlConversationRow>[] = [];
   const convsByContact = new Map<string, { conv: any; token: string }[]>();
-  const { data: team } = await supabaseAdmin.from("profiles").select("email, member_id");
+  const { data: team } = await supabaseAdmin.from("profiles").select("email, member_id, ghl_user_id");
   const memberByEmail = new Map<string, string>();
   for (const p of team ?? []) if (p.email && p.member_id) memberByEmail.set(String(p.email).toLowerCase(), p.member_id as string);
 
+  // Each teammate's GoHighLevel user id, as GoHighLevel itself lists it.
+  const ghlIdsByMember = new Map<string, Set<string>>();
   // 1. Recent conversations, newest first, per sub-account.
   for (const locationId of await configuredLocations()) {
     const token = await tokenForLocation(locationId);
     if (!token) continue;
     const headers = { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json" };
     const members = await ghlUsersToMembers(locationId, token, memberByEmail);
+    for (const [ghlId, member] of members) ghlIdsByMember.set(member, new Set([...(ghlIdsByMember.get(member) ?? []), ghlId]));
     let startAfterDate: number | undefined;
     for (let page = 0; page < 5; page++) {
       const q = new URLSearchParams({ locationId, sortBy: "last_message_date", sort: "desc", limit: "100" });
@@ -94,6 +97,18 @@ async function run(req: NextRequest, days: number) {
       startAfterDate = Number(convs[convs.length - 1]?.lastMessageDate) || undefined;
       if (!startAfterDate) break;
     }
+  }
+
+  // Settings, Team keeps each teammate's GoHighLevel user id, which Assign and
+  // sending under your own name need. Filled from GoHighLevel's user list
+  // (matched by email) when it is blank or not one GoHighLevel knows, so a
+  // mistyped id fixes itself (Derek's had a lowercase L for a capital I).
+  let ghlIdsFixed = 0;
+  for (const p of team ?? []) {
+    const ids = p.member_id ? ghlIdsByMember.get(p.member_id as string) : undefined;
+    if (!ids?.size || ids.has(((p.ghl_user_id as string | null) ?? "").trim())) continue;
+    const { error } = await supabaseAdmin.from("profiles").update({ ghl_user_id: [...ids][0] }).eq("member_id", p.member_id);
+    if (!error) ghlIdsFixed++;
   }
 
   // 2. Local messages GoHighLevel has not confirmed yet.
@@ -190,7 +205,7 @@ async function run(req: NextRequest, days: number) {
   }
 
   const out = {
-    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers, strangersSkipped,
+    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers, strangersSkipped, ghlIdsFixed,
     unknownInGhl, noGhlId, notFound,
     ...(rejectedTokens.length ? { rejectedTokens } : {}),
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
