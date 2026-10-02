@@ -2266,7 +2266,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // edge, or the window's left edge when the sidebar is collapsed. Set here
     // (rather than read inside the drawer) so the one place that owns the
     // sidebar's width owns this too.
-    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : "16rem" } as React.CSSProperties}>
+    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : "13rem" } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -2279,7 +2279,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           feeding the width into state re-rendered on every step until the
           renderer died. macOS overlay scrollbars take no width, which is why
           it only ever happened to Michaella. */}
-      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-52 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Account block, promoted from the sidebar footer to the top in place
             of the old app-branding header (Derek's call). */}
         {/* Account block. Borderless icon buttons, not bordered boxes, which
