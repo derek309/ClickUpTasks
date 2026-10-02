@@ -528,9 +528,12 @@ type ComposeMode = "reply" | "replyAll" | "forward";
  *  address Gmail shows), or the teammate who sent it. */
 function whoWrote(m: Message, t: InboxThread, p: InboxViewProps): { name: string; org: string | null } {
   if (m.direction === "outbound") return { name: m.createdBy === p.me.id ? "You" : p.team.find((x) => x.id === m.createdBy)?.name ?? "You", org: null };
-  const c = t.contactId ? p.contacts.find((x) => x.id === t.contactId) : null;
-  const name = c?.name || m.peerName || t.peerName;
-  const org = c?.company || p.clientName(t.clientId);
+  // The contact's own name only when this message is theirs: a conversation
+  // can hold several people (Wendy introducing Russell).
+  const c = m.contactId ? p.contacts.find((x) => x.id === m.contactId) : null;
+  const theirs = !!c && (!m.peerAddress || !c.email || c.email.toLowerCase() === m.peerAddress.toLowerCase());
+  const name = (theirs ? c!.name : null) || m.peerName || m.peerAddress || t.peerName;
+  const org = theirs ? c!.company || p.clientName(m.clientId) : null;
   return { name, org: org && org.toLowerCase() !== name.toLowerCase() ? org : null };
 }
 const fullTime = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -907,8 +910,13 @@ function EmailBody({ body }: { body: string }) {
 
 // Photos show as previews; anything else is a card to open (Derek,
 // 2026-10-01: "show a preview if there are images").
+// A small "image.png" on an email stored before signatures were left out:
+// a logo or social icon from the signature, not a file anyone sent.
+const kbOf = (size: string) => { const n = parseFloat(size); return /mb/i.test(size) ? n * 1000 : n; };
+const isSignatureImage = (a: Attachment) => a.kind === "image" && !!a.gmailAttachmentId && /^image\d*\.(png|jpe?g|gif)$/i.test(a.name) && kbOf(a.size || "0") < 100;
+
 function Files({ m, p }: { m: Message; p: InboxViewProps }) {
-  const imgs = m.attachments.filter((a) => a.kind === "image");
+  const imgs = m.attachments.filter((a) => a.kind === "image" && !isSignatureImage(a));
   const docs = m.attachments.filter((a) => a.kind !== "image");
   const [big, setBig] = useState<number | null>(null);
   return (
@@ -1242,6 +1250,28 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  // Change contact: everyone outside the team on the conversation.
+  const [peopleOpen, setPeopleOpen] = useState(false);
+  const [adding, setAdding] = useState<{ address: string; name: string | null } | null>(null);
+  const people = useMemo(() => {
+    const seen = new Map<string, string | null>();
+    const add = (a: string | null | undefined, n?: string | null) => {
+      const k = (a ?? "").trim().toLowerCase();
+      if (!k.includes("@") || k.endsWith("@clickuplocal.com")) return;
+      if (!seen.has(k) || (!seen.get(k) && n)) seen.set(k, n ?? null);
+    };
+    for (const m of t.messages) { add(m.peerAddress, m.direction === "inbound" ? m.peerName : null); (m.cc ?? []).forEach((c) => add(c)); }
+    return [...seen].map(([address, name]) => ({ address, name }));
+  }, [t.messages]);
+  const changeTo = async (x: { address: string; name: string | null }) => {
+    setBusy(true);
+    try {
+      const j = await p.inbox.addContact(t.key, { address: x.address, name: x.name ?? undefined });
+      if (j.needsClient) setAdding({ address: x.address, name: j.name ?? x.name });
+      else p.pushToast(`This conversation is now with ${x.name || x.address}`);
+    } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't change it."); }
+    finally { setBusy(false); }
+  };
   // Mark done remembers what it was, so Undo puts it back.
   const [before, setBefore] = useState<TaskStatus | null>(null);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
@@ -1362,7 +1392,24 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
       )}
 
       <div className={card}>
-        <div className={label}>{contact || client ? "CONTACT" : "FROM"}</div>
+        <div className="flex items-start justify-between gap-2">
+          <div className={label}>{contact || client ? "CONTACT" : "FROM"}</div>
+          {people.length > 1 && (
+            <span className="relative">
+              <button onClick={() => setPeopleOpen(!peopleOpen)} className={`${linkBtn} text-[15px]`}>Change ▾</button>
+              {peopleOpen && (
+                <Menu onClose={() => setPeopleOpen(false)} right>
+                  <div className="px-3 pb-1 pt-1.5 text-[14px] text-muted">Who is this conversation with?</div>
+                  {people.map((x) => (
+                    <button key={x.address} disabled={busy} onClick={() => { setPeopleOpen(false); changeTo(x); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                      <b className="block">{x.name || x.address}</b>{x.name && <span className="text-[14px] text-muted">{x.address}</span>}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </span>
+          )}
+        </div>
         <b className="block text-[18px]">{person}</b>
         {(contact?.company || (client && client !== person)) && <div className="text-muted">🏢 {contact?.company || client}</div>}
         {(email || phone) && (
@@ -1376,7 +1423,8 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
             {t.clientId && <button onClick={() => p.onOpenClient(t.clientId!)} className={linkBtn}>Open client</button>}
             {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>Open in GoHighLevel</a>}
           </div>
-        ) : <AddToClient p={p} t={t} />}
+        ) : !adding && <AddToClient p={p} t={t} />}
+        {adding && <AddToClient p={p} t={t} person={adding} onDone={() => setAdding(null)} />}
       </div>
     </aside>
   );
@@ -1385,15 +1433,20 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
 // Someone who wrote in but is not a contact yet: put them on a client you
 // have, or make a new one (admins). Their messages move onto it, and what they
 // send next lands there by itself.
-function AddToClient({ p, t }: { p: InboxViewProps; t: InboxThread }) {
-  const [open, setOpen] = useState(false);
+function AddToClient({ p, t, person, onDone }: { p: InboxViewProps; t: InboxThread; person?: { address: string; name: string | null }; onDone?: () => void }) {
+  const [open, setOpen] = useState(!!person);
+  // Which GoHighLevel sub-account a new email person goes into: Agency for
+  // anyone buying from us, Directory only for a listed business (Derek, 2026-10-02).
+  const [sub, setSub] = useState<"agency" | "directory">("agency");
+  const isEmail = t.channel === "email";
+  const who = person?.name || person?.address || t.peerName;
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = words.length ? p.clients.filter((c) => words.every((w) => c.name.toLowerCase().includes(w))).slice(0, 6) : [];
   const add = async (to: { clientId?: string; newClientName?: string }, label: string) => {
     setBusy(true);
-    try { await p.inbox.addContact(t.key, to); p.pushToast(`Added to ${label}`); setOpen(false); }
+    try { await p.inbox.addContact(t.key, { ...to, ...(person ? { address: person.address, name: person.name ?? undefined } : {}), ...(isEmail ? { sub } : {}) }); p.pushToast(`Added ${who} to ${label}`); setOpen(false); onDone?.(); }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't add them."); }
     finally { setBusy(false); }
   };
@@ -1405,10 +1458,22 @@ function AddToClient({ p, t }: { p: InboxViewProps; t: InboxThread }) {
   );
   return (
     <div className="mt-2 grid gap-2">
+      {person && <div className="font-semibold">Add {who}</div>}
+      {isEmail && (
+        <div className="grid gap-1">
+          <span className="text-muted">Into GoHighLevel</span>
+          <span className="inline-flex gap-1 rounded-lg bg-background p-1">
+            {(["agency", "directory"] as const).map((k) => (
+              <button key={k} onClick={() => setSub(k)} title={k === "agency" ? "Anyone buying from us: website, marketing, a prospect" : "A business listed in the directory"}
+                className={`flex-1 rounded-md px-3 py-1.5 font-semibold ${sub === k ? "bg-surface ring-1 ring-[var(--border)]" : "text-muted"}`}>{k === "agency" ? "Agency" : "Directory"}</button>
+            ))}
+          </span>
+        </div>
+      )}
       <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your clients" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
       {hits.map((c) => <button key={c.id} disabled={busy} onClick={() => add({ clientId: c.id }, c.name)} className="rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">🏢 {c.name}</button>)}
-      {p.canAdmin && <button disabled={busy} onClick={() => add({ newClientName: q.trim() || t.peerName }, q.trim() || t.peerName)} className="h-10 rounded-lg border font-semibold hover:bg-background">＋ New client “{q.trim() || t.peerName}”</button>}
-      <button onClick={() => setOpen(false)} className="text-muted hover:underline">Cancel</button>
+      {p.canAdmin && <button disabled={busy} onClick={() => add({ newClientName: q.trim() || who }, q.trim() || who)} className="h-10 rounded-lg border font-semibold hover:bg-background">＋ New client “{q.trim() || who}”</button>}
+      <button onClick={() => { setOpen(false); onDone?.(); }} className="text-muted hover:underline">Cancel</button>
     </div>
   );
 }

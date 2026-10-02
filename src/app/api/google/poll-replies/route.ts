@@ -3,7 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
-import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, strangerThreadsIn } from "@/lib/inboundIngest";
+import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, ingestTeammateCopy, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
 import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
 
@@ -59,6 +59,11 @@ async function run(req: NextRequest, days: number, only: string | null) {
   // Sender-email → contact map. A client email in a teammate's inbox is only
   // ingested when its From address matches a known contact.
   const byEmail = await contactsByEmail<any>("id, name, client_id, email, ghl_contact_id");
+  // Teammates are never the client in a conversation, even though GoHighLevel
+  // keeps them as contacts (Derek, 2026-10-02).
+  const teamEmails = new Set(memberIdByMailbox.keys());
+  for (const e of teamEmails) byEmail.delete(e);
+  let teammateCopies = 0;
 
   // Admins triage unknown senders. Deterministic notification ids
   // (n_um_<gmailId>_<recipient>) make the every-10-min re-poll idempotent —
@@ -119,6 +124,23 @@ async function run(req: NextRequest, days: number, only: string | null) {
           errors.push(`mention ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
         }
         continue;
+      }
+      // A teammate's own email (Justin answering with Derek on CC): their
+      // reply, to whoever outside the team it went to.
+      if (teamEmails.has(em.fromEmail)) {
+        const outside = (em.others ?? []).filter((a) => !teamEmails.has(a));
+        if (memberId && outside.length) {
+          try {
+            if (await ingestTeammateCopy({
+              mailboxMemberId: memberId, senderMemberId: memberIdByMailbox.get(em.fromEmail) ?? null, peerAddress: outside[0],
+              subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+              files: em.attachments, others: em.others,
+            })) teammateCopies++;
+          } catch (e) {
+            errors.push(`teammate ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+          }
+          continue;
+        }
       }
       const contact = byEmail.get(em.fromEmail);
       if (contact) {
@@ -181,7 +203,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
           if (!em.threadId || !strangerThreads.has(em.threadId)) continue;
           try {
             if (await ingestStrangerEmail({
-              mailboxMemberId: createdBy, direction: "outbound", peerAddress: em.toEmails[0] ?? "",
+              mailboxMemberId: createdBy, direction: "outbound", peerAddress: em.toEmails.find((a) => !teamEmails.has(a)) ?? em.toEmails[0] ?? "",
               subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
               files: em.attachments,
             })) strangerReplies++;
@@ -196,7 +218,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
             contact: { id: contact.id, name: contact.name, client_id: contact.client_id },
             channel: "email", subject: em.subject, body: em.body,
             gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, createdBy, at: em.internalDate,
-            toAddress: em.toEmails[0] ?? null, files: em.attachments,
+            toAddress: em.toEmails.find((a) => !teamEmails.has(a)) ?? em.toEmails[0] ?? null, files: em.attachments,
           });
           if (did) sentIngested++;
         } catch (e) {
@@ -208,7 +230,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
 
   return NextResponse.json({
     ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, skippedAuto, mentionReplies,
-    sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail,
+    sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail, teammateCopies,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
 }

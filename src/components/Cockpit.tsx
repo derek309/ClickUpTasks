@@ -921,7 +921,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const lifetime = action ? 11000 : 2800;
     setToasts((t) => [...t, { id, text, action, secondaryAction }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), lifetime);
+    if (action && /^undo$/i.test(action.label)) lastUndoRef.current = { id, run: action.run, at: Date.now() };
   };
+  // ⌘Z (Ctrl+Z) undoes the last thing that offered Undo, for a minute after
+  // (Derek, 2026-10-02). Not while typing: there it is the box's own undo.
+  const lastUndoRef = useRef<{ id: string; run: () => void; at: number } | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+      const last = lastUndoRef.current;
+      if (!last || Date.now() - last.at > 60_000) return;
+      e.preventDefault();
+      lastUndoRef.current = null;
+      setToasts((t) => t.filter((x) => x.id !== last.id));
+      last.run();
+      pushToast("Undone");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const dismissToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
   // Copy a shareable deep link (see buildSearch) to the clipboard.
   // Same URL copyLink puts on the clipboard, returned instead of copied, so a

@@ -222,10 +222,13 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     setOlder((o) => { const ids = new Set(o.map((m) => m.id)); return [...o, ...rows.filter((m) => !ids.has(m.id))]; });
     return rows.length;
   }, []);
-  const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string }) => {
+  // to.address: one person picked from everyone on the conversation; sub: the
+  // GoHighLevel sub-account a new person goes into. A new person with no client
+  // yet comes back as needsClient so the screen can ask where they go.
+  const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string; address?: string; name?: string; sub?: "agency" | "directory" }) => {
     const j = await post("/api/inbox/contact", { threadKey, ...to });
-    load();
-    return j as { clientId: string; contactId: string };
+    if (!j.needsClient) load();
+    return j as { clientId?: string; contactId?: string; needsClient?: boolean; address?: string; name?: string };
   }, [post, load]);
   const send = useCallback(async (body: { threadKey?: string | null; channel?: "sms"; contactId?: string; to?: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; attachments?: { path: string; name: string }[] }) => {
     const j = await post("/api/inbox/send", body);

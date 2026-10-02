@@ -180,14 +180,18 @@ export function gmailFiles(payload: any): GmailFile[] {
     const id = part.body?.attachmentId;
     if (id && (part.filename || String(part.mimeType ?? "").startsWith("image/"))) {
       const headers: any[] = part.headers ?? [];
-      const inline = headers.some((x) => x.name?.toLowerCase() === "content-id") && !part.filename;
+      // Shown inside the email itself (a Content-ID, and not sent as an
+      // attachment): a signature's logo and social icons, even when the mail
+      // program named it "image.png" (Derek, 2026-10-02: 14 of them on one email).
+      const disposition = String(headers.find((x) => x.name?.toLowerCase() === "content-disposition")?.value ?? "").toLowerCase();
+      const inline = headers.some((x) => x.name?.toLowerCase() === "content-id") && !disposition.startsWith("attachment");
       out.push({ name: part.filename || "image", mimeType: part.mimeType || "application/octet-stream", bytes: Number(part.body?.size) || 0, gmailAttachmentId: id, inline });
     }
     for (const p of part.parts ?? []) walk(p);
   };
   walk(payload);
   // A signature logo or tracking pixel is not something anyone sent you.
-  return out.filter((f) => !(f.inline && f.bytes < 15_000)).slice(0, 20);
+  return out.filter((f) => !(f.inline && f.bytes < 100_000)).slice(0, 20);
 }
 
 /** One file's bytes from a teammate's Gmail. */

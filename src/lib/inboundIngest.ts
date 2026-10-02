@@ -489,3 +489,38 @@ export async function strangerThreadsIn(mailboxMemberId: string, threadIds: stri
     .eq("mailbox_member_id", mailboxMemberId).is("contact_id", null).in("gmail_thread_id", ids);
   return new Set((data ?? []).map((r: any) => r.gmail_thread_id as string));
 }
+
+/** A teammate's email in another teammate's Gmail: Justin answering a client
+ *  with Derek on CC. It is Justin's reply, not mail from a client called
+ *  Justin (Derek, 2026-10-02: teammates are GoHighLevel contacts too, so the
+ *  poll used to file it on a client made for him). Stored in the reader's
+ *  Inbox as Justin's outbound message, the other person being whoever outside
+ *  the team it went to. No contact or client on the row: the sender's own
+ *  sent copy already carries those, so the client page shows it once. */
+export async function ingestTeammateCopy(opts: {
+  mailboxMemberId: string; senderMemberId: string | null; peerAddress: string;
+  subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
+  files?: GmailFile[]; others?: string[];
+}): Promise<boolean> {
+  const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
+  if (dupe && dupe.length > 0) return false;
+  let taskId: string | null = null;
+  if (opts.gmailThreadId) {
+    const { data } = await supabaseAdmin.from("messages").select("task_id")
+      .eq("gmail_thread_id", opts.gmailThreadId).eq("mailbox_member_id", opts.mailboxMemberId)
+      .not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
+    taskId = (data?.[0]?.task_id as string | undefined) ?? null;
+  }
+  const { error } = await supabaseAdmin.from("messages").insert({
+    id: "msg_" + crypto.randomUUID(), contact_id: null, client_id: null, task_id: taskId,
+    channel: "email", direction: "outbound",
+    subject: opts.subject?.trim() || null, body: opts.body,
+    gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null,
+    created_by: opts.senderMemberId, mailbox_member_id: opts.mailboxMemberId,
+    peer_name: null, peer_address: opts.peerAddress.toLowerCase(), read: true,
+    attachments: gmailFilesToAttachments(opts.files),
+    ...(opts.others?.length ? { cc: opts.others } : {}),
+    ...(opts.at ? { created_at: opts.at } : {}),
+  });
+  return !error;
+}
