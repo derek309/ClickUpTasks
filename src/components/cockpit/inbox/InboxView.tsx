@@ -108,7 +108,9 @@ export default function InboxView(p: InboxViewProps) {
   const visible = useMemo(() => {
     if (folder === "settings") return [];
     if (q.trim()) return inbox.threads.filter((t) => matchesSearch(t, q, p.clientName(t.clientId)));
-    return inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
+    const list = inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
+    // Starred conversations stay pinned at the top (Derek, 2026-10-02: "front and center").
+    return folder === "starred" ? list : [...list.filter((t) => t.starred), ...list.filter((t) => !t.starred)];
   }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
 
@@ -222,11 +224,18 @@ export default function InboxView(p: InboxViewProps) {
                   </div>
                 )}
                 {visible.map((t, i) => {
-                  const day = prefs.byDay && !q ? dayGroup(t.latest.at) : null;
-                  const showDay = day && (i === 0 || dayGroup(visible[i - 1].latest.at) !== day);
+                  const pinnedTop = !q && folder !== "starred" && visible.some((x) => x.starred);
+                  const prevT = visible[i - 1];
+                  // Pinned stars first, then everything else (by day when that is on).
+                  const section = pinnedTop && t.starred && i === 0 ? "★ Starred"
+                    : pinnedTop && !t.starred && prevT?.starred ? (prefs.byDay ? dayGroup(t.latest.at) : "Everything else")
+                    : null;
+                  const day = !section && prefs.byDay && !q && !t.starred ? dayGroup(t.latest.at) : null;
+                  const showDay = day && (i === 0 || prevT?.starred || dayGroup(prevT.latest.at) !== day);
+                  const head = section ?? (showDay ? day : null);
                   return (
                     <div key={t.key}>
-                      {showDay && <div className="border-b px-5 pb-2 pt-4 text-[14px] font-extrabold uppercase tracking-wider text-muted">{day}</div>}
+                      {head && <div className="border-b px-5 pb-2 pt-4 text-[14px] font-extrabold uppercase tracking-wider text-muted">{head}</div>}
                       <Row t={t} p={p} active={cursor === t.key} checked={selected.has(t.key)} draft={drafts.has(t.key)} where={q.trim() ? whereIs(t) : null}
                         onCheck={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(t.key); else n.delete(t.key); return n; })}
                         onOpen={() => openThread(t)} picking={selected.size > 0}
