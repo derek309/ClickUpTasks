@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
+import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import {
   CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
@@ -461,7 +462,7 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
         return (
           <div key={m.id} className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
             {m.channel === "call" && m.ghlMessageId && m.ghlConversationId
-              ? <div className="rounded-2xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]"><CallPlayer m={m} /></div>
+              ? <div className="rounded-2xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]"><CallPlayer m={m} peerName={t.peerName} /></div>
               : (m.body?.trim() || other) && (
                 <div className={`whitespace-pre-wrap rounded-[20px] px-3.5 py-2 [overflow-wrap:anywhere] ${corners} ${mine ? "bg-accent text-white" : "bg-background text-foreground"}`}>
                   {other}<ChatText text={m.body ?? ""} />
@@ -519,7 +520,7 @@ function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: Inb
         )}
       </div>
       {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} p={p} />
-        : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} />
+        : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
         : <EmailBody body={m.body} />}
       {m.attachments?.length > 0 && <Files m={m} p={p} />}
     </div>
@@ -528,9 +529,12 @@ function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: Inb
 
 // A call: what happened, and for a voicemail (or any recorded call) its
 // recording and transcript, read from GoHighLevel when asked for.
-function CallPlayer({ m }: { m: Message }) {
+function CallPlayer({ m, peerName }: { m: Message; peerName: string }) {
   const [audio, setAudio] = useState<string | null>(null);
-  const [lines, setLines] = useState<string[] | null>(null);
+  const [lines, setLines] = useState<{ who: "them" | "us"; text: string }[] | null>(null);
+  const [copied, setCopied] = useState(false);
+  // The transcript opens in a panel on the right, not inside the conversation.
+  const [panel, setPanel] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<"audio" | "text" | null>(null);
   useEffect(() => () => { if (audio) URL.revokeObjectURL(audio); }, [audio]);
@@ -544,9 +548,22 @@ function CallPlayer({ m }: { m: Message }) {
   const transcript = async () => {
     setBusy("text"); setNote(null);
     const j = await authedFetch(`/api/inbox/call?message=${encodeURIComponent(m.id)}&part=transcript`).then((r) => r.json()).catch(() => null);
-    const got: string[] = (j?.lines ?? []).map((l: { text: string }) => l.text);
+    const got: { who: "them" | "us"; text: string }[] = j?.lines ?? [];
     if (got.length) setLines(got); else setNote(j?.note ?? j?.error ?? "No transcript for this call.");
     setBusy(null);
+    return got.length ? got : null;
+  };
+  const showTranscript = async () => { if (lines || (await transcript())) setPanel(true); };
+  // Copy transcript (Derek, 2026-10-01): who said what, ready to paste.
+  // Loads it first when it is not open yet.
+  const copy = async (): Promise<boolean> => {
+    const got = lines ?? (await transcript());
+    if (!got) return false;
+    const them = peerName.split(/\s+/)[0] || "Them";
+    const when = new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const text = [`Call with ${peerName}, ${when}`, "", ...got.map((l) => `${l.who === "them" ? them : "Us"}: ${l.text}`)].join("\n");
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); return true; }
+    catch { if (!panel) setNote("Couldn't copy. Open the transcript and copy it by hand."); return false; }
   };
   return (
     <div className="space-y-2">
@@ -554,11 +571,63 @@ function CallPlayer({ m }: { m: Message }) {
       <div className="flex flex-wrap items-center gap-2">
         {audio ? <audio src={audio} controls autoPlay className="h-10 max-w-full" />
           : <button onClick={play} disabled={busy !== null} className="h-10 rounded-lg bg-accent px-4 font-semibold text-white disabled:opacity-60">{busy === "audio" ? "Loading…" : "▶ Play recording"}</button>}
-        {!lines && <button onClick={transcript} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{busy === "text" ? "Loading…" : "Show transcript"}</button>}
+        <button onClick={showTranscript} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{busy === "text" ? "Loading…" : "Show transcript"}</button>
+        <button onClick={() => { copy(); }} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{copied ? "✓ Copied" : "📋 Copy transcript"}</button>
       </div>
       {note && <p className="text-muted">{note}</p>}
-      {lines && <div className="space-y-1.5 rounded-lg bg-background px-3 py-2.5 leading-relaxed">{lines.map((l, i) => <p key={i}>{l}</p>)}</div>}
+      {panel && lines && (
+        <TranscriptPanel title={`Call with ${peerName}`} when={new Date(m.at).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+          them={peerName.split(/\s+/)[0] || "Them"} lines={lines} copied={copied} onCopy={copy} onClose={() => setPanel(false)} />
+      )}
     </div>
+  );
+}
+
+/** A call's transcript in a panel on the right (full width on a phone), so a
+ *  long call never pushes the conversation down. Esc or a click outside closes
+ *  it; the Inbox's own keys wait while it is open (.inbox-slide). */
+function TranscriptPanel({ title, when, them, lines, copied, onCopy, onClose }: {
+  title: string; when: string; them: string; lines: { who: "them" | "us"; text: string }[]; copied: boolean; onCopy: () => Promise<boolean>; onClose: () => void;
+}) {
+  const body = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState(false);
+  // When the browser refuses the clipboard, the whole transcript is selected
+  // so Cmd+C copies it.
+  const copy = async () => {
+    if (await onCopy()) return;
+    const el = body.current, sel = window.getSelection();
+    if (!el || !sel) return;
+    const r = document.createRange(); r.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(r);
+    setSelected(true);
+  };
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown", k, true);
+    return () => window.removeEventListener("keydown", k, true);
+  }, [onClose]);
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <aside role="dialog" aria-label={title} className="inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l bg-surface text-[16px] shadow-2xl sm:w-[clamp(380px,40vw,560px)]">
+        <div className="flex items-start gap-3 border-b px-5 py-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[20px] font-extrabold leading-tight">📞 {title}</h2>
+            <p className="text-muted">{when}</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" title="Close (Esc)" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">✕</button>
+        </div>
+        <div className="flex gap-2 border-b px-5 py-3">
+          <button onClick={copy} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">{copied ? "✓ Copied" : "📋 Copy transcript"}</button>
+          {selected && !copied && <span className="self-center text-muted">Selected. Press ⌘C to copy.</span>}
+        </div>
+        <div ref={body} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 leading-relaxed">
+          {lines.map((l, i) => (
+            <p key={i}><b className={l.who === "them" ? "text-foreground" : "text-accent"}>{l.who === "them" ? them : "Us"}:</b> {l.text}</p>
+          ))}
+        </div>
+      </aside>
+    </>,
+    document.body,
   );
 }
 
