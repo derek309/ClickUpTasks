@@ -229,3 +229,35 @@ export function mergeStates(cur: Map<string, InboxState>, read: Map<string, Inbo
   }
   return out;
 }
+
+// ── Texts as a chat (Derek, 2026-10-01: "make texts like a phone") ─────────
+// Mockup: https://claude.ai/artifact/CkvnXhb1rFVm9j1Rjcqh2g
+export type ChatItem =
+  | { kind: "day"; key: string; label: string }
+  | { kind: "group"; key: string; side: "theirs" | "mine"; who: string | null; messages: Message[] };
+
+/** How many messages a chat shows before "Show earlier". */
+export const CHAT_PAGE = 30;
+
+/** Messages, oldest first, as day lines and runs of bubbles. A run is the same
+ *  side and the same person, on the same day, with no gap over 30 minutes;
+ *  it shows one time, under its last bubble. */
+export function chatItems(oldestFirst: Message[], whoOf: (m: Message) => string | null, now = new Date()): ChatItem[] {
+  const out: ChatItem[] = [];
+  let group: Extract<ChatItem, { kind: "group" }> | null = null;
+  let lastDay = "";
+  for (const m of oldestFirst) {
+    const label = dayLabel(m.at, now);
+    if (label !== lastDay) { out.push({ kind: "day", key: `d:${m.id}`, label }); lastDay = label; group = null; }
+    const side = m.direction === "outbound" ? "mine" : "theirs";
+    const who = whoOf(m);
+    const prev = group?.messages[group.messages.length - 1];
+    const gap = prev ? new Date(m.at).getTime() - new Date(prev.at).getTime() : 0;
+    if (!group || group.side !== side || group.who !== who || gap > 30 * 60_000) {
+      group = { kind: "group", key: `g:${m.id}`, side, who, messages: [] };
+      out.push(group);
+    }
+    group.messages.push(m);
+  }
+  return out;
+}

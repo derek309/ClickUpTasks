@@ -6,13 +6,13 @@
 // model: a folder list on the left, two line rows, and an open conversation
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import SignaturePanel from "../../SignaturePanel";
 import {
-  CHANNEL_ICON, CHANNEL_LABEL, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
-  type Folder, type InboxThread,
+  CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
+  type ChatItem, type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
 import { draftKeys, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
@@ -356,11 +356,18 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
           </div>
         )}
       </div>
+      {!isEmailThread(t) ? (
+        // Texts, social messages and task chats read like a phone chat
+        // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px] lg:overflow-hidden">
+          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
+          <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} />
+        </div>
+      ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px] lg:overflow-hidden">
         <div className="min-w-0 px-5 py-5 lg:overflow-y-auto lg:px-7">
           <h1 className="mb-4 text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || (t.channel === "email" ? t.peerName : `${CHANNEL_LABEL[t.channel]} with ${t.peerName}`)}</h1>
           {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
-          {!isEmailThread(t) && <Composer key={t.key} p={p} t={t} onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} />}
           {isEmailThread(t) && !compose && (
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setCompose({ mode: "reply", m: lastFromThem })} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">↩ Reply</button>
@@ -384,8 +391,97 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         </div>
         <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} />
       </div>
+      )}
     </div>
   );
+}
+
+// ── A text conversation as a chat ─────────────────────────────────────────
+function ChatView({ p, t, typing, onDraft, emailInstead }: {
+  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; emailInstead: (to: string, body: string) => void;
+}) {
+  const [shown, setShown] = useState(CHAT_PAGE);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Show earlier keeps your place: the height added above is scrolled past.
+  const keepFrom = useRef<number | null>(null);
+  const oldestFirst = useMemo(() => [...t.messages].reverse(), [t.messages]);
+  const visible = useMemo(() => oldestFirst.slice(-shown), [oldestFirst, shown]);
+  const hidden = oldestFirst.length - visible.length;
+  const teamName = useCallback((id: string | null) => p.team.find((x) => x.id === id)?.name ?? null, [p.team]);
+  const items = useMemo(() => chatItems(visible, (m) => m.direction === "outbound"
+    ? (m.createdBy && m.createdBy !== p.me.id ? teamName(m.createdBy) : null)
+    : t.channel === "chat" ? (m.peerName || t.peerName) : null), [visible, p.me.id, teamName, t.channel, t.peerName]);
+  const newest = t.messages[0]?.id;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (keepFrom.current !== null) { el.scrollTop = el.scrollHeight - keepFrom.current; keepFrom.current = null; return; }
+    el.scrollTop = el.scrollHeight;
+  }, [t.key, newest, shown]);
+  const showEarlier = () => { keepFrom.current = scrollRef.current?.scrollHeight ?? null; setShown((n) => n + CHAT_PAGE * 2); };
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
+        <Avatar t={t} />
+        <div className="min-w-0">
+          <h1 className="truncate text-[20px] font-extrabold leading-tight">{t.peerName}</h1>
+          <div className="text-muted">{CHANNEL_LABEL[t.channel]} · {t.count} {t.count === 1 ? "message" : "messages"}</div>
+        </div>
+      </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6">
+        {hidden > 0 && (
+          <div className="mb-2 flex justify-center">
+            <button onClick={showEarlier} className="rounded-full px-4 py-1.5 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">Show earlier messages ({hidden})</button>
+          </div>
+        )}
+        {items.map((it) => it.kind === "day"
+          ? <div key={it.key} className="flex items-center gap-3 pb-1 pt-4 font-semibold text-muted" role="separator"><span className="h-px flex-1 bg-[var(--border)]" />{it.label}<span className="h-px flex-1 bg-[var(--border)]" /></div>
+          : <ChatGroup key={it.key} g={it} t={t} p={p} />)}
+        {typing && <div className="mt-3 italic text-muted">{typing} is writing a reply…</div>}
+      </div>
+      <div className="border-t px-3 py-3 sm:px-4">
+        <Composer key={t.key} p={p} t={t} compact onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} />
+      </div>
+    </div>
+  );
+}
+
+function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: InboxThread; p: InboxViewProps }) {
+  const mine = g.side === "mine";
+  const last = g.messages[g.messages.length - 1];
+  return (
+    <div className={`mt-2.5 flex w-fit max-w-[85%] flex-col gap-[3px] sm:max-w-[75%] ${mine ? "ml-auto items-end" : "items-start"}`}>
+      {g.who && <div className="px-3 font-semibold text-muted">{g.who}</div>}
+      {g.messages.map((m, i) => {
+        // Bubbles in a run hug each other: the corners between them tighten.
+        const corners = mine
+          ? `${i > 0 ? "rounded-tr-md" : ""} ${i < g.messages.length - 1 ? "rounded-br-md" : ""}`
+          : `${i > 0 ? "rounded-tl-md" : ""} ${i < g.messages.length - 1 ? "rounded-bl-md" : ""}`;
+        const other = m.channel !== t.channel && <span className="mb-0.5 block text-[15px] opacity-80">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</span>;
+        return (
+          <div key={m.id} className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
+            {m.channel === "call" && m.ghlMessageId && m.ghlConversationId
+              ? <div className="rounded-2xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]"><CallPlayer m={m} /></div>
+              : (m.body?.trim() || other) && (
+                <div className={`whitespace-pre-wrap rounded-[20px] px-3.5 py-2 [overflow-wrap:anywhere] ${corners} ${mine ? "bg-accent text-white" : "bg-background text-foreground"}`}>
+                  {other}<ChatText text={m.body ?? ""} />
+                </div>
+              )}
+            {(m.attachments?.length ?? 0) > 0 && <Files m={m} p={p} />}
+          </div>
+        );
+      })}
+      <div className="px-3 text-muted">{shortTime(last.at)}</div>
+    </div>
+  );
+}
+
+/** A text's words, with any link shown as its website. */
+function ChatText({ text }: { text: string }) {
+  const parts = useMemo(() => bodyParts(text.trim()), [text]);
+  return <>{parts.map((part, i) => "url" in part
+    ? <a key={i} href={part.url} target="_blank" rel="noopener noreferrer nofollow" title={part.url} className="font-semibold underline">🔗 {part.label}</a>
+    : <span key={i}>{part.text}</span>)}</>;
 }
 
 function Menu({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -670,9 +766,11 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
-function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead }: {
+function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
   mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
+  /** Under a chat: two lines to start, Enter sends, Shift+Enter is a new line. */
+  compact?: boolean;
 }) {
   // Facebook and Instagram only let a business reply within 24 hours of the
   // person's last message (Meta's rule). Said before you type, not after.
@@ -768,7 +866,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
 
   const from = email ? `From ${p.me.email ?? "your Gmail"}` : t.channel === "chat" ? "Reply in the task chat (the client sees it in their portal)" : t.channel === "call" ? "Text them back" : `Reply by ${CHANNEL_LABEL[t.channel]}`;
   return (
-    <div className="rounded-xl bg-surface p-3 ring-2 ring-accent/40">
+    <div className={compact ? "" : "rounded-xl bg-surface p-3 ring-2 ring-accent/40"}>
       {answering && (
         <div className="mb-2 flex items-start gap-3 rounded-lg bg-background px-3 py-2">
           <span className="min-w-0 flex-1">
@@ -778,7 +876,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           {onClose && <button onClick={onClose} title="Close (your draft is kept)" aria-label="Close" className="text-muted hover:text-foreground">✕</button>}
         </div>
       )}
-      <div className="mb-1 text-muted">{from}</div>
+      {!compact && <div className="mb-1 text-muted">{from}</div>}
       {metaClosed && (
         <div className="mb-2 flex flex-wrap items-center gap-3 rounded-lg bg-highlight-soft px-3 py-2.5 font-semibold text-highlight">
           {t.channel === "ig" ? "Instagram" : "Facebook"} only allows a reply within 24 hours of their last message, and that was {shortTime(lastIn!.at)}.
@@ -810,7 +908,8 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           </>}
         </div>
       )}
-      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={4}
+      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 2 : 4}
+        onKeyDown={compact ? (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } : undefined}
         className="mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none" />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">

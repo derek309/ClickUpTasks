@@ -152,3 +152,27 @@ describe("refreshing the Inbox", () => {
     expect(out.get("gm:2")?.doneAt).toBe("2026-10-01T09:00:00Z");
   });
 });
+
+describe("texts as a chat", () => {
+  it("groups runs by side and person, splits on a new day or a long gap", async () => {
+    const { chatItems } = await import("./inboxModel");
+    const now = new Date("2026-10-01T20:00:00");
+    const m = (id: string, direction: "inbound" | "outbound", at: string) => msg({ id, direction, at, channel: "sms" });
+    const items = chatItems([
+      m("a", "inbound", "2026-09-30T10:00:00"), m("b", "inbound", "2026-09-30T10:01:00"),
+      m("c", "outbound", "2026-09-30T10:05:00"),
+      m("d", "inbound", "2026-09-30T16:00:00"),
+      m("e", "inbound", "2026-10-01T09:00:00"),
+    ], () => null, now);
+    expect(items.map((i) => i.kind === "day" ? i.label : `${i.side}:${i.messages.map((x) => x.id).join("")}`))
+      .toEqual(["Yesterday", "theirs:ab", "mine:c", "theirs:d", "Today", "theirs:e"]);
+  });
+  it("splits your side when a teammate wrote", async () => {
+    const { chatItems } = await import("./inboxModel");
+    const items = chatItems([
+      msg({ id: "a", direction: "outbound", at: "2026-10-01T10:00:00", createdBy: "u_derek" }),
+      msg({ id: "b", direction: "outbound", at: "2026-10-01T10:01:00", createdBy: "u_justin" }),
+    ], (x) => x.createdBy ?? null, new Date("2026-10-01T12:00:00"));
+    expect(items.filter((i) => i.kind === "group")).toHaveLength(2);
+  });
+});
