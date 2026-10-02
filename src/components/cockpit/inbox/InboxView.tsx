@@ -356,8 +356,11 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
     back();
     p.pushToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, { label: "Undo", run: () => { undo(); } });
   };
+  // The side panel sits beside the conversation when the conversation area
+  // itself has room (1080px), not the whole window: with the folders folded
+  // to icons a laptop has room too (Derek, 2026-10-02).
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="@container flex min-h-0 flex-1 flex-col">
       <div className="relative flex flex-wrap gap-0.5 border-b px-2 py-1.5 sm:px-3">
         <button onClick={back} title="Back" aria-label="Back" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">←<span className="hidden sm:inline"> Back</span></button>
         <button onClick={done} title="Archive: out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">🗄<span className="hidden sm:inline"> Archive</span></button>
@@ -395,7 +398,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             )}
           </div>
         )}
-        <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground 2xl:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
+        <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground @min-[1080px]:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
         {isGhl && (
           <div className="relative">
             <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">👤<span className="hidden sm:inline"> Assign</span></button>
@@ -416,16 +419,16 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
       {!isEmailThread(t) ? (
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto 2xl:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] 2xl:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1080px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1080px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
           <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
           <SideResizer p={p} />
-          <div className="hidden min-h-0 overflow-y-auto bg-background/40 2xl:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+          <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1080px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto 2xl:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] 2xl:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1080px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1080px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
         <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
         <SideResizer p={p} />
-        <div className="hidden min-h-0 overflow-y-auto bg-background/40 2xl:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+        <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1080px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
       </div>
       )}
       {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
@@ -574,7 +577,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
     ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} /></div>
     : null;
   return (
-    <div className="min-w-0 px-4 py-4 sm:px-6 2xl:overflow-y-auto">
+    <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1080px]:overflow-y-auto">
       <h1 className="text-[22px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || t.peerName}</h1>
       <p className="mb-3 text-muted">{others.length ? `${others.join(", ")} and you` : `You and ${t.peerName}`} · {t.count} {t.count === 1 ? "email" : "emails"}</p>
       {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
@@ -1247,7 +1250,7 @@ function SideResizer({ p }: { p: InboxViewProps }) {
     <button ref={ref} role="separator" aria-orientation="vertical" aria-label="Side panel width" aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={width}
       title="Drag to resize. Double-click to reset." onPointerDown={down} onDoubleClick={() => set(SIDE_DEFAULT)}
       onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); set(width + 20); } if (e.key === "ArrowRight") { e.preventDefault(); set(width - 20); } }}
-      className="group relative hidden cursor-col-resize touch-none 2xl:block">
+      className="group relative hidden cursor-col-resize touch-none @min-[1080px]:block">
       <span className="absolute inset-y-0 left-[3px] w-0.5 bg-[var(--border)] transition-colors group-hover:bg-accent group-focus-visible:bg-accent" />
     </button>
   );
