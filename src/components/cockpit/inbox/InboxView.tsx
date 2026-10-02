@@ -284,7 +284,8 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
     .map((x) => ("text" in x ? x.text : "")).join(" ").replace(/\s+/g, " ").replace(/\[\s*\]/g, "").trim();
   const client = p.clientName(t.clientId);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
-  const act = "grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
+  // Room between them so a quick move doesn't hit the wrong one (Derek, 2026-10-02).
+  const act = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
   const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
   return (
     <div onClick={onOpen} className={`group relative grid cursor-pointer grid-cols-[40px_minmax(0,1fr)] items-center gap-3 border-b px-5 py-2.5 ${checked ? "bg-accent-soft" : active ? "bg-accent-soft/60" : "hover:bg-background/60"}`}>
@@ -302,13 +303,13 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
           <span className={`ml-auto flex shrink-0 items-center gap-1.5 tabular-nums ${t.unread ? "font-bold text-[#2563eb]" : "text-muted"}`}>
             {t.hasFiles && <span title="Has attachments" className="opacity-60">📎</span>}
             <span className="sm:group-hover:hidden">{t.snoozed && t.snoozedUntil ? `⏰ ${shortTime(t.snoozedUntil)}` : shortTime(t.latest.at)}</span>
-            <span className="hidden gap-0.5 font-normal sm:group-hover:flex">
+            <span className="hidden gap-2 font-normal sm:group-hover:flex">
               <button onClick={stop(onArchive)} title="Archive" aria-label="Archive" className={act}>🗄</button>
               <button onClick={stop(onSnooze)} title="Snooze until tomorrow, 9 AM" aria-label="Snooze" className={act}>⏰</button>
               <button onClick={stop(onDelete)} title={t.trashed ? "Restore" : "Delete"} aria-label={t.trashed ? "Restore" : "Delete"} className={act}>{t.trashed ? "↩" : "🗑"}</button>
             </span>
             <button onClick={stop(() => p.inbox.star([t.key], !t.starred))} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
-              className={`w-6 text-[19px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "invisible text-muted/50 hover:text-[#d97706] group-hover:visible"}`}>{t.starred ? "★" : "☆"}</button>
+              className={`ml-1.5 w-6 text-[19px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "invisible text-muted/50 hover:text-[#d97706] group-hover:visible"}`}>{t.starred ? "★" : "☆"}</button>
           </span>
         </div>
         <div className="flex min-w-0 items-baseline gap-2 text-muted">
