@@ -363,7 +363,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
     p.pushToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, { label: "Undo", run: () => { undo(); } });
   };
   // The side panel sits beside the conversation when the conversation area
-  // itself has room (1080px), not the whole window: with the folders folded
+  // itself has room (1000px), not the whole window: with the folders folded
   // to icons a laptop has room too (Derek, 2026-10-02).
   return (
     <div className="@container flex min-h-0 flex-1 flex-col">
@@ -404,7 +404,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             )}
           </div>
         )}
-        <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground @min-[1080px]:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
+        <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground @min-[1000px]:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
         {isGhl && (
           <div className="relative">
             <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">👤<span className="hidden sm:inline"> Assign</span></button>
@@ -425,16 +425,16 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
       {!isEmailThread(t) ? (
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1080px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1080px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
           <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
           <SideResizer p={p} />
-          <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1080px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+          <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1080px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1080px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
         <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
         <SideResizer p={p} />
-        <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1080px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+        <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
       </div>
       )}
       {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
@@ -583,7 +583,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
     ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} /></div>
     : null;
   return (
-    <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1080px]:overflow-y-auto">
+    <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1000px]:overflow-y-auto">
       <h1 className="text-[22px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || t.peerName}</h1>
       <p className="mb-3 text-muted">{others.length ? `${others.join(", ")} and you` : `You and ${t.peerName}`} · {t.count} {t.count === 1 ? "email" : "emails"}</p>
       {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
@@ -1256,7 +1256,7 @@ function SideResizer({ p }: { p: InboxViewProps }) {
     <button ref={ref} role="separator" aria-orientation="vertical" aria-label="Side panel width" aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={width}
       title="Drag to resize. Double-click to reset." onPointerDown={down} onDoubleClick={() => set(SIDE_DEFAULT)}
       onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); set(width + 20); } if (e.key === "ArrowRight") { e.preventDefault(); set(width - 20); } }}
-      className="group relative hidden cursor-col-resize touch-none @min-[1080px]:block">
+      className="group relative hidden cursor-col-resize touch-none @min-[1000px]:block">
       <span className="absolute inset-y-0 left-[3px] w-0.5 bg-[var(--border)] transition-colors group-hover:bg-accent group-focus-visible:bg-accent" />
     </button>
   );
@@ -1594,6 +1594,11 @@ function AddPersonForm({ p, t, x, onClose }: { p: InboxViewProps; t: InboxThread
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = words.length ? p.clients.filter((c) => words.every((w) => c.name.toLowerCase().includes(w))).slice(0, 5) : [];
   const who = `${d.firstName} ${d.lastName}`.trim() || x.address;
+  // The client it goes on: picked by hand, else the one whose name matches.
+  const [pick, setPick] = useState<{ clientId?: string; newClientName?: string; label: string } | null>(null);
+  const exact = hits.find((c) => c.name.toLowerCase() === q.trim().toLowerCase());
+  const newName = q.trim() || d.companyName || "";
+  const chosen = pick ?? (exact ? { clientId: exact.id, label: exact.name } : null);
   const add = async (to: { clientId?: string; newClientName?: string; useContactId?: string }, label: string) => {
     setBusy(true);
     try {
@@ -1639,10 +1644,30 @@ function AddPersonForm({ p, t, x, onClose }: { p: InboxViewProps; t: InboxThread
         ))}
       </span>
       <span className="mt-1 text-muted">Client</span>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your clients" aria-label="Search your clients" className={fieldCls} />
-      {hits.map((c) => <button key={c.id} disabled={busy} onClick={() => add({ clientId: c.id }, c.name)} className="rounded-lg bg-surface px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-accent-soft">🏢 {c.name}</button>)}
-      {p.canAdmin && <button disabled={busy} onClick={() => add({ newClientName: q.trim() || d.companyName || who }, q.trim() || d.companyName || who)} className="h-10 rounded-lg border font-semibold hover:bg-surface">＋ New client “{q.trim() || d.companyName || who}”</button>}
-      <button onClick={onClose} className="text-muted hover:underline">Cancel</button>
+      <input value={q} onChange={(e) => { setQ(e.target.value); setPick(null); }} placeholder="Search your clients" aria-label="Search your clients" className={fieldCls} />
+      {/* Pick one, then Add: nothing is added until the button. */}
+      <div className="grid gap-1" role="radiogroup" aria-label="Client">
+        {hits.map((c) => {
+          const on = chosen?.clientId === c.id;
+          return (
+            <button key={c.id} role="radio" aria-checked={on} onClick={() => setPick({ clientId: c.id, label: c.name })}
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left ring-1 ${on ? "bg-accent-soft font-semibold text-accent ring-accent" : "bg-surface ring-[var(--border)] hover:bg-accent-soft"}`}>
+              <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 ${on ? "border-accent bg-accent text-white" : "border-[var(--border)]"}`}>{on && <Ico n="check" className="h-3 w-3" />}</span>
+              <span className="truncate">{c.name}</span>
+            </button>
+          );
+        })}
+        {p.canAdmin && newName && !exact && (
+          <button role="radio" aria-checked={!!chosen?.newClientName} onClick={() => setPick({ newClientName: newName, label: newName })}
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left ring-1 ${chosen?.newClientName ? "bg-accent-soft font-semibold text-accent ring-accent" : "bg-surface ring-[var(--border)] hover:bg-accent-soft"}`}>
+            <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 border-[var(--border)]">＋</span>
+            <span className="min-w-0 truncate">New client: {newName}</span>
+          </button>
+        )}
+      </div>
+      <button disabled={busy || !chosen} onClick={() => chosen && add(chosen.clientId ? { clientId: chosen.clientId } : { newClientName: chosen.newClientName }, chosen.label)}
+        className="mt-1 h-11 rounded-lg bg-accent font-bold text-white disabled:opacity-50">{busy ? "Adding…" : `Add to GoHighLevel (${sub === "agency" ? "Agency" : "Directory"})`}</button>
+      <button onClick={onClose} className="justify-self-center px-2 text-muted hover:underline">Cancel</button>
     </div>
   );
 }
