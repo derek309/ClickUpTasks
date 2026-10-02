@@ -17,6 +17,7 @@ import {
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
 import { draftKeys, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
+import { allowEntry } from "@/lib/inbox";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -371,6 +372,13 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
                   <button onClick={() => blockIt(domain)} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Block everyone at {domain.slice(1)}</button>
                 )}
                 <div className="px-3 pb-1 pt-2 text-[14px] text-muted">Moves this to Trash. Undo any time in Settings.</div>
+                {t.channel === "email" && <>
+                  <div className="my-1 border-t" />
+                  <button onClick={() => { setBlockOpen(false); letIn(p, t.peerAddress!); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">✅ Always let in {t.peerAddress}</button>
+                  {domain && !/@(gmail|yahoo|hotmail|outlook|icloud|aol|me|msn|live)\./i.test(domain) && (
+                    <button onClick={() => { setBlockOpen(false); letIn(p, domain); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">✅ Always let in everyone at {domain.slice(1)}</button>
+                  )}
+                </>}
               </Menu>
             )}
           </div>
@@ -1521,6 +1529,47 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: st
   );
 }
 
+// ── Always let in (Derek, 2026-10-02: "emails I want to hit my inbox that are
+// not"). The Gmail sync reads only the Primary tab and leaves out mail that
+// looks automated; these senders come in anyway. Kept with Inbox settings, and
+// adding one checks the last two weeks of Gmail for them.
+async function letIn(p: InboxViewProps, raw: string) {
+  const entry = allowEntry(raw);
+  if (!entry) { p.pushToast("That isn't an email address or a domain."); return; }
+  const list = p.prefs.allowSenders ?? [];
+  if (!list.includes(entry)) p.setPrefs({ allowSenders: [...list, entry] });
+  const who = entry.startsWith("@") ? `everyone at ${entry.slice(1)}` : entry;
+  p.pushToast(`Letting in ${who}. Checking the last 2 weeks of your Gmail…`);
+  // The setting saves a moment after it changes; the check reads it from there.
+  await new Promise((r) => setTimeout(r, 1500));
+  const res = await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 14, member: p.me.id }) }).catch(() => null);
+  const j = res?.ok ? await res.json().catch(() => null) : null;
+  p.inbox.reload();
+  const found = (j?.strangers ?? 0) + (j?.ingested ?? 0);
+  p.pushToast(j ? (found ? `Found ${found} new ${found === 1 ? "email" : "emails"} from them.` : "Done. Nothing new from them in the last 2 weeks; what they send next comes in.") : "Saved. What they send next comes in.");
+}
+
+function AllowBox({ p }: { p: InboxViewProps }) {
+  const [v, setV] = useState("");
+  const list = p.prefs.allowSenders ?? [];
+  const add = () => { const e = allowEntry(v); if (!e) { p.pushToast("Type an email address, or a domain like acme.com."); return; } setV(""); letIn(p, e); };
+  return (
+    <Box title="Always let in" help="Email from these comes into your Inbox even when Gmail files it under Updates or Promotions, or it looks automated (invoices, form notices, no-reply senders).">
+      <div className="flex gap-2">
+        <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} placeholder="jane@acme.com, or acme.com for everyone there"
+          className="h-10 min-w-0 flex-1 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+        <button onClick={add} disabled={!v.trim()} className="h-10 shrink-0 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-50">＋ Let in</button>
+      </div>
+      {list.length ? list.map((a) => (
+        <div key={a} className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2">
+          <span className="break-all">{a.startsWith("@") ? `Everyone at ${a.slice(1)}` : a}</span>
+          <button onClick={() => p.setPrefs({ allowSenders: list.filter((x) => x !== a) })} className="h-9 shrink-0 rounded-md border px-3 font-semibold hover:bg-surface">Remove</button>
+        </div>
+      )) : <div className="text-muted">Nobody yet. You can also let someone in from the ⛔ menu on their email.</div>}
+    </Box>
+  );
+}
+
 function Switch({ on, set, label, help }: { on: boolean; set: (v: boolean) => void; label: string; help?: string }) {
   return (
     <label className="flex cursor-pointer items-center justify-between gap-4 py-1.5">
@@ -1573,6 +1622,7 @@ function InboxSettings(p: InboxViewProps) {
             </div>
           )) : <div className="text-muted">Nobody blocked.</div>}
         </Box>
+        <AllowBox p={p} />
         <Box title="Sending">
           <div className="flex flex-wrap items-center justify-between gap-3 py-1.5">
             <span><b className="block font-semibold">Undo send</b><span className="text-muted">Time to take a message back after Send</span></span>

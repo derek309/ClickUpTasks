@@ -34,3 +34,23 @@ export function isBlocked(address: string | null | undefined, blocks: Iterable<s
   }
   return false;
 }
+
+/** An "Always let in" entry (Inbox Settings): an address as written, or a
+ *  domain, stored "@acme.com" so isBlocked's matching works for it too. */
+export function allowEntry(raw: string): string | null {
+  const a = raw.trim().toLowerCase().replace(/^mailto:/, "");
+  if (!a || !/^[a-z0-9@._+-]+$/.test(a)) return null;
+  if (a.includes("@") && !a.startsWith("@")) return /^[^@]+@[^@]+\.[^@]+$/.test(a) ? a : null;
+  const domain = a.replace(/^@/, "");
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) ? `@${domain}` : null;
+}
+
+/** The Gmail search for a teammate's inbox: the Primary tab, plus anything
+ *  from someone they always let in, whichever tab Gmail put it in. */
+export function inboundGmailQuery(days: number, allows: string[], onlyAllowed = false): string {
+  const froms = allows.map(allowEntry).filter((a): a is string => !!a).slice(0, 40)
+    .map((a) => `from:${a.startsWith("@") ? a.slice(1) : a}`);
+  // onlyAllowed: the catch-up after adding someone looks for just them.
+  const where = onlyAllowed ? `{${froms.join(" ") || "from:nobody.invalid"}}` : froms.length ? `{category:primary ${froms.join(" ")}}` : "category:primary";
+  return `in:inbox ${where} newer_than:${days}d -from:me`;
+}

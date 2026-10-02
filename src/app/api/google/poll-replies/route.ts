@@ -5,7 +5,7 @@ import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
-import { isBlocked } from "@/lib/inbox";
+import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,17 +25,20 @@ import { isBlocked } from "@/lib/inbox";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  return run(req, 2);
+  return run(req, 2, null);
 }
 // An admin may POST { days } (up to 30) once, to fill the Inbox with recent
 // mail when it first goes live; the timer always reads two days.
 export async function POST(req: NextRequest) {
   const body = await req.clone().json().catch(() => ({} as any));
   const days = typeof body?.days === "number" && body.days > 0 ? Math.min(Math.floor(body.days), 30) : 2;
-  return run(req, days);
+  // { member }: only that teammate's mailbox, for the catch-up after they add
+  // someone to Always let in.
+  const only = typeof body?.member === "string" && body.member ? body.member as string : null;
+  return run(req, days, only);
 }
 
-async function run(req: NextRequest, days: number) {
+async function run(req: NextRequest, days: number, only: string | null) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -43,7 +46,7 @@ async function run(req: NextRequest, days: number) {
 
   // Which mailboxes to read — the team's own @clickuplocal.com accounts.
   const { data: profiles } = await supabaseAdmin.from("profiles").select("email, member_id").ilike("email", "%@clickuplocal.com");
-  const mailboxes = Array.from(new Set((profiles ?? []).map((p: any) => (p.email ?? "").toLowerCase()).filter(Boolean)));
+  const mailboxes = Array.from(new Set((profiles ?? []).filter((p: any) => !only || p.member_id === only).map((p: any) => (p.email ?? "").toLowerCase()).filter(Boolean)));
   // Sent-folder pass (below) needs each mailbox's roster id to stamp as
   // created_by — the inbound pass has no equivalent need (created_by is
   // always null for a client's own inbound message).
@@ -62,7 +65,14 @@ async function run(req: NextRequest, days: number) {
   // an unmatched email is surfaced in the Inbox exactly once, not each run.
   // category:primary keeps Gmail's own Promotions/Social/Updates tabs (where
   // newsletters + notifications live) out of what we scan.
-  const query = `in:inbox category:primary newer_than:${days}d -from:me`;
+  // Each teammate's Always let in list (Inbox Settings): their mail comes in
+  // from any Gmail tab and even when it looks automated.
+  const { data: prefRows } = await supabaseAdmin.from("inbox_prefs").select("member_id, prefs");
+  const allowsBy = new Map<string, string[]>();
+  for (const r of prefRows ?? []) {
+    const list = (r.prefs as any)?.allowSenders;
+    if (Array.isArray(list)) allowsBy.set(r.member_id as string, list.filter((x: unknown): x is string => typeof x === "string"));
+  }
   const sentQuery = `in:sent newer_than:${days}d`;
   // A catch-up reads more than one poll's worth.
   const max = days > 2 ? 200 : 25;
@@ -79,7 +89,7 @@ async function run(req: NextRequest, days: number) {
     const memberId = memberIdByMailbox.get(mailbox) ?? null;
     let emails;
     try {
-      emails = await readInboundGmail(mailbox, query, max);
+      emails = await readInboundGmail(mailbox, inboundGmailQuery(days, memberId ? allowsBy.get(memberId) ?? [] : [], !!only), max);
     } catch (e) {
       errors.push(`${mailbox}: ${e instanceof Error ? e.message : "read failed"}`);
       continue;
@@ -131,7 +141,7 @@ async function run(req: NextRequest, days: number) {
         // is not lost; from there they can answer it, add the person or link
         // it to a task. Automated mail (newsletters, no-reply, notifications)
         // stays in Gmail: people, not robots (Derek, 2026-10-01).
-        if (em.auto) { skippedAuto++; continue; }
+        if (em.auto && !(memberId && isBlocked(em.fromEmail, allowsBy.get(memberId) ?? []))) { skippedAuto++; continue; }
         unmatched++;
         if (!memberId || isBlocked(em.fromEmail, blocksBy.get(memberId) ?? [])) continue;
         try {
@@ -152,7 +162,8 @@ async function run(req: NextRequest, days: number) {
     // skipped silently: unlike an unmatched inbound email, it's not a lead to
     // triage — just the teammate emailing someone outside the CRM.
     const createdBy = memberIdByMailbox.get(mailbox);
-    if (createdBy) {
+    // The let-in catch-up reads only inbound mail from the people let in.
+    if (createdBy && !only) {
       let sent: SentEmail[];
       try {
         sent = await readSentGmail(mailbox, sentQuery, max);
