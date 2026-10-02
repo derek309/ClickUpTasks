@@ -7,7 +7,8 @@ import type { Message } from "@/lib/data";
 
 /** One conversation in the Inbox. A Gmail thread, a GoHighLevel conversation,
  *  or a task's portal chat; anything else stands alone. */
-export function threadKeyOf(m: Pick<Message, "id" | "channel" | "taskId" | "gmailThreadId" | "ghlConversationId">): string {
+export function threadKeyOf(m: Pick<Message, "id" | "channel" | "taskId" | "gmailThreadId" | "ghlConversationId"> & { threadKey?: string }): string {
+  if (m.threadKey) return m.threadKey;
   if (m.gmailThreadId) return `gm:${m.gmailThreadId}`;
   if (m.ghlConversationId) return `ghl:${m.ghlConversationId}`;
   if (m.channel === "chat" && m.taskId) return `chat:${m.taskId}`;

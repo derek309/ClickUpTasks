@@ -50,6 +50,8 @@ export type InboxViewProps = {
   contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null }[];
   /** The side panel's live task card: status, Mark done. */
   onPatchTask: (taskId: string, patch: Partial<Task>) => void;
+  /** Team chat: a task's chat (as a comment), a direct message, or the team group. */
+  onSendTeam: (threadKey: string, body: string) => Promise<void>;
   /** 📌 Add to task: an email onto the linked task as a comment. */
   onAddComment: (taskId: string, body: string) => void;
   onOpenClient: (clientId: string) => void;
@@ -64,7 +66,7 @@ const FOLDERS: { id: Folder; label: string; icon: string }[] = [
 ];
 const FILTERS: { id: Folder; label: string; icon: string }[] = [
   { id: "email", label: "Email", icon: "✉️" }, { id: "sms", label: "Texts", icon: "💬" },
-  { id: "social", label: "Social", icon: "👥" }, { id: "call", label: "Calls", icon: "📞" }, { id: "chat", label: "Task chats", icon: "🗂️" },
+  { id: "social", label: "Social", icon: "👥" }, { id: "call", label: "Calls", icon: "📞" }, { id: "team", label: "Team", icon: "🤝" }, { id: "chat", label: "Client chats", icon: "🗂️" },
 ];
 const AVATAR = ["#1b3a5c", "#0f766e", "#b45309", "#7c3aed", "#be185d", "#2563eb", "#4d7c0f"];
 const initials = (name: string) => (name.includes("@") || /^\+?\d/.test(name) ? name.replace(/^\+/, "")[0] ?? "?" : name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("")).toUpperCase();
@@ -281,7 +283,8 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
   onCheck: (v: boolean) => void; onOpen: () => void; onArchive: () => void; onSnooze: () => void; onDelete: () => void;
 }) {
   // Words first: links in the preview are just noise.
-  const preview = bodyParts(splitQuotedEmail(t.latest.body || "").visible || t.latest.body || "")
+  const author = t.channel === "team" ? (t.latest.direction === "outbound" ? "You" : (t.latest.peerName ?? "").split(/\s+/)[0]) : "";
+  const preview = (author ? `${author}: ` : "") + bodyParts(splitQuotedEmail(t.latest.body || "").visible || t.latest.body || "")
     .map((x) => ("text" in x ? x.text : "")).join(" ").replace(/\s+/g, " ").replace(/\[\s*\]/g, "").trim();
   const client = p.clientName(t.clientId);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
@@ -433,16 +436,16 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
           <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
           <SideResizer p={p} />
-          <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+          <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
         </div>
       ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
         <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
         <SideResizer p={p} />
-        <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
+        <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
       </div>
       )}
-      {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
+      {details && <DetailsPanel onClose={() => setDetails(false)}>{t.channel === "team" ? <TeamPanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} /> : <SidePanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} />}</DetailsPanel>}
     </div>
   );
 }
@@ -461,7 +464,7 @@ function ChatView({ p, t, typing, onDraft, emailInstead }: {
   const teamName = useCallback((id: string | null) => p.team.find((x) => x.id === id)?.name ?? null, [p.team]);
   const items = useMemo(() => chatItems(visible, (m) => m.direction === "outbound"
     ? (m.createdBy && m.createdBy !== p.me.id ? teamName(m.createdBy) : null)
-    : t.channel === "chat" ? (m.peerName || t.peerName) : null), [visible, p.me.id, teamName, t.channel, t.peerName]);
+    : t.channel === "chat" || (t.channel === "team" && !t.key.startsWith("team:dm:")) ? (m.peerName || t.peerName) : null), [visible, p.me.id, teamName, t.channel, t.peerName, t.key]);
   const newest = t.messages[0]?.id;
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -1086,6 +1089,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
 
   const deliver = async (body: string) => {
     if (t.channel === "chat") return p.onSendChat(t, body);
+    if (t.channel === "team") return p.onSendTeam(t.key, body);
     await p.inbox.send({
       threadKey: t.key.startsWith("gm:") || t.key.startsWith("ghl:") ? t.key : null,
       to: email ? (to.trim() || undefined) : undefined,
@@ -1276,6 +1280,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   // Change contact: everyone outside the team on the conversation.
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [adding, setAdding] = useState<{ address: string; name: string | null } | null>(null);
@@ -1319,6 +1324,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
       .filter((x) => words.every((w) => x.title.toLowerCase().includes(w) || (p.clientName(x.clientId) ?? "").toLowerCase().includes(w)))
       .slice(0, 6);
   }, [q, p, t.clientId]);
+  // Their open tasks (this contact's, else this client's), soonest due first.
+  const theirs = useMemo(() => p.tasks
+    .filter((x) => x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (t.clientId && x.clientId === t.clientId)))
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")), [p.tasks, t.contactId, t.clientId]);
   const link = async (taskId: string | null) => {
     setBusy(true);
     try { await p.inbox.linkTask(t.key, taskId); p.pushToast(taskId ? "Linked. New messages here land on the task too." : "Unlinked"); setQ(""); }
@@ -1370,13 +1379,22 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         </> : <>
           <p className="mb-2 text-muted">Link it and every new message here lands on the task too.</p>
           <input ref={linkSearchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={client ? `Search ${client}'s tasks` : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
-          {q && <div className="mt-1.5 space-y-1">
-            {matches.map((x) => (
-              <button key={x.id} disabled={busy} onClick={() => link(x.id)} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">
-                {x.title}<span className="block text-[14px] text-muted">{p.clientName(x.clientId)}{x.due ? `, due ${x.due}` : ""}</span>
-              </button>
+          {/* Their open tasks, one click to link (Derek, 2026-10-02: "quick"):
+              three, then Show more; typing searches every task. */}
+          <div className="mt-1.5 space-y-1">
+            {(q ? matches : theirs.slice(0, showAll ? 12 : 3)).map((x) => (
+              <div key={x.id} className="flex items-center gap-2 rounded-lg bg-background py-1.5 pl-3 pr-1.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">{x.title}</span>
+                  <span className="block truncate text-[14px] text-muted">{q ? p.clientName(x.clientId) : STATUS_META[x.status].label}{x.due ? ` · due ${new Date(`${x.due}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}` : ""}</span>
+                </span>
+                <button disabled={busy} onClick={() => link(x.id)} title="Link this email to it" aria-label={`Link to ${x.title}`}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-[20px] font-bold text-white disabled:opacity-50">＋</button>
+              </div>
             ))}
-          </div>}
+            {!q && theirs.length === 0 && <p className="text-muted">No open tasks for them yet.</p>}
+            {!q && theirs.length > 3 && !showAll && <button onClick={() => setShowAll(true)} className={linkBtn}>Show {Math.min(theirs.length, 12) - 3} more</button>}
+          </div>
           <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
         </>}
       </div>
@@ -1431,6 +1449,81 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         {adding && <AddToClient p={p} t={t} person={adding} onDone={() => setAdding(null)} />}
       </div>
       )}
+    </aside>
+  );
+}
+
+// ── The side panel of a team chat: the task, and who is in the chat ─────
+function TeamPanel({ p, t }: { p: InboxViewProps; t: InboxThread }) {
+  const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
+  const [statusOpen, setStatusOpen] = useState(false);
+  const nameOf = (id: string) => p.team.find((m) => m.id === id)?.name ?? "Teammate";
+  // In the chat: whoever has written in it, the task's owner, the other side
+  // of a direct message, or everyone for the group.
+  const inChat = useMemo(() => {
+    if (t.key === "team:group") return p.team.map((m) => m.id);
+    const ids = new Set<string>([p.me.id]);
+    if (t.key.startsWith("team:dm:")) ids.add(t.key.slice(8));
+    t.messages.forEach((m) => { if (m.createdBy) ids.add(m.createdBy); });
+    if (task?.assigneeId) ids.add(task.assigneeId);
+    return [...ids].filter((id) => p.team.some((m) => m.id === id));
+  }, [t, task, p.team, p.me.id]);
+  const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
+  const label = "mb-1.5 text-[14px] font-bold tracking-wide text-muted";
+  const linkBtn = "font-semibold text-accent hover:underline";
+  const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
+  // Adding someone to a task chat mentions them on the task, which tells them.
+  const addPerson = async (id: string) => {
+    try { await p.onSendTeam(t.key, `@${nameOf(id)} joining this chat`); p.pushToast(`${nameOf(id).split(/\s+/)[0]} added`); }
+    catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't add them."); }
+  };
+  return (
+    <aside className="min-w-0 space-y-3 p-4">
+      {task ? (
+        <div className={card}>
+          <div className={label}>TASK</div>
+          <b className="block text-[18px] leading-snug">{task.title}</b>
+          {p.clientName(task.clientId) && <div className="text-muted">🏢 {p.clientName(task.clientId)}</div>}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="relative">
+              <button onClick={() => setStatusOpen(!statusOpen)} className="h-8 rounded-full px-3 font-semibold" style={{ background: STATUS_META[task.status].chip }}>
+                <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label} ▾
+              </button>
+              {statusOpen && (
+                <Menu onClose={() => setStatusOpen(false)}>
+                  {STATUS_ORDER.filter((st) => !HIDDEN_STATUSES.has(st)).map((st) => (
+                    <button key={st} onClick={() => { setStatusOpen(false); p.onPatchTask(task.id, { status: st }); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
+                      <span className="h-2 w-2 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}{st === task.status ? " ✓" : ""}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </span>
+            {task.due && <span className="h-8 rounded-full bg-background px-3 leading-8 ring-1 ring-[var(--border)]">📅 {dueLabel(task.due)}</span>}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {task.status !== "done" && <button onClick={() => { p.onPatchTask(task.id, { status: "done" }); p.pushToast("Marked done"); }} className="h-9 rounded-lg bg-success px-3 font-bold text-white">✓ Mark done</button>}
+            <button onClick={() => p.onOpenTask(task.id, t.peerName)} className={linkBtn}>Open task →</button>
+          </div>
+        </div>
+      ) : (
+        <div className={card}>
+          <div className={label}>{t.key === "team:group" ? "GROUP CHAT" : "DIRECT MESSAGE"}</div>
+          <p className="text-muted">Just a chat. Talk about a task in that task&apos;s own chat, so it stays with the work.</p>
+        </div>
+      )}
+      <div className={card}>
+        <div className={label}>IN THIS CHAT</div>
+        {inChat.map((id) => (
+          <div key={id} className="flex items-center gap-2.5 py-1.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-bold text-white" style={{ background: avatarColor(nameOf(id)) }}>{initials(nameOf(id))}</span>
+            <b className="truncate">{nameOf(id)}</b>{id === p.me.id && <span className="text-muted">(you)</span>}
+          </div>
+        ))}
+        {task && p.team.filter((m) => !inChat.includes(m.id)).map((m) => (
+          <button key={m.id} onClick={() => addPerson(m.id)} className={`${linkBtn} mt-1.5 block`}>＋ Add {m.name.split(/\s+/)[0]}</button>
+        ))}
+      </div>
     </aside>
   );
 }
@@ -1725,15 +1818,80 @@ function AddToClient({ p, t, person, onDone }: { p: InboxViewProps; t: InboxThre
   );
 }
 
+// New message to the team: who, then the task it's about (or none). With a
+// task it goes in that task's chat, naming the person so they hear about it;
+// without one it's a direct message, or the group when it's everyone.
+function TeamNew({ p, onClose }: { p: InboxViewProps; onClose: () => void }) {
+  const others = p.team.filter((m) => m.id !== p.me.id);
+  const [to, setTo] = useState<string>(others[0]?.id ?? "all");
+  const [q, setQ] = useState("");
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const open = p.tasks.filter((t) => t.status !== "done" && !t.private);
+  const hits = (words.length ? open.filter((t) => words.every((w) => `${t.title} ${p.clientName(t.clientId) ?? ""}`.toLowerCase().includes(w))) : open.filter((t) => t.assigneeId === to || t.assigneeId === p.me.id)).slice(0, 5);
+  const picked = taskId ? p.tasks.find((t) => t.id === taskId) ?? null : null;
+  const name = (id: string) => p.team.find((m) => m.id === id)?.name ?? "";
+  const send = async () => {
+    const text = body.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      if (picked) await p.onSendTeam(`team:task:${picked.id}`, to === "all" ? text : `@${name(to)} ${text}`);
+      else await p.onSendTeam(to === "all" ? "team:group" : `team:dm:${to}`, text);
+      p.pushToast(picked ? `Sent, on "${picked.title}"` : "Sent");
+      onClose();
+    } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
+    finally { setBusy(false); }
+  };
+  const chip = (on: boolean) => `inline-flex items-center gap-2 rounded-full py-1 pl-1 pr-3 font-semibold ring-1 ${on ? "bg-accent-soft text-accent ring-accent" : "ring-[var(--border)] hover:bg-background"}`;
+  return (
+    <div className="grid max-w-2xl gap-3 rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+      <span className="text-muted">To</span>
+      <div className="flex flex-wrap gap-2">
+        {others.map((m) => (
+          <button key={m.id} onClick={() => setTo(m.id)} className={chip(to === m.id)}>
+            <span className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>{m.name}
+          </button>
+        ))}
+        <button onClick={() => setTo("all")} className={chip(to === "all")}><span className="grid h-7 w-7 place-items-center rounded-full bg-background">🤝</span>Everyone</button>
+      </div>
+      <span className="text-muted">About</span>
+      {picked ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-success-soft px-3 py-2 font-semibold text-success">
+          <span className="min-w-0 truncate">✓ {picked.title}</span>
+          <button onClick={() => setTaskId(null)} aria-label="No task" className="shrink-0 text-muted">✕</button>
+        </div>
+      ) : <>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks (or leave it for no task)" aria-label="Search tasks" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+        <div className="grid gap-1">
+          {hits.map((t) => (
+            <button key={t.id} onClick={() => { setTaskId(t.id); setQ(""); }} className="rounded-lg px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-accent-soft">
+              <b className="block truncate">✓ {t.title}</b><span className="text-[15px] text-muted">{p.clientName(t.clientId)}</span>
+            </button>
+          ))}
+        </div>
+      </>}
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={to === "all" ? "Write to everyone" : `Write to ${name(to).split(/\s+/)[0]}`}
+        className="rounded-lg border bg-surface px-3 py-2 leading-relaxed outline-none focus:border-accent" />
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted">{picked ? "Goes in the task's chat" : to === "all" ? "Goes in the team group" : "A direct message"}</span>
+        <button disabled={busy || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Sending…" : "Send"}</button>
+      </div>
+    </div>
+  );
+}
+
 // ── A new message: an email or a text to anyone in GoHighLevel ────────────
 // Search every contact by name, email, company or phone, or type any email
 // address (Derek, 2026-10-01). Fills the page; CC, BCC, files, and the task
 // it belongs to, so the conversation lands there from the first message.
 type Pick = { contactId?: string; name: string; address: string };
 /** How New message opens: blank, an email to someone, or a text to a contact. */
-type NewStart = { to?: string; body?: string; kind?: "email" | "text"; contactId?: string; name?: string };
+type NewStart = { to?: string; body?: string; kind?: "email" | "text" | "team"; contactId?: string; name?: string };
 function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart; onClose: () => void }) {
-  const [kind, setKind] = useState<"email" | "text">(start.kind ?? "email");
+  const [kind, setKind] = useState<"email" | "text" | "team">(start.kind ?? "email");
   const [to, setTo] = useState<Pick | null>(start.to ? { contactId: start.contactId, name: start.name || start.to, address: start.to } : null);
   const [q, setQ] = useState("");
   const [ccOpen, setCcOpen] = useState(false);
@@ -1781,8 +1939,10 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
           <button onClick={() => { setKind("email"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "email" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>✉️ Email</button>
           <button onClick={() => { setKind("text"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "text" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>💬 Text</button>
+          <button onClick={() => { setKind("team"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "team" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>🤝 Team</button>
         </span>
       </div>
+      {kind === "team" ? <TeamNew p={p} onClose={onClose} /> : <>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-h-0 min-w-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
           <div className="mb-1 text-muted">{kind === "email" ? "From your Gmail" : "From the contact's GoHighLevel number"}</div>
@@ -1839,6 +1999,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
           </div>
         </aside>
       </div>
+      </>}
     </div>
   );
 }

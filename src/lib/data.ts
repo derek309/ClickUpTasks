@@ -530,7 +530,7 @@ export function normalizeState(state: string): string {
 
 /** fb, ig, web (website chat) and gbp (Google Business) come from GoHighLevel's
  *  other inboxes and are shown in the Inbox (supabase/inbox.sql). */
-export type MessageChannel = "email" | "sms" | "call" | "chat" | "fb" | "ig" | "web" | "gbp";
+export type MessageChannel = "email" | "sms" | "call" | "chat" | "fb" | "ig" | "web" | "gbp" | "team";
 export type MessageDirection = "outbound" | "inbound";
 
 /** A single email/SMS with a Contact, sent or received via GoHighLevel's
@@ -588,6 +588,10 @@ export interface Message {
   peerAddress?: string | null;
   /** Automated, or filed outside Gmail's Primary tab: the Inbox's Updates folder. */
   bulk?: boolean;
+  /** Team chat in the Inbox: the conversation it belongs to ("team:task:<id>",
+   *  "team:dm:<memberId>", "team:group") and that conversation's title. */
+  threadKey?: string;
+  threadTitle?: string;
 }
 
 /** GoHighLevel is the record of every client conversation (Derek,

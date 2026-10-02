@@ -43,6 +43,8 @@ import {
   type Folder,
   type Stage,
   type DmMessage,
+  type Attachment,
+  mentionsUser,
   dmConversationId,
   PERSONAL_CLIENT_ID,
   WORKSPACE_CLIENT_ID,
@@ -108,6 +110,45 @@ import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 
+
+/** Team chat as Inbox messages: each task's comments (on tasks you own, made,
+ *  commented on or were mentioned in), your direct messages, and the team
+ *  group. The last 30 days. */
+function buildTeamMessages({ meId, meName, users, tasks, dms, feed }: {
+  meId: string; meName: string; users: { id: string; name: string }[]; tasks: Task[];
+  dms: DmMessage[]; feed: { id: string; author_id: string; body: string; created_at: string }[];
+}): Message[] {
+  const since = Date.now() - 30 * 86_400_000;
+  const team = new Map(users.map((u) => [u.id, u.name]));
+  const nameOf = (id: string) => team.get(id) ?? "Teammate";
+  const out: Message[] = [];
+  const add = (o: { id: string; key: string; title: string; author: string; body: string; at: string; taskId?: string; clientId?: string; attachments?: Attachment[] }) => {
+    const t = Date.parse(o.at);
+    if (!Number.isFinite(t) || t < since) return;
+    out.push({
+      id: o.id, contactId: "", clientId: o.clientId ?? "", taskId: o.taskId ?? null, channel: "team",
+      direction: o.author === meId ? "outbound" : "inbound", subject: null, body: o.body, ghlMessageId: null,
+      createdBy: o.author, at: o.at, read: true, attachments: o.attachments ?? [], cc: [], bcc: [],
+      peerName: nameOf(o.author), peerAddress: null, threadKey: o.key, threadTitle: o.title,
+    });
+  };
+  for (const t of tasks) {
+    const said = (t.comments ?? []).filter((c) => c.kind !== "event" && team.has(c.authorId));
+    if (!said.length) continue;
+    const mine = t.assigneeId === meId || t.createdBy === meId || said.some((c) => c.authorId === meId || mentionsUser(c.body, meName));
+    if (!mine) continue;
+    for (const c of said) add({ id: `tc_${c.id}`, key: `team:task:${t.id}`, title: t.title, author: c.authorId, body: c.body, at: c.at, taskId: t.id, clientId: t.clientId, attachments: c.attachments });
+  }
+  // Only your own conversations: admins can read every direct message.
+  for (const m of dms) {
+    if (m.authorId !== meId && m.recipientId !== meId) continue;
+    const other = m.authorId === meId ? m.recipientId : m.authorId;
+    add({ id: `dm_${m.id}`, key: `team:dm:${other}`, title: nameOf(other), author: m.authorId, body: m.body, at: m.at, attachments: m.attachments });
+  }
+  const groupTitle = users.filter((u) => u.id !== meId).map((u) => u.name.split(/\s+/)[0]).join(", ") || "Team";
+  for (const r of feed) add({ id: `tm_${r.id}`, key: "team:group", title: groupTitle, author: r.author_id, body: r.body, at: r.created_at });
+  return out;
+}
 
 // ⌘Z: the last action that offered Undo, kept for a minute.
 type LastUndo = { id: string; run: () => void; at: number };
@@ -1677,7 +1718,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     .filter((n) => n.recipientId === me.id && n.taskId && !/^\d+[a-z] ago$/.test(n.at))
     .flatMap((n): Message[] => {
       const kind = inboxKind({ text: n.text, actor_id: n.actorId ?? null });
-      if (kind !== "mention" && kind !== "comment" && kind !== "client_review") return [];
+      // Teammates' comments and mentions now come in as task chats (below).
+      if (kind !== "client_review") return [];
       const task = taskById.get(n.taskId!);
       if (!task) return [];
       const said = latestCommentBy(task.comments, n.actorId ?? null, kind === "client_review");
@@ -1689,7 +1731,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         peerAddress: null,
       }];
     }); }, [notifications, me.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps -- clientById/userById read state already listed
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxTaskNotes, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, pushToast });
+  // ── Team chat in the Inbox (Derek, 2026-10-02, mockup
+  // https://claude.ai/artifact/EEwdfz34xJxnfjkbBWS8gG): a chat per task (its
+  // comments), direct messages, and the team group, laid out like texts.
+  const [teamFeed, setTeamFeed] = useState<{ id: string; author_id: string; body: string; created_at: string }[]>([]);
+  const loadTeamFeed = useCallback(() => {
+    supabase.from("team_messages").select("id, author_id, body, created_at").gte("created_at", new Date(Date.now() - 30 * 86_400_000).toISOString())
+      .order("created_at", { ascending: true }).limit(500).then(({ data }) => { if (data) setTeamFeed(data as typeof teamFeed); });
+  }, []);
+  useEffect(() => {
+    loadTeamFeed();
+    const id = setInterval(loadTeamFeed, 60_000);
+    return () => clearInterval(id);
+  }, [loadTeamFeed]);
+  const teamInbox = useMemo(() => buildTeamMessages({ meId: me.id, meName: me.name, users, tasks, dms: dmMessages, feed: teamFeed }), [me.id, me.name, tasks, dmMessages, teamFeed]);
+  const inboxExtra = useMemo(() => [...inboxTaskNotes, ...teamInbox], [inboxTaskNotes, teamInbox]);
+  const sendTeam = async (key: string, body: string) => {
+    if (key.startsWith("team:task:")) { addComment(key.slice(10), body); return; }
+    if (key.startsWith("team:dm:")) { sendDmMessage(key.slice(8), body); return; }
+    const row = { id: newId("tm_"), author_id: me.id, body: body.trim(), created_at: new Date().toISOString() };
+    setTeamFeed((f) => [...f, row]);
+    const { error } = await supabase.from("team_messages").insert({ id: row.id, author_id: row.author_id, body: row.body });
+    if (error) { setTeamFeed((f) => f.filter((x) => x.id !== row.id)); throw new Error(error.message); }
+  };
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, pushToast });
   // Updates don't count toward the badge or pop alerts: they are robots.
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
@@ -2267,12 +2332,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               views (Derek, 2026-09-28): they are people, not places work
               lives, and they were splitting My Work and All Tasks off from
               Clients and Projects. */}
-          {dmEnabled && users.filter((u) => u.id !== me.id).map((u) => (
-            <SideItem key={u.id} active={inboxView && dmUserId === u.id} onClick={() => openDm(u.id)}>
-              <Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate text-left">{u.name}</span>
-              {dmUnread(u.id) && <span title="Unread messages" className="ml-auto h-2 w-2 rounded-full bg-accent" />}
-            </SideItem>
-          ))}
+          {/* Teammate chats moved into the Inbox's Team chats (Derek, 2026-10-02). */}
         </nav>
 
         {/* Pinned — per-user quick access to starred clients + lists. Starring
@@ -2598,6 +2658,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               }}
               clients={workableClients.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name))} canAdmin={canAdmin}
               contacts={contacts}
+              onSendTeam={sendTeam}
               onPatchTask={(id, patch) => patchTask(id, patch)}
               onAddComment={(id, body) => addComment(id, body)}
               onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}

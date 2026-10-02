@@ -40,7 +40,7 @@ export type InboxThread = {
   count: number;
 };
 
-export type Folder = "inbox" | "updates" | "starred" | "drafts" | "snoozed" | "sent" | "done" | "trash" | "email" | "sms" | "social" | "call" | "chat";
+export type Folder = "inbox" | "updates" | "team" | "starred" | "drafts" | "snoozed" | "sent" | "done" | "trash" | "email" | "sms" | "social" | "call" | "chat";
 export const SOCIAL: MessageChannel[] = ["fb", "ig", "web", "gbp"];
 
 const time = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
@@ -81,7 +81,7 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
       key, messages: msgs, latest, channel: latest.channel,
       subject: [...msgs].reverse().find((m) => m.subject)?.subject ?? null,
       // The contact's own name first (nameOf), then what the message said.
-      peerName: named || peerMsg?.peerName || conv?.contactName || peerMsg?.peerAddress || conv?.phone || conv?.email || "Unknown",
+      peerName: latest.threadTitle || named || peerMsg?.peerName || conv?.contactName || peerMsg?.peerAddress || conv?.phone || conv?.email || "Unknown",
       peerAddress: peerMsg?.peerAddress ?? conv?.phone ?? conv?.email ?? null,
       clientId: msgs.find((m) => m.clientId)?.clientId || null,
       contactId: msgs.find((m) => m.contactId)?.contactId || null,
@@ -116,6 +116,7 @@ export function inFolder(t: InboxThread, f: Folder, hasDraft: (key: string) => b
   if (t.updates) return false;
   if (f === "inbox") return true;
   if (f === "social") return SOCIAL.includes(t.channel);
+  if (f === "team") return t.channel === "team";
   return t.channel === f;
 }
 
@@ -164,10 +165,10 @@ export function snoozeUntil(preset: "1h" | "3h" | "tomorrow" | "monday", now = n
 }
 
 export const CHANNEL_LABEL: Record<MessageChannel, string> = {
-  email: "Email", sms: "Text", call: "Call", chat: "Task chat", fb: "Facebook", ig: "Instagram", web: "Website chat", gbp: "Google Business",
+  email: "Email", sms: "Text", call: "Call", chat: "Task chat", team: "Team", fb: "Facebook", ig: "Instagram", web: "Website chat", gbp: "Google Business",
 };
 export const CHANNEL_ICON: Record<MessageChannel, string> = {
-  email: "✉️", sms: "💬", call: "📞", chat: "🗂️", fb: "📘", ig: "📸", web: "🌐", gbp: "🏪",
+  email: "✉️", sms: "💬", call: "📞", chat: "🗂️", team: "🤝", fb: "📘", ig: "📸", web: "🌐", gbp: "🏪",
 };
 
 // ── Reading an email ──────────────────────────────────────────────────────
