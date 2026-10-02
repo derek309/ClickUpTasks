@@ -29,7 +29,8 @@ export type InboxViewProps = {
   setPrefs: (p: Partial<InboxPrefs>) => void;
   clientName: (id: string | null) => string | null;
   tasks: Task[];
-  onOpenTask: (taskId: string) => void;
+  /** from: what the task panel's "← back" says (the conversation). */
+  onOpenTask: (taskId: string, from?: string) => void;
   /** Makes a task for a conversation and returns its id. */
   onNewTask: (t: InboxThread) => Promise<string | null>;
   /** Uploads a file the person attached; returns where it went. */
@@ -404,7 +405,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         <div className="hidden min-h-0 overflow-y-auto bg-background/40 2xl:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
       </div>
       )}
-      {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
+      {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={{ ...p, onOpenTask: (id, from) => { setDetails(false); p.onOpenTask(id, from); } }} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
     </div>
   );
 }
@@ -1296,7 +1297,7 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
             {task.status === "done"
               ? <button onClick={() => { p.onPatchTask(task.id, { status: before ?? "todo" }); setBefore(null); }} className="h-9 rounded-lg px-3 font-semibold text-muted ring-1 ring-[var(--border)] hover:bg-background">✓ Done · Undo</button>
               : <button onClick={() => { setBefore(task.status); p.onPatchTask(task.id, { status: "done" }); p.pushToast("Marked done"); }} className="h-9 rounded-lg bg-success px-3 font-bold text-white">✓ Mark done</button>}
-            <button onClick={() => p.onOpenTask(task.id)} className={linkBtn}>Open task</button>
+            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task</button>
             <button disabled={busy} onClick={() => link(null)} className={linkBtn}>Unlink</button>
           </div>
         </> : <>
@@ -1317,7 +1318,7 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
         {otherTasks.length === 0 && <p className="text-muted">None open.</p>}
         {otherTasks.map((x) => (
           <div key={x.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t py-2 first-of-type:border-t-0">
-            <button onClick={() => p.onOpenTask(x.id)} className="min-w-0 text-left">
+            <button onClick={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 text-left">
               <span className="block truncate font-semibold">{x.title}</span>
               <span className="block truncate text-muted">{STATUS_META[x.status].label}{x.due ? ` · ${dueLabel(x.due)}` : ""}</span>
             </button>

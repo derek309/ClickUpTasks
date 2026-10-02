@@ -32,7 +32,7 @@ const ICON: Record<TaskActionKind, string> = {
 
 export function ActionDock({
   task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
-  onSendMessage, reachable, replyTarget,
+  onSendMessage, reachable, replyTarget, bar = false,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -65,6 +65,8 @@ export function ActionDock({
   askNextStepFor?: { kind: TaskActionKind; body: string } | null;
   onAskNextStepHandled?: () => void;
   pushToast: (msg: string) => void;
+  /** A plain bar across the bottom (the task slid over the Inbox), not a floating card. */
+  bar?: boolean;
   /** Sends a chat or text straight from the box; the drawer logs it and asks what's next. */
   onSendMessage?: (channel: "chat" | "sms", body: string, replyToId: string | null) => void;
   /** Which channels this client can be reached on. */
@@ -709,9 +711,9 @@ export function ActionDock({
     // Lined up with the task's own column above it: the same side padding and
     // the same 5xl width, so its edges meet the title and sections (Derek,
     // 2026-09-16: "make it the same width as the top content box").
-    <div className="pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"
-      style={{ right: "var(--dock-right, 0px)" }}>
-      <div className="pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md">
+    <div className={bar ? "absolute inset-x-0 bottom-0 z-30 border-t bg-surface px-3 pb-2 pt-1.5 sm:px-6" : "pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"}
+      style={bar ? undefined : { right: "var(--dock-right, 0px)" }}>
+      <div className={bar ? "w-full" : "pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md"}>
 
         {view === "closed" && (() => {
           const canChat = canMessageClient && !!onSendMessage && (reachable?.chat ?? false);

@@ -47,11 +47,13 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment, slideOver }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, taskLink, onDeleteComment, slideOver, slideBackLabel }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
   slideOver?: boolean;
+  /** Slid over the Inbox: what "← back" returns to (the conversation's subject). */
+  slideBackLabel?: string | null;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
@@ -1198,6 +1200,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
     onDeleteMessage, onEditMessage, hasMessaging,
+    // Over the Inbox you just read the conversation, so the feed opens on Everything.
+    initialView: slideOver ? "all" : undefined,
   });
   // Reads like the task row it effectively is: a tick box, their face, what
   // they were asked for, and when they owe it. Sits directly under the stage
@@ -1550,11 +1554,43 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the last tab of that feed rather than a section above the deliverables
   // (Derek, 2026-09-30: "it's kind of getting in the way there. We can move
   // the deliverables up").
+  // ── Slid over the Inbox (Derek, 2026-10-01, mockup
+  // https://claude.ai/artifact/1TH5ReGvyZ6r4TvadyTrEG): one column. The client
+  // rail folds into a row of chips, and the header is back, full page, more, close.
+  const slideChip = "inline-flex h-9 items-center gap-1.5 rounded-full border bg-background px-3 text-[16px] text-muted transition hover:bg-surface hover:text-foreground";
+  const slideContext = (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {!isPersonal && <button onClick={onOpenClientList} title={`Open ${client.name}`} className={slideChip}>🏢 <b className="font-semibold text-foreground">{client.name}</b></button>}
+      {!isPersonal && <button onClick={onRenameProject} title="Rename list" className={slideChip}>📁 <b className="font-semibold text-foreground">{project.name}</b></button>}
+      {task.attachments.length > 0 && <button onClick={() => document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" })} className={slideChip}>📎 <b className="font-semibold text-foreground">{task.attachments.length} {task.attachments.length === 1 ? "file" : "files"}</b></button>}
+    </div>
+  );
+  const slideHeader = (
+    <div className="flex items-center gap-1 border-b px-3 py-2 text-[16px] text-muted">
+      <button onClick={onClose} title="Back (Esc)" className="min-w-0 truncate rounded-lg px-2 py-1.5 font-semibold hover:bg-background hover:text-foreground">← {slideBackLabel || "Inbox"}</button>
+      <span className="flex-1" />
+      <button onClick={onToggleFull} title="Open the task on its own page" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
+      <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
+      <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[
+        !!(messageDest?.phone && mayContactClient) && { label: `Call ${client.name}`, onClick: () => { window.location.href = `tel:${messageDest!.phone}`; } },
+        !!(hasMessaging && messageDest?.email) && { label: `Email ${client.name}`, onClick: () => startDraftEmail() },
+        !!onCopyClientLink && { label: "Copy client link", onClick: () => onCopyClientLink!() },
+        !!(ghlContactUrl && mayContactClient) && { label: "Open in GoHighLevel", onClick: () => window.open(ghlContactUrl!, "_blank", "noopener,noreferrer") },
+        { label: "Copy link to task", onClick: onCopyLink },
+        { label: "Duplicate here", onClick: () => onDuplicate() },
+        task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
+        { label: "Delete task", onClick: onDelete, danger: true },
+      ]} />
+      <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground"><I.close /></button>
+    </div>
+  );
+
   const mainColumn = (
     <>
       {titleRow}
       {subMeta}
       {chipRow}
+      {slideOver && slideContext}
       {delegationRow}
       {nextStepCard}
       {clientResponseBlock}
@@ -1566,8 +1602,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {draftEmailBlock}
           {/* Links and files live in the client rail, under the contact card
               (Derek, 2026-09-14). A personal to do has no rail, so they stay here. */}
-          {isPersonal && attachmentsBlock}
-          {!hasDeliverables && !(isPersonal && showAttachments) && (
+          {(isPersonal || slideOver) && <div id="task-files">{attachmentsBlock}</div>}
+          {!hasDeliverables && !((isPersonal || slideOver) && showAttachments) && (
             <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. Drop a file anywhere on the task to attach it.</p>
           )}
         </>
@@ -1578,6 +1614,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {composerFooter}
         <div className="mt-6">{feedArea}</div>
       </section>
+      {/* Over the Inbox there is no client rail: where the task lives sits here. */}
+      {slideOver && !isPersonal && <section className="mt-10"><h3 className="mb-2 text-[18px] font-semibold">Details</h3><div className="rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
     </>
   );
 
@@ -1726,7 +1764,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
   return (
     <>
-      <div className={`fixed inset-0 bg-black/20 ${full ? "z-40" : "z-10"}`} onClick={onClose} />
+      <div className={`fixed inset-0 ${full ? "z-40 bg-black/20" : slideOver ? "z-40 bg-black/30 backdrop-blur-[1.5px]" : "z-10 bg-black/20"}`} onClick={onClose} />
       {/* Docked mode spans everything from the sidebar's right edge to the
           window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
           follows the sidebar; below md the sidebar is an overlay, so the
@@ -1734,9 +1772,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* --dock-right keeps the floating dock over the task column, clear of
           the client rail. Zero below 1100px, where the rail stacks under. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
-        className={`[--dock-right:0px] ${isPersonal ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-2xl md:w-[clamp(640px,62vw,1040px)]" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
+        className={`[--dock-right:0px] ${isPersonal || (slideOver && !full) ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
-        <div className="hidden sm:block">{headerBar}</div>
+        <div className="hidden sm:block">{slideOver && !full ? slideHeader : headerBar}</div>
 
         {/* One scroll container. The client rail is sticky inside it at
             1100px and up, and stacks under the task below that. A task with
@@ -1746,7 +1784,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {/* All white, no boxed in sheet (Derek, 2026-09-16: "I don't like it
               boxed in so just make it all white"). */}
           <div className="min-w-0 flex-1 pb-32 sm:px-5 sm:pt-5">
-            <div className="sm:hidden">{headerBar}</div>
+            <div className="sm:hidden">{slideOver && !full ? slideHeader : headerBar}</div>
             <div className="px-2 pt-3 sm:px-0 sm:pt-0">
             <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-10 sm:py-9">
               {mainColumn}
@@ -1754,7 +1792,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </div>
             </div>
           </div>
-          {!isPersonal && clientRail}
+          {!isPersonal && !(slideOver && !full) && clientRail}
         </div>
         {/* Shown over the whole drawer while a file is being dragged in, so
             the target is obvious and it is clear the drop will land here
@@ -1798,6 +1836,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           replyTarget={replyTarget}
           onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
+          bar={!!slideOver && !full}
         />
       </aside>
     </>

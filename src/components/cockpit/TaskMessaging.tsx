@@ -198,7 +198,7 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean } }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -212,7 +212,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // need it, but it's kind of getting in the way"). It used to be a section
   // between the follow up and the deliverables, pushing the work down the page
   // on every task to show text that is read once.
-  const [view, setView] = useState<"conversation" | "changes" | "all" | "description">("conversation");
+  const [view, setView] = useState<"conversation" | "changes" | "all" | "description">(p.initialView ?? "conversation");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
