@@ -290,6 +290,9 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
+  // Below a wide screen the side panel would squeeze the conversation to a
+  // strip (Derek, 2026-10-01), so it waits behind ⓘ Details instead.
+  const [details, setDetails] = useState(false);
   // An email's reply box opens from Reply, Reply all or Forward, above the
   // message it answers, so it is clear what is being answered (Derek,
   // 2026-10-01). A draft already started opens it as a reply.
@@ -347,6 +350,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             )}
           </div>
         )}
+        <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground 2xl:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
         {isGhl && (
           <div className="relative">
             <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">👤<span className="hidden sm:inline"> Assign</span></button>
@@ -367,18 +371,19 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
       {!isEmailThread(t) ? (
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto lg:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] lg:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto 2xl:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] 2xl:overflow-hidden" style={sideWidthStyle(p.prefs)}>
           <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
           <SideResizer p={p} />
-          <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />
+          <div className="hidden min-h-0 overflow-y-auto bg-background/40 2xl:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] lg:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto 2xl:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] 2xl:overflow-hidden" style={sideWidthStyle(p.prefs)}>
         <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
         <SideResizer p={p} />
-        <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />
+        <div className="hidden min-h-0 overflow-y-auto bg-background/40 2xl:block"><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} /></div>
       </div>
       )}
+      {details && <DetailsPanel onClose={() => setDetails(false)}><SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={(k) => { setDetails(false); onOpenOther(k); }} /></DetailsPanel>}
     </div>
   );
 }
@@ -521,7 +526,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
     ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} /></div>
     : null;
   return (
-    <div className="min-w-0 px-4 py-4 sm:px-6 lg:overflow-y-auto">
+    <div className="min-w-0 px-4 py-4 sm:px-6 2xl:overflow-y-auto">
       <h1 className="text-[22px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || t.peerName}</h1>
       <p className="mb-3 text-muted">{others.length ? `${others.join(", ")} and you` : `You and ${t.peerName}`} · {t.count} {t.count === 1 ? "email" : "emails"}</p>
       {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
@@ -665,6 +670,29 @@ function CallPlayer({ m, peerName }: { m: Message; peerName: string }) {
           them={peerName.split(/\s+/)[0] || "Them"} lines={lines} copied={copied} onCopy={copy} onClose={() => setPanel(false)} />
       )}
     </div>
+  );
+}
+
+/** The side panel slid in from the right, below a wide screen. Esc or a
+ *  click outside closes it; the Inbox's keys wait while it is open. */
+function DetailsPanel({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown", k, true);
+    return () => window.removeEventListener("keydown", k, true);
+  }, [onClose]);
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
+      <div role="dialog" aria-label="Details" className="inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l bg-background text-[16px] shadow-2xl sm:w-[380px]">
+        <div className="flex items-center justify-between border-b bg-surface px-4 py-2.5">
+          <b className="text-[18px]">Details</b>
+          <button onClick={onClose} aria-label="Close" title="Close (Esc)" className="h-9 rounded-md px-3 font-semibold text-muted hover:bg-background">✕</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      </div>
+    </>,
+    document.body,
   );
 }
 
@@ -1030,6 +1058,15 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
 
   const from = email ? `From ${p.me.email ?? "your Gmail"}` : t.channel === "chat" ? "Reply in the task chat (the client sees it in their portal)" : t.channel === "call" ? "Text them back" : `Reply by ${CHANNEL_LABEL[t.channel]}`;
   return (
+    // Under a chat Instagram or Facebook will not take a reply: one slim line
+    // instead of the box, so the conversation keeps the room (Derek, 2026-10-01).
+    compact && metaClosed ? (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-highlight">
+        <span>🔒 {t.channel === "ig" ? "Instagram" : "Facebook"} reply window closed ({shortTime(lastIn!.at)}, 24 hours after their last message)</span>
+        {altEmail && emailInstead && <button onClick={() => emailInstead(altEmail, text)} className="text-accent hover:underline">✉️ Email them instead</button>}
+        {text.trim() && <button onClick={discard} className="text-muted hover:underline">🗑 Discard draft</button>}
+      </div>
+    ) :
     <div className={compact ? "" : "rounded-xl bg-surface p-3 ring-2 ring-accent/40"}>
       {answering && (
         <div className="mb-2 flex items-start gap-3 rounded-lg bg-background px-3 py-2">
@@ -1072,21 +1109,23 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           </>}
         </div>
       )}
-      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 2 : 4}
+      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 1 : 4}
         onKeyDown={compact ? (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } : undefined}
-        className="mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none" />
+        // Under a chat it starts at one line and grows with what you write, up to about six.
+        ref={compact ? (el) => { if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 168)}px`; } } : undefined}
+        className={compact ? "w-full resize-none overflow-y-auto rounded-2xl bg-background px-4 py-2.5 leading-relaxed outline-none ring-1 ring-[var(--border)] focus:ring-accent" : "mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none"} />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">
           {files.map((f) => <span key={f.id} className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 ring-1 ring-[var(--border)]">{f.kind === "image" ? "🖼️" : "📄"} {f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`Remove ${f.name}`} className="text-muted">✕</button></span>)}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t pt-2.5">
+      <div className={`flex flex-wrap items-center gap-2 ${compact ? "pt-2" : "border-t pt-2.5"}`}>
         {t.channel !== "chat" && email && <>
           <button onClick={() => fileRef.current?.click()} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         </>}
         <div className="relative">
-          <button onClick={() => setRepliesOpen(!repliesOpen)} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">⚡ Saved replies</button>
+          <button onClick={() => setRepliesOpen(!repliesOpen)} title="Saved replies" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg border font-semibold hover:bg-background`}>⚡<span className={compact ? "hidden sm:inline" : ""}> Saved replies</span></button>
           {repliesOpen && (
             <div className="absolute bottom-12 left-0 z-50 w-80 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
               {p.prefs.replies.length ? p.prefs.replies.map((r) => (
@@ -1097,7 +1136,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
             </div>
           )}
         </div>
-        <button onClick={improve} disabled={busy !== null || !text.trim()} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : "✨ Improve with AI"}</button>
+        <button onClick={improve} disabled={busy !== null || !text.trim()} title="Improve with AI" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> Improve with AI</span></>}</button>
         {(text.trim() || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑 Discard</button>}
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
@@ -1149,7 +1188,7 @@ function SideResizer({ p }: { p: InboxViewProps }) {
     <button ref={ref} role="separator" aria-orientation="vertical" aria-label="Side panel width" aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={width}
       title="Drag to resize. Double-click to reset." onPointerDown={down} onDoubleClick={() => set(SIDE_DEFAULT)}
       onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); set(width + 20); } if (e.key === "ArrowRight") { e.preventDefault(); set(width - 20); } }}
-      className="group relative hidden cursor-col-resize touch-none lg:block">
+      className="group relative hidden cursor-col-resize touch-none 2xl:block">
       <span className="absolute inset-y-0 left-[3px] w-0.5 bg-[var(--border)] transition-colors group-hover:bg-accent group-focus-visible:bg-accent" />
     </button>
   );
@@ -1203,7 +1242,7 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
   const label = "mb-1.5 text-[14px] font-bold tracking-wide text-muted";
   const linkBtn = "font-semibold text-accent hover:underline";
   return (
-    <aside className="min-w-0 space-y-3 border-t bg-background/40 p-4 lg:overflow-y-auto lg:border-t-0">
+    <aside className="min-w-0 space-y-3 p-4">
       <div className={card}>
         <div className={label}>{task ? "LINKED TASK" : "LINK TO A TASK"}</div>
         {task ? <>
