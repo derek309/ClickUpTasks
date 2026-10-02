@@ -6,9 +6,10 @@ import { appendSignatureHtml } from "@/lib/emailSignature";
 import { sentRfc822 } from "@/lib/sendMessageServer";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { TASK_FILES_BUCKET } from "@/lib/db";
-import { plainTextToHtml } from "@/lib/data";
+import { plainTextToHtml, looksLikeHtml, htmlToText } from "@/lib/data";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId, peerOf, GHL_SEND_TYPE, escapeLike } from "@/lib/inboxServer";
+import { richToText } from "@/lib/inbox";
 import { isClientVisible } from "@/lib/extensionApi";
 import { contactHome } from "@/lib/ghlPerson";
 
@@ -96,7 +97,10 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   }
 
   const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").eq("id", caller.id).maybeSingle();
-  const html = appendSignatureHtml(plainTextToHtml(text), ((prof?.email_signature as string | null) ?? "").trim());
+  // The Inbox email box writes HTML (bold, lists, links); the rest is plain.
+  const rich = looksLikeHtml(text);
+  if (rich && !htmlToText(text).trim()) return NextResponse.json({ error: "Write something first." }, { status: 400 });
+  const html = appendSignatureHtml(rich ? text : plainTextToHtml(text), ((prof?.email_signature as string | null) ?? "").trim());
 
   const attParts: { filename: string; mimeType: string; contentBase64: string }[] = [];
   const stored: { id: string; name: string; kind: "doc" | "image" | "pdf"; size: string; path: string }[] = [];
@@ -143,7 +147,7 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
     const rfc822 = await sentRfc822(sender, id);
     const row = {
       id: "msg_" + crypto.randomUUID(), contact_id: contactId, client_id: clientId, task_id: taskId,
-      channel: "email", direction: "outbound", subject: subject || null, body: text,
+      channel: "email", direction: "outbound", subject: subject || null, body: rich ? richToText(text) : text,
       gmail_message_id: id, gmail_thread_id: threadId, rfc822_message_id: rfc822, created_by: caller.memberId,
       mailbox_member_id: caller.memberId, peer_name: peer.name, peer_address: to.toLowerCase(),
       cc, bcc, attachments: stored, read: true,

@@ -33,13 +33,16 @@ function ToolbarButton({ onClick, active, title, children, large }: { onClick: (
 
 export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", highlights, activeHighlightId, onHighlightClick, onSelectionComment }: {
   value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean;
-  editable?: boolean; variant?: "task" | "doc";
+  editable?: boolean; variant?: "task" | "doc" | "email";
   /** Document only: the words comments are about, highlighted; clicking one calls onHighlightClick. */
   highlights?: CommentHighlight[]; activeHighlightId?: string | null; onHighlightClick?: (id: string) => void;
   /** Document only: selecting words shows a Comment button that hands them over. */
   onSelectionComment?: (quote: string) => void;
 }) {
   const doc = variant === "doc";
+  // The Inbox email reply: bold, italic, underline, a list and a link. No
+  // headings, checklists or code, which an email has no use for.
+  const mail = variant === "email";
   // handleClick is set when the editor is made, so it reads the latest callback here.
   const highlightClickRef = useRef(onHighlightClick);
   useEffect(() => { highlightClickRef.current = onHighlightClick; });
@@ -47,7 +50,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
     immediatelyRender: false,
     editable,
     extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3] } }),
+      StarterKit.configure(mail ? { heading: false, codeBlock: false } : { heading: { levels: [2, 3] } }),
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
@@ -173,7 +176,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
     <div ref={toolbarRef} className={doc
       ? "rte-toolbar sticky top-0 z-10 mb-3 flex items-center gap-1 overflow-x-auto border-b bg-surface pb-2 pt-1"
       : "rte-toolbar mb-1 flex flex-wrap items-center gap-0.5 border-b pb-1.5"}>
-      <select value={blockValue} onChange={(e) => setBlock(e.target.value)}
+      {!mail && <><select value={blockValue} onChange={(e) => setBlock(e.target.value)}
         className={doc
           ? "mr-1 min-h-[44px] shrink-0 rounded-md bg-transparent px-2 text-[16px] text-muted outline-none hover:bg-background"
           : "mr-1 rounded-md border-transparent bg-transparent px-1 py-1 text-[13px] text-muted outline-none hover:bg-background"}>
@@ -181,15 +184,15 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
         <option value="h2">Heading</option>
         <option value="h3">Subheading</option>
       </select>
-      <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+      <span className="mx-0.5 h-4 w-px shrink-0 bg-border" /></>}
       <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} title="Bold"><I.bold /></ToolbarButton>
       <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} title="Italic"><I.italic /></ToolbarButton>
       <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive("underline")} title="Underline"><I.underline /></ToolbarButton>
       <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
       <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} title="Bullet list"><I.list /></ToolbarButton>
-      {!doc && <ToolbarButton onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="Checklist"><I.check /></ToolbarButton>}
-      {!doc && <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="Code block"><I.code /></ToolbarButton>}
-      <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Quote"><I.quote /></ToolbarButton>
+      {!doc && !mail && <ToolbarButton onClick={() => editor.chain().focus().toggleTaskList().run()} active={editor.isActive("taskList")} title="Checklist"><I.check /></ToolbarButton>}
+      {!doc && !mail && <ToolbarButton onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive("codeBlock")} title="Code block"><I.code /></ToolbarButton>}
+      {!mail && <ToolbarButton large={doc} onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive("blockquote")} title="Quote"><I.quote /></ToolbarButton>}
       <ToolbarButton large={doc} onClick={setLink} active={editor.isActive("link")} title="Link"><I.link /></ToolbarButton>
     </div>
   );
@@ -207,6 +210,14 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
             Comment
           </button>
         )}
+      </div>
+    );
+  }
+  if (mail) {
+    return (
+      <div>
+        {toolbar}
+        <EditorContent editor={editor} className="py-1" />
       </div>
     );
   }

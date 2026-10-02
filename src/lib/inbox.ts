@@ -60,3 +60,18 @@ export function inboundGmailQuery(days: number, allows: string[], onlyAllowed = 
   if (onlyAllowed) return `in:inbox {${froms.join(" ") || "from:nobody.invalid"}} newer_than:${days}d -from:me`;
   return `in:inbox newer_than:${days}d -from:me`;
 }
+
+// What we keep of a formatted email, as plain text the Inbox and the task
+// show: paragraphs and lines kept, a bullet for each list item, and a link's
+// address after its words.
+export function richToText(html: string): string {
+  return html
+    .replace(/<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, words: string) => {
+      const w = words.replace(/<[^>]+>/g, "").trim();
+      return w && w !== href ? `${w} (${href})` : href;
+    })
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<li[^>]*>/gi, "• ").replace(/<\/(p|li|h[1-6]|blockquote)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, "\"").replace(/&#0?39;|&apos;/gi, "'").replace(/&amp;/gi, "&")
+    .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").replace(/\n\n(?=• )/g, "\n").trim();
+}

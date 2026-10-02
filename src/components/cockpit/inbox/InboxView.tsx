@@ -7,10 +7,11 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task, type TaskStatus } from "@/lib/data";
+import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
+import { RichTextEditor } from "../RichTextEditor";
 import {
   CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
   type ChatItem, type Folder, type InboxThread,
@@ -1034,6 +1035,11 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
+// Your signature, read once and kept for the session, so the email box can
+// show what goes under your words (the send route adds it).
+let signatureCache: Promise<string> | null = null;
+const loadSignature = () => (signatureCache ??= authedFetch("/api/signature").then((r) => (r.ok ? r.json() : null)).then((j) => (typeof j?.signature === "string" ? j.signature : "")).catch(() => ""));
+
 function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
   mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
@@ -1050,7 +1056,23 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const forward = mode === "forward";
   const fromLabel = (m: Message) => (m.direction === "outbound" ? "you" : t.peerName.split(/\s+/)[0]);
   const when = (m: Message) => new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  const [text, setText] = useState(() => readDraft(p.me.id, t.key) || (forward && answering ? `\n\nForwarded message from ${answering.direction === "outbound" ? p.me.name : t.peerName}, ${when(answering)}:\n${answering.body}` : ""));
+  // An email reply is written with formatting (Derek, 2026-10-02): the box
+  // holds HTML. Chats and texts stay plain.
+  const rich = email && !compact;
+  const asRich = (v: string) => (rich && v && !looksLikeHtml(v) ? plainTextToHtml(v) : v);
+  const [text, setText] = useState(() => asRich(readDraft(p.me.id, t.key) || (forward && answering ? `\n\nForwarded message from ${answering.direction === "outbound" ? p.me.name : t.peerName}, ${when(answering)}:\n${answering.body}` : "")));
+  // The words alone, for "is there anything to send" and for the AI.
+  const plain = rich ? htmlToText(text) : text;
+  const hasText = !!plain.trim();
+  // The editor reads its value when it starts, so text put in from outside
+  // (Undo, a saved reply, the AI) starts it again.
+  const [nonce, setNonce] = useState(0);
+  const put = (v: string) => { setText(v); setNonce((n) => n + 1); };
+  const [signature, setSignature] = useState("");
+  useEffect(() => { if (rich) loadSignature().then(setSignature); }, [rich]);
+  const [big, setBig] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [quoteOpen, setQuoteOpen] = useState(false);
   // Reply all: everyone else who was on it, besides the person you answer.
   const allOthers = (answering?.cc ?? []).filter((a) => a && a !== t.peerAddress);
   const [to, setTo] = useState(forward ? "" : t.peerAddress ?? "");
@@ -1066,31 +1088,33 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const change = (v: string) => {
     setText(v); setNote(null);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { writeDraft(p.me.id, t.key, v); onDraft(); }, 500);
+    const keep = rich && !htmlToText(v).trim() ? "" : v;
+    saveTimer.current = setTimeout(() => { writeDraft(p.me.id, t.key, keep); onDraft(); }, 500);
   };
+  const putAndKeep = (v: string) => { change(v); setNonce((n) => n + 1); };
   // Discard (Derek, 2026-10-01: "struggling to close or cancel this draft"):
   // empties the box and the saved draft, with Undo, and closes an email reply.
   const discard = () => {
     const before = text, beforeFiles = files;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    setText(""); setFiles([]); setNote(null); writeDraft(p.me.id, t.key, ""); onDraft();
+    put(""); setFiles([]); setNote(null); writeDraft(p.me.id, t.key, ""); onDraft();
     onClose?.();
-    p.pushToast("Draft discarded", { label: "Undo", run: () => { setText(before); setFiles(beforeFiles); writeDraft(p.me.id, t.key, before); onDraft(); } });
+    p.pushToast("Draft discarded", { label: "Undo", run: () => { put(before); setFiles(beforeFiles); writeDraft(p.me.id, t.key, before); onDraft(); } });
   };
   const channelForAi = t.channel === "email" ? "email" : t.channel === "chat" ? "chat" : "sms";
 
   const improve = async () => {
-    if (!text.trim()) return;
+    if (!hasText) return;
     setBusy("improve");
     try {
-      const r = await p.inbox.improve(text, channelForAi);
-      if (r.changed) { const before = text; change(r.text); setNote({ kind: "ai", text: "Fixed spelling and grammar.", before }); }
+      const r = await p.inbox.improve(plain, channelForAi);
+      if (r.changed) { const before = text; putAndKeep(asRich(r.text)); setNote({ kind: "ai", text: "Fixed spelling and grammar.", before }); }
       else setNote({ kind: "ai", text: "Looks good already. Nothing to fix." });
     } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't improve it." }); }
     finally { setBusy(null); }
   };
 
-  const upload = async (list: FileList | null) => {
+  const upload = async (list: FileList | File[] | null) => {
     if (!list) return;
     const prefix = t.clientId ? `messages/${t.clientId}` : `inbox/${p.me.id}`;
     for (const f of Array.from(list)) { const a = await p.onUpload(prefix, f); if (a) setFiles((x) => [...x, a]); }
@@ -1111,27 +1135,27 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   // Send sends: no typo check in the way (Derek, 2026-10-02: "it's already
   // been read and approved"). Improve with AI is the button for that.
   const send = async () => {
-    const body = text.trim();
-    if (!body) return;
-    const clear = () => { setText(""); writeDraft(p.me.id, t.key, ""); setFiles([]); setNote(null); onDraft(); };
+    const body = rich ? text : text.trim();
+    if (!hasText) return;
+    const clear = () => { put(""); writeDraft(p.me.id, t.key, ""); setFiles([]); setNote(null); onDraft(); };
     const go = async () => {
       setBusy("send");
       try { await deliver(body); p.pushToast("Sent"); onSent(); }
-      catch (e) { setText(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
+      catch (e) { put(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
       finally { setBusy(null); }
     };
     clear();
     if (p.prefs.undoSeconds > 0) {
       let cancelled = false;
       const timer = setTimeout(() => { if (!cancelled) go(); }, p.prefs.undoSeconds * 1000);
-      p.pushToast(`Sending in ${p.prefs.undoSeconds} seconds`, { label: "Undo", run: () => { cancelled = true; clearTimeout(timer); setText(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast("Not sent. It's back in your reply."); } });
+      p.pushToast(`Sending in ${p.prefs.undoSeconds} seconds`, { label: "Undo", run: () => { cancelled = true; clearTimeout(timer); put(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast("Not sent. It's back in your reply."); } });
     } else go();
   };
 
   const later = async (at: Date) => {
     setLaterOpen(false);
-    if (!p.onSchedule || !text.trim()) return;
-    try { await p.onSchedule(t, text.trim(), at); setText(""); writeDraft(p.me.id, t.key, ""); onDraft(); p.pushToast(`Scheduled for ${at.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`); }
+    if (!p.onSchedule || !hasText) return;
+    try { await p.onSchedule(t, rich ? text : text.trim(), at); put(""); writeDraft(p.me.id, t.key, ""); onDraft(); p.pushToast(`Scheduled for ${at.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`); }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't schedule it."); }
   };
   const tomorrow8 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(8, 0, 0, 0); return d; };
@@ -1145,11 +1169,26 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-highlight">
         <span>🔒 {t.channel === "ig" ? "Instagram" : "Facebook"} reply window closed ({shortTime(lastIn!.at)}, 24 hours after their last message)</span>
         {altEmail && emailInstead && <button onClick={() => emailInstead(altEmail, text)} className="text-accent hover:underline">✉️ Email them instead</button>}
-        {text.trim() && <button onClick={discard} className="text-muted hover:underline">🗑 Discard draft</button>}
+        {hasText && <button onClick={discard} className="text-muted hover:underline">🗑 Discard draft</button>}
       </div>
     ) :
     <div className={compact ? "" : "rounded-xl bg-surface p-3 ring-2 ring-accent/40"}>
-      {answering && (
+      {rich && (
+        // One line on top (Derek, 2026-10-02): who it goes to, CC and BCC, and
+        // close. What they wrote folds out from the arrow.
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b pb-2" title={from}>
+          <span className="shrink-0 font-semibold text-muted">{forward ? "↪ Forward to" : mode === "replyAll" ? "↩ Reply all to" : "↩ To"}</span>
+          {forward
+            ? <input autoFocus value={to} onChange={(e) => setTo(e.target.value)} placeholder="Who to forward it to" className="h-8 min-w-0 flex-1 bg-transparent outline-none" />
+            : <span className="min-w-0 flex-1 truncate"><b>{t.peerName}</b>{t.peerAddress && t.peerAddress !== t.peerName && <span className="text-muted"> {t.peerAddress}</span>}</span>}
+          {answering && !forward && <button onClick={() => setQuoteOpen(!quoteOpen)} title="What they wrote" aria-expanded={quoteOpen} className="rounded-md px-2 py-1 font-semibold text-muted hover:bg-background">{quoteOpen ? "▴" : "···"}</button>}
+          <button onClick={() => setCcOpen(!ccOpen)} className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">CC / BCC</button>
+          <button onClick={() => setBig(!big)} title={big ? "Smaller" : "More room to write"} aria-label={big ? "Smaller" : "More room to write"} className="rounded-md px-2 py-1 text-muted hover:bg-background hover:text-foreground">{big ? "⤡" : "⤢"}</button>
+          {onClose && <button onClick={onClose} title="Close (your draft is kept)" aria-label="Close" className="rounded-md px-2 py-1 text-muted hover:bg-background hover:text-foreground">✕</button>}
+          {quoteOpen && answering && <div className="w-full rounded-lg bg-background px-3 py-2 text-muted"><b className="text-foreground">{fromLabel(answering) === "you" ? "You" : t.peerName}, {when(answering)}:</b> {(answering.body || "").replace(/\s+/g, " ").slice(0, 400)}</div>}
+        </div>
+      )}
+      {!rich && answering && (
         <div className="mb-2 flex items-start gap-3 rounded-lg bg-background px-3 py-2">
           <span className="min-w-0 flex-1">
             <b>{mode === "forward" ? "Forwarding" : mode === "replyAll" ? "Replying to everyone on" : "Replying to"} {fromLabel(answering)}, {when(answering)}</b>
@@ -1158,14 +1197,14 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           {onClose && <button onClick={onClose} title="Close (your draft is kept)" aria-label="Close" className="text-muted hover:text-foreground">✕</button>}
         </div>
       )}
-      {!compact && <div className="mb-1 text-muted">{from}</div>}
+      {!compact && !rich && <div className="mb-1 text-muted">{from}</div>}
       {metaClosed && (
         <div className="mb-2 flex flex-wrap items-center gap-3 rounded-lg bg-highlight-soft px-3 py-2.5 font-semibold text-highlight">
           {t.channel === "ig" ? "Instagram" : "Facebook"} only allows a reply within 24 hours of their last message, and that was {shortTime(lastIn!.at)}.
           {altEmail && emailInstead && <button onClick={() => emailInstead(altEmail, text)} className="h-9 rounded-md px-3 ring-1 ring-current">✉️ Email them instead</button>}
         </div>
       )}
-      {email && (
+      {email && !rich && (
         <div className="flex flex-wrap items-center gap-2 border-b py-1.5">
           <span className="w-11 text-muted">To</span>
           {forward
@@ -1182,14 +1221,33 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         // One slim line after Improve with AI: what it did, and Undo.
         <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-1.5 font-semibold ${note.kind === "error" ? "bg-danger-soft text-danger" : "bg-[#f3efff] text-[#7c3aed]"}`}>
           ✨ {note.text}
-          {note.before !== undefined && <button onClick={() => { change(note.before!); setNote(null); }} className="underline">Undo</button>}
+          {note.before !== undefined && <button onClick={() => { putAndKeep(note.before!); setNote(null); }} className="underline">Undo</button>}
         </div>
       )}
-      <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 1 : 4}
+      {rich ? (
+        // Files dragged on, or a screenshot pasted, attach to the email.
+        <div data-inbox-composer={t.key}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}
+          onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDropping(true); } }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+          onDropCapture={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); setDropping(false); upload(e.dataTransfer.files); } }}
+          onPasteCapture={(e) => { const f = Array.from(e.clipboardData.files); if (f.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); e.stopPropagation(); upload(f); } }}
+          className={`relative mt-2 rounded-lg ${dropping ? "ring-2 ring-accent" : ""} ${big ? "[&_.rte-content]:min-h-[55vh]" : "[&_.rte-content]:min-h-[130px]"} [&_.rte-toolbar]:border-0`}>
+          <RichTextEditor key={`inbox-${t.key}-${nonce}`} variant="email" value={text} onChange={change} autoFocus={!!answering && !forward}
+            placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} />
+          {dropping && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg bg-accent-soft/80 font-bold text-accent">Drop to attach</div>}
+          {/* What goes under your words: the send adds it, so there's no need to type it. */}
+          <div className="mt-1 border-t border-dashed pt-2 text-muted">
+            {signature.trim()
+              ? <div className="opacity-70 [&_a]:underline" title="Your signature, added when it sends. Change it in Settings." dangerouslySetInnerHTML={{ __html: looksLikeHtml(signature) ? signature : plainTextToHtml(signature) }} />
+              : <span>No signature yet. Add one in Settings and it goes on every email.</span>}
+          </div>
+        </div>
+      ) : <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 1 : 4}
         onKeyDown={compact ? (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } : undefined}
         // Under a chat it starts at one line and grows with what you write, up to about six.
         ref={compact ? (el) => { if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 168)}px`; } } : undefined}
-        className={compact ? "w-full resize-none overflow-y-auto rounded-2xl bg-background px-4 py-2.5 leading-relaxed outline-none ring-1 ring-[var(--border)] focus:ring-accent" : "mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none"} />
+        className={compact ? "w-full resize-none overflow-y-auto rounded-2xl bg-background px-4 py-2.5 leading-relaxed outline-none ring-1 ring-[var(--border)] focus:ring-accent" : "mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none"} />}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">
           {files.map((f) => <span key={f.id} className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 ring-1 ring-[var(--border)]">{f.kind === "image" ? "🖼️" : "📄"} {f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`Remove ${f.name}`} className="text-muted">✕</button></span>)}
@@ -1205,19 +1263,19 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           {repliesOpen && (
             <div className="absolute bottom-12 left-0 z-50 w-80 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
               {p.prefs.replies.length ? p.prefs.replies.map((r) => (
-                <button key={r.name} onClick={() => { change(text.trim() ? `${text.trim()}\n\n${r.text}` : r.text); setRepliesOpen(false); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                <button key={r.name} onClick={() => { putAndKeep(rich ? (hasText ? text : "") + plainTextToHtml(r.text) : text.trim() ? `${text.trim()}\n\n${r.text}` : r.text); setRepliesOpen(false); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
                   <b className="block">{r.name}</b><span className="text-[14px] text-muted">{r.text.slice(0, 70)}{r.text.length > 70 ? "…" : ""}</span>
                 </button>
               )) : <div className="px-3 py-2 text-muted">None yet. Add some in Settings.</div>}
             </div>
           )}
         </div>
-        <button onClick={improve} disabled={busy !== null || !text.trim()} title="Improve with AI" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> Improve with AI</span></>}</button>
-        {(text.trim() || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑 Discard</button>}
+        <button onClick={improve} disabled={busy !== null || !hasText} title="Improve with AI" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> Improve with AI</span></>}</button>
+        {(hasText || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑 Discard</button>}
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">
-          <button onClick={() => send()} disabled={busy !== null || !text.trim() || metaClosed} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
+          <button onClick={() => send()} disabled={busy !== null || !hasText || metaClosed} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
           {p.onSchedule && t.clientId && <>
             <button onClick={() => setLaterOpen(!laterOpen)} aria-label="Send later" className="h-10 rounded-r-lg border-l border-white/30 bg-accent px-2.5 text-white">▾</button>
             {laterOpen && (
