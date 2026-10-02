@@ -109,6 +109,11 @@ import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 
 
+// ⌘Z: the last action that offered Undo, kept for a minute.
+type LastUndo = { id: string; run: () => void; at: number };
+function rememberUndo(ref: { current: LastUndo | null }, id: string, run: () => void) { ref.current = { id, run, at: Date.now() }; }
+const undoTooOld = (at: number) => Date.now() - at > 60_000;
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -921,18 +926,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const lifetime = action ? 11000 : 2800;
     setToasts((t) => [...t, { id, text, action, secondaryAction }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), lifetime);
-    if (action && /^undo$/i.test(action.label)) lastUndoRef.current = { id, run: action.run, at: Date.now() };
+    if (action && /^undo$/i.test(action.label)) rememberUndo(lastUndoRef, id, action.run);
   };
   // ⌘Z (Ctrl+Z) undoes the last thing that offered Undo, for a minute after
   // (Derek, 2026-10-02). Not while typing: there it is the box's own undo.
-  const lastUndoRef = useRef<{ id: string; run: () => void; at: number } | null>(null);
+  const lastUndoRef = useRef<LastUndo | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "z") return;
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
       const last = lastUndoRef.current;
-      if (!last || Date.now() - last.at > 60_000) return;
+      if (!last || undoTooOld(last.at)) return;
       e.preventDefault();
       lastUndoRef.current = null;
       setToasts((t) => t.filter((x) => x.id !== last.id));

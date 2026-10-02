@@ -27,6 +27,8 @@ export type InboxPrefs = {
   /** Always let in (lower case; "@domain" for a whole domain): their email
    *  reaches the Inbox from any Gmail tab, even when it looks automated. */
   allowSenders: string[];
+  /** The folder list folded to icons only (Derek, 2026-10-02: "to save space"). */
+  railCollapsed: boolean;
   /** The open conversation's side panel width in pixels, dragged by hand. */
   sideWidth: number;
 };
@@ -39,7 +41,7 @@ export const DEFAULT_PREFS: InboxPrefs = {
     { name: "Call me", text: "Easier to talk this through. Can you give me a call when you have 5 minutes?" },
   ],
   undoSeconds: 5, aiNudge: true, badge: true, popup: true, sound: false,
-  gmailRead: true, gmailArchive: true, imageSenders: [], allowSenders: [], sideWidth: 320,
+  gmailRead: true, gmailArchive: true, imageSenders: [], allowSenders: [], railCollapsed: false, sideWidth: 320,
 };
 
 const key = (member: string) => `inboxPrefs:${member}`;
