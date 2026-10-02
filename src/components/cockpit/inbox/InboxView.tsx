@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task } from "@/lib/data";
+import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, splitQuotedEmail, tidyEmailText, type Attachment, type Message, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
@@ -45,6 +45,13 @@ export type InboxViewProps = {
   canAdmin: boolean;
   /** Everyone in GoHighLevel, for New message. */
   contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null }[];
+  /** The side panel's live task card: status, Mark done. */
+  onPatchTask: (taskId: string, patch: Partial<Task>) => void;
+  /** 📌 Add to task: an email onto the linked task as a comment. */
+  onAddComment: (taskId: string, body: string) => void;
+  onOpenClient: (clientId: string) => void;
+  /** The person in GoHighLevel, when they are a contact there. */
+  ghlUrlFor: (contactId: string) => string | null;
 };
 
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
@@ -168,7 +175,7 @@ export default function InboxView(p: InboxViewProps) {
 
         {folder === "settings" ? <InboxSettings {...p} />
           : composeNew ? <NewMessage key={JSON.stringify(composeNew)} p={p} start={composeNew} onClose={() => setComposeNew(false)} />
-          : open ? <ThreadView emailInstead={(to, body) => { setOpenKey(null); setComposeNew({ to, body }); }} p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
+          : open ? <ThreadView key={open.key} onOpenOther={(k) => { const x = inbox.threads.find((y) => y.key === k); if (x) openThread(x); }} emailInstead={(to, body) => { setOpenKey(null); setComposeNew({ to, body }); }} p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
           : (
             <>
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
@@ -278,8 +285,8 @@ function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: Inbo
 }
 
 // ── An open conversation ──────────────────────────────────────────────────
-function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft, emailInstead }: {
-  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void; emailInstead: (to: string, body: string) => void;
+function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft, emailInstead, onOpenOther }: {
+  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void; emailInstead: (to: string, body: string) => void; onOpenOther: (key: string) => void;
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
@@ -310,12 +317,12 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex flex-wrap gap-1.5 border-b px-3 py-2.5 sm:gap-2 sm:px-4">
-        <button onClick={back} title="Back" aria-label="Back" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">←<span className="hidden sm:inline"> Back</span></button>
-        <button onClick={done} title="Archive: out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">🗄<span className="hidden sm:inline"> Archive</span></button>
-        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} aria-label={t.starred ? "Starred" : "Star"} title={t.starred ? "Starred" : "Star"} className={`h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3 ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★" : "☆"}<span className="hidden sm:inline">{t.starred ? " Starred" : " Star"}</span></button>
+      <div className="relative flex flex-wrap gap-0.5 border-b px-2 py-1.5 sm:px-3">
+        <button onClick={back} title="Back" aria-label="Back" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">←<span className="hidden sm:inline"> Back</span></button>
+        <button onClick={done} title="Archive: out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">🗄<span className="hidden sm:inline"> Archive</span></button>
+        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} aria-label={t.starred ? "Starred" : "Star"} title={t.starred ? "Starred" : "Star"} className={`h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★" : "☆"}<span className="hidden sm:inline">{t.starred ? " Starred" : " Star"}</span></button>
         <div className="relative">
-          <button onClick={() => setSnoozeOpen(!snoozeOpen)} title="Snooze" aria-label="Snooze" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">⏰<span className="hidden sm:inline"> Snooze</span></button>
+          <button onClick={() => setSnoozeOpen(!snoozeOpen)} title="Snooze" aria-label="Snooze" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">⏰<span className="hidden sm:inline"> Snooze</span></button>
           {snoozeOpen && (
             <Menu onClose={() => setSnoozeOpen(false)}>
               {([["1h", "In 1 hour"], ["3h", "In 3 hours"], ["tomorrow", "Tomorrow, 9 AM"], ["monday", "Monday, 9 AM"]] as const).map(([k, l]) => (
@@ -324,11 +331,11 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
             </Menu>
           )}
         </div>
-        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} title="Mark as unread" aria-label="Mark as unread" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">✉<span className="hidden sm:inline"> Mark as unread</span></button>
-        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} aria-label={t.trashed ? "Restore" : "Delete"} className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">{t.trashed ? "↩" : "🗑"}<span className="hidden sm:inline">{t.trashed ? " Restore" : " Delete"}</span></button>
+        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} title="Mark as unread" aria-label="Mark as unread" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">✉<span className="hidden sm:inline"> Mark as unread</span></button>
+        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} aria-label={t.trashed ? "Restore" : "Delete"} className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">{t.trashed ? "↩" : "🗑"}<span className="hidden sm:inline">{t.trashed ? " Restore" : " Delete"}</span></button>
         {t.peerAddress && !t.trashed && (
           <div className="relative">
-            <button onClick={() => setBlockOpen(!blockOpen)} title="Block sender" aria-label="Block sender" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">⛔<span className="hidden sm:inline"> Block</span></button>
+            <button onClick={() => setBlockOpen(!blockOpen)} title="Block sender" aria-label="Block sender" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">⛔<span className="hidden sm:inline"> Block</span></button>
             {blockOpen && (
               <Menu onClose={() => setBlockOpen(false)}>
                 <button onClick={() => blockIt(t.peerAddress!)} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Block {t.peerAddress}</button>
@@ -342,7 +349,7 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
         )}
         {isGhl && (
           <div className="relative">
-            <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-10 rounded-lg border px-2.5 font-semibold hover:bg-background sm:px-3">👤<span className="hidden sm:inline"> Assign</span></button>
+            <button onClick={() => setAssignOpen(!assignOpen)} title="Assign" aria-label="Assign" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">👤<span className="hidden sm:inline"> Assign</span></button>
             {assignOpen && (
               <Menu onClose={() => setAssignOpen(false)}>
                 {[...p.team.map((m) => ({ id: m.id as string | null, name: m.id === p.me.id ? `${m.name} (you)` : m.name })), { id: null, name: "Unassigned, everyone sees it" }].map((m) => (
@@ -360,37 +367,16 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
       {!isEmailThread(t) ? (
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px] lg:overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto lg:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] lg:overflow-hidden" style={sideWidthStyle(p.prefs)}>
           <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
-          <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} />
+          <SideResizer p={p} />
+          <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />
         </div>
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px] lg:overflow-hidden">
-        <div className="min-w-0 px-5 py-5 lg:overflow-y-auto lg:px-7">
-          <h1 className="mb-4 text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || (t.channel === "email" ? t.peerName : `${CHANNEL_LABEL[t.channel]} with ${t.peerName}`)}</h1>
-          {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
-          {isEmailThread(t) && !compose && (
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => setCompose({ mode: "reply", m: lastFromThem })} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">↩ Reply</button>
-              <button onClick={() => setCompose({ mode: "replyAll", m: lastFromThem })} className="h-10 rounded-lg border px-4 font-semibold hover:bg-background">↩↩ Reply all</button>
-              <button onClick={() => setCompose({ mode: "forward", m: t.messages[0] })} className="h-10 rounded-lg border px-4 font-semibold hover:bg-background">→ Forward</button>
-            </div>
-          )}
-          <div className="mt-5 space-y-3">
-            {t.messages.map((m, i) => (
-              <div key={m.id} className="space-y-3">
-                {(i === 0 || dayLabel(t.messages[i - 1].at) !== dayLabel(m.at)) && (
-                  <div className="flex items-center gap-3 pt-2 text-[14px] font-bold uppercase tracking-wider text-muted" role="separator">
-                    <span className="h-px flex-1 bg-[var(--border)]" />{dayLabel(m.at)}<span className="h-px flex-1 bg-[var(--border)]" />
-                  </div>
-                )}
-                {compose?.m.id === m.id && <Composer key={`${t.key}:${compose.mode}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} />}
-                <MessageCard m={m} t={t} p={p} onAction={isEmailThread(t) ? (mode) => setCompose({ mode, m }) : undefined} />
-              </div>
-            ))}
-          </div>
-        </div>
-        <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} />
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] lg:overflow-hidden" style={sideWidthStyle(p.prefs)}>
+        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
+        <SideResizer p={p} />
+        <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />
       </div>
       )}
     </div>
@@ -485,7 +471,7 @@ function ChatText({ text }: { text: string }) {
     : <span key={i}>{part.text}</span>)}</>;
 }
 
-function Menu({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Menu({ children, onClose, right = false }: { children: React.ReactNode; onClose: () => void; right?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
     window.addEventListener("keydown", k, true);
@@ -494,36 +480,131 @@ function Menu({ children, onClose }: { children: React.ReactNode; onClose: () =>
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute left-0 top-12 z-50 min-w-60 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">{children}</div>
+      <div className={`absolute ${right ? "right-0" : "left-0"} top-10 z-50 min-w-60 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]`}>{children}</div>
     </>
   );
 }
 
 type ComposeMode = "reply" | "replyAll" | "forward";
-function MessageCard({ m, t, p, onAction }: { m: Message; t: InboxThread; p: InboxViewProps; onAction?: (mode: ComposeMode) => void }) {
-  const mine = m.direction === "outbound";
-  const who = mine ? (p.team.find((x) => x.id === m.createdBy)?.name ?? "You") : t.peerName;
+/** Who wrote a message, and their company: the contact's own name (not the
+ *  address Gmail shows), or the teammate who sent it. */
+function whoWrote(m: Message, t: InboxThread, p: InboxViewProps): { name: string; org: string | null } {
+  if (m.direction === "outbound") return { name: m.createdBy === p.me.id ? "You" : p.team.find((x) => x.id === m.createdBy)?.name ?? "You", org: null };
+  const c = t.contactId ? p.contacts.find((x) => x.id === t.contactId) : null;
+  const name = c?.name || m.peerName || t.peerName;
+  const org = c?.company || p.clientName(t.clientId);
+  return { name, org: org && org.toLowerCase() !== name.toLowerCase() ? org : null };
+}
+const fullTime = (iso: string) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+// ── An email conversation (Derek, 2026-10-01, mockup
+// https://claude.ai/artifact/Tei4W4znGdehdTpFJAxBP1): oldest first, older
+// emails folded to one line, the newest open at the bottom with Reply under it.
+function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
+  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void;
+  compose: { mode: ComposeMode; m: Message } | null; setCompose: (c: { mode: ComposeMode; m: Message } | null) => void;
+}) {
+  const oldestFirst = useMemo(() => [...t.messages].reverse(), [t.messages]);
+  const last = oldestFirst[oldestFirst.length - 1];
+  // Open: the newest, and everything they sent after your last reply when it is unread.
+  const [openIds, setOpenIds] = useState<Set<string>>(() => {
+    const ids = new Set([last.id]);
+    if (t.unread) {
+      const lastMine = oldestFirst.map((m) => m.direction).lastIndexOf("outbound");
+      oldestFirst.slice(lastMine + 1).forEach((m) => ids.add(m.id));
+    }
+    return ids;
+  });
+  const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const others = [...new Set(oldestFirst.filter((m) => m.direction === "inbound").map((m) => whoWrote(m, t, p).name))];
+  const composer = (m: Message) => compose?.m.id === m.id
+    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} /></div>
+    : null;
   return (
-    // White like the email inside it; yours are told apart by a blue edge, not a tint.
-    <div className="rounded-xl bg-surface px-4 py-3.5 ring-1 ring-[var(--border)]" style={mine ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
-      <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
-        <b>{who}</b>
-        <span className="text-muted">{new Date(m.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-        {m.channel !== t.channel && <span className="text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</span>}
-        {(m.cc?.length ?? 0) > 0 && <span className="text-[14px] text-muted">{m.direction === "inbound" ? "Also to" : "CC"} {m.cc.join(", ")}</span>}
-        {onAction && (
-          <span className="ml-auto flex gap-1">
-            <button onClick={() => onAction("reply")} title="Reply" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">↩ Reply</button>
-            <button onClick={() => onAction("replyAll")} title="Reply all" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">↩↩ All</button>
-            <button onClick={() => onAction("forward")} title="Forward" className="rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">→ Forward</button>
-          </span>
-        )}
+    <div className="min-w-0 px-4 py-4 sm:px-6 lg:overflow-y-auto">
+      <h1 className="text-[22px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.subject || t.peerName}</h1>
+      <p className="mb-3 text-muted">{others.length ? `${others.join(", ")} and you` : `You and ${t.peerName}`} · {t.count} {t.count === 1 ? "email" : "emails"}</p>
+      {typing && <div className="mb-3 rounded-lg bg-highlight-soft px-4 py-2.5 font-semibold text-highlight">{typing} is writing a reply right now</div>}
+      <div className="border-y">
+        {oldestFirst.map((m, i) => {
+          const prev = oldestFirst[i - 1];
+          return (
+            <div key={m.id}>
+              {(!prev || dayLabel(prev.at) !== dayLabel(m.at)) && i > 0 && (
+                <div className="flex items-center gap-3 border-t py-1.5 font-semibold text-muted" role="separator"><span className="h-px flex-1 bg-[var(--border)]" />{dayLabel(m.at)}<span className="h-px flex-1 bg-[var(--border)]" /></div>
+              )}
+              <EmailItem m={m} t={t} p={p} open={openIds.has(m.id)} onToggle={() => toggle(m.id)} onAnswer={(mode) => { setOpenIds((s) => new Set(s).add(m.id)); setCompose({ mode, m }); }} first={i === 0} />
+              {m.id !== last.id && composer(m)}
+            </div>
+          );
+        })}
       </div>
-      {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} p={p} />
-        : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
-        : <EmailBody body={m.body} />}
-      {m.attachments?.length > 0 && <Files m={m} p={p} />}
+      {compose?.m.id === last.id ? composer(last) : (
+        <div className="flex flex-wrap gap-2 pt-4">
+          <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-4 font-bold text-white">↩ Reply</button>
+          <button onClick={() => setCompose({ mode: "replyAll", m: last })} className="h-9 rounded-full px-4 font-semibold ring-1 ring-[var(--border)] hover:bg-background">↩↩ Reply all</button>
+          <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-4 font-semibold ring-1 ring-[var(--border)] hover:bg-background">→ Forward</button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
+  m: Message; t: InboxThread; p: InboxViewProps; open: boolean; first: boolean; onToggle: () => void; onAnswer: (mode: ComposeMode) => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const { name, org } = whoWrote(m, t, p);
+  const mine = m.direction === "outbound";
+  const snippet = (m.body || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const to = mine ? `to ${t.peerName}` : `to you${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}`;
+  // 📌 Add to task: the email onto the linked task, as a comment.
+  const pin = () => {
+    if (!t.taskId) { p.pushToast("Link a task first, on the right."); return; }
+    const body = `📌 Email from ${name}, ${fullTime(m.at)}${m.subject ? `\n${m.subject}` : ""}\n\n${(m.body || "").trim().slice(0, 4000)}`;
+    p.onAddComment(t.taskId, body);
+    p.pushToast("Added to the task as a comment");
+  };
+  return (
+    <article className={first ? "" : "border-t"}>
+      <div role="button" tabIndex={0} aria-expanded={open} onClick={onToggle} onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); onToggle(); } }}
+        className="grid cursor-pointer grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-1 py-2.5 hover:bg-background">
+        <span className="grid h-9 w-9 place-items-center rounded-full text-[15px] font-bold text-white" style={{ background: avatarColor(name) }}>{initials(name)}</span>
+        <span className="min-w-0">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <b className="truncate">{name}</b>
+            {org && <span className="hidden truncate text-muted sm:inline">{org}</span>}
+          </span>
+          <span className="block truncate text-muted">{open ? to : snippet}</span>
+        </span>
+        <span className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <span className="mr-1 whitespace-nowrap text-muted">{open ? fullTime(m.at) : shortTime(m.at)}</span>
+          {open && <>
+            <button onClick={pin} title="Add this email to the task" aria-label="Add this email to the task" className="h-8 rounded-md px-1.5 text-muted hover:bg-background">📌</button>
+            <button onClick={() => onAnswer("reply")} title="Reply to this email" aria-label="Reply to this email" className="h-8 rounded-md px-1.5 font-semibold text-muted hover:bg-background">↩</button>
+            <span className="relative">
+              <button onClick={() => setMenu(!menu)} aria-label="More" title="More" className="h-8 rounded-md px-1.5 font-bold text-muted hover:bg-background">⋯</button>
+              {menu && (
+                <Menu onClose={() => setMenu(false)} right>
+                  <button onClick={() => { setMenu(false); onAnswer("replyAll"); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">↩↩ Reply all</button>
+                  <button onClick={() => { setMenu(false); onAnswer("forward"); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">→ Forward</button>
+                  <button onClick={() => { setMenu(false); pin(); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">📌 Add to task</button>
+                </Menu>
+              )}
+            </span>
+          </>}
+        </span>
+      </div>
+      {open && (
+        <div className="pb-4 pl-1 sm:pl-[52px]">
+          {m.channel !== t.channel && <div className="mb-1 text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</div>}
+          {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} p={p} />
+            : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
+            : <EmailBody body={m.body} />}
+          {m.attachments?.length > 0 && <Files m={m} p={p} />}
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1024,11 +1105,62 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
 }
 
 // ── Right side: the task, and who it is from ──────────────────────────────
-function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread; linkSearchRef: React.RefObject<HTMLInputElement | null> }) {
+// The side panel (Derek, 2026-10-01): the linked task you can work from here,
+// the person's other open tasks and conversations, and how to reach them.
+// Its width is dragged with the line to its left (SideResizer).
+const SIDE_MIN = 260, SIDE_MAX = 560, SIDE_DEFAULT = 320;
+const sideWidthStyle = (prefs: InboxPrefs) => ({ ["--side-w" as string]: `${Math.min(SIDE_MAX, Math.max(SIDE_MIN, prefs.sideWidth || SIDE_DEFAULT))}px` }) as React.CSSProperties;
+
+function SideResizer({ p }: { p: InboxViewProps }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const width = Math.min(SIDE_MAX, Math.max(SIDE_MIN, p.prefs.sideWidth || SIDE_DEFAULT));
+  const set = (w: number) => p.setPrefs({ sideWidth: Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, w))) });
+  const down = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const el = ref.current, grid = el?.parentElement;
+    if (!el || !grid) return;
+    el.setPointerCapture(e.pointerId);
+    const right = grid.getBoundingClientRect().right;
+    document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none";
+    // While dragging only the CSS moves; the setting is saved once, at the end.
+    let w = width;
+    const move = (ev: PointerEvent) => { w = Math.min(SIDE_MAX, Math.max(SIDE_MIN, right - ev.clientX - 4)); grid.style.setProperty("--side-w", `${w}px`); };
+    const up = () => {
+      el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up);
+      document.body.style.cursor = ""; document.body.style.userSelect = "";
+      set(w);
+    };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+  };
+  return (
+    <button ref={ref} role="separator" aria-orientation="vertical" aria-label="Side panel width" aria-valuemin={SIDE_MIN} aria-valuemax={SIDE_MAX} aria-valuenow={width}
+      title="Drag to resize. Double-click to reset." onPointerDown={down} onDoubleClick={() => set(SIDE_DEFAULT)}
+      onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); set(width + 20); } if (e.key === "ArrowRight") { e.preventDefault(); set(width - 20); } }}
+      className="group relative hidden cursor-col-resize touch-none lg:block">
+      <span className="absolute inset-y-0 left-[3px] w-0.5 bg-[var(--border)] transition-colors group-hover:bg-accent group-focus-visible:bg-accent" />
+    </button>
+  );
+}
+
+async function copyText(text: string, p: InboxViewProps) {
+  try { await navigator.clipboard.writeText(text); p.pushToast("Copied"); }
+  catch { p.pushToast("Couldn't copy. Select it and copy by hand."); }
+}
+
+function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t: InboxThread; linkSearchRef: React.RefObject<HTMLInputElement | null>; onOpenOther: (key: string) => void }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  // Mark done remembers what it was, so Undo puts it back.
+  const [before, setBefore] = useState<TaskStatus | null>(null);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
   const client = p.clientName(t.clientId);
+  const contact = t.contactId ? p.contacts.find((x) => x.id === t.contactId) ?? null : null;
+  const person = contact?.name || t.peerName;
+  const first = person.split(/\s+/)[0];
+  const conv = t.ghlConversationId ? p.inbox.convs.get(t.ghlConversationId) : undefined;
+  const email = contact?.email || (t.peerAddress?.includes("@") ? t.peerAddress : null) || conv?.email || null;
+  const phone = contact?.phone || (t.peerAddress && !t.peerAddress.includes("@") ? t.peerAddress : null) || conv?.phone || null;
+  const ghlUrl = t.contactId ? p.ghlUrlFor(t.contactId) : null;
   const matches = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     return p.tasks
@@ -1036,39 +1168,123 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
       .filter((x) => words.every((w) => x.title.toLowerCase().includes(w) || (p.clientName(x.clientId) ?? "").toLowerCase().includes(w)))
       .slice(0, 6);
   }, [q, p, t.clientId]);
+  // Their other open work: tasks on this contact or this client, soonest due first.
+  const otherTasks = useMemo(() => p.tasks
+    .filter((x) => x.id !== t.taskId && x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (t.clientId && x.clientId === t.clientId)))
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
+    .slice(0, 3), [p.tasks, t.taskId, t.contactId, t.clientId]);
+  // Their other conversations here: texts, other email threads, calls.
+  const otherConvs = useMemo(() => p.inbox.threads
+    .filter((x) => x.key !== t.key && !x.trashed && ((t.contactId && x.contactId === t.contactId) || (t.peerAddress && x.peerAddress === t.peerAddress) || (t.clientId && x.clientId === t.clientId && x.clientId !== null)))
+    .slice(0, 3), [p.inbox.threads, t.key, t.contactId, t.peerAddress, t.clientId]);
   const link = async (taskId: string | null) => {
     setBusy(true);
     try { await p.inbox.linkTask(t.key, taskId); p.pushToast(taskId ? "Linked. New messages here land on the task too." : "Unlinked"); setQ(""); }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't link it."); }
     finally { setBusy(false); }
   };
+  const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
+  const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
+  const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
+  const label = "mb-1.5 text-[14px] font-bold tracking-wide text-muted";
+  const linkBtn = "font-semibold text-accent hover:underline";
   return (
-    <aside className="space-y-3.5 border-t bg-background/40 p-4 lg:overflow-y-auto lg:border-l lg:border-t-0">
-      <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-        <div className="mb-2 text-[14px] font-bold tracking-wide text-accent">{task ? "LINKED TASK" : "LINK TO A TASK"}</div>
+    <aside className="min-w-0 space-y-3 border-t bg-background/40 p-4 lg:overflow-y-auto lg:border-t-0">
+      <div className={card}>
+        <div className={label}>{task ? "LINKED TASK" : "LINK TO A TASK"}</div>
         {task ? <>
-          <div className="rounded-lg bg-success-soft px-3 py-2.5"><b className="block">{task.title}</b><span className="text-[14px] text-muted">{p.clientName(task.clientId)}</span></div>
-          <button onClick={() => p.onOpenTask(task.id)} className="mt-2 h-10 w-full rounded-lg border font-semibold hover:bg-background">Open task</button>
-          <button disabled={busy} onClick={() => link(null)} className="mt-2 h-10 w-full rounded-lg border font-semibold hover:bg-background">Unlink</button>
+          <b className="block text-[18px] leading-snug">{task.title}</b>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="relative">
+              <button onClick={() => setStatusOpen(!statusOpen)} className="h-8 rounded-full px-3 font-semibold" style={{ background: STATUS_META[task.status].chip }}>
+                <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label} ▾
+              </button>
+              {statusOpen && (
+                <Menu onClose={() => setStatusOpen(false)}>
+                  {STATUS_ORDER.filter((st) => !HIDDEN_STATUSES.has(st)).map((st) => (
+                    <button key={st} onClick={() => { setStatusOpen(false); p.onPatchTask(task.id, { status: st }); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
+                      <span className="h-2 w-2 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}{st === task.status ? " ✓" : ""}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </span>
+            {task.due && <span className="h-8 rounded-full bg-background px-3 leading-8 ring-1 ring-[var(--border)]">📅 {dueLabel(task.due)}</span>}
+            {task.waitingOnClient && <span className="h-8 rounded-full bg-highlight-soft px-3 font-semibold leading-8 text-highlight">Waiting on client</span>}
+          </div>
+          {(task.followUpAt || owner) && (
+            <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+              {task.followUpAt && <><dt className="text-muted">Follow up</dt><dd>{dueLabel(task.followUpAt.slice(0, 10))}</dd></>}
+              {owner && <><dt className="text-muted">On</dt><dd>{owner}</dd></>}
+            </dl>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {task.status === "done"
+              ? <button onClick={() => { p.onPatchTask(task.id, { status: before ?? "todo" }); setBefore(null); }} className="h-9 rounded-lg px-3 font-semibold text-muted ring-1 ring-[var(--border)] hover:bg-background">✓ Done · Undo</button>
+              : <button onClick={() => { setBefore(task.status); p.onPatchTask(task.id, { status: "done" }); p.pushToast("Marked done"); }} className="h-9 rounded-lg bg-success px-3 font-bold text-white">✓ Mark done</button>}
+            <button onClick={() => p.onOpenTask(task.id)} className={linkBtn}>Open task</button>
+            <button disabled={busy} onClick={() => link(null)} className={linkBtn}>Unlink</button>
+          </div>
         </> : <>
           <p className="mb-2 text-muted">Link it and every new message here lands on the task too.</p>
           <input ref={linkSearchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={client ? `Search ${client}'s tasks` : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
-          {(q || t.clientId) && <div className="mt-1.5 space-y-1">
+          {q && <div className="mt-1.5 space-y-1">
             {matches.map((x) => (
               <button key={x.id} disabled={busy} onClick={() => link(x.id)} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">
                 {x.title}<span className="block text-[14px] text-muted">{p.clientName(x.clientId)}{x.due ? `, due ${x.due}` : ""}</span>
               </button>
             ))}
           </div>}
-          <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className="mt-2 h-10 w-full rounded-lg bg-accent font-bold text-white">＋ New task from this</button>
         </>}
       </div>
-      <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-        <div className="mb-1 text-[14px] font-bold tracking-wide text-accent">FROM</div>
-        <b className="block text-[18px]">{t.peerName}</b>
-        {t.peerAddress && t.peerAddress !== t.peerName && <div className="break-all text-muted">{t.peerAddress}</div>}
-        {client ? <div className="text-muted">🏢 {client}</div> : <AddToClient p={p} t={t} />}
-        <div className="mt-1 text-muted">{CHANNEL_ICON[t.channel]} {CHANNEL_LABEL[t.channel]}</div>
+
+      <div className={card}>
+        <div className={label}>{(task ? `${first.toUpperCase()}'S OTHER OPEN TASKS` : `${first.toUpperCase()}'S OPEN TASKS`)}</div>
+        {otherTasks.length === 0 && <p className="text-muted">None open.</p>}
+        {otherTasks.map((x) => (
+          <div key={x.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t py-2 first-of-type:border-t-0">
+            <button onClick={() => p.onOpenTask(x.id)} className="min-w-0 text-left">
+              <span className="block truncate font-semibold">{x.title}</span>
+              <span className="block truncate text-muted">{STATUS_META[x.status].label}{x.due ? ` · ${dueLabel(x.due)}` : ""}</span>
+            </button>
+            <button disabled={busy} onClick={() => link(x.id)} className={`${linkBtn} whitespace-nowrap`}>Link here</button>
+          </div>
+        ))}
+        <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
+      </div>
+
+      {otherConvs.length > 0 && (
+        <div className={card}>
+          <div className={label}>OTHER CONVERSATIONS WITH {first.toUpperCase()}</div>
+          {otherConvs.map((x) => (
+            <button key={x.key} onClick={() => onOpenOther(x.key)} className="grid w-full grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 border-t py-2 text-left first-of-type:border-t-0 hover:bg-background">
+              <span>{CHANNEL_ICON[x.channel]}</span>
+              <span className="min-w-0">
+                <span className={`block truncate ${x.unread ? "font-bold" : "font-semibold"}`}>{x.subject || CHANNEL_LABEL[x.channel]}</span>
+                <span className="block truncate text-muted">{(x.latest.body || "").replace(/\s+/g, " ").slice(0, 80)}</span>
+              </span>
+              <span className="whitespace-nowrap text-muted">{shortTime(x.latest.at)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className={card}>
+        <div className={label}>{contact || client ? "CONTACT" : "FROM"}</div>
+        <b className="block text-[18px]">{person}</b>
+        {(contact?.company || (client && client !== person)) && <div className="text-muted">🏢 {contact?.company || client}</div>}
+        {(email || phone) && (
+          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
+            {email && <><span className="break-all">{email}</span><button onClick={() => copyText(email, p)} className={linkBtn}>Copy</button></>}
+            {phone && <><span>{phone}</span><button onClick={() => copyText(phone, p)} className={linkBtn}>Copy</button></>}
+          </div>
+        )}
+        {client ? (
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {t.clientId && <button onClick={() => p.onOpenClient(t.clientId!)} className={linkBtn}>Open client</button>}
+            {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>Open in GoHighLevel</a>}
+          </div>
+        ) : <AddToClient p={p} t={t} />}
       </div>
     </aside>
   );

@@ -75,7 +75,8 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
     out.push({
       key, messages: msgs, latest, channel: latest.channel,
       subject: [...msgs].reverse().find((m) => m.subject)?.subject ?? null,
-      peerName: peerMsg?.peerName || named || conv?.contactName || peerMsg?.peerAddress || conv?.phone || conv?.email || "Unknown",
+      // The contact's own name first (nameOf), then what the message said.
+      peerName: named || peerMsg?.peerName || conv?.contactName || peerMsg?.peerAddress || conv?.phone || conv?.email || "Unknown",
       peerAddress: peerMsg?.peerAddress ?? conv?.phone ?? conv?.email ?? null,
       clientId: msgs.find((m) => m.clientId)?.clientId || null,
       contactId: msgs.find((m) => m.contactId)?.contactId || null,

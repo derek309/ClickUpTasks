@@ -24,6 +24,8 @@ export type InboxPrefs = {
   gmailArchive: boolean;
   /** Senders whose pictures always show (lower case addresses). */
   imageSenders: string[];
+  /** The open conversation's side panel width in pixels, dragged by hand. */
+  sideWidth: number;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {
@@ -34,7 +36,7 @@ export const DEFAULT_PREFS: InboxPrefs = {
     { name: "Call me", text: "Easier to talk this through. Can you give me a call when you have 5 minutes?" },
   ],
   undoSeconds: 5, aiNudge: true, badge: true, popup: true, sound: false,
-  gmailRead: true, gmailArchive: true, imageSenders: [],
+  gmailRead: true, gmailArchive: true, imageSenders: [], sideWidth: 320,
 };
 
 const key = (member: string) => `inboxPrefs:${member}`;

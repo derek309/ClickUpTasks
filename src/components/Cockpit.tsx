@@ -1638,7 +1638,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // The Inbox. Loaded whatever page is open, so the sidebar can count it.
   const clientNames = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
-  const inboxNameOf = useCallback((m: Message) => (m.clientId ? clientNames.get(m.clientId) ?? null : null), [clientNames]);
+  // A thread is named after the person: their contact's name, not the address
+  // or display name Gmail had ("brian bibboards.com").
+  const contactNames = useMemo(() => new Map(contacts.map((c) => [c.id, c.name])), [contacts]);
+  const inboxNameOf = useCallback((m: Message) => (m.contactId ? contactNames.get(m.contactId) ?? null : null) ?? (m.clientId && !m.peerName ? clientNames.get(m.clientId) ?? null : null), [clientNames, contactNames]);
   const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);
   // Task chats in the Inbox: your mentions, comments on your tasks and a
@@ -2563,6 +2566,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               }}
               clients={workableClients.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name))} canAdmin={canAdmin}
               contacts={contacts}
+              onPatchTask={(id, patch) => patchTask(id, patch)}
+              onAddComment={(id, body) => addComment(id, body)}
+              onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
+              ghlUrlFor={(contactId) => { const ct = contactById(contactId); const sub = ct ? clientById(ct.clientId) : null; return ct?.ghlContactId && sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null; }}
               onSchedule={(t, body, at) => (t.clientId && canMessageClient(t.clientId) ? scheduleMessage(t.clientId, t.channel === "email" ? "email" : "sms", t.subject ? (/^re:/i.test(t.subject) ? t.subject : `Re: ${t.subject}`) : "", body, at.toISOString(), [], [], [], t.taskId, undefined, t.messages.find((m) => m.direction === "inbound")?.id ?? null) : Promise.reject(new Error("Send later works on a client's conversation."))) as Promise<void>}
               pushToast={pushToast} />
           </div>
