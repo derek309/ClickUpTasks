@@ -554,6 +554,8 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
   m: Message; t: InboxThread; p: InboxViewProps; open: boolean; first: boolean; onToggle: () => void; onAnswer: (mode: ComposeMode) => void;
 }) {
   const [menu, setMenu] = useState(false);
+  const [asText, setAsText] = useState(false);
+  const isHtmlEmail = m.channel === "email" && !!m.gmailMessageId && !!m.mailboxMemberId;
   const { name, org } = whoWrote(m, t, p);
   const mine = m.direction === "outbound";
   const snippet = (m.body || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -589,6 +591,7 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
                   <button onClick={() => { setMenu(false); onAnswer("replyAll"); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">↩↩ Reply all</button>
                   <button onClick={() => { setMenu(false); onAnswer("forward"); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">→ Forward</button>
                   <button onClick={() => { setMenu(false); pin(); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">📌 Add to task</button>
+                  {isHtmlEmail && <button onClick={() => { setMenu(false); setAsText(!asText); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">{asText ? "✉ Show the email" : "Aa Show as text"}</button>}
                 </Menu>
               )}
             </span>
@@ -598,7 +601,7 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
       {open && (
         <div className="pb-4 pl-1 sm:pl-[52px]">
           {m.channel !== t.channel && <div className="mb-1 text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</div>}
-          {m.channel === "email" && m.gmailMessageId && m.mailboxMemberId ? <EmailHtml m={m} p={p} />
+          {isHtmlEmail ? <EmailHtml m={m} p={p} asText={asText} />
             : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
             : <EmailBody body={m.body} />}
           {m.attachments?.length > 0 && <Files m={m} p={p} />}
@@ -738,10 +741,11 @@ function tidyEmailHtml(html: string): string {
     .replace(/(?:<br\s*\/?>\s*(?:&nbsp;|&#160;)?\s*){3,}/gi, "<br><br>");
 }
 const QUOTE_CSS = ".gmail_quote,.gmail_extra,blockquote,.yahoo_quoted,#appendonsend,#divRplyFwdMsg,#divRplyFwdMsg~*,hr#stopSpelling~*{display:none!important}";
-function EmailHtml({ m, p }: { m: Message; p: InboxViewProps }) {
+// Show as text lives in the email's ⋯ menu (Derek, 2026-10-01), so the
+// switch is held by the email above this (EmailItem).
+function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; asText?: boolean }) {
   const [html, setHtml] = useState<string | null | undefined>(HTML_CACHE.has(m.id) ? HTML_CACHE.get(m.id) : undefined);
   const [quoted, setQuoted] = useState(false);
-  const [asText, setAsText] = useState(false);
   const [imagesOn, setImagesOn] = useState(false);
   const [height, setHeight] = useState(120);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -778,7 +782,6 @@ function EmailHtml({ m, p }: { m: Message; p: InboxViewProps }) {
   if (html === null || asText) return (
     <>
       <EmailBody body={m.body} />
-      {html && <button onClick={() => setAsText(false)} className="mt-2 font-semibold text-accent hover:underline">Show the email</button>}
     </>
   );
   const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg/i.test(html);
@@ -801,10 +804,11 @@ function EmailHtml({ m, p }: { m: Message; p: InboxViewProps }) {
         <iframe key={showImages ? "on" : "off"} ref={frame} title="Email" srcDoc={doc} onLoad={fit} style={{ height }}
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" className="block w-full border-0" />
       </div>
-      <div className="mt-2 flex flex-wrap gap-4">
-        {hasQuote && <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide earlier messages" : "Show earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>}
-        <button onClick={() => setAsText(true)} className="font-semibold text-muted hover:underline">Show as text</button>
-      </div>
+      {hasQuote && (
+        <div className="mt-2">
+          <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide earlier messages" : "Show earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>
+        </div>
+      )}
     </>
   );
 }
@@ -951,6 +955,15 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { writeDraft(p.me.id, t.key, v); onDraft(); }, 500);
   };
+  // Discard (Derek, 2026-10-01: "struggling to close or cancel this draft"):
+  // empties the box and the saved draft, with Undo, and closes an email reply.
+  const discard = () => {
+    const before = text, beforeFiles = files;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setText(""); setFiles([]); setNote(null); writeDraft(p.me.id, t.key, ""); onDraft();
+    onClose?.();
+    p.pushToast("Draft discarded", { label: "Undo", run: () => { setText(before); setFiles(beforeFiles); writeDraft(p.me.id, t.key, before); onDraft(); } });
+  };
   const channelForAi = t.channel === "email" ? "email" : t.channel === "chat" ? "chat" : "sms";
 
   const improve = async () => {
@@ -1085,6 +1098,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           )}
         </div>
         <button onClick={improve} disabled={busy !== null || !text.trim()} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : "✨ Improve with AI"}</button>
+        {(text.trim() || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑 Discard</button>}
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">
