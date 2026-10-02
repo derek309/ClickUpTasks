@@ -127,17 +127,19 @@ export default function InboxView(p: InboxViewProps) {
   };
   const back = () => { if (openKey) setCursor(openKey); setOpenKey(null); setComposeNew(false); };
 
-  // Left hand keys, as in Gmail: J next, K previous, E archive, R read, S snooze, T link, F star.
+  // → next, ← previous (Derek, 2026-10-02: arrows instead of J and K), and
+  // left hand keys as in Gmail: E archive, R read, S snooze, T link, F star.
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const linkSearchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey || folder === "settings") return;
       // A task open over the Inbox has the keys; Escape closes it, not this.
-      if (document.querySelector(".inbox-slide")) return;
+      // A panel or photo open over the Inbox has the keys (its arrows are its own).
+      if (document.querySelector('.inbox-slide, [role="dialog"]')) return;
       const k = e.key.toLowerCase();
-      if (k === "j") { e.preventDefault(); step(1); }
-      else if (k === "k") { e.preventDefault(); step(-1); }
+      if (k === "arrowright") { e.preventDefault(); step(1); }
+      else if (k === "arrowleft") { e.preventDefault(); step(-1); }
       else if ((k === " " || k === "enter") && !openKey && cursor) { e.preventDefault(); const t = visible.find((x) => x.key === cursor); if (t) openThread(t); }
       else if (k === "escape" && openKey) back();
       else if (k === "e" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); done([key]); }
@@ -220,7 +222,7 @@ export default function InboxView(p: InboxViewProps) {
                 })}
               </div>
               <div className="hidden gap-4 border-t bg-background/40 px-5 py-2 text-[14px] text-muted lg:flex">
-                <span><Kbd>J</Kbd> Next</span><span><Kbd>K</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Archive</span><span><Kbd>F</Kbd> Star</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
+                <span><Kbd>→</Kbd> Next</span><span><Kbd>←</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Archive</span><span><Kbd>F</Kbd> Star</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
               </div>
             </>
           )}
@@ -924,7 +926,13 @@ function Files({ m, p }: { m: Message; p: InboxViewProps }) {
         </div>
       )}
       {big !== null && (
-        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/85 p-6" onClick={() => setBig(null)} role="dialog" aria-label={imgs[big].name}>
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/85 p-6" onClick={() => setBig(null)} role="dialog" aria-label={imgs[big].name}
+          tabIndex={-1} ref={(el) => el?.focus()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") { e.stopPropagation(); setBig(null); }
+            else if (e.key === "ArrowRight" && imgs.length > 1) setBig((big + 1) % imgs.length);
+            else if (e.key === "ArrowLeft" && imgs.length > 1) setBig((big - 1 + imgs.length) % imgs.length);
+          }}>
           <div className="text-center" onClick={(e) => e.stopPropagation()}>
             <FileImage a={imgs[big]} m={m} p={p} className="max-h-[78vh] max-w-[min(1000px,100%)] rounded-lg bg-white" />
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-white">
