@@ -225,7 +225,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   // to.address: one person picked from everyone on the conversation; sub: the
   // GoHighLevel sub-account a new person goes into. A new person with no client
   // yet comes back as needsClient so the screen can ask where they go.
-  const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string; address?: string; name?: string; sub?: "agency" | "directory" }) => {
+  const addContact = useCallback(async (threadKey: string, to: { clientId?: string; newClientName?: string; address?: string; name?: string; sub?: "agency" | "directory"; useContactId?: string; details?: { firstName?: string; lastName?: string; companyName?: string; phone?: string; website?: string; extras?: Record<string, string> } }) => {
     const j = await post("/api/inbox/contact", { threadKey, ...to });
     if (!j.needsClient) load();
     return j as { clientId?: string; contactId?: string; needsClient?: boolean; address?: string; name?: string };

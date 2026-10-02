@@ -18,6 +18,7 @@ import {
 import type { useInbox } from "./useInbox";
 import { draftKeys, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
 import { allowEntry } from "@/lib/inbox";
+import { guessFromSignature } from "@/lib/signature";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -1274,6 +1275,10 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
     for (const m of t.messages) { add(m.peerAddress, m.direction === "inbound" ? m.peerName : null); (m.cc ?? []).forEach((c) => add(c)); }
     return [...seen].map(([address, name]) => ({ address, name }));
   }, [t.messages]);
+  const contactFor = (address: string) => p.contacts.find((c) => (c.email ?? "").toLowerCase() === address) ?? null;
+  // The person the conversation is filed on: its contact, or for someone new
+  // the one it came from.
+  const isMain = (x: { address: string }) => (t.contactId ? contactFor(x.address)?.id === t.contactId || (!!contact?.email && contact.email.toLowerCase() === x.address) : (t.peerAddress ?? "").toLowerCase() === x.address);
   const changeTo = async (x: { address: string; name: string | null }) => {
     setBusy(true);
     try {
@@ -1402,6 +1407,18 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
         </div>
       )}
 
+      {t.channel === "email" && people.length > 0 ? (
+        // Everyone outside the team on the email, a card each (Derek, 2026-10-02,
+        // mockup https://claude.ai/artifact/3Sp1HavTj7KLFJYaK8QuyN): the one
+        // replies go to first. Click a name to see and change the contact.
+        <>
+          <div className="px-1 pt-1 text-[14px] font-bold tracking-wide text-muted">PEOPLE ON THIS EMAIL</div>
+          {[...people].sort((a, b) => Number(isMain(b)) - Number(isMain(a))).map((x) => (
+            <PersonCard key={x.address} p={p} t={t} x={x} contact={contactFor(x.address)} main={isMain(x)} busy={busy}
+              clientId={isMain(x) ? t.clientId : null} onMakeMain={() => changeTo(x)} />
+          ))}
+        </>
+      ) : (
       <div className={card}>
         <div className="flex items-start justify-between gap-2">
           <div className={label}>{contact || client ? "CONTACT" : "FROM"}</div>
@@ -1437,7 +1454,209 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
         ) : !adding && <AddToClient p={p} t={t} />}
         {adding && <AddToClient p={p} t={t} person={adding} onDone={() => setAdding(null)} />}
       </div>
+      )}
     </aside>
+  );
+}
+
+// ── A person on an email ──────────────────────────────────────────────────
+const ICO: Record<string, string> = {
+  mail: "M4 4h16v16H4zM22 6l-10 7L2 6",
+  phone: "M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z",
+  copy: "M9 9h13v13H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+  building: "M4 2h16v20H4zM9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01",
+  reply: "M9 17l-5-5 5-5M20 18v-2a4 4 0 0 0-4-4H4",
+  user: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+  ext: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3",
+  globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
+  check: "M20 6 9 17l-5-5",
+};
+function Ico({ n, className = "" }: { n: keyof typeof ICO; className?: string }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-[18px] w-[18px] shrink-0 fill-none stroke-current ${className}`} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d={ICO[n]} /></svg>;
+}
+type Person = { address: string; name: string | null };
+type ContactLite = InboxViewProps["contacts"][number];
+
+function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
+  p: InboxViewProps; t: InboxThread; x: Person; contact: ContactLite | null; main: boolean; busy: boolean; clientId: string | null; onMakeMain: () => void;
+}) {
+  const [show, setShow] = useState<"email" | "phone" | null>(null);
+  const [form, setForm] = useState(false);
+  const name = contact?.name || x.name || x.address;
+  const company = contact?.company || (main ? p.clientName(clientId) : null);
+  const ib = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground";
+  const val = show === "email" ? (contact?.email || x.address) : show === "phone" ? contact?.phone ?? null : null;
+  const mini = "grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
+  return (
+    <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+      <div className="flex items-center gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full font-bold text-white" style={{ background: avatarColor(name) }}>{initials(name)}</span>
+        <div className="min-w-0 flex-1">
+          <button onClick={() => { setForm(!form); setShow(null); }} aria-expanded={form} title={contact ? "See and change this contact" : "Add as a contact"}
+            className="block max-w-full truncate text-left text-[18px] font-bold leading-tight underline decoration-transparent underline-offset-[3px] transition hover:decoration-current">{name}</button>
+          {company && company.toLowerCase() !== name.toLowerCase() && <div className="flex items-center gap-1.5 truncate text-muted"><Ico n="building" className="h-4 w-4" />{company}</div>}
+        </div>
+        {!contact ? <span className="shrink-0 rounded-full bg-highlight-soft px-2.5 py-0.5 font-semibold text-highlight">New</span>
+          : main && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 font-semibold text-accent"><Ico n="reply" className="h-4 w-4" />Replies</span>}
+      </div>
+      <div className="mt-2 flex items-center gap-0.5">
+        <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /></button>
+        {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /></button>}
+        {main && clientId && <button onClick={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></button>}
+        {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
+      </div>
+      {show && (
+        // One line: the address or number, then small buttons (names on hover).
+        <div className="mt-2 flex items-center gap-1 rounded-lg bg-background py-1 pl-3 pr-1">
+          <span className="min-w-0 flex-1 truncate font-semibold" title={val ?? ""}>{val || "None on file"}</span>
+          {val && <button onClick={() => copyText(val, p)} title="Copy" aria-label="Copy" className={mini}><Ico n="copy" /></button>}
+          {val && show === "phone" && <a href={`tel:${val}`} title="Call" aria-label="Call" className={mini}><Ico n="phone" /></a>}
+          {contact && <button onClick={() => { setForm(true); setShow(null); }} title={val ? "Change" : "Add one"} aria-label={val ? "Change" : "Add one"} className={mini}><Ico n="user" /></button>}
+        </div>
+      )}
+      {form && (contact
+        ? <ContactForm p={p} contact={contact} onClose={() => setForm(false)} />
+        : <AddPersonForm p={p} t={t} x={x} onClose={() => setForm(false)} />)}
+    </div>
+  );
+}
+
+const fieldCls = "h-10 min-w-0 rounded-lg border bg-surface px-3 outline-none focus:border-accent";
+type Details = { firstName: string; lastName: string; companyName: string; email: string; phone: string; website: string; extras: { key: string; id: string; label: string; value: string }[] };
+const EXTRA_PLACEHOLDER: Record<string, string> = { title: "Job title", facebook: "Facebook page", instagram: "Instagram", linkedin: "LinkedIn" };
+
+/** A contact as GoHighLevel holds it, changed in place and saved there. */
+function ContactForm({ p, contact, onClose }: { p: InboxViewProps; contact: ContactLite; onClose: () => void }) {
+  const [d, setD] = useState<Details | null>(null);
+  const [ghlUrl, setGhlUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let live = true;
+    authedFetch(`/api/inbox/person?contactId=${encodeURIComponent(contact.id)}`).then((r) => r.json()).then((j) => {
+      if (!live) return;
+      if (j.details) { setD(j.details); setGhlUrl(j.ghlUrl ?? null); } else setError(j.error ?? "Couldn't load this contact.");
+    }, () => live && setError("Couldn't load this contact."));
+    return () => { live = false; };
+  }, [contact.id]);
+  const set = (k: keyof Omit<Details, "extras">, v: string) => setD((x) => (x ? { ...x, [k]: v } : x));
+  const save = async () => {
+    if (!d) return;
+    setSaving(true);
+    const res = await authedFetch("/api/inbox/person", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId: contact.id, details: { ...d, extras: Object.fromEntries(d.extras.map((e) => [e.key, e.value])) } }) }).catch(() => null);
+    const j = res ? await res.json().catch(() => ({})) : {};
+    setSaving(false);
+    if (!res?.ok) { setError(j.error ?? "Couldn't save it."); return; }
+    p.pushToast("Saved here and in GoHighLevel");
+    onClose();
+  };
+  return (
+    <div className="mt-3 grid gap-2 rounded-xl bg-background p-3">
+      <div className="flex items-center justify-between gap-2">
+        <b>Contact</b>
+        {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-accent hover:underline">Open in GoHighLevel <Ico n="ext" className="h-4 w-4" /></a>}
+      </div>
+      {error && <div className="rounded-lg bg-danger-soft px-3 py-2 font-semibold text-danger">{error}</div>}
+      {!d && !error && <div className="text-muted">Loading from GoHighLevel…</div>}
+      {d && <>
+        <div className="grid grid-cols-2 gap-2">
+          <input value={d.firstName} onChange={(e) => set("firstName", e.target.value)} placeholder="First name" aria-label="First name" className={fieldCls} />
+          <input value={d.lastName} onChange={(e) => set("lastName", e.target.value)} placeholder="Last name" aria-label="Last name" className={fieldCls} />
+        </div>
+        <input value={d.companyName} onChange={(e) => set("companyName", e.target.value)} placeholder="Company" aria-label="Company" className={fieldCls} />
+        <input value={d.email} onChange={(e) => set("email", e.target.value)} placeholder="Email" aria-label="Email" className={fieldCls} />
+        <input value={d.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Phone" aria-label="Phone" className={fieldCls} />
+        <input value={d.website} onChange={(e) => set("website", e.target.value)} placeholder="Website" aria-label="Website" className={fieldCls} />
+        {d.extras.map((x) => (
+          <input key={x.key} value={x.value} onChange={(e) => setD((cur) => (cur ? { ...cur, extras: cur.extras.map((y) => (y.key === x.key ? { ...y, value: e.target.value } : y)) } : cur))}
+            placeholder={EXTRA_PLACEHOLDER[x.key] ?? x.label} aria-label={x.label} className={fieldCls} />
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <button disabled={saving} onClick={save} className="h-10 rounded-lg bg-accent px-4 font-bold text-white disabled:opacity-50">{saving ? "Saving…" : "Save to GoHighLevel"}</button>
+          <button onClick={onClose} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-surface">Cancel</button>
+        </div>
+      </>}
+    </div>
+  );
+}
+
+/** A new person: filled in from their email signature, checked for anyone
+ *  GoHighLevel already has with that email or phone, then added to Agency or
+ *  Directory and a client. */
+function AddPersonForm({ p, t, x, onClose }: { p: InboxViewProps; t: InboxThread; x: Person; onClose: () => void }) {
+  const theirs = t.messages.find((m) => m.direction === "inbound" && (m.peerAddress ?? "").toLowerCase() === x.address);
+  const guess = useMemo(() => guessFromSignature(theirs?.body ?? "", { name: x.name, email: x.address }), [theirs?.body, x.name, x.address]);
+  const [d, setD] = useState({ firstName: guess.firstName, lastName: guess.lastName, companyName: guess.companyName, phone: guess.phone, website: guess.website, title: guess.title });
+  const filled = !!(guess.title || guess.phone || guess.companyName);
+  const [sub, setSub] = useState<"agency" | "directory">("agency");
+  const [q, setQ] = useState(() => (guess.companyName || "").replace(/,?\s*(LLC|Inc\.?|Ltd\.?|Corp\.?)$/i, ""));
+  const [busy, setBusy] = useState(false);
+  const [dupes, setDupes] = useState<{ id: string; name: string; email: string | null; phone: string | null; where: string | null; sameEmail: boolean }[]>([]);
+  // Anyone GoHighLevel already has with this email or phone.
+  const checkDupes = useCallback(async (phone: string) => {
+    const res = await authedFetch(`/api/inbox/person?email=${encodeURIComponent(x.address)}&phone=${encodeURIComponent(phone)}`).catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) : null;
+    setDupes(j?.matches ?? []);
+  }, [x.address]);
+  useEffect(() => {
+    let live = true;
+    authedFetch(`/api/inbox/person?email=${encodeURIComponent(x.address)}&phone=${encodeURIComponent(guess.phone)}`)
+      .then((r) => (r.ok ? r.json() : null)).then((j) => { if (live) setDupes(j?.matches ?? []); }, () => null);
+    return () => { live = false; };
+  }, [x.address, guess.phone]);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = words.length ? p.clients.filter((c) => words.every((w) => c.name.toLowerCase().includes(w))).slice(0, 5) : [];
+  const who = `${d.firstName} ${d.lastName}`.trim() || x.address;
+  const add = async (to: { clientId?: string; newClientName?: string; useContactId?: string }, label: string) => {
+    setBusy(true);
+    try {
+      await p.inbox.addContact(t.key, {
+        address: x.address, name: who, sub, ...to,
+        details: { firstName: d.firstName, lastName: d.lastName, companyName: d.companyName, phone: d.phone, website: d.website, extras: { title: d.title } },
+      });
+      p.pushToast(to.useContactId ? `Using ${label}` : `Added ${who} to ${sub === "agency" ? "Agency" : "Directory"} and ${label}`);
+      onClose();
+    } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't add them."); }
+    finally { setBusy(false); }
+  };
+  const set = (k: keyof typeof d, v: string) => setD((cur) => ({ ...cur, [k]: v }));
+  return (
+    <div className="mt-3 grid gap-2 rounded-xl bg-background p-3">
+      <b>Add as a contact</b>
+      {filled && <div className="flex items-center gap-1.5 rounded-lg bg-success-soft px-3 py-1.5 font-semibold text-success"><Ico n="check" className="h-4 w-4" />Filled in from their email signature</div>}
+      {dupes.length > 0 && (
+        <div className="grid gap-1.5 rounded-lg bg-highlight-soft px-3 py-2 text-highlight">
+          <b>Already in GoHighLevel?</b>
+          {dupes.map((m) => (
+            <div key={m.id} className="flex items-center justify-between gap-2">
+              <span className="min-w-0"><b className="block truncate">{m.name}</b><span className="block truncate text-[15px]">{m.sameEmail ? "Same email" : "Same phone"}{m.where ? ` · ${m.where}` : ""}</span></span>
+              <button disabled={busy} onClick={() => add({ useContactId: m.id }, m.name)} className="h-9 shrink-0 rounded-lg bg-surface px-3 font-semibold text-foreground ring-1 ring-[var(--border)]">Use this one</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <input value={d.firstName} onChange={(e) => set("firstName", e.target.value)} placeholder="First name" aria-label="First name" className={fieldCls} />
+        <input value={d.lastName} onChange={(e) => set("lastName", e.target.value)} placeholder="Last name" aria-label="Last name" className={fieldCls} />
+      </div>
+      <input value={d.title} onChange={(e) => set("title", e.target.value)} placeholder="Job title" aria-label="Job title" className={fieldCls} />
+      <input value={d.companyName} onChange={(e) => set("companyName", e.target.value)} placeholder="Company" aria-label="Company" className={fieldCls} />
+      <input value={x.address} readOnly aria-label="Email" className={`${fieldCls} text-muted`} />
+      <input value={d.phone} onChange={(e) => set("phone", e.target.value)} onBlur={() => checkDupes(d.phone)} placeholder="Phone" aria-label="Phone" className={fieldCls} />
+      <input value={d.website} onChange={(e) => set("website", e.target.value)} placeholder="Website" aria-label="Website" className={fieldCls} />
+      <span className="mt-1 text-muted">Into GoHighLevel</span>
+      <span className="inline-flex gap-1 rounded-lg bg-surface p-1 ring-1 ring-[var(--border)]">
+        {(["agency", "directory"] as const).map((k) => (
+          <button key={k} onClick={() => setSub(k)} title={k === "agency" ? "Anyone buying from us: website, marketing, a prospect" : "A business listed in the directory"}
+            className={`flex-1 rounded-md px-3 py-1.5 font-semibold ${sub === k ? "bg-accent-soft text-accent" : "text-muted"}`}>{k === "agency" ? "Agency" : "Directory"}</button>
+        ))}
+      </span>
+      <span className="mt-1 text-muted">Client</span>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your clients" aria-label="Search your clients" className={fieldCls} />
+      {hits.map((c) => <button key={c.id} disabled={busy} onClick={() => add({ clientId: c.id }, c.name)} className="rounded-lg bg-surface px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-accent-soft">🏢 {c.name}</button>)}
+      {p.canAdmin && <button disabled={busy} onClick={() => add({ newClientName: q.trim() || d.companyName || who }, q.trim() || d.companyName || who)} className="h-10 rounded-lg border font-semibold hover:bg-surface">＋ New client “{q.trim() || d.companyName || who}”</button>}
+      <button onClick={onClose} className="text-muted hover:underline">Cancel</button>
+    </div>
   );
 }
 

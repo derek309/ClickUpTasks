@@ -5,6 +5,7 @@ import { isClientVisible } from "@/lib/extensionApi";
 import { parseThreadKey, threadRows, canUseThread, ghlConversation, peerOf, escapeLike } from "@/lib/inboxServer";
 import { tokenForLocation } from "@/lib/ghlTokens";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
+import { savePerson } from "@/lib/ghlPerson";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -21,7 +22,8 @@ const API = "https://services.leadconnectorhq.com";
 
 /** A new person into GoHighLevel, in the sub-account picked, so they live
  *  there and in ClickUpTasks. A duplicate GoHighLevel already has is reused. */
-async function createGhlContact(sub: keyof typeof SUB_ACCOUNTS, name: string, email: string): Promise<{ ghlContactId: string; subClientId: string } | { error: string }> {
+type NewDetails = { firstName?: string; lastName?: string; companyName?: string; phone?: string; website?: string; extras?: Partial<Record<"title" | "facebook" | "instagram" | "linkedin", string>> };
+async function createGhlContact(sub: keyof typeof SUB_ACCOUNTS, name: string, email: string, d: NewDetails = {}): Promise<{ ghlContactId: string; subClientId: string } | { error: string }> {
   const { data: subClient } = await supabaseAdmin.from("clients").select("id, ghl_location_id").eq("id", SUB_ACCOUNTS[sub]).maybeSingle();
   const locationId = subClient?.ghl_location_id as string | undefined;
   const token = locationId ? await tokenForLocation(locationId) : null;
@@ -30,18 +32,24 @@ async function createGhlContact(sub: keyof typeof SUB_ACCOUNTS, name: string, em
   const res = await fetch(`${API}/contacts/`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28", Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ locationId, email, firstName: firstName || email, lastName: rest.join(" ") || undefined, source: "ClickUpTasks Inbox" }),
+    body: JSON.stringify({
+      locationId, email, firstName: d.firstName || firstName || email, lastName: d.lastName ?? (rest.join(" ") || undefined),
+      ...(d.companyName ? { companyName: d.companyName } : {}), ...(d.phone ? { phone: d.phone } : {}), ...(d.website ? { website: d.website } : {}),
+      source: "ClickUpTasks Inbox",
+    }),
   });
   const j: any = await res.json().catch(() => null);
   const id = j?.contact?.id ?? j?.meta?.contactId ?? null; // meta.contactId: GoHighLevel already had them
   if (!id) return { error: `GoHighLevel didn't add them (${res.status}). ${String(j?.message ?? "").slice(0, 160)}` };
+  // Job title and socials are custom fields: set once the contact exists.
+  if (d.extras && Object.values(d.extras).some(Boolean)) await savePerson(id as string, { extras: d.extras }).catch(() => null);
   return { ghlContactId: id as string, subClientId: subClient!.id as string };
 }
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { threadKey?: string; clientId?: string; newClientName?: string; address?: string; name?: string; sub?: string };
+  const b = (await req.json().catch(() => ({}))) as { threadKey?: string; clientId?: string; newClientName?: string; address?: string; name?: string; sub?: string; details?: NewDetails; useContactId?: string };
   const ref = parseThreadKey(b.threadKey);
   if (!ref) return NextResponse.json({ error: "Unknown conversation." }, { status: 400 });
   const rows = await threadRows(ref, caller);
@@ -56,6 +64,16 @@ export async function POST(req: NextRequest) {
   const email = picked.includes("@") ? picked : peer.address?.includes("@") ? peer.address.toLowerCase() : null;
   if (email?.endsWith("@clickuplocal.com")) return NextResponse.json({ error: "A teammate can't be the contact." }, { status: 400 });
   const personName = (b.name ?? "").trim() || (rows.find((r) => (r.peer_address ?? "").toLowerCase() === email)?.peer_name as string | undefined) || (email === peer.address?.toLowerCase() ? peer.name : null) || email || "Unknown";
+
+  // "Use this one" on a duplicate: the conversation moves onto that contact and its client.
+  if (b.useContactId && !b.clientId && !b.newClientName) {
+    const { data: dup } = await supabaseAdmin.from("contacts").select("id, client_id").eq("id", b.useContactId).maybeSingle();
+    if (!dup) return NextResponse.json({ error: "That contact is gone." }, { status: 404 });
+    const clientId = await resolveTrackedClientId(dup.id as string, (dup.client_id as string | null) ?? "");
+    if (caller.role !== "admin" && !(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "You can't see that client." }, { status: 403 });
+    await supabaseAdmin.from("messages").update({ contact_id: dup.id, client_id: clientId }).in("id", ids);
+    return NextResponse.json({ ok: true, clientId, contactId: dup.id });
+  }
 
   // Already a contact: the conversation moves onto them and their client.
   if (email && !conv?.ghl_contact_id) {
@@ -93,13 +111,20 @@ export async function POST(req: NextRequest) {
   } else {
     if (!email) return NextResponse.json({ error: "There's no email address to save." }, { status: 400 });
     const { data: existing } = await supabaseAdmin.from("contacts").select("id").ilike("email", escapeLike(email)).limit(1).maybeSingle();
-    if (existing) contactId = existing.id as string;
+    // A duplicate the screen found (same email or phone): that contact, not a new one.
+    const { data: chosen } = b.useContactId ? await supabaseAdmin.from("contacts").select("id").eq("id", b.useContactId).maybeSingle() : { data: null };
+    if (chosen) contactId = chosen.id as string;
+    else if (existing) contactId = existing.id as string;
     else {
       const sub = b.sub === "directory" ? "directory" : "agency";
-      const made = await createGhlContact(sub, personName, email);
+      const made = await createGhlContact(sub, personName, email, b.details ?? {});
       if ("error" in made) return NextResponse.json({ error: made.error }, { status: 502 });
       contactId = `ct_ghl_${made.ghlContactId}`;
-      const { error } = await supabaseAdmin.from("contacts").upsert({ id: contactId, client_id: made.subClientId, name: personName, email, ghl_contact_id: made.ghlContactId }, { onConflict: "id" });
+      const fullName = [b.details?.firstName, b.details?.lastName].filter(Boolean).join(" ").trim() || personName;
+      const { error } = await supabaseAdmin.from("contacts").upsert({
+        id: contactId, client_id: made.subClientId, name: fullName, email, ghl_contact_id: made.ghlContactId,
+        ...(b.details?.phone ? { phone: b.details.phone } : {}), ...(b.details?.companyName ? { company_name: b.details.companyName } : {}),
+      }, { onConflict: "id" });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }
