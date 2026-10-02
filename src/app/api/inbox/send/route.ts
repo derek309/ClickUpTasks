@@ -10,6 +10,7 @@ import { plainTextToHtml } from "@/lib/data";
 import { resolveTrackedClientId } from "@/lib/ghlConversationTask";
 import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId, peerOf, GHL_SEND_TYPE, escapeLike } from "@/lib/inboxServer";
 import { isClientVisible } from "@/lib/extensionApi";
+import { contactHome } from "@/lib/ghlPerson";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -204,8 +205,10 @@ async function sendNewText(caller: any, b: Body, text: string) {
     if (denied) return NextResponse.json({ error: denied }, { status: 403 });
   }
   const { data: sub } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.client_id ?? "-").maybeSingle();
-  const locationId = sub?.ghl_location_id as string | undefined;
-  const token = locationId ? await tokenForLocation(locationId) : null;
+  let locationId = (sub?.ghl_location_id as string | undefined) || undefined;
+  let token = locationId ? await tokenForLocation(locationId) : null;
+  // A contact filed on their own client (not a sub-account): ask GoHighLevel where they live.
+  if (!token) { const home = await contactHome(contact.ghl_contact_id as string); if (home) { locationId = home.locationId; token = home.token; } }
   if (!token) return NextResponse.json({ error: "No GoHighLevel token for that contact's sub-account." }, { status: 501 });
   const { data: prof } = await supabaseAdmin.from("profiles").select("ghl_user_id").eq("id", caller.id).maybeSingle();
   const res = await fetch("https://services.leadconnectorhq.com/conversations/messages", {

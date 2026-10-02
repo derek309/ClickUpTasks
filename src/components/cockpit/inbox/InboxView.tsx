@@ -84,7 +84,13 @@ export default function InboxView(p: InboxViewProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [composeNew, setComposeNew] = useState<false | { to?: string; body?: string }>(false);
+  const [composeNew, setComposeNew] = useState<false | NewStart>(false);
+  // A person card's Text button opens New message as a text to them.
+  useEffect(() => {
+    const onCompose = (e: Event) => { const d = (e as CustomEvent<NewStart>).detail; setOpenKey(null); setComposeNew(d); };
+    window.addEventListener("inbox-compose", onCompose);
+    return () => window.removeEventListener("inbox-compose", onCompose);
+  }, []);
   const [drafts, setDrafts] = useState<Set<string>>(() => draftKeys(p.me.id));
   // A search also looks past the 30 days loaded, once you stop typing.
   const searchOlder = inbox.searchOlder;
@@ -1261,7 +1267,7 @@ async function copyText(text: string, p: InboxViewProps) {
   catch { p.pushToast("Couldn't copy. Select it and copy by hand."); }
 }
 
-function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t: InboxThread; linkSearchRef: React.RefObject<HTMLInputElement | null>; onOpenOther: (key: string) => void }) {
+function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread; linkSearchRef: React.RefObject<HTMLInputElement | null>; onOpenOther: (key: string) => void }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -1297,7 +1303,6 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
   const client = p.clientName(t.clientId);
   const contact = t.contactId ? p.contacts.find((x) => x.id === t.contactId) ?? null : null;
   const person = contact?.name || t.peerName;
-  const first = person.split(/\s+/)[0];
   const conv = t.ghlConversationId ? p.inbox.convs.get(t.ghlConversationId) : undefined;
   const email = contact?.email || (t.peerAddress?.includes("@") ? t.peerAddress : null) || conv?.email || null;
   const phone = contact?.phone || (t.peerAddress && !t.peerAddress.includes("@") ? t.peerAddress : null) || conv?.phone || null;
@@ -1309,15 +1314,6 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
       .filter((x) => words.every((w) => x.title.toLowerCase().includes(w) || (p.clientName(x.clientId) ?? "").toLowerCase().includes(w)))
       .slice(0, 6);
   }, [q, p, t.clientId]);
-  // Their other open work: tasks on this contact or this client, soonest due first.
-  const otherTasks = useMemo(() => p.tasks
-    .filter((x) => x.id !== t.taskId && x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (t.clientId && x.clientId === t.clientId)))
-    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"))
-    .slice(0, 3), [p.tasks, t.taskId, t.contactId, t.clientId]);
-  // Their other conversations here: texts, other email threads, calls.
-  const otherConvs = useMemo(() => p.inbox.threads
-    .filter((x) => x.key !== t.key && !x.trashed && ((t.contactId && x.contactId === t.contactId) || (t.peerAddress && x.peerAddress === t.peerAddress) || (t.clientId && x.clientId === t.clientId && x.clientId !== null)))
-    .slice(0, 3), [p.inbox.threads, t.key, t.contactId, t.peerAddress, t.clientId]);
   const link = async (taskId: string | null) => {
     setBusy(true);
     try { await p.inbox.linkTask(t.key, taskId); p.pushToast(taskId ? "Linked. New messages here land on the task too." : "Unlinked"); setQ(""); }
@@ -1376,40 +1372,12 @@ function SidePanel({ p, t, linkSearchRef, onOpenOther }: { p: InboxViewProps; t:
               </button>
             ))}
           </div>}
+          <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
         </>}
       </div>
 
-      <div className={card}>
-        <div className={label}>{(task ? `${first.toUpperCase()}'S OTHER OPEN TASKS` : `${first.toUpperCase()}'S OPEN TASKS`)}</div>
-        {otherTasks.length === 0 && <p className="text-muted">None open.</p>}
-        {otherTasks.map((x) => (
-          <div key={x.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t py-2 first-of-type:border-t-0">
-            <button onClick={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 text-left">
-              <span className="block truncate font-semibold">{x.title}</span>
-              <span className="block truncate text-muted">{STATUS_META[x.status].label}{x.due ? ` · ${dueLabel(x.due)}` : ""}</span>
-            </button>
-            <button disabled={busy} onClick={() => link(x.id)} className={`${linkBtn} whitespace-nowrap`}>Link here</button>
-          </div>
-        ))}
-        <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
-      </div>
-
-      {otherConvs.length > 0 && (
-        <div className={card}>
-          <div className={label}>OTHER CONVERSATIONS WITH {first.toUpperCase()}</div>
-          {otherConvs.map((x) => (
-            <button key={x.key} onClick={() => onOpenOther(x.key)} className="grid w-full grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 border-t py-2 text-left first-of-type:border-t-0 hover:bg-background">
-              <span>{CHANNEL_ICON[x.channel]}</span>
-              <span className="min-w-0">
-                <span className={`block truncate ${x.unread ? "font-bold" : "font-semibold"}`}>{x.subject || CHANNEL_LABEL[x.channel]}</span>
-                <span className="block truncate text-muted">{(x.latest.body || "").replace(/\s+/g, " ").slice(0, 80)}</span>
-              </span>
-              <span className="whitespace-nowrap text-muted">{shortTime(x.latest.at)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
+      {/* Just the task and the people (Derek, 2026-10-02): the person's other
+          tasks and conversations were more than this needs. */}
       {t.channel === "email" && people.length > 0 ? (
         // Everyone outside the team on the email, a card each (Derek, 2026-10-02,
         // mockup https://claude.ai/artifact/3Sp1HavTj7KLFJYaK8QuyN): the one
@@ -1474,6 +1442,7 @@ const ICO: Record<string, string> = {
   globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
   check: "M20 6 9 17l-5-5",
   bolt: "M13 2 3 14h9l-1 8 10-12h-9z",
+  text: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
 };
 function Ico({ n, className = "" }: { n: keyof typeof ICO; className?: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-[18px] w-[18px] shrink-0 fill-none stroke-current ${className}`} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d={ICO[n]} /></svg>;
@@ -1513,7 +1482,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
           {company && company.toLowerCase() !== name.toLowerCase() && <div className="flex items-center gap-1.5 truncate text-muted"><Ico n="building" className="h-4 w-4" />{company}</div>}
         </div>
         {!contact ? <span className="shrink-0 rounded-full bg-highlight-soft px-2.5 py-0.5 font-semibold text-highlight">New</span>
-          : main && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 font-semibold text-accent"><Ico n="reply" className="h-4 w-4" />Replies</span>}
+          : main && <span title="Replies go to them" aria-label="Replies go to them" className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent-soft text-accent"><Ico n="reply" className="h-4 w-4" /></span>}
       </div>
       <div className="mt-2 flex items-center gap-0.5">
         <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /></button>
@@ -1528,6 +1497,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
           <span className="min-w-0 flex-1 truncate font-semibold" title={val ?? ""}>{val || "None on file"}</span>
           {val && <button onClick={() => copyText(val, p)} title="Copy" aria-label="Copy" className={mini}><Ico n="copy" /></button>}
           {val && show === "phone" && <a href={`tel:${val}`} title="Call" aria-label="Call" className={mini}><Ico n="phone" /></a>}
+          {val && show === "phone" && contact && <button onClick={() => window.dispatchEvent(new CustomEvent("inbox-compose", { detail: { kind: "text", contactId: contact.id, name, to: val } }))} title={`Text ${name.split(/\s+/)[0]}`} aria-label="Text" className={mini}><Ico n="text" /></button>}
           {contact && <button onClick={() => { setForm(true); setShow(null); }} title={val ? "Change" : "Add one"} aria-label={val ? "Change" : "Add one"} className={mini}><Ico n="user" /></button>}
         </div>
       )}
@@ -1730,9 +1700,11 @@ function AddToClient({ p, t, person, onDone }: { p: InboxViewProps; t: InboxThre
 // address (Derek, 2026-10-01). Fills the page; CC, BCC, files, and the task
 // it belongs to, so the conversation lands there from the first message.
 type Pick = { contactId?: string; name: string; address: string };
-function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: { to?: string; body?: string }; onClose: () => void }) {
-  const [kind, setKind] = useState<"email" | "text">("email");
-  const [to, setTo] = useState<Pick | null>(start.to ? { name: start.to, address: start.to } : null);
+/** How New message opens: blank, an email to someone, or a text to a contact. */
+type NewStart = { to?: string; body?: string; kind?: "email" | "text"; contactId?: string; name?: string };
+function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart; onClose: () => void }) {
+  const [kind, setKind] = useState<"email" | "text">(start.kind ?? "email");
+  const [to, setTo] = useState<Pick | null>(start.to ? { contactId: start.contactId, name: start.name || start.to, address: start.to } : null);
   const [q, setQ] = useState("");
   const [ccOpen, setCcOpen] = useState(false);
   const [cc, setCc] = useState(""); const [bcc, setBcc] = useState("");
