@@ -1473,6 +1473,7 @@ const ICO: Record<string, string> = {
   ext: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3",
   globe: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
   check: "M20 6 9 17l-5-5",
+  bolt: "M13 2 3 14h9l-1 8 10-12h-9z",
 };
 function Ico({ n, className = "" }: { n: keyof typeof ICO; className?: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-[18px] w-[18px] shrink-0 fill-none stroke-current ${className}`} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d={ICO[n]} /></svg>;
@@ -1488,6 +1489,18 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
   const name = contact?.name || x.name || x.address;
   const company = contact?.company || (main ? p.clientName(clientId) : null);
   const ib = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground";
+  // Open in GoHighLevel: the server finds which sub-account they live in. The
+  // tab opens on the click (so no popup blocker), then goes there.
+  const openGhl = async () => {
+    if (!contact) return;
+    const quick = p.ghlUrlFor(contact.id);
+    if (quick) { window.open(quick, "_blank", "noopener,noreferrer"); return; }
+    const tab = window.open("about:blank", "_blank");
+    const res = await authedFetch(`/api/inbox/person?contactId=${encodeURIComponent(contact.id)}`).catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) : null;
+    if (j?.ghlUrl && tab) { tab.opener = null; tab.location.href = j.ghlUrl; }
+    else { tab?.close(); p.pushToast("Couldn't find them in GoHighLevel."); }
+  };
   const val = show === "email" ? (contact?.email || x.address) : show === "phone" ? contact?.phone ?? null : null;
   const mini = "grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
   return (
@@ -1506,6 +1519,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
         <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /></button>
         {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /></button>}
         {main && clientId && <button onClick={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></button>}
+        {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /></button>}
         {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
       </div>
       {show && (
