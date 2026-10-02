@@ -1048,7 +1048,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [ccOpen, setCcOpen] = useState(mode === "replyAll" && allOthers.length > 0);
   const [cc, setCc] = useState(mode === "replyAll" ? allOthers.join(", ") : ""); const [bcc, setBcc] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
-  const [note, setNote] = useState<{ kind: "ai" | "nudge" | "error"; text: string; before?: string } | null>(null);
+  const [note, setNote] = useState<{ kind: "ai" | "error"; text: string; before?: string } | null>(null);
   const [busy, setBusy] = useState<"improve" | "send" | null>(null);
   const [repliesOpen, setRepliesOpen] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
@@ -1075,7 +1075,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
     setBusy("improve");
     try {
       const r = await p.inbox.improve(text, channelForAi);
-      if (r.changed) { const before = text; change(r.text); setNote({ kind: "ai", text: "Fixed spelling, grammar and punctuation. Your words, just cleaner.", before }); }
+      if (r.changed) { const before = text; change(r.text); setNote({ kind: "ai", text: "Fixed spelling and grammar.", before }); }
       else setNote({ kind: "ai", text: "Looks good already. Nothing to fix." });
     } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't improve it." }); }
     finally { setBusy(null); }
@@ -1099,16 +1099,11 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
     });
   };
 
-  const send = async (skipNudge = false) => {
+  // Send sends: no typo check in the way (Derek, 2026-10-02: "it's already
+  // been read and approved"). Improve with AI is the button for that.
+  const send = async () => {
     const body = text.trim();
     if (!body) return;
-    // A quick check before it goes: only when the AI is reachable and finds something.
-    if (p.prefs.aiNudge && !skipNudge && note?.kind !== "ai") {
-      setBusy("send");
-      const r = await p.inbox.improve(body, channelForAi).catch(() => null);
-      setBusy(null);
-      if (r?.changed) { setNote({ kind: "nudge", text: r.text }); return; }
-    }
     const clear = () => { setText(""); writeDraft(p.me.id, t.key, ""); setFiles([]); setNote(null); onDraft(); };
     const go = async () => {
       setBusy("send");
@@ -1175,15 +1170,10 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         <label className="flex items-center gap-2 border-b py-1.5"><span className="w-11 text-muted">BCC</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Add people" className="h-8 min-w-0 flex-1 bg-transparent outline-none" /></label>
       </>}
       {note && (
-        <div className={`mt-2 flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 font-semibold ${note.kind === "nudge" ? "bg-highlight-soft text-highlight" : note.kind === "error" ? "bg-danger-soft text-danger" : "bg-[#f3efff] text-[#7c3aed]"}`}>
-          {note.kind === "nudge" ? <>
-            ✨ A few typos spotted.
-            <button onClick={() => { change(note.text); setNote({ kind: "ai", text: "Fixed. Press Send when ready." }); }} className="h-9 rounded-md px-3 ring-1 ring-current">Fix them</button>
-            <button onClick={() => send(true)} className="h-9 rounded-md px-3 ring-1 ring-current">Send anyway</button>
-          </> : <>
-            ✨ {note.text}
-            {note.before !== undefined && <button onClick={() => { change(note.before!); setNote(null); }} className="underline">Undo</button>}
-          </>}
+        // One slim line after Improve with AI: what it did, and Undo.
+        <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-1.5 font-semibold ${note.kind === "error" ? "bg-danger-soft text-danger" : "bg-[#f3efff] text-[#7c3aed]"}`}>
+          ✨ {note.text}
+          {note.before !== undefined && <button onClick={() => { change(note.before!); setNote(null); }} className="underline">Undo</button>}
         </div>
       )}
       <textarea data-inbox-composer={t.key} autoFocus={!!answering && !forward} value={text} onChange={(e) => change(e.target.value)} placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} rows={compact ? 1 : 4}
@@ -2105,7 +2095,6 @@ function InboxSettings(p: InboxViewProps) {
               {([0, 5, 10, 30] as const).map((n) => <button key={n} onClick={() => setPrefs({ undoSeconds: n })} className={`rounded-md px-3 py-1.5 font-semibold ${prefs.undoSeconds === n ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>{n ? `${n} s` : "Off"}</button>)}
             </span>
           </div>
-          <Switch on={prefs.aiNudge} set={(v) => setPrefs({ aiNudge: v })} label="Check for typos when I press Send" help="Offers a fix first if the AI finds spelling or grammar mistakes" />
         </Box>
         <Box title="Alerts">
           <Switch on={prefs.badge} set={(v) => setPrefs({ badge: v })} label="Unread count in the sidebar" />
