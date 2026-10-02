@@ -160,11 +160,11 @@ export default function InboxView(p: InboxViewProps) {
     <div onClickCapture={prefs.popup ? askAlertPermission : undefined} className="flex h-full min-h-0 w-full min-w-0 flex-1 overflow-hidden text-[16px]">
       {/* Folders */}
       {/* Folds to icons only, and remembers it (Derek, 2026-10-02). */}
-      <nav className={`hidden shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r bg-background/40 md:flex ${slim ? "w-[68px] items-center px-2 py-3" : "w-60 p-3"}`}>
+      <nav className={`hidden shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r bg-background/40 md:flex ${slim ? "w-[68px] items-center px-2 py-3" : "w-48 p-2.5"}`}>
         <button onClick={() => { setComposeNew({}); setOpenKey(null); setFolder("inbox"); }} title="New message" aria-label="New message"
           className={`mb-3 h-11 shrink-0 rounded-lg bg-accent font-semibold text-white ${slim ? "w-11 text-[20px]" : "w-full"}`}>{slim ? "＋" : "＋ New message"}</button>
         {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
-        {slim ? <div className="my-2 h-px w-8 bg-[var(--border)]" /> : <div className="mx-3 mb-1 mt-4 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>}
+        {slim ? <div className="my-2 h-px w-8 bg-[var(--border)]" /> : <div className="mx-2.5 mb-1 mt-3 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>}
         {FILTERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
         <div className={`mt-auto border-t pt-3 ${slim ? "flex w-full flex-col items-center gap-0.5" : ""}`}>
           <FolderButton f={{ id: "inbox", label: "Settings", icon: "⚙️" }} slim={slim} active={folder === "settings"} count={0} onClick={() => { setFolder("settings"); setOpenKey(null); }} />
@@ -248,8 +248,8 @@ function FolderButton({ f, active, count, onClick, slim = false }: { f: { id?: s
     </button>
   );
   return (
-    <button onClick={onClick} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left ${active ? "bg-accent-soft font-bold text-accent" : "font-medium hover:bg-background"}`}>
-      <span className="w-6 text-center">{f.icon}</span>{f.label}
+    <button onClick={onClick} className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left ${active ? "bg-accent-soft font-bold text-accent" : "font-medium hover:bg-background"}`}>
+      <span className="w-5 text-center">{f.icon}</span><span className="truncate">{f.label}</span>
       {count > 0 && <span className={`ml-auto inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[14px] font-semibold ${active ? "bg-accent text-white" : "bg-border text-foreground"}`}>{count}</span>}
     </button>
   );
