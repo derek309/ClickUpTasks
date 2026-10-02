@@ -25,10 +25,12 @@ export type PersonDetails = {
   extras: { key: PersonExtraKey; id: string; label: string; value: string }[];
 };
 
-const fieldCache = new Map<string, { key: PersonExtraKey; id: string; label: string }[]>();
+// Re-read every 10 minutes, so a field added in GoHighLevel shows up soon.
+const fieldCache = new Map<string, { at: number; fields: { key: PersonExtraKey; id: string; label: string }[] }>();
 /** This sub-account's job title and social fields, by name. */
 export async function extraFields(locationId: string, token: string): Promise<{ key: PersonExtraKey; id: string; label: string }[]> {
-  if (fieldCache.has(locationId)) return fieldCache.get(locationId)!;
+  const hit = fieldCache.get(locationId);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.fields;
   const res = await fetch(`${API}/locations/${encodeURIComponent(locationId)}/customFields`, { headers: HEADERS(token), signal: AbortSignal.timeout(8000) }).catch(() => null);
   if (!res?.ok) return [];
   const all: any[] = (await res.json().catch(() => null))?.customFields ?? [];
@@ -37,7 +39,7 @@ export async function extraFields(locationId: string, token: string): Promise<{ 
     const f = all.find((x) => x?.model !== "opportunity" && EXTRA_MATCH[key].test(String(x?.name ?? "")));
     if (f?.id) out.push({ key, id: f.id as string, label: String(f.name) });
   }
-  fieldCache.set(locationId, out);
+  fieldCache.set(locationId, { at: Date.now(), fields: out });
   return out;
 }
 
