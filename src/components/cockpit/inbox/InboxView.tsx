@@ -462,7 +462,7 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
         return (
           <div key={m.id} className={`flex flex-col gap-1 ${mine ? "items-end" : "items-start"}`}>
             {m.channel === "call" && m.ghlMessageId && m.ghlConversationId
-              ? <div className="rounded-2xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]"><CallPlayer m={m} peerName={t.peerName} /></div>
+              ? <div className="w-max max-w-full rounded-2xl bg-surface px-3 py-1.5 ring-1 ring-[var(--border)]"><CallPlayer m={m} peerName={t.peerName} /></div>
               : (m.body?.trim() || other) && (
                 <div className={`whitespace-pre-wrap rounded-[20px] px-3.5 py-2 [overflow-wrap:anywhere] ${corners} ${mine ? "bg-accent text-white" : "bg-background text-foreground"}`}>
                   {other}<ChatText text={m.body ?? ""} />
@@ -566,13 +566,14 @@ function CallPlayer({ m, peerName }: { m: Message; peerName: string }) {
     catch { if (!panel) setNote("Couldn't copy. Open the transcript and copy it by hand."); return false; }
   };
   return (
-    <div className="space-y-2">
-      <p className="font-semibold">📞 {m.body || "Call"}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        {audio ? <audio src={audio} controls autoPlay className="h-10 max-w-full" />
-          : <button onClick={play} disabled={busy !== null} className="h-10 rounded-lg bg-accent px-4 font-semibold text-white disabled:opacity-60">{busy === "audio" ? "Loading…" : "▶ Play recording"}</button>}
-        <button onClick={showTranscript} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{busy === "text" ? "Loading…" : "Show transcript"}</button>
-        <button onClick={() => { copy(); }} disabled={busy !== null} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60">{copied ? "✓ Copied" : "📋 Copy transcript"}</button>
+    // One slim row (Derek, 2026-10-01: the buttons were "big and bulky").
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        <span className="mr-1.5 font-semibold">📞 {m.body || "Call"}</span>
+        {audio ? <audio src={audio} controls autoPlay className="h-8 max-w-full" />
+          : <button onClick={play} disabled={busy !== null} title="Play recording" className="h-8 rounded-md px-2 font-semibold text-accent hover:bg-accent-soft disabled:opacity-60">{busy === "audio" ? "Loading…" : "▶ Play"}</button>}
+        <button onClick={showTranscript} disabled={busy !== null} title="Show transcript" className="h-8 rounded-md px-2 font-semibold text-accent hover:bg-accent-soft disabled:opacity-60">{busy === "text" ? "Loading…" : "Transcript"}</button>
+        <button onClick={() => { copy(); }} disabled={busy !== null} title="Copy transcript" className="h-8 rounded-md px-2 font-semibold text-accent hover:bg-accent-soft disabled:opacity-60">{copied ? "✓ Copied" : "Copy"}</button>
       </div>
       {note && <p className="text-muted">{note}</p>}
       {panel && lines && (
