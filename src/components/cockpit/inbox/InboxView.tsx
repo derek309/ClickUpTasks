@@ -210,7 +210,9 @@ export default function InboxView(p: InboxViewProps) {
                       {showDay && <div className="border-b px-5 pb-2 pt-4 text-[14px] font-extrabold uppercase tracking-wider text-muted">{day}</div>}
                       <Row t={t} p={p} active={cursor === t.key} checked={selected.has(t.key)} draft={drafts.has(t.key)} where={q.trim() ? whereIs(t) : null}
                         onCheck={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(t.key); else n.delete(t.key); return n; })}
-                        onOpen={() => openThread(t)} />
+                        onOpen={() => openThread(t)} picking={selected.size > 0}
+                        onArchive={() => done([t.key])} onDelete={() => del([t.key], t.trashed)}
+                        onSnooze={async () => { const until = snoozeUntil("tomorrow"); const undo = await inbox.snooze([t.key], until); undoToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, undo); }} />
                     </div>
                   );
                 })}
@@ -245,33 +247,52 @@ function Avatar({ t, size = 40 }: { t: InboxThread; size?: number }) {
   );
 }
 
-function Row({ t, p, active, checked, draft, where, onCheck, onOpen }: { t: InboxThread; p: InboxViewProps; active: boolean; checked: boolean; draft: boolean; where: string | null; onCheck: (v: boolean) => void; onOpen: () => void }) {
+// A row in the list (Derek, 2026-10-01, mockup
+// https://claude.ai/artifact/3a7ZymR6ZLUL5bZPqf1sqU): two clean lines, unread
+// as a blue dot and bold, the avatar turns into a checkbox on hover (or for
+// every row once one is picked), and Archive, Snooze and Delete take the
+// time's place on hover. The star shows on hover or once starred.
+function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, onArchive, onSnooze, onDelete }: {
+  t: InboxThread; p: InboxViewProps; active: boolean; checked: boolean; picking: boolean; draft: boolean; where: string | null;
+  onCheck: (v: boolean) => void; onOpen: () => void; onArchive: () => void; onSnooze: () => void; onDelete: () => void;
+}) {
   // Words first: links in the preview are just noise.
   const preview = bodyParts(splitQuotedEmail(t.latest.body || "").visible || t.latest.body || "")
     .map((x) => ("text" in x ? x.text : "")).join(" ").replace(/\s+/g, " ").replace(/\[\s*\]/g, "").trim();
   const client = p.clientName(t.clientId);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
+  const act = "grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
+  const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
   return (
-    <div onClick={onOpen} className={`grid cursor-pointer grid-cols-[20px_40px_minmax(0,1fr)] items-center gap-3.5 border-b px-5 py-3 ${active ? "bg-accent-soft" : "hover:bg-background/60"}`}
-      style={t.unread ? { boxShadow: "inset 3px 0 0 #2563eb" } : undefined}>
-      <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-[18px] w-[18px]" checked={checked} onClick={(e) => e.stopPropagation()} onChange={(e) => onCheck(e.target.checked)} />
-      <Avatar t={t} />
+    <div onClick={onOpen} className={`group relative grid cursor-pointer grid-cols-[40px_minmax(0,1fr)] items-center gap-3 border-b px-5 py-2.5 ${checked ? "bg-accent-soft" : active ? "bg-accent-soft/60" : "hover:bg-background/60"}`}>
+      {t.unread && <span aria-label="Unread" className="absolute left-1.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#2563eb]" />}
+      <span className="relative h-10 w-10">
+        <span className={picking || checked ? "invisible" : "group-hover:invisible"}><Avatar t={t} /></span>
+        <label onClick={(e) => e.stopPropagation()} className={`absolute inset-0 place-items-center ${picking || checked ? "grid" : "hidden group-hover:grid"}`}>
+          <input type="checkbox" aria-label={`Select ${t.peerName}`} className="h-5 w-5 accent-[#2563eb]" checked={checked} onChange={(e) => onCheck(e.target.checked)} />
+        </label>
+      </span>
       <div className="grid min-w-0 gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
           <span className={`truncate ${t.unread ? "font-extrabold" : ""}`}>{t.peerName}</span>
-          {t.count > 1 && <span className="text-[14px] text-muted">{t.count}</span>}
+          {t.count > 1 && <span className="text-muted/80">{t.count}</span>}
           <span className={`ml-auto flex shrink-0 items-center gap-1.5 tabular-nums ${t.unread ? "font-bold text-[#2563eb]" : "text-muted"}`}>
-            {t.hasFiles && <span title="Has attachments">📎</span>}
-            {t.snoozed && t.snoozedUntil ? `⏰ ${shortTime(t.snoozedUntil)}` : shortTime(t.latest.at)}
-            <button onClick={(e) => { e.stopPropagation(); p.inbox.star([t.key], !t.starred); }} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
-              className={`ml-1 text-[20px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "text-muted/50 hover:text-[#d97706]"}`}>{t.starred ? "★" : "☆"}</button>
+            {t.hasFiles && <span title="Has attachments" className="opacity-60">📎</span>}
+            <span className="sm:group-hover:hidden">{t.snoozed && t.snoozedUntil ? `⏰ ${shortTime(t.snoozedUntil)}` : shortTime(t.latest.at)}</span>
+            <span className="hidden gap-0.5 font-normal sm:group-hover:flex">
+              <button onClick={stop(onArchive)} title="Archive" aria-label="Archive" className={act}>🗄</button>
+              <button onClick={stop(onSnooze)} title="Snooze until tomorrow, 9 AM" aria-label="Snooze" className={act}>⏰</button>
+              <button onClick={stop(onDelete)} title={t.trashed ? "Restore" : "Delete"} aria-label={t.trashed ? "Restore" : "Delete"} className={act}>{t.trashed ? "↩" : "🗑"}</button>
+            </span>
+            <button onClick={stop(() => p.inbox.star([t.key], !t.starred))} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
+              className={`w-6 text-[19px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "invisible text-muted/50 hover:text-[#d97706] group-hover:visible"}`}>{t.starred ? "★" : "☆"}</button>
           </span>
         </div>
-        <div className="truncate text-muted">
-          {draft && <span className="mr-2 font-bold text-danger">Draft</span>}
-          {where && where !== "Inbox" && <span className="mr-2 rounded bg-background px-1.5 font-semibold">{where}</span>}
-          {t.subject && <span className={`mr-2 text-foreground ${t.unread ? "font-extrabold" : "font-semibold"}`}>{t.subject}</span>}
-          {preview}
+        <div className="flex min-w-0 items-baseline gap-2 text-muted">
+          {draft && <span className="shrink-0 font-bold text-danger">Draft</span>}
+          {where && where !== "Inbox" && <span className="shrink-0 rounded-md bg-background px-1.5 font-semibold">{where}</span>}
+          {t.subject && <span className={`max-w-full shrink-0 truncate text-foreground sm:max-w-[55%] ${t.unread ? "font-extrabold" : "font-semibold"}`}>{t.subject}</span>}
+          <span className={`min-w-0 truncate ${t.subject ? "hidden sm:inline" : ""}`}>{preview}</span>
         </div>
         {p.prefs.showClientAndTask && (client || task) && (
           <div className="mt-1 flex flex-wrap gap-2 text-[14px]">
