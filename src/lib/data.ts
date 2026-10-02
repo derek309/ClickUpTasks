@@ -586,6 +586,8 @@ export interface Message {
    *  yet, contactId "") still says who it is from. */
   peerName?: string | null;
   peerAddress?: string | null;
+  /** Automated, or filed outside Gmail's Primary tab: the Inbox's Updates folder. */
+  bulk?: boolean;
 }
 
 /** GoHighLevel is the record of every client conversation (Derek,

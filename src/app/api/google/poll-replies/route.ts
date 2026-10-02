@@ -5,7 +5,7 @@ import { contactsByEmail } from "@/lib/contactsByEmail";
 import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, ingestTeammateCopy, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
-import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
+import { isBlocked, inboundGmailQuery, UPDATES_FROM } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,7 +25,7 @@ import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  return run(req, 2, null);
+  return run(req, 2, null, false);
 }
 // An admin may POST { days } (up to 30) once, to fill the Inbox with recent
 // mail when it first goes live; the timer always reads two days.
@@ -35,10 +35,12 @@ export async function POST(req: NextRequest) {
   // { member }: only that teammate's mailbox, for the catch-up after they add
   // someone to Always let in.
   const only = typeof body?.member === "string" && body.member ? body.member as string : null;
-  return run(req, days, only);
+  // all: the ↻ button, one person's whole mailbox now; otherwise the
+  // Always to Inbox catch-up, just the senders let in.
+  return run(req, days, only, !!body?.all);
 }
 
-async function run(req: NextRequest, days: number, only: string | null) {
+async function run(req: NextRequest, days: number, only: string | null, all = false) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -80,7 +82,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
   }
   const sentQuery = `in:sent newer_than:${days}d`;
   // A catch-up reads more than one poll's worth.
-  const max = days > 2 ? 200 : 25;
+  const max = days > 2 ? 200 : 50;
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
   let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0;
   const errors: string[] = [];
@@ -94,7 +96,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
     const memberId = memberIdByMailbox.get(mailbox) ?? null;
     let emails;
     try {
-      emails = await readInboundGmail(mailbox, inboundGmailQuery(days, memberId ? allowsBy.get(memberId) ?? [] : [], !!only), max);
+      emails = await readInboundGmail(mailbox, inboundGmailQuery(days, memberId ? allowsBy.get(memberId) ?? [] : [], !!only && !all), max);
     } catch (e) {
       errors.push(`${mailbox}: ${e instanceof Error ? e.message : "read failed"}`);
       continue;
@@ -163,14 +165,19 @@ async function run(req: NextRequest, days: number, only: string | null) {
         // is not lost; from there they can answer it, add the person or link
         // it to a task. Automated mail (newsletters, no-reply, notifications)
         // stays in Gmail: people, not robots (Derek, 2026-10-01).
-        if (em.auto && !(memberId && isBlocked(em.fromEmail, allowsBy.get(memberId) ?? []))) { skippedAuto++; continue; }
+        // Everything comes in now; automated mail, or what Gmail files
+        // outside Primary, goes to the Updates folder (bulk). Updates began
+        // today, so older mail like that is not pulled in.
+        const bulk = em.auto || (!!em.tab && em.tab !== "primary");
+        const allowed = !!memberId && isBlocked(em.fromEmail, allowsBy.get(memberId) ?? []);
+        if (bulk && !allowed && new Date(em.internalDate).getTime() < UPDATES_FROM) { skippedAuto++; continue; }
         unmatched++;
         if (!memberId || isBlocked(em.fromEmail, blocksBy.get(memberId) ?? [])) continue;
         try {
           if (await ingestStrangerEmail({
             mailboxMemberId: memberId, direction: "inbound", peerName: em.fromName || null, peerAddress: em.fromEmail,
             subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
-            files: em.attachments, others: em.others,
+            files: em.attachments, others: em.others, bulk,
           })) strangers++;
         } catch (e) {
           errors.push(`stranger ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
@@ -185,7 +192,7 @@ async function run(req: NextRequest, days: number, only: string | null) {
     // triage — just the teammate emailing someone outside the CRM.
     const createdBy = memberIdByMailbox.get(mailbox);
     // The let-in catch-up reads only inbound mail from the people let in.
-    if (createdBy && !only) {
+    if (createdBy && (!only || all)) {
       let sent: SentEmail[];
       try {
         sent = await readSentGmail(mailbox, sentQuery, max);

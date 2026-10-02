@@ -454,6 +454,8 @@ export async function ingestStrangerEmail(opts: {
   peerName?: string | null; peerAddress: string;
   subject?: string | null; body: string; gmailMessageId: string; gmailThreadId?: string | null; rfc822?: string | null; at?: string;
   files?: GmailFile[]; others?: string[];
+  /** Automated, or filed outside Gmail's Primary tab: the Updates folder. */
+  bulk?: boolean;
 }): Promise<boolean> {
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
   if (dupe && dupe.length > 0) return false;
@@ -473,6 +475,7 @@ export async function ingestStrangerEmail(opts: {
     created_by: opts.direction === "outbound" ? opts.mailboxMemberId : null,
     mailbox_member_id: opts.mailboxMemberId, peer_name: opts.peerName || null, peer_address: opts.peerAddress.toLowerCase(),
     read: opts.direction === "outbound",
+    ...(opts.bulk ? { bulk: true } : {}),
     attachments: gmailFilesToAttachments(opts.files),
     ...(opts.others?.length ? { cc: opts.others } : {}),
     ...(opts.at ? { created_at: opts.at } : {}),

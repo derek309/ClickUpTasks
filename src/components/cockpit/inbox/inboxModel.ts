@@ -3,7 +3,7 @@
 // own (inboxModel.test.ts). Mockup Derek picked, 2026-10-01:
 // https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import type { Message, MessageChannel } from "@/lib/data";
-import { threadKeyOf } from "@/lib/inbox";
+import { threadKeyOf, isBlocked } from "@/lib/inbox";
 
 export type InboxState = { threadKey: string; readAt: string | null; snoozedUntil: string | null; doneAt: string | null; trashedAt?: string | null; starredAt?: string | null; updatedAt: string | null };
 export type GhlConv = { id: string; assignedMemberId: string | null; contactName: string | null; phone: string | null; email: string | null; locationId: string };
@@ -30,6 +30,9 @@ export type InboxThread = {
   starred: boolean;
   /** You wrote last. */
   sentLast: boolean;
+  /** In the Updates folder, not the Inbox: their newest message is automated
+   *  or Gmail filed it outside Primary, and they are not on Always to Inbox. */
+  updates: boolean;
   /** They have written at least once. Only you so far: it lives in Sent. */
   hasInbound: boolean;
   hasFiles: boolean;
@@ -37,7 +40,7 @@ export type InboxThread = {
   count: number;
 };
 
-export type Folder = "inbox" | "starred" | "drafts" | "snoozed" | "sent" | "done" | "trash" | "email" | "sms" | "social" | "call" | "chat";
+export type Folder = "inbox" | "updates" | "starred" | "drafts" | "snoozed" | "sent" | "done" | "trash" | "email" | "sms" | "social" | "call" | "chat";
 export const SOCIAL: MessageChannel[] = ["fb", "ig", "web", "gbp"];
 
 const time = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
@@ -48,6 +51,8 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
   now?: number;
   nameOf?: (m: Message) => string | null;
   convs?: Map<string, GhlConv>;
+  /** Always to Inbox (addresses, "@domain"): their mail stays out of Updates. */
+  allows?: string[];
 } = {}): InboxThread[] {
   const now = opts.now ?? Date.now();
   const groups = new Map<string, Message[]>();
@@ -86,6 +91,7 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
       snoozed, snoozedUntil: snoozed ? st!.snoozedUntil : null, done, trashed, starred: !!st?.starredAt,
       sentLast: latest.direction === "outbound",
       hasInbound: !!lastInbound,
+      updates: !!lastInbound?.bulk && !isBlocked(lastInbound.peerAddress ?? peerMsg?.peerAddress, opts.allows ?? []),
       hasFiles: msgs.some((m) => m.attachments?.length),
       count: msgs.length,
     });
@@ -105,6 +111,9 @@ export function inFolder(t: InboxThread, f: Folder, hasDraft: (key: string) => b
   if (t.done || t.snoozed) return false;
   // Like Gmail: an email only you have written so far is in Sent, not here.
   if (!t.hasInbound) return false;
+  // Updates: automated mail and what Gmail files outside Primary.
+  if (f === "updates") return t.updates;
+  if (t.updates) return false;
   if (f === "inbox") return true;
   if (f === "social") return SOCIAL.includes(t.channel);
   return t.channel === f;

@@ -16,9 +16,9 @@ describe("Always let in", () => {
     expect(isBlocked("bob@other.com", ["@acme.com"])).toBe(false);
   });
 
-  it("reads the Primary tab plus the people let in", () => {
-    expect(inboundGmailQuery(2, [])).toBe("in:inbox category:primary newer_than:2d -from:me");
-    expect(inboundGmailQuery(2, ["jane@acme.com", "@kp.org"])).toBe("in:inbox {category:primary from:jane@acme.com from:kp.org} newer_than:2d -from:me");
+  it("reads every tab, and only the people let in for the catch-up", () => {
+    expect(inboundGmailQuery(2, [])).toBe("in:inbox newer_than:2d -from:me");
+    expect(inboundGmailQuery(2, ["jane@acme.com", "@kp.org"])).toBe("in:inbox newer_than:2d -from:me");
     expect(inboundGmailQuery(14, ["@kp.org"], true)).toBe("in:inbox {from:kp.org} newer_than:14d -from:me");
   });
 });

@@ -45,12 +45,17 @@ export function allowEntry(raw: string): string | null {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) ? `@${domain}` : null;
 }
 
-/** The Gmail search for a teammate's inbox: the Primary tab, plus anything
- *  from someone they always let in, whichever tab Gmail put it in. */
+/** Updates began on this day: older automated mail is not pulled in. */
+export const UPDATES_FROM = Date.parse("2026-10-02T07:00:00Z");
+
+/** The Gmail search for a teammate's inbox. */
 export function inboundGmailQuery(days: number, allows: string[], onlyAllowed = false): string {
   const froms = allows.map(allowEntry).filter((a): a is string => !!a).slice(0, 40)
     .map((a) => `from:${a.startsWith("@") ? a.slice(1) : a}`);
   // onlyAllowed: the catch-up after adding someone looks for just them.
-  const where = onlyAllowed ? `{${froms.join(" ") || "from:nobody.invalid"}}` : froms.length ? `{category:primary ${froms.join(" ")}}` : "category:primary";
-  return `in:inbox ${where} newer_than:${days}d -from:me`;
+  // Every tab now (Derek, 2026-10-02: "let it all flow in"); what is not
+  // Primary is sorted into the Updates folder. onlyAllowed: the catch-up after
+  // adding someone to Always to Inbox looks for just them.
+  if (onlyAllowed) return `in:inbox {${froms.join(" ") || "from:nobody.invalid"}} newer_than:${days}d -from:me`;
+  return `in:inbox newer_than:${days}d -from:me`;
 }

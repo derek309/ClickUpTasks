@@ -151,7 +151,7 @@ export const rowToTaskAction = (r: any): TaskAction => ({
 
 export const rowToMessage = (r: any): Message => ({
   id: r.id, contactId: r.contact_id ?? "", clientId: r.client_id ?? "",
-  mailboxMemberId: r.mailbox_member_id ?? null, peerName: r.peer_name ?? null, peerAddress: r.peer_address ?? null, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
+  mailboxMemberId: r.mailbox_member_id ?? null, peerName: r.peer_name ?? null, peerAddress: r.peer_address ?? null, bulk: !!r.bulk, taskId: r.task_id ?? null, channel: (r.channel as MessageChannel) ?? "email",
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, ghlConversationId: r.ghl_conversation_id ?? null, gmailMessageId: r.gmail_message_id ?? null, gmailThreadId: r.gmail_thread_id ?? null, rfc822MessageId: r.rfc822_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],

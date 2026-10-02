@@ -58,7 +58,7 @@ export type InboxViewProps = {
 };
 
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
-  { id: "inbox", label: "Inbox", icon: "📥" }, { id: "starred", label: "Starred", icon: "⭐" }, { id: "drafts", label: "Drafts", icon: "📝" },
+  { id: "inbox", label: "Inbox", icon: "📥" }, { id: "updates", label: "Updates", icon: "📰" }, { id: "starred", label: "Starred", icon: "⭐" }, { id: "drafts", label: "Drafts", icon: "📝" },
   { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "📤" }, { id: "done", label: "Archive", icon: "🗄" },
   { id: "trash", label: "Trash", icon: "🗑" },
 ];
@@ -84,6 +84,7 @@ export default function InboxView(p: InboxViewProps) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pulling, setPulling] = useState(false);
   const [composeNew, setComposeNew] = useState<false | NewStart>(false);
   // A person card's Text button opens New message as a text to them.
   useEffect(() => {
@@ -197,7 +198,7 @@ export default function InboxView(p: InboxViewProps) {
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
                 <input type="checkbox" aria-label="Select all" className="h-5 w-5" checked={selected.size > 0 && selected.size === visible.length}
                   onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((t) => t.key)) : new Set())} />
-                <button onClick={() => inbox.reload()} title="Refresh" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">↻</button>
+                <button onClick={async () => { setPulling(true); await inbox.pullNow(); setPulling(false); }} disabled={pulling} title="Check Gmail now" aria-label="Check Gmail now" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60"><span className={pulling ? "inline-block animate-spin" : ""}>↻</span></button>
                 {selected.size > 0 && <>
                   <button onClick={async () => { const undo = await inbox.markRead([...selected]); setSelected(new Set()); undoToast(`${selected.size} marked read`, undo); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark read</button>
                   <button onClick={() => { done([...selected]); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">🗄 Archive</button>
@@ -396,14 +397,17 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
                 <div className="px-3 pb-1 pt-2 text-[14px] text-muted">Moves this to Trash. Undo any time in Settings.</div>
                 {t.channel === "email" && <>
                   <div className="my-1 border-t" />
-                  <button onClick={() => { setBlockOpen(false); letIn(p, t.peerAddress!); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">✅ Always let in {t.peerAddress}</button>
+                  <button onClick={() => { setBlockOpen(false); letIn(p, t.peerAddress!); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">📥 Always to Inbox: {t.peerAddress}</button>
                   {domain && !/@(gmail|yahoo|hotmail|outlook|icloud|aol|me|msn|live)\./i.test(domain) && (
-                    <button onClick={() => { setBlockOpen(false); letIn(p, domain); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">✅ Always let in everyone at {domain.slice(1)}</button>
+                    <button onClick={() => { setBlockOpen(false); letIn(p, domain); }} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">📥 Always to Inbox: everyone at {domain.slice(1)}</button>
                   )}
                 </>}
               </Menu>
             )}
           </div>
+        )}
+        {t.updates && t.peerAddress && (
+          <button onClick={() => letIn(p, t.peerAddress!)} title="Their email goes to your Inbox from now on, not Updates" className="h-9 rounded-md px-2.5 font-semibold text-accent hover:bg-background">📥<span className="hidden sm:inline"> To Inbox</span></button>
         )}
         <button onClick={() => setDetails(true)} title="Task, contact and other conversations" aria-label="Details" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground @min-[1000px]:hidden">ⓘ<span className="hidden sm:inline"> Details</span></button>
         {isGhl && (
@@ -1849,7 +1853,7 @@ async function letIn(p: InboxViewProps, raw: string) {
   const list = p.prefs.allowSenders ?? [];
   if (!list.includes(entry)) p.setPrefs({ allowSenders: [...list, entry] });
   const who = entry.startsWith("@") ? `everyone at ${entry.slice(1)}` : entry;
-  p.pushToast(`Letting in ${who}. Checking the last 2 weeks of your Gmail…`);
+  p.pushToast(`${who[0].toUpperCase()}${who.slice(1)} now goes to your Inbox. Checking the last 2 weeks of your Gmail…`);
   // The setting saves a moment after it changes; the check reads it from there.
   await new Promise((r) => setTimeout(r, 1500));
   const res = await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 14, member: p.me.id }) }).catch(() => null);
@@ -1864,18 +1868,18 @@ function AllowBox({ p }: { p: InboxViewProps }) {
   const list = p.prefs.allowSenders ?? [];
   const add = () => { const e = allowEntry(v); if (!e) { p.pushToast("Type an email address, or a domain like acme.com."); return; } setV(""); letIn(p, e); };
   return (
-    <Box title="Always let in" help="Email from these comes into your Inbox even when Gmail files it under Updates or Promotions, or it looks automated (invoices, form notices, no-reply senders).">
+    <Box title="Always to Inbox" help="Everything in your Gmail comes in. Mail Gmail files outside Primary, or that looks automated, goes to Updates; these senders always go to your Inbox instead.">
       <div className="flex gap-2">
         <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} placeholder="jane@acme.com, or acme.com for everyone there"
           className="h-10 min-w-0 flex-1 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
-        <button onClick={add} disabled={!v.trim()} className="h-10 shrink-0 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-50">＋ Let in</button>
+        <button onClick={add} disabled={!v.trim()} className="h-10 shrink-0 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-50">＋ Add</button>
       </div>
       {list.length ? list.map((a) => (
         <div key={a} className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2">
           <span className="break-all">{a.startsWith("@") ? `Everyone at ${a.slice(1)}` : a}</span>
           <button onClick={() => p.setPrefs({ allowSenders: list.filter((x) => x !== a) })} className="h-9 shrink-0 rounded-md border px-3 font-semibold hover:bg-surface">Remove</button>
         </div>
-      )) : <div className="text-muted">Nobody yet. You can also let someone in from the ⛔ menu on their email.</div>}
+      )) : <div className="text-muted">Nobody yet. Or press 📥 To Inbox on an email in Updates.</div>}
     </Box>
   );
 }

@@ -165,12 +165,22 @@ export async function readReplyHeaders(mailbox: string, find: { gmailMessageId?:
 export type InboundEmail = { gmailId: string; threadId: string; fromEmail: string; fromName: string; subject: string; body: string; internalDate: string; auto: boolean; rfc822: string; attachments?: GmailFile[];
   /** Everyone else it went to (To and CC, minus the mailbox itself), for Reply all. */
   others?: string[];
+  /** Gmail's inbox tab. */
+  tab?: "primary" | "updates" | "promotions" | "social" | "forums";
   /** Still unread in Gmail. Read there: the Inbox marks it read too. */
   unread?: boolean };
 
 /** A file on an email, left in Gmail and fetched when someone opens it
  *  (api/inbox/attachment), so a photo shows as a preview in the Inbox
  *  (Derek, 2026-10-01: "show a preview if there are images"). */
+const TAB_BY_LABEL: Record<string, "updates" | "promotions" | "social" | "forums"> = {
+  CATEGORY_UPDATES: "updates", CATEGORY_PROMOTIONS: "promotions", CATEGORY_SOCIAL: "social", CATEGORY_FORUMS: "forums",
+};
+export const tabOf = (labels: unknown): "primary" | "updates" | "promotions" | "social" | "forums" => {
+  for (const l of Array.isArray(labels) ? labels : []) if (TAB_BY_LABEL[l as string]) return TAB_BY_LABEL[l as string];
+  return "primary";
+};
+
 export type GmailFile = { name: string; mimeType: string; bytes: number; gmailAttachmentId: string; inline: boolean };
 
 export function gmailFiles(payload: any): GmailFile[] {
@@ -343,10 +353,16 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
   const ids: string[] = (listJson.messages ?? []).map((m: any) => m.id).filter(Boolean);
 
   const out: InboundEmail[] = [];
-  for (const id of ids) {
-    const mRes = await fetch(`${GMAIL_LIST}/${id}?format=full`, { headers: auth });
-    if (!mRes.ok) continue;
-    const m = await mRes.json().catch(() => null);
+  // Eight at a time: reading every tab is more mail per run than Primary alone.
+  const full: any[] = [];
+  for (let i = 0; i < ids.length; i += 8) {
+    const batch = await Promise.all(ids.slice(i, i + 8).map(async (id) => {
+      const r = await fetch(`${GMAIL_LIST}/${id}?format=full`, { headers: auth }).catch(() => null);
+      return r?.ok ? r.json().catch(() => null) : null;
+    }));
+    full.push(...batch);
+  }
+  for (const m of full) {
     if (!m) continue;
     const headers: any[] = m.payload?.headers ?? [];
     const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
@@ -373,6 +389,8 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
       rfc822: h("message-id"),
       attachments: gmailFiles(m.payload),
       unread: Array.isArray(m.labelIds) ? m.labelIds.includes("UNREAD") : undefined,
+      // Gmail's tab for it: anything but Primary goes to the Inbox's Updates folder.
+      tab: tabOf(m.labelIds),
       others: [...new Set([...`${h("to")},${h("cc")}`.matchAll(/[^<>@\s,"]+@[^<>\s,"]+/g)].map((x) => x[0].toLowerCase()))]
         .filter((a) => a !== userEmail.toLowerCase() && a !== fromEmail).slice(0, 20),
     });

@@ -30,12 +30,14 @@ export type UseInboxDeps = {
   nameOf: (m: Message) => string | null;
   /** Keep Gmail in step (Inbox Settings): read state, and Done as archive. */
   gmailSync: { read: boolean; archive: boolean };
+  /** Always to Inbox, which keeps a sender out of Updates. */
+  allows?: string[];
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
 };
 
 const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, starredAt: r.starred_at, updatedAt: r.updated_at });
 
-export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, pushToast }: UseInboxDeps) {
+export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, allows, pushToast }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
@@ -107,9 +109,9 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     for (const m of older) if (!byId.has(m.id)) byId.set(m.id, m);
     // Blocked senders stay out, except what is already in the Trash, and so
     // does a conversation you just handed to someone else.
-    return buildThreads([...byId.values()], states, { now, nameOf, convs })
+    return buildThreads([...byId.values()], states, { now, nameOf, convs, allows })
       .filter((t) => (t.trashed || !isBlocked(t.peerAddress, blocks)) && !(t.ghlConversationId && handedOff.has(t.ghlConversationId)));
-  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff]);
+  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff, allows]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -235,9 +237,14 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     load();
     return j as { messageId: string; threadKey: string | null };
   }, [post, load]);
+  // ↻: fetch your Gmail now instead of waiting up to 15 minutes for the timer.
+  const pullNow = useCallback(async () => {
+    await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 1, member: meMemberId, all: true }) }).catch(() => null);
+    await load();
+  }, [meMemberId, load]);
   const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
 
-  return { threads, loading, error, reload: load, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {

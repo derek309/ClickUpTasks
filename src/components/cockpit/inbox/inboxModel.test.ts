@@ -176,3 +176,21 @@ describe("texts as a chat", () => {
     expect(items.filter((i) => i.kind === "group")).toHaveLength(2);
   });
 });
+
+describe("the Updates folder", () => {
+  const robot = msg({ id: "r", gmailThreadId: "tr", bulk: true, peerAddress: "news@acme.com", at: "2026-10-02T10:00:00Z" });
+  const person = msg({ id: "h", gmailThreadId: "th", peerAddress: "jane@acme.com", at: "2026-10-02T11:00:00Z" });
+  it("keeps automated mail out of the Inbox and in Updates", () => {
+    const [p, r] = buildThreads([robot, person], new Map(), { now: NOW });
+    expect(inFolder(r, "updates", none)).toBe(true);
+    expect(inFolder(r, "inbox", none)).toBe(false);
+    expect(inFolder(r, "email", none)).toBe(false);
+    expect(inFolder(p, "inbox", none)).toBe(true);
+    expect(inFolder(p, "updates", none)).toBe(false);
+  });
+  it("sends a sender on Always to Inbox to the Inbox", () => {
+    const [, r] = buildThreads([robot, person], new Map(), { now: NOW, allows: ["@acme.com"] });
+    expect(inFolder(r, "inbox", none)).toBe(true);
+    expect(inFolder(r, "updates", none)).toBe(false);
+  });
+});

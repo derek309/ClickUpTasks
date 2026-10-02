@@ -1689,12 +1689,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         peerAddress: null,
       }];
     }); }, [notifications, me.id, tasks]); // eslint-disable-line react-hooks/exhaustive-deps -- clientById/userById read state already listed
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxTaskNotes, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, pushToast });
-  const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed).length, [inbox.threads]);
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxTaskNotes, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, pushToast });
+  // Updates don't count toward the badge or pop alerts: they are robots.
+  const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
   const alertedRef = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const unread = inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed);
+    const unread = inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.updates);
     const seen = alertedRef.current;
     alertedRef.current = new Set(unread.map((t) => `${t.key}|${t.latest.id}`));
     if (!seen || !inboxPrefs.popup || typeof Notification === "undefined") return;
