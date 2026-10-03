@@ -62,7 +62,7 @@ export type InboxViewProps = {
 
 const FOLDERS: { id: Folder; label: string; icon: string }[] = [
   { id: "inbox", label: "Inbox", icon: "📥" }, { id: "updates", label: "Updates", icon: "📰" }, { id: "starred", label: "Starred", icon: "⭐" }, { id: "drafts", label: "Drafts", icon: "📝" },
-  { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "📤" }, { id: "done", label: "Archive", icon: "🗄" },
+  { id: "snoozed", label: "Snoozed", icon: "⏰" }, { id: "sent", label: "Sent", icon: "🚀" }, { id: "done", label: "Archive", icon: "🗄" },
   { id: "trash", label: "Trash", icon: "🗑" },
 ];
 const FILTERS: { id: Folder; label: string; icon: string }[] = [
