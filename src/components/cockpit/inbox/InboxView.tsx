@@ -1232,7 +1232,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
           onDropCapture={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); setDropping(false); upload(e.dataTransfer.files); } }}
           onPasteCapture={(e) => { const f = Array.from(e.clipboardData.files); if (f.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); e.stopPropagation(); upload(f); } }}
-          className={`relative mt-2 rounded-lg ${dropping ? "ring-2 ring-accent" : ""} ${big ? "[&_.rte-content]:min-h-[55vh]" : "[&_.rte-content]:min-h-[130px]"} [&_.rte-toolbar]:border-0`}>
+          className={`relative mt-2 rounded-lg ${dropping ? "ring-2 ring-accent" : ""} ${big ? "[&_.rte-content]:min-h-[55vh]" : "[&_.rte-content]:min-h-[130px]"} [&_.rte-toolbar]:border-0 [&_.ProseMirror]:outline-none! [&_.ProseMirror]:px-1`}>
           <RichTextEditor key={`inbox-${t.key}-${nonce}`} variant="email" value={text} onChange={change} autoFocus={!!answering && !forward}
             placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} />
           {dropping && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg bg-accent-soft/80 font-bold text-accent">Drop to attach</div>}
