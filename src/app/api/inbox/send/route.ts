@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, canCallerMessageClient } from "@/lib/serverAuth";
+import { requireUser, canCallerMessageClient, callerCanSeeTask } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured, readReplyHeaders } from "@/lib/googleMail";
 import { appendSignatureHtml } from "@/lib/emailSignature";
@@ -67,16 +67,18 @@ export async function POST(req: NextRequest) {
   }
   const taskId = linkedTaskId(rows);
 
-  if (!ref || ref.kind === "gm") return sendEmail(caller, b, text, rows, peer, taskId);
+  // A task's own files, put in from Insert from task, when the caller can see that task.
+  const seesTask = (id: string) => callerCanSeeTask(req, id);
+  if (!ref || ref.kind === "gm") return sendEmail(caller, b, text, rows, peer, taskId, seesTask);
   // A GoHighLevel conversation with only email in it is answered by email,
   // from the caller's Gmail, rather than turned away.
   if (conv && !rows.some((r) => GHL_SEND_TYPE[r.channel as string]) && conv.email) {
-    return sendEmail(caller, { ...b, to: (b.to ?? "").trim() || (conv.email as string) }, text, [], peer, taskId);
+    return sendEmail(caller, { ...b, to: (b.to ?? "").trim() || (conv.email as string) }, text, [], peer, taskId, seesTask);
   }
   return sendGhl(caller, b, text, rows, conv, peer, taskId);
 }
 
-async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: ReturnType<typeof peerOf>, taskId: string | null) {
+async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: ReturnType<typeof peerOf>, taskId: string | null, seesTask: (id: string) => Promise<boolean>) {
   if (!googleConfigured) return NextResponse.json({ error: "Gmail sending is not configured." }, { status: 501 });
   const sender = caller.email as string;
   if (!sender.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) return NextResponse.json({ error: "Your account isn't a Google Workspace sender." }, { status: 501 });
@@ -111,7 +113,8 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
     if (!a?.path || a.path.includes("..")) continue;
     const okPath = a.path.startsWith(`inbox/${caller.memberId}/`)
       || (!!clientId && a.path.startsWith(`messages/${clientId}/`)
-        && (caller.role === "admin" || (clientId === peer.clientId && rows.length > 0) || (await isClientVisible(caller, clientId))));
+        && (caller.role === "admin" || (clientId === peer.clientId && rows.length > 0) || (await isClientVisible(caller, clientId))))
+      || (/^[\w-]{1,80}\/[^/]+$/.test(a.path) && (await seesTask(a.path.split("/")[0])));
     if (!okPath) continue;
     const { data: file } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).download(a.path);
     if (!file) continue;

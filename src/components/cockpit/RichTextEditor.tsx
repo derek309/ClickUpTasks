@@ -12,7 +12,7 @@
 // the checklist and code block buttons), and `editable={false}` is the locked
 // view of an approved or closed document.
 import { useEffect, useRef, useState } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { CommentHighlights, commentHighlightsKey, type CommentHighlight } from "./commentHighlights";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
@@ -31,13 +31,15 @@ function ToolbarButton({ onClick, active, title, children, large }: { onClick: (
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", highlights, activeHighlightId, onHighlightClick, onSelectionComment }: {
+export function RichTextEditor({ value, onChange, placeholder, autoFocus, editable = true, variant = "task", highlights, activeHighlightId, onHighlightClick, onSelectionComment, onEditor }: {
   value: string; onChange: (html: string) => void; placeholder?: string; autoFocus?: boolean;
   editable?: boolean; variant?: "task" | "doc" | "email";
   /** Document only: the words comments are about, highlighted; clicking one calls onHighlightClick. */
   highlights?: CommentHighlight[]; activeHighlightId?: string | null; onHighlightClick?: (id: string) => void;
   /** Document only: selecting words shows a Comment button that hands them over. */
   onSelectionComment?: (quote: string) => void;
+  /** The editor, once made, for a caller that puts things in where the cursor is. */
+  onEditor?: (editor: Editor | null) => void;
 }) {
   const doc = variant === "doc";
   // The Inbox email reply: bold, italic, underline, a list and a link. No
@@ -94,6 +96,8 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       },
     },
   });
+
+  useEffect(() => { onEditor?.(editor); return () => onEditor?.(null); }, [editor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // `editable` is read once when the editor is created. A document that locks
   // on approval, or reopens, flips it without a remount.

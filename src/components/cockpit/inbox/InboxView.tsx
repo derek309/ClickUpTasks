@@ -12,8 +12,9 @@ import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
+import type { Editor } from "@tiptap/react";
 import {
-  CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, matchesSearch, shortTime, snoozeUntil, whereIs,
+  CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, linksOnTask, matchesSearch, shortTime, snoozeUntil, whereIs,
   type ChatItem, type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
@@ -1080,7 +1081,14 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [cc, setCc] = useState(mode === "replyAll" ? allOthers.join(", ") : ""); const [bcc, setBcc] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [note, setNote] = useState<{ kind: "ai" | "error"; text: string; before?: string } | null>(null);
-  const [busy, setBusy] = useState<"improve" | "send" | null>(null);
+  const [busy, setBusy] = useState<"improve" | "shorter" | "draft" | "send" | null>(null);
+  const editorRef = useRef<Editor | null>(null);
+  // Insert from task (Derek, 2026-10-02): the linked task's review links,
+  // other links and files, one click into the email.
+  const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) ?? null : null;
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [reviews, setReviews] = useState<{ id: string; name: string; url: string; opened: boolean }[] | null>(null);
+  const [askReplace, setAskReplace] = useState(false);
   const [repliesOpen, setRepliesOpen] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1103,15 +1111,52 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   };
   const channelForAi = t.channel === "email" ? "email" : t.channel === "chat" ? "chat" : "sms";
 
-  const improve = async () => {
+  const words = (v: string) => (rich ? htmlToText(v) : v).split(/\s+/).filter(Boolean).length;
+  // Improve fixes, Shorter tightens. The email box sends its HTML, so bold,
+  // lists and links come back as they were.
+  const improve = async (mode: "fix" | "shorter" = "fix") => {
     if (!hasText) return;
-    setBusy("improve");
+    setBusy(mode === "shorter" ? "shorter" : "improve");
     try {
-      const r = await p.inbox.improve(plain, channelForAi);
-      if (r.changed) { const before = text; putAndKeep(asRich(r.text)); setNote({ kind: "ai", text: "Fixed spelling and grammar.", before }); }
-      else setNote({ kind: "ai", text: "Looks good already. Nothing to fix." });
-    } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't improve it." }); }
+      const r = await p.inbox.improve(rich ? text : plain, channelForAi, mode);
+      if (r.changed) {
+        const before = text;
+        const next = rich ? (looksLikeHtml(r.text) ? r.text : asRich(r.text)) : r.text;
+        putAndKeep(next);
+        setNote({ kind: "ai", text: mode === "shorter" ? `Cut from ${words(before)} words to ${words(next)}.` : "Fixed spelling and grammar.", before });
+      } else setNote({ kind: "ai", text: mode === "shorter" ? "It's already short. Nothing to cut." : "Looks good already. Nothing to fix." });
+    } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't do that." }); }
     finally { setBusy(null); }
+  };
+  // Draft a reply from their email and the linked task. Over words already
+  // written it asks first.
+  const draft = async (replace = false) => {
+    if (hasText && !replace) { setAskReplace(true); return; }
+    setAskReplace(false); setBusy("draft");
+    try {
+      const r = await p.inbox.draftReply(t.key, t.taskId ?? null);
+      const before = text;
+      putAndKeep(asRich(r.text));
+      setNote({ kind: "ai", text: r.usedTask && task ? `Drafted from their email and the task "${task.title}". Check it before you send.` : "Drafted from their email. Check it before you send.", before });
+    } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't draft it." }); }
+    finally { setBusy(null); }
+  };
+  const openTaskMenu = () => {
+    setTaskOpen(!taskOpen);
+    if (!taskOpen && task && reviews === null) p.inbox.taskReviews(task.id).then(setReviews).catch(() => setReviews([]));
+  };
+  const taskLinks = useMemo(() => (task ? linksOnTask(task).filter((l) => !(reviews ?? []).some((r) => r.url === l.url)) : []), [task, reviews]);
+  const taskFiles = (task?.attachments ?? []).filter((a) => a.path);
+  const insertLink = (url: string, label: string) => {
+    setTaskOpen(false);
+    const ed = editorRef.current;
+    if (ed && !ed.isDestroyed) ed.chain().focus().insertContent([{ type: "text", text: label, marks: [{ type: "link", attrs: { href: url } }] }, { type: "text", text: " " }]).run();
+    else putAndKeep(`${hasText ? text : ""}<p><a href="${url.replace(/"/g, "&quot;")}">${label.replace(/</g, "&lt;")}</a></p>`);
+  };
+  const attachFromTask = (a: Attachment) => {
+    setTaskOpen(false);
+    if (!files.some((f) => f.path === a.path)) setFiles((x) => [...x, a]);
+    p.pushToast(`${a.name} attached`);
   };
 
   const upload = async (list: FileList | File[] | null) => {
@@ -1224,6 +1269,13 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           {note.before !== undefined && <button onClick={() => { putAndKeep(note.before!); setNote(null); }} className="underline">Undo</button>}
         </div>
       )}
+      {askReplace && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[#f3efff] px-3 py-1.5 font-semibold text-[#7c3aed]">
+          ✍️ Replace what you wrote with a draft?
+          <button onClick={() => draft(true)} className="underline">Replace</button>
+          <button onClick={() => setAskReplace(false)} className="underline">Keep mine</button>
+        </div>
+      )}
       {rich ? (
         // Files dragged on, or a screenshot pasted, attach to the email.
         <div data-inbox-composer={t.key}
@@ -1233,7 +1285,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           onDropCapture={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); setDropping(false); upload(e.dataTransfer.files); } }}
           onPasteCapture={(e) => { const f = Array.from(e.clipboardData.files); if (f.length && !e.clipboardData.getData("text/plain")) { e.preventDefault(); e.stopPropagation(); upload(f); } }}
           className={`relative mt-2 rounded-lg ${dropping ? "ring-2 ring-accent" : ""} ${big ? "[&_.rte-content]:min-h-[55vh]" : "[&_.rte-content]:min-h-[130px]"} [&_.rte-toolbar]:border-0 [&_.ProseMirror]:outline-none! [&_.ProseMirror]:px-1`}>
-          <RichTextEditor key={`inbox-${t.key}-${nonce}`} variant="email" value={text} onChange={change} autoFocus={!!answering && !forward}
+          <RichTextEditor key={`inbox-${t.key}-${nonce}`} variant="email" value={text} onChange={change} onEditor={(e) => { editorRef.current = e; }} autoFocus={!!answering && !forward}
             placeholder={forward ? "Add a note (optional)" : `Write to ${t.peerName.split(/\s+/)[0]}`} />
           {dropping && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-lg bg-accent-soft/80 font-bold text-accent">Drop to attach</div>}
           {/* What goes under your words: the send adds it, so there's no need to type it. */}
@@ -1255,11 +1307,11 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
       )}
       <div className={`flex flex-wrap items-center gap-2 ${compact ? "pt-2" : "border-t pt-2.5"}`}>
         {t.channel !== "chat" && email && <>
-          <button onClick={() => fileRef.current?.click()} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
+          <button onClick={() => fileRef.current?.click()} title="Attach files (or drag them onto the box)" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎{!rich && " Attach"}</button>
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
         </>}
         <div className="relative">
-          <button onClick={() => setRepliesOpen(!repliesOpen)} title="Saved replies" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg border font-semibold hover:bg-background`}>⚡<span className={compact ? "hidden sm:inline" : ""}> Saved replies</span></button>
+          <button onClick={() => setRepliesOpen(!repliesOpen)} title="Saved replies" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg border font-semibold hover:bg-background`}>⚡<span className={compact ? "hidden sm:inline" : rich ? "hidden" : ""}> Saved replies</span></button>
           {repliesOpen && (
             <div className="absolute bottom-12 left-0 z-50 w-80 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
               {p.prefs.replies.length ? p.prefs.replies.map((r) => (
@@ -1270,8 +1322,37 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
             </div>
           )}
         </div>
-        <button onClick={improve} disabled={busy !== null || !hasText} title="Improve with AI" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> Improve with AI</span></>}</button>
-        {(hasText || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑 Discard</button>}
+        {rich && task && (
+          <div className="relative">
+            <button onClick={openTaskMenu} title="Put in a link or file from the task" className={`h-10 rounded-lg px-3 font-semibold ring-1 ${taskOpen ? "bg-success-soft text-success ring-success" : "text-success ring-success/60 hover:bg-success-soft"}`}>🔗<span className="hidden sm:inline"> From task</span></button>
+            {taskOpen && (
+              <div className="absolute bottom-12 left-0 z-50 max-h-96 w-[min(22rem,80vw)] overflow-y-auto rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                <div className="truncate px-3 py-1.5 text-[14px] font-bold tracking-wide text-muted">ON &ldquo;{task.title.toUpperCase()}&rdquo;</div>
+                {reviews === null && <div className="px-3 py-2 text-muted">Looking for review links…</div>}
+                {(reviews ?? []).map((r) => (
+                  <button key={r.id} onClick={() => insertLink(r.url, r.name)} className="flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-accent-soft">
+                    <span>🔍</span><span className="min-w-0"><b className="block truncate">{r.name}</b><span className="text-muted">Review link · {r.opened ? "opened" : "not opened yet"}</span></span>
+                  </button>
+                ))}
+                {taskLinks.map((l) => (
+                  <button key={l.url} onClick={() => insertLink(l.url, l.label)} className="flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-accent-soft">
+                    <span>🔗</span><span className="min-w-0"><b className="block truncate">{l.label}</b><span className="block truncate text-muted">{l.url.replace(/^https?:\/\//, "")}</span></span>
+                  </button>
+                ))}
+                {taskFiles.map((a) => (
+                  <button key={a.id} onClick={() => attachFromTask(a)} className="flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-accent-soft">
+                    <span>{a.kind === "image" ? "🖼️" : "📄"}</span><span className="min-w-0"><b className="block truncate">{a.name}</b><span className="text-muted">File · attaches to the email</span></span>
+                  </button>
+                ))}
+                {reviews !== null && !reviews.length && !taskLinks.length && !taskFiles.length && <div className="px-3 py-2 text-muted">Nothing on this task to put in yet: no live review links, links or files.</div>}
+              </div>
+            )}
+          </div>
+        )}
+        {rich && <button onClick={() => draft()} disabled={busy !== null} title="Draft a reply from their email and the task" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "draft" ? "✍️ Drafting…" : <>✍️<span className="hidden sm:inline"> Draft</span></>}</button>}
+        <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Fix spelling and grammar" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> {rich ? "Improve" : "Improve with AI"}</span></>}</button>
+        {!compact && <button onClick={() => improve("shorter")} disabled={busy !== null || !hasText} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "shorter" ? "✂️ Cutting…" : <>✂️<span className="hidden sm:inline"> Shorter</span></>}</button>}
+        {(hasText || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑{!rich && " Discard"}</button>}
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">

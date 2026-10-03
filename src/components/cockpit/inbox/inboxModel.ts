@@ -272,3 +272,24 @@ export function chatItems(oldestFirst: Message[], whoOf: (m: Message) => string 
   }
   return out;
 }
+
+/** Links written on a task, for Insert from task in the email box: a link in
+ *  the description keeps its words, a bare address gets a short name. Newest
+ *  notes first, six at most. */
+export function linksOnTask(task: { description?: string | null; comments?: { kind?: string; body?: string }[] }): { url: string; label: string }[] {
+  const out = new Map<string, string>();
+  const nice = (u: string) => { try { const x = new URL(u); return (x.hostname.replace(/^www\./, "") + x.pathname.replace(/\/$/, "")).slice(0, 48); } catch { return u.slice(0, 48); } };
+  const take = (html: string) => {
+    for (const m of html.matchAll(/<a\b[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const url = m[1].replace(/&amp;/g, "&"), words = m[2].replace(/<[^>]+>/g, "").trim();
+      if (!out.has(url)) out.set(url, words && !/^https?:\/\//.test(words) ? words : nice(url));
+    }
+    for (const m of html.replace(/<a\b[\s\S]*?<\/a>/gi, " ").matchAll(/https?:\/\/[^\s<>"')\]]+/g)) {
+      const url = m[0].replace(/[.,;:!?]+$/, "").replace(/&amp;/g, "&");
+      if (!out.has(url)) out.set(url, nice(url));
+    }
+  };
+  [...(task.comments ?? [])].reverse().forEach((c) => { if (c.kind !== "event" && c.body) take(c.body); });
+  take(task.description ?? "");
+  return [...out].slice(0, 6).map(([url, label]) => ({ url, label }));
+}

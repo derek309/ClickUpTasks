@@ -242,9 +242,16 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 1, member: meMemberId, all: true }) }).catch(() => null);
     await load();
   }, [meMemberId, load]);
-  const improve = useCallback(async (text: string, channel: string) => (await post("/api/ai/improve", { text, channel })) as { text: string; changed: boolean }, [post]);
+  const improve = useCallback(async (text: string, channel: string, mode: "fix" | "shorter" = "fix") => (await post("/api/ai/improve", { text, channel, mode })) as { text: string; changed: boolean }, [post]);
+  const draftReply = useCallback(async (threadKey: string, taskId: string | null) => (await post("/api/ai/draft-reply", { threadKey, taskId })) as { text: string; usedTask: boolean }, [post]);
+  const taskReviews = useCallback(async (taskId: string) => {
+    const r = await authedFetch(`/api/inbox/task-reviews?task=${encodeURIComponent(taskId)}`);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error ?? "Couldn't read the task's reviews.");
+    return (j.reviews ?? []) as { id: string; kind: string; name: string; url: string; opened: boolean; status: string }[];
+  }, []);
 
-  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve };
+  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve, draftReply, taskReviews };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {
