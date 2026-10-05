@@ -15,7 +15,7 @@ import { authedFetch } from "@/lib/supabase";
 import { htmlToText, looksLikeHtml, plainTextToHtml } from "@/lib/data";
 import { RichTextEditor } from "./cockpit/RichTextEditor";
 
-const MAX_LEN = 4000;
+const MAX_LEN = 10000; // the same as /api/signature
 
 export default function SignaturePanel() {
   const [signature, setSignature] = useState("");
