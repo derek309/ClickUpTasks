@@ -83,7 +83,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   const tab = (on: boolean) => `h-9 rounded-md px-3 font-semibold ${on ? "bg-surface ring-1 ring-[var(--border)]" : "text-muted hover:text-foreground"}`;
 
   return (
-    <div className="mx-auto w-full max-w-[1280px] px-4 py-5 text-[16px] sm:px-6">
+    // The whole width (Derek, 2026-10-05): the agenda takes what the links column leaves.
+    <div className="w-full px-4 py-5 text-[16px] sm:px-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
           <button onClick={() => setWho("all")} className={tab(who === "all")}>Both</button>
@@ -93,7 +94,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         <span className="flex-1" />
         <button onClick={onRefresh} disabled={loading} title="Read GoHighLevel again" className="h-10 rounded-md px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-60"><span className={loading ? "inline-block animate-spin" : ""}>↻</span></button>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
@@ -135,16 +136,16 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </div>
       )}
       </div>
-      <aside className="grid gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4">
+      <aside className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">📅 Booking links</h2>
           <span className="text-[14px] text-muted">{linkRows.length}</span>
         </div>
         <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Search booking links" aria-label="Search booking links"
-          className="h-10 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
-        <div className="grid">
+          className="h-10 w-full min-w-0 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
           {linksShown.map((r) => (
-            <div key={r.url} className="flex items-center gap-2 border-b py-1.5 last:border-0">
+            <div key={r.url} className="flex min-w-0 items-center gap-2 border-b py-1.5 last:border-0">
               <span className="min-w-0 flex-1">
                 <b className="block truncate font-semibold" title={r.label}>{r.label}</b>
                 <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
