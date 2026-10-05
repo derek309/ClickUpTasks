@@ -154,6 +154,14 @@ export default function InboxView(p: InboxViewProps) {
     if (openKey) openThread(n); else setCursor(n.key);
   };
   const back = () => { if (openKey) setCursor(openKey); setOpenKey(null); setComposeNew(false); };
+  // Archive, delete or snooze an open conversation and the next one opens, so
+  // you work straight through (Derek, 2026-10-05). The one below, else the one
+  // above, else back to the list.
+  const leave = (key: string) => {
+    const i = visible.findIndex((t) => t.key === key);
+    const n = i < 0 ? null : visible[i + 1] ?? visible[i - 1] ?? null;
+    if (n) openThread(n); else back();
+  };
 
   // → next, ← previous (Derek, 2026-10-02: arrows instead of J and K), and
   // left hand keys as in Gmail: E archive, R read, S snooze, T link, F star.
@@ -170,8 +178,8 @@ export default function InboxView(p: InboxViewProps) {
       else if (k === "arrowleft" || (k === "arrowup" && !openKey)) { e.preventDefault(); step(-1); }
       else if ((k === " " || k === "enter") && !openKey && cursor) { e.preventDefault(); const t = visible.find((x) => x.key === cursor); if (t) openThread(t); }
       else if (k === "escape" && openKey) back();
-      else if (k === "e" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); done([key]); }
-      else if (k === "d" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); del([key]); }
+      else if (k === "e" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) leave(key); done([key]); }
+      else if (k === "d" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) leave(key); del([key]); }
       else if (k === "r" && open) { e.preventDefault(); if (open.unread) inbox.markRead([open.key]); else inbox.markUnread([open.key]); }
       else if (k === "s" && open) { e.preventDefault(); setSnoozeOpen(true); }
       else if (k === "s" && cursor) { e.preventDefault(); snoozeRow(cursor); }
@@ -212,7 +220,7 @@ export default function InboxView(p: InboxViewProps) {
 
         {folder === "settings" ? <InboxSettings {...p} />
           : composeNew ? <NewMessage key={JSON.stringify(composeNew)} p={p} start={composeNew} onClose={() => setComposeNew(false)} />
-          : open ? <ThreadView key={open.key} onOpenOther={(k) => { const x = inbox.threads.find((y) => y.key === k); if (x) openThread(x); }} emailInstead={(to, body) => { setOpenKey(null); setComposeNew({ to, body }); }} p={p} t={open} back={back} done={() => { back(); done([open.key]); }} del={() => { back(); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
+          : open ? <ThreadView key={open.key} onOpenOther={(k) => { const x = inbox.threads.find((y) => y.key === k); if (x) openThread(x); }} emailInstead={(to, body) => { setOpenKey(null); setComposeNew({ to, body }); }} p={p} t={open} back={back} leave={() => leave(open.key)} done={() => { leave(open.key); done([open.key]); }} del={() => { leave(open.key); del([open.key], open.trashed); }} snoozeOpen={snoozeOpen} setSnoozeOpen={setSnoozeOpen} linkSearchRef={linkSearchRef} onDraft={refreshDrafts} />
           : (
             <>
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
@@ -362,8 +370,8 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
 }
 
 // ── An open conversation ──────────────────────────────────────────────────
-function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft, emailInstead, onOpenOther }: {
-  p: InboxViewProps; t: InboxThread; back: () => void; done: () => void; del: () => void; emailInstead: (to: string, body: string) => void; onOpenOther: (key: string) => void;
+function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, linkSearchRef, onDraft, emailInstead, onOpenOther }: {
+  p: InboxViewProps; t: InboxThread; back: () => void; leave: () => void; done: () => void; del: () => void; emailInstead: (to: string, body: string) => void; onOpenOther: (key: string) => void;
   snoozeOpen: boolean; setSnoozeOpen: (v: boolean) => void; linkSearchRef: React.RefObject<HTMLInputElement | null>; onDraft: () => void;
 }) {
   const [assignOpen, setAssignOpen] = useState(false);
@@ -391,8 +399,8 @@ function ThreadView({ p, t, back, done, del, snoozeOpen, setSnoozeOpen, linkSear
   const snooze = async (preset: "1h" | "3h" | "tomorrow" | "monday") => {
     setSnoozeOpen(false);
     const until = snoozeUntil(preset);
+    leave();
     const undo = await p.inbox.snooze([t.key], until);
-    back();
     p.pushToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, { label: "Undo", run: () => { undo(); } });
   };
   // The side panel sits beside the conversation when the conversation area
