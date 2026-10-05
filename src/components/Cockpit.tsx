@@ -2236,6 +2236,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // an IIFE returning JSX there confused the React Compiler into treating it
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
+  // The Overdue, Waiting and Meeting boxes (Derek, 2026-10-05, mockup C).
+  const needsStrip = clientView && clientTab !== "chat" && clientById(activeClient) ? (() => {
+          const all = (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold");
+          const late = all.filter((t) => !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""));
+          const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
+          const oldest = late[0];
+          return (
+              <ClientNeeds clientId={activeClient} ghlContactId={contactForClient(activeClient)?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
+                overdue={late.length} oldestOverdue={oldest ? { title: oldest.title, daysLate: -(daysUntilDue(oldest.due) ?? 0) } : null} onOpenOverdue={() => oldest && setOpenTaskId(oldest.id)}
+                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMessageClient(activeClient) ? () => openRemindClient(activeClient) : null}
+                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)} />
+          );
+        })() : null;
   const overflowControl = (
     <div className="relative">
       <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
@@ -2567,7 +2580,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     when a specific client is the thing being viewed. */}
                 {/* Company, then who follows them (Derek, 2026-10-05, mockup C). */}
                 <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
-                {clientView && followingControl && <><span className="opacity-50">·</span>{followingControl}</>}
+                {clientView && followingControl && <>{clientCompany(clientById(activeClient)) && <span className="opacity-50">·</span>}{followingControl}</>}
               </div>
             </>)}
           </div>
@@ -2677,22 +2690,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               clear rather than one more thing you learn from. */}
 
           </div>
+          {/* Part of the bar, full width (Derek, 2026-10-05: "fill in the whole bar"). */}
+          {needsStrip && <div className="basis-full">{needsStrip}</div>}
         </header>
 
-        {clientView && clientTab !== "chat" && clientById(activeClient) && (() => {
-          const all = (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold");
-          const late = all.filter((t) => !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""));
-          const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
-          const oldest = late[0];
-          return (
-            <div className="shrink-0 border-b bg-surface px-4 pb-3 sm:px-5">
-              <ClientNeeds clientId={activeClient} ghlContactId={contactForClient(activeClient)?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
-                overdue={late.length} oldestOverdue={oldest ? { title: oldest.title, daysLate: -(daysUntilDue(oldest.due) ?? 0) } : null} onOpenOverdue={() => oldest && setOpenTaskId(oldest.id)}
-                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMessageClient(activeClient) ? () => openRemindClient(activeClient) : null}
-                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)} />
-            </div>
-          );
-        })()}
+        {/* Phones: the boxes under the header (the header is hidden there). */}
+        {needsStrip && <div className="shrink-0 border-b bg-surface px-4 py-3 sm:hidden">{needsStrip}</div>}
         {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
