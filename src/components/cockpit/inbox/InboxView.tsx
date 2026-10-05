@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
 import { InlineDate } from "../GroupedList";
-import { type BookingLink } from "../useCalendar";
+import { loadBookingLinks, type BookingLink } from "../useCalendar";
 import { BookingLinkMenu } from "../BookingLinkMenu";
 import { BookAppointment } from "../BookAppointment";
 import type { Editor } from "@tiptap/react";
@@ -1066,6 +1066,49 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
+// The AI helpers in one menu (Derek, 2026-10-05: fold them). Suggest times
+// opens its calendar list in the same menu.
+function AiMenu({ busy, hasText, canDraft, canSuggest, meId, onDraft, onImprove, onShorter, onSuggest }: {
+  busy: string | null; hasText: boolean; canDraft: boolean; canSuggest: boolean; meId: string;
+  onDraft: () => void; onImprove: () => void; onShorter: () => void; onSuggest: (l: BookingLink) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"main" | "times">("main");
+  const [links, setLinks] = useState<BookingLink[] | null>(null);
+  const close = () => { setOpen(false); setStep("main"); };
+  const toTimes = () => { setStep("times"); if (links === null) loadBookingLinks().then(setLinks); };
+  const seen = new Set<string>();
+  const calendars = [...(links ?? [])].sort((a, b) => Number(b.memberId === meId) - Number(a.memberId === meId) || a.label.localeCompare(b.label))
+    .filter((l) => (seen.has(l.calendarId) ? false : (seen.add(l.calendarId), true)));
+  const working = busy === "improve" ? "Improving…" : busy === "shorter" ? "Cutting…" : busy === "draft" ? "Drafting…" : busy === "times" ? "Finding times…" : null;
+  const item = "flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent";
+  return (
+    <div className="relative">
+      <button onClick={() => (open ? close() : setOpen(true))} disabled={busy === "send"} title="AI helpers"
+        className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">✨<span className="hidden sm:inline"> {working ?? "AI"} ▾</span></button>
+      {open && <>
+        <div className="fixed inset-0 z-40" onClick={close} />
+        <div className="absolute bottom-12 left-0 z-50 max-h-96 w-[min(20rem,80vw)] overflow-y-auto rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+          {step === "main" ? <>
+            {canDraft && <button disabled={busy !== null} onClick={() => { close(); onDraft(); }} className={item}><span>✍️</span><span><b className="block font-semibold">Draft a reply</b><span className="text-[14px] text-muted">From their email and the task</span></span></button>}
+            {canSuggest && <button disabled={busy !== null} onClick={toTimes} className={item}><span>🗓</span><span className="flex-1"><b className="block font-semibold">Suggest times</b><span className="text-[14px] text-muted">Three open times and a booking link</span></span><span className="text-muted">›</span></button>}
+            <button disabled={busy !== null || !hasText} onClick={() => { close(); onImprove(); }} className={item}><span>✨</span><span><b className="block font-semibold">Fix spelling and grammar</b><span className="text-[14px] text-muted">Your words, cleaned up</span></span></button>
+            <button disabled={busy !== null || !hasText} onClick={() => { close(); onShorter(); }} className={item}><span>✂️</span><span><b className="block font-semibold">Make it shorter</b><span className="text-[14px] text-muted">Keeps your links and bold</span></span></button>
+          </> : <>
+            <button onClick={() => setStep("main")} className="w-full rounded-md px-3 py-1.5 text-left font-semibold text-muted hover:bg-background">‹ Suggest times from…</button>
+            {links === null ? <div className="px-3 py-2 text-muted">Reading GoHighLevel…</div>
+              : calendars.length ? calendars.map((l) => (
+                <button key={l.calendarId} onClick={() => { close(); onSuggest(l); }} className={item}>
+                  <span className="min-w-0"><b className="block truncate font-semibold">{l.label}</b><span className="text-[14px] text-muted">{l.minutes} min{l.shared ? " · shared" : l.memberId === meId ? " · yours" : ""}</span></span>
+                </button>
+              )) : <div className="px-3 py-2 text-muted">No calendars found.</div>}
+          </>}
+        </div>
+      </>}
+    </div>
+  );
+}
+
 // Your signature, read once and kept for the session, so the email box can
 // show what goes under your words (the send route adds it).
 let signatureCache: Promise<string> | null = null;
@@ -1409,10 +1452,10 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           </div>
         )}
         {rich && <BookingLinkMenu me={p.me.id} onPick={(l) => insertLink(l.url, "book a time here")} />}
-        {rich && t.key.match(/^(gm|ghl):/) && <BookingLinkMenu me={p.me.id} icon={busy === "times" ? "⏳" : "🗓"} label={busy === "times" ? "Finding times…" : "Suggest times"} title="Offer three open times from a calendar, with its booking page" onPick={suggestTimes} />}
-        {rich && <button onClick={() => draft()} disabled={busy !== null} title="Draft a reply from their email and the task" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "draft" ? "✍️ Drafting…" : <>✍️<span className="hidden sm:inline"> Draft</span></>}</button>}
-        <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Fix spelling and grammar" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> {rich ? "Improve" : "Improve with AI"}</span></>}</button>
-        {!compact && <button onClick={() => improve("shorter")} disabled={busy !== null || !hasText} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "shorter" ? "✂️ Cutting…" : <>✂️<span className="hidden sm:inline"> Shorter</span></>}</button>}
+        {compact
+          ? <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Improve with AI" className="h-9 rounded-lg bg-[#f3efff] px-2.5 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : <>✨<span className="hidden sm:inline"> Improve with AI</span></>}</button>
+          : <AiMenu busy={busy} hasText={hasText} canDraft={rich} canSuggest={rich && /^(gm|ghl):/.test(t.key)} meId={p.me.id}
+              onDraft={() => draft()} onImprove={() => improve()} onShorter={() => improve("shorter")} onSuggest={suggestTimes} />}
         {rich && hasBcc && (
           <label title="A hidden copy goes to your GoHighLevel Auto BCC Sync address, so it's logged on the contact" className="flex h-10 cursor-pointer items-center gap-2 px-1 font-semibold text-muted">
             <input type="checkbox" checked={ghlLog} onChange={(e) => setGhlLog(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Log in GoHighLevel
