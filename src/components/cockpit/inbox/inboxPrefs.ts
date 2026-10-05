@@ -78,16 +78,26 @@ export function useInboxPrefs(member: string) {
     return () => { live = false; };
   }, [member]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Only what changed is saved, on top of the latest saved copy. Saving this
+  // tab's whole copy let an older tab put back settings changed elsewhere
+  // (Derek, 2026-10-05: his starred booking links and default calendar were
+  // wiped when another tab changed something small).
+  const pending = useRef<Partial<InboxPrefs>>({});
   const setPrefs = useCallback((patch: Partial<InboxPrefs>) => {
+    pending.current = { ...pending.current, ...patch };
     setPrefsState((p) => {
       const n = { ...p, ...patch };
       try { localStorage.setItem(key(member), JSON.stringify(n)); } catch { /* private window: this session only */ }
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        supabase.from("inbox_prefs").upsert({ member_id: member, prefs: n, updated_at: new Date().toISOString() }, { onConflict: "member_id" }).then(() => {});
-      }, 600);
       return n;
     });
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const change = pending.current;
+      pending.current = {};
+      const { data } = await supabase.from("inbox_prefs").select("prefs").eq("member_id", member).maybeSingle();
+      const merged = { ...((data?.prefs as Partial<InboxPrefs> | undefined) ?? {}), ...change };
+      await supabase.from("inbox_prefs").upsert({ member_id: member, prefs: merged, updated_at: new Date().toISOString() }, { onConflict: "member_id" });
+    }, 600);
   }, [member]);
   return { prefs, setPrefs };
 }
