@@ -97,6 +97,7 @@ import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
+import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
 import { pickThreeTimes } from "@/lib/improveText";
 
@@ -443,7 +444,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number; body?: string } | null>(null);
-  const openCompose = (mode: "email" | "sms", body?: string) => { setClientTab("chat"); setComposeIntent((c) => ({ mode, body, nonce: (c?.nonce ?? 0) + 1 })); };
+  // Texts open their own window over the page, like email (Derek, 2026-10-05).
+  const [clientText, setClientText] = useState<{ clientId: string; body?: string; nonce: number } | null>(null);
+  const openClientText = (clientId: string, body?: string) => setClientText((c) => ({ clientId, body, nonce: (c?.nonce ?? 0) + 1 }));
+  const openCompose = (mode: "email" | "sms", body?: string) => {
+    if (mode === "sms") { openClientText(activeClient, body); return; }
+    setClientTab("chat"); setComposeIntent((c) => ({ mode, body, nonce: (c?.nonce ?? 0) + 1 }));
+  };
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
@@ -689,8 +696,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     if (channel === "sms") {
       const body = [`Hi ${first}, do you have time to meet this week?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", `Or pick any time here: ${cal.url}`].filter(Boolean).join(" ");
-      setActiveProject(null);
-      openCompose("sms", body);
+      openClientText(clientId, body);
       return;
     }
     const link = { url: cal.url, label: "Pick a time that works for you" };
@@ -2289,9 +2295,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
                 lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms", preview: `${inn.channel === "sms" ? "Text" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
                 lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" } : null}
-                onReply={canMsg && inn ? () => { if (inn.channel === "sms") { setActiveProject(null); openCompose("sms"); } else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
+                onReply={canMsg && inn ? () => { if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
                 onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
-                onText={canMsg && ct?.phone ? () => { setActiveProject(null); openCompose("sms"); } : null}
+                onText={canMsg && ct?.phone ? () => openClientText(activeClient) : null}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
                 onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
@@ -2881,6 +2887,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onSendMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body) => sendMessage(activeClient, channel, subject, body)}
             onScheduleMessage={activeProject || !canMessageClient(activeClient) ? undefined : (channel, subject, body, scheduledAt) => scheduleMessage(activeClient, channel, subject, body, scheduledAt)}
             onComposeEmail={activeProject || !canMessageClient(activeClient) ? undefined : (reply) => openClientEmail(activeClient, reply ?? {})}
+            onComposeText={activeProject || !canMessageClient(activeClient) ? undefined : () => openClientText(activeClient)}
             scheduled={scheduledMessages[activeClient] ?? []}
             onLoadScheduled={() => loadScheduledMessages(activeClient)}
             onCancelScheduled={(id) => cancelScheduledMessage(id, activeClient)}
@@ -2996,6 +3003,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             scheduled={(scheduledMessages[cid] ?? []).filter((s) => s.channel === "email")}
             onLoadScheduled={() => loadScheduledMessages(cid)} onCancelScheduled={(id) => cancelScheduledMessage(id, cid)}
             pushToast={pushToast} />
+        );
+      })()}
+      {clientText && (() => {
+        const cid = clientText.clientId;
+        const ct = contactForClient(cid);
+        const allowed = canMessageClient(cid);
+        return (
+          <TextWindow key={clientText.nonce} clientId={cid} clientName={clientById(cid)?.name ?? "this client"} toName={ct?.name || clientById(cid)?.name || "them"} toPhone={ct?.phone || null}
+            start={clientText.body} meId={me.id} pushToast={pushToast} onClose={() => setClientText(null)}
+            history={ct ? messages.filter((m) => m.contactId === ct.id && m.channel === "sms").sort((a, b) => a.at.localeCompare(b.at)) : []}
+            onSend={allowed ? (body) => sendMessage(cid, "sms", "", body) : undefined}
+            onSchedule={allowed ? (body, whenIso) => scheduleMessage(cid, "sms", "", body, whenIso) : undefined}
+            onAiDraft={(instruction) => draftMessage(cid, "sms", instruction || undefined, null)} />
         );
       })()}
       {dumpGroup && (

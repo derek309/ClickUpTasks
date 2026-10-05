@@ -75,7 +75,7 @@ function buildFeedRows(items: JournalItem[]): FeedRow[] {
   return rows;
 }
 
-export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, onComposeEmail, scheduled, onLoadScheduled, onCancelScheduled, toContact, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onDeleteFolder, onSetNoteAttachmentFolder, initialFolderFilter }: {
+export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDelete, onOpenTask, onOpenMessages, onSendMessage, onScheduleMessage, onComposeEmail, onComposeText, scheduled, onLoadScheduled, onCancelScheduled, toContact, sendingMessage, onUploadImage, onOpenFile, canAdmin, canMessage, onToggleCanMessage, onDraftMessage, draftingMessage, onRefreshContact, refreshingContact, onRefreshMessages, refreshingMessages, onWhatsNext, whatsNextBusy, composeIntent, folders, onCreateFolder, onDeleteFolder, onSetNoteAttachmentFolder, initialFolderFilter }: {
   notes: ClientNote[];
   tasks: Task[]; // already scoped by the caller to the current client/project
   messages?: Message[] | null; // null/undefined = no linked GHL contact at this scope, so no Email/SMS
@@ -114,6 +114,8 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // A header Email/SMS button sets this to jump the composer straight into that
   // mode. `nonce` bumps on every click so the effect re-fires even when the
   // Journal is already open (the component isn't remounted then).
+  /** SMS opens the Text window over the page (Derek, 2026-10-05). */
+  onComposeText?: () => void;
   composeIntent?: { mode: "email" | "sms"; nonce: number; body?: string } | null;
   // Vault→Journal merge: the Filter menu's Photos/Links/Files already covers
   // "browse by kind" — folders are the one Vault capability without an
@@ -350,6 +352,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // Email opens the email window; Note and SMS switch this column.
   const switchComposeMode = (mode: "note" | "email" | "sms") => {
     if (mode === "email") { onComposeEmail?.(); return; }
+    if (mode === "sms" && onComposeText) { onComposeText(); return; }
     setComposeMode(mode);
   };
   // Reply starts a new email with "Re: subject", no quoted body: GHL sends it on
