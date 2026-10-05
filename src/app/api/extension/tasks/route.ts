@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
   if (!clientId) return NextResponse.json({ error: "Missing client_id." }, { status: 400 });
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
 
-  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at, project_id, due, follow_up_at, waiting_on_client").eq("client_id", clientId).neq("status", "done").is("deleted_at", null).order("created_at", { ascending: false });
+  const { data, error } = await supabaseAdmin.from("tasks").select("id, title, status, created_at, project_id, due, follow_up_at, waiting_on_client, assignee_id").eq("client_id", clientId).neq("status", "done").is("deleted_at", null).order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const query = (req.nextUrl.searchParams.get("query") || "").trim().toLowerCase();
@@ -127,6 +127,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     // The dates say which ones need you now: the clipper lists a client's open
     // tasks first and sorts them by when they come back (2026-09-30).
-    tasks: filtered.slice(0, 100).map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: t.project_id, due: t.due, followUpAt: t.follow_up_at, waitingOnClient: t.waiting_on_client === true })),
+    // assigneeId says whose it is, so a site's Setup page can split a client's
+    // open work into a column per teammate (CUL Brain Box 3.16.4, 2026-10-05).
+    // It is the member id GET /api/extension/members already returns.
+    tasks: filtered.slice(0, 100).map((t) => ({ id: t.id, title: t.title, status: t.status, projectId: t.project_id, due: t.due, followUpAt: t.follow_up_at, waitingOnClient: t.waiting_on_client === true, assigneeId: t.assignee_id ?? null })),
   });
 }
