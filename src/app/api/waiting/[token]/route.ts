@@ -52,9 +52,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   type Row = {
     id: string; project_id: string | null; title: string; due: string | null; description: string | null; status: string;
     waiting_on_client: boolean | null; client_response: { body: string; attachments: Attachment[]; submittedAt: string } | null;
-    attachments: Attachment[] | null;
+    attachments: Attachment[] | null; updated_at: string | null;
   };
-  const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments";
+  const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments, updated_at";
   // is_private tasks never reach a public page, whatever client they're filed
   // under — RLS protects them from other teammates, but this route reads with
   // the service role, so the filter has to be explicit here. A project-scoped
@@ -135,6 +135,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     color: (p.color as string) || "#1b3a5c", initials: initialsOf((p.name as string) || "Team"),
   }]));
 
+  // Which tasks have a client document (Derek, 2026-10-05: a doc lives on a
+  // task, added like a file or a link). Only whether one exists leaves here;
+  // opening it goes through ./doc, which hands back its link.
+  const { data: docRows } = taskIds.length
+    ? await supabaseAdmin.from("task_documents").select("task_id").eq("kind", "doc").is("deleted_at", null).in("task_id", taskIds)
+    : { data: [] as { task_id: string }[] };
+  const withDoc = new Set((docRows ?? []).map((d) => d.task_id as string));
+
   const tasks = await Promise.all(rows.map(async (t) => {
     const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
     const threadRows = threadByTask.get(t.id) ?? [];
@@ -159,6 +167,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       // response, and the page never needs the TipTap editor bundle to render it.
       description: htmlToText(t.description ?? ""),
       status: t.status, needsResponse: t.waiting_on_client === true,
+      // When it was finished, for "Done Oct 3" (the last change on a done task).
+      doneAt: t.status === "done" ? t.updated_at ?? null : null,
+      hasDoc: withDoc.has(t.id),
       // Mockups/screenshots/staging links the team attached — the "review
       // pages, media, etc" surface, so the client sees what they're
       // approving/responding to, not just a text description.

@@ -21,6 +21,10 @@ type WaitingSender = { name: string; avatarUrl: string | null; color: string; in
 type WaitingMessage = { id: string; from: "team" | "client"; body: string; at: string; attachments: WaitingAttachment[]; sender?: WaitingSender | null };
 type WaitingTask = {
   id: string; projectId: string | null; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
+  /** When it was finished, for "Done Oct 3". */
+  doneAt?: string | null;
+  /** It has a client document (added with 📝 Doc). */
+  hasDoc?: boolean;
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
   thread: WaitingMessage[];
@@ -143,7 +147,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
-  onSetStatus, statusBusy,
+  onSetStatus, statusBusy, onDoc, docBusy,
 }: {
   task: WaitingTask;
   showProjectName: boolean;
@@ -170,6 +174,9 @@ function TaskDetailBody({
   // /api/waiting/[token]/status/route.ts, which allows exactly these three).
   onSetStatus: (status: "changes_requested" | "review" | "done") => void;
   statusBusy: boolean;
+  /** 📝 Doc: add one to this task, or open the one it has. */
+  onDoc: () => void;
+  docBusy: boolean;
 }) {
   const isDone = t.status === "done";
   const [dragOver, setDragOver] = useState(false);
@@ -237,6 +244,8 @@ function TaskDetailBody({
             <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
           </label>
           <button onClick={onToggleLink} className="text-[16px] font-medium text-accent">+ Add link</button>
+          {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
+          {!isDone && <button onClick={onDoc} disabled={docBusy} className="text-[16px] font-medium text-accent disabled:opacity-50">{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Add a doc"}</button>}
         </div>
         <button
           onClick={onSend}
@@ -340,6 +349,16 @@ function TaskDetailBody({
 // the first time this loads if it holds the next required step, so a
 // returning client doesn't have to go hunting for where they left off.
 const sortFn = (a: WaitingTask, b: WaitingTask) => (a.due ?? "9999").localeCompare(b.due ?? "9999");
+// Dates the client sees (Derek, 2026-10-05): "Needed by" on what needs them
+// (red once it's late), "Done" on what's finished, nothing on work in
+// progress, whose dates move as the team works.
+const todayKey = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+const shortDate = (d: string) => new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
+function dateNote(t: WaitingTask): { text: string; late: boolean } | null {
+  if (t.status === "done") return t.doneAt ? { text: `Done ${shortDate(t.doneAt)}`, late: false } : null;
+  if (t.needsResponse && t.due) return { text: `Needed by ${shortDate(t.due)}`, late: t.due < todayKey() };
+  return null;
+}
 // Groups a flat task list by project — a section per project, plus a
 // catch-all for anything whose project got deleted/reassigned out from
 // under it. Shared by both top-level sections (needsResponseGroups,
@@ -428,17 +447,21 @@ export default function WaitingView({ token }: { token: string }) {
   // to whatever's actually open; this is deliberately a request, not the
   // default state of the page.
   const [addElseOpen, setAddElseOpen] = useState(false);
-  // Completed items are history, not something waiting on the client — kept
-  // out of the main list and tucked behind a closed-by-default toggle at
-  // the bottom instead of sorted inline with what's still open.
-  const [completedOpen, setCompletedOpen] = useState(false);
+  // New task extras (Derek, 2026-10-05): when they need it, and starting a doc with it.
+  const [newNeededBy, setNewNeededBy] = useState("");
+  const [newWithDoc, setNewWithDoc] = useState(false);
+  const [docBusyId, setDocBusyId] = useState<string | null>(null);
+  const [tab, setTab] = useState<string>("all");
+  const [doneOpenIds, setDoneOpenIds] = useState<Set<string>>(new Set());
   // "What we're working on" starts open (Derek, 2026-09-16: "default it open",
   // reversing 2026-08-26). A client can still fold it away.
   const [inProgressOpen, setInProgressOpen] = useState(true);
   // Project filter. "" is everything; otherwise one project's id. A
   // project-scoped share link already only carries its own project, so the
   // chips simply don't render in that case.
-  const [projectFilter, setProjectFilter] = useState("");
+  // The list tabs replaced the filter chips (2026-10-05); kept at "everything"
+  // for the memos below that still read it.
+  const [projectFilter] = useState("");
 
   // Shared "add a link" popover — only one open at a time, keyed by task id
   // or the "__new__" sentinel for the "Need something else?" composer, so
@@ -532,15 +555,6 @@ export default function WaitingView({ token }: { token: string }) {
   // Counts are of OPEN work, not everything: a chip reading "Website · 4" is
   // answering "how much is live over there", which is what someone scanning
   // this page wants to know.
-  const openCountByProject = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const t of tasks ?? []) {
-      if (t.status === "done") continue;
-      const k = t.projectId ?? "__other__";
-      m.set(k, (m.get(k) ?? 0) + 1);
-    }
-    return m;
-  }, [tasks]);
   const inFilter = useMemo(
     () => (t: { projectId: string | null }) => !projectFilter || t.projectId === projectFilter,
     [projectFilter],
@@ -548,7 +562,6 @@ export default function WaitingView({ token }: { token: string }) {
   const open = useMemo(() => (tasks ?? []).filter((t) => t.status !== "done").filter(inFilter), [tasks, inFilter]);
   const needsResponseGroups = useMemo(() => groupByProject(open.filter((t) => t.needsResponse), projects), [open, projects]);
   const inProgressGroups = useMemo(() => groupByProject(open.filter((t) => !t.needsResponse), projects), [open, projects]);
-  const totalOpen = open.length;
   // Completed items are their own flat list (not grouped) since there's
   // rarely more than a handful — shown behind the collapsed toggle below.
   const completedTasks = useMemo(() => (tasks ?? []).filter((t) => t.status === "done").filter(inFilter).sort(sortFn), [tasks, inFilter]);
@@ -665,17 +678,35 @@ export default function WaitingView({ token }: { token: string }) {
     setNewUploading(false);
   };
 
+  // 📝 Doc: the task's document opens in a new tab. The tab opens on the click,
+  // so a popup blocker lets it through, then goes to the link.
+  const openDoc = async (taskId: string, tabWin?: Window | null) => {
+    const win = tabWin ?? window.open("about:blank", "_blank");
+    setDocBusyId(taskId);
+    try {
+      const res = await fetch(`/api/waiting/${token}/doc`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) { win?.close(); alert(j.error || "Couldn't open the doc. Try again."); return; }
+      if (win) { win.opener = null; win.location.href = j.url; } else window.location.href = j.url;
+      setTasks((list) => list?.map((t) => (t.id === taskId ? { ...t, hasDoc: true } : t)) ?? list);
+    } finally { setDocBusyId(null); }
+  };
+
   const submitNewRequest = async () => {
     setNewSaving(true);
+    const docWin = newWithDoc ? window.open("about:blank", "_blank") : null;
     try {
       const res = await fetch(`/api/waiting/${token}/request`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: newBody, attachments: newAttachments, projectId: effectiveNewProjectId }),
+        body: JSON.stringify({ body: newBody, attachments: newAttachments, projectId: effectiveNewProjectId, neededBy: newNeededBy || undefined }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setNewError(j.error || "Couldn't send — try again."); return; }
+      if (!res.ok) { docWin?.close(); setNewError(j.error || "Couldn't send. Try again."); return; }
+      if (newWithDoc && j.taskId) await openDoc(j.taskId as string, docWin);
       setNewError(null);
       setNewBody("");
+      setNewNeededBy("");
+      setNewWithDoc(false);
       setNewAttachments([]);
       setNewSent(true);
       setTimeout(() => setNewSent(false), 3000);
@@ -685,7 +716,6 @@ export default function WaitingView({ token }: { token: string }) {
     }
   };
 
-  const isEmpty = tasks && (tasks.length === 0 || totalOpen === 0);
   const emptyState = (
     <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
@@ -709,8 +739,9 @@ export default function WaitingView({ token }: { token: string }) {
     const preview = lastMsg
       ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
       : t.description;
+    const note = dateNote(t);
     const status = isDone ? (
-      <span className="text-[16px] text-muted">Completed</span>
+      <span className="text-[16px] text-muted">{note?.text ?? "Completed"}</span>
     ) : (
       <span className={`rounded-full px-2 py-0.5 text-[16px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
         {t.needsResponse ? "Needs your input" : "In progress"}
@@ -728,6 +759,12 @@ export default function WaitingView({ token }: { token: string }) {
               16px, a status beside it cut the title down to "Approve ...". */}
           <div className={`break-words text-[17px] font-semibold sm:truncate ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
           {preview && <div className="line-clamp-2 text-[16px] text-muted sm:line-clamp-none sm:truncate">{preview}</div>}
+          {(t.hasDoc || (!isDone && note)) && (
+            <div className="flex flex-wrap gap-x-3 text-[16px]">
+              {!isDone && note && <span className={`font-semibold ${note.late ? "text-danger" : "text-highlight"}`}>{note.text}{note.late ? " · late" : ""}</span>}
+              {t.hasDoc && <span className="font-semibold text-accent">📝 Has a doc</span>}
+            </div>
+          )}
           {showProject && projects.length > 1 && projectName(t.projectId) && (
             <div className="text-[16px] text-muted">{projectName(t.projectId)}</div>
           )}
@@ -789,6 +826,8 @@ export default function WaitingView({ token }: { token: string }) {
           onSend={() => sendChatMessage(selectedTask.id)}
           onSetStatus={(status) => setTaskStatus(selectedTask.id, status)}
           statusBusy={statusBusyIds.has(selectedTask.id)}
+          onDoc={() => openDoc(selectedTask.id)}
+          docBusy={docBusyId === selectedTask.id}
         />
       ) : (
       <div className="px-6 pb-10 pt-6 md:px-10">
@@ -808,7 +847,7 @@ export default function WaitingView({ token }: { token: string }) {
                 <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="text-[16px] font-bold">Need something else?</div>
+                      <div className="text-[16px] font-bold">New task</div>
                       <div className="mt-0.5 text-[16px] text-muted">Tell us what you need and we&apos;ll take a look.</div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -865,6 +904,17 @@ export default function WaitingView({ token }: { token: string }) {
                       {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
                     </button>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-2">
+                    <label className="flex items-center gap-2 text-[16px]">
+                      <span className="text-muted">Needed by</span>
+                      <input type="date" value={newNeededBy} min={todayKey()} onChange={(e) => setNewNeededBy(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent" />
+                      {newNeededBy ? <button onClick={() => setNewNeededBy("")} className="text-muted hover:text-foreground">No rush</button> : <span className="text-muted">(optional)</span>}
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2 text-[16px]">
+                      <input type="checkbox" checked={newWithDoc} onChange={(e) => setNewWithDoc(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+                      📝 Start a doc for it
+                    </label>
+                  </div>
                   {newError && <div className="mt-1.5 text-[16px] text-danger">{newError}</div>}
                   {newSent && <div className="mt-1.5 text-[16px] text-success">Sent, we&apos;ll take a look!</div>}
                 </div>
@@ -880,84 +930,82 @@ export default function WaitingView({ token }: { token: string }) {
                   <button onClick={() => setAddElseOpen(true)}
                     className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-background py-2.5 text-[16px] font-bold text-accent transition hover:bg-surface"
                     style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
-                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> Add Something
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> New task
                   </button>
                   <p className="mt-1 text-center text-[16px] text-muted">One request per task, please. It&apos;s easier for us to track.</p>
                 </div>
               ))}
 
-              {/* Project navigation. Only when there's more than one to move
-                  between — a single-project client, or a list-scoped share
-                  link, has nothing to choose. */}
-              {projects.length > 1 && (
-                <div className="mb-5 flex flex-wrap gap-1.5">
-                  <button onClick={() => setProjectFilter("")}
-                    className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${projectFilter === "" ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
-                    Everything
-                  </button>
-                  {projects.map((p) => (
-                    <button key={p.id} onClick={() => setProjectFilter(p.id)}
-                      className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${projectFilter === p.id ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:text-foreground"}`}>
-                      {p.name}
-                      {openCountByProject.get(p.id) ? <span className="ml-1.5 opacity-60">{openCountByProject.get(p.id)}</span> : null}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {isEmpty ? emptyState : (
-                <div className="space-y-7">
-                  {needsResponseGroups.length > 0 && (
-                    <div>
-                      <div className="mb-2.5 text-[16px] font-bold uppercase tracking-wide text-highlight">What we need from you</div>
-                      <div className="space-y-5">
-                        {needsResponseGroups.map((g) => (
-                          <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`req-${g.project!.id}`] = el; } : undefined}>
-                            {projects.length > 1 && (
-                              <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
-                            )}
-                            <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
-                          </div>
-                        ))}
+              {/* The overview, then the lists as tabs (Derek, 2026-10-05, mockup
+                  https://claude.ai/artifact/1QUx22d65Qwr7n2iSjpHSf): All shows a
+                  box per list; a tab shows one. In each, what needs them first,
+                  then what we're working on, then what's done, folded away. */}
+              {(() => {
+                const all = tasks ?? [];
+                const needCount = all.filter((t) => t.status !== "done" && t.needsResponse).length;
+                const progCount = all.filter((t) => t.status !== "done" && !t.needsResponse).length;
+                const doneAll = all.filter((t) => t.status === "done").length;
+                const pct = all.length ? Math.round((doneAll / all.length) * 100) : 0;
+                const lists = [...projects.map((p) => ({ id: p.id as string | null, name: p.name })), ...(all.some((t) => !projects.some((p) => p.id === t.projectId)) ? [{ id: null, name: "Other" }] : [])];
+                const inList = (id: string | null) => (t: WaitingTask) => (id ? t.projectId === id : !projects.some((p) => p.id === t.projectId));
+                const shown = tab === "all" ? lists : lists.filter((l) => (l.id ?? "__other__") === tab);
+                const box = (l: { id: string | null; name: string }, single: boolean) => {
+                  const mine = all.filter(inList(l.id));
+                  const need = mine.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
+                  const prog = mine.filter((t) => t.status !== "done" && !t.needsResponse).sort(sortFn);
+                  const done = mine.filter((t) => t.status === "done").sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""));
+                  const key = l.id ?? "__other__";
+                  const open = doneOpenIds.has(key);
+                  const p2 = mine.length ? Math.round((done.length / mine.length) * 100) : 0;
+                  return (
+                    <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-xl border bg-surface shadow-[var(--shadow-sm)]">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3">
+                        <h2 className="text-[18px] font-bold">{single && lists.length === 1 ? "Your tasks" : l.name}</h2>
+                        <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full bg-success" style={{ width: `${p2}%` }} /></span>
+                        <span className="ml-auto text-[16px] text-muted">{need.length ? `${need.length} need${need.length === 1 ? "s" : ""} you · ` : ""}{done.length} of {mine.length} done</span>
+                      </div>
+                      <div className="space-y-2 p-3">
+                        {need.length > 0 && <div className="px-1 pt-1 text-[14px] font-extrabold uppercase tracking-wider text-highlight">Needs you</div>}
+                        {need.map((t) => renderTaskRow(t))}
+                        {prog.length > 0 && <div className="px-1 pt-2 text-[14px] font-extrabold uppercase tracking-wider text-accent">In progress</div>}
+                        {prog.map((t) => renderTaskRow(t))}
+                        {!need.length && !prog.length && <div className="px-1 py-2 text-[16px] text-muted">Nothing open here right now.</div>}
+                        {done.length > 0 && (
+                          <button onClick={() => setDoneOpenIds((m) => { const n = new Set(m); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
+                            className="flex items-center gap-1.5 px-1 pt-1 text-[16px] font-semibold text-success hover:underline">
+                            <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>›</span>{open ? "Hide" : "Show"} {done.length} done
+                          </button>
+                        )}
+                        {open && done.map((t) => renderTaskRow(t))}
                       </div>
                     </div>
-                  )}
-                  {inProgressGroups.length > 0 && (
-                    <div>
-                      {/* Collapsed by default, same treatment as Completed
-                          below: this is our work, not theirs, and it should
-                          never push what needs them off the screen. The count
-                          is on the header so it's still answering "is anything
-                          happening" while shut. */}
-                      <button onClick={() => setInProgressOpen((o) => !o)}
-                        className="mb-2.5 flex items-center gap-1.5 text-[16px] font-bold uppercase tracking-wide text-muted transition hover:text-foreground">
-                        <span className={`inline-block transition-transform ${inProgressOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
-                        What we&apos;re working on · {inProgressGroups.reduce((n, g) => n + g.tasks.length, 0)}
-                      </button>
-                      <div className={`space-y-5 ${inProgressOpen ? "" : "hidden"}`}>
-                        {inProgressGroups.map((g) => (
-                          <div key={g.project?.id ?? "__other__"} ref={g.project ? (el) => { groupRefs.current[`wip-${g.project!.id}`] = el; } : undefined}>
-                            {projects.length > 1 && (
-                              <div className="mb-2 text-[16px] font-semibold uppercase tracking-wide text-muted">{g.project?.name ?? "Other"}</div>
-                            )}
-                            <div className="space-y-2">{g.tasks.map((t) => renderTaskRow(t))}</div>
-                          </div>
-                        ))}
+                  );
+                };
+                return (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
+                      <div className="flex items-baseline justify-between gap-2"><b className="text-[18px]">{doneAll} of {all.length} done</b><span className="text-[16px] text-muted">{pct}%</span></div>
+                      <div className="h-2 overflow-hidden rounded-full bg-border"><div className="h-full bg-success" style={{ width: `${pct}%` }} /></div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-highlight">{needCount}</b><span className="text-[16px] text-muted">Need you</span></div>
+                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight">{progCount}</b><span className="text-[16px] text-muted">In progress</span></div>
+                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-success">{doneAll}</b><span className="text-[16px] text-muted">Done</span></div>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
-
-              {completedTasks.length > 0 && (
-                <div className={isEmpty ? "" : "mt-5"}>
-                  <button onClick={() => setCompletedOpen((o) => !o)} className="flex items-center gap-1.5 text-[16px] font-medium text-muted hover:text-foreground">
-                    <span className={`inline-block transition-transform ${completedOpen ? "rotate-90" : ""}`} aria-hidden>›</span>
-                    Completed · {completedTasks.length}
-                  </button>
-                  {completedOpen && <div className="mt-2 space-y-2">{completedTasks.map((t) => renderTaskRow(t, { showProject: true }))}</div>}
-                </div>
-              )}
+                    {lists.length > 1 && (
+                      <div className="flex gap-1 overflow-x-auto border-b">
+                        {[{ key: "all", name: "All", count: all.length }, ...lists.map((l) => ({ key: l.id ?? "__other__", name: l.name, count: all.filter(inList(l.id)).length }))].map((x) => (
+                          <button key={x.key} onClick={() => setTab(x.key)}
+                            className={`shrink-0 border-b-2 px-3 py-2 text-[16px] font-semibold ${tab === x.key ? "border-accent text-accent" : "border-transparent text-muted hover:text-foreground"}`}>
+                            {x.name} <span className="font-normal text-muted">{x.count}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {all.length === 0 ? emptyState : shown.map((l) => box(l, tab !== "all"))}
+                  </div>
+                );
+              })()}
 
               <p className="mt-6 text-center text-[16px] text-muted">This is a private link just for you. Please don&apos;t forward it.</p>
             </div>

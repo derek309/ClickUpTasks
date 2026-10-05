@@ -47,8 +47,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     return NextResponse.json({ error: "This isn't available for your account yet. Reply on one of your existing tasks, or reach out to us directly." }, { status: 403 });
   }
 
-  const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[]; projectId?: string } | null;
-  const text = (payload?.body ?? "").slice(0, 10000).trim();
+  const payload = await req.json().catch(() => null) as { body?: string; attachments?: Attachment[]; projectId?: string; neededBy?: string } | null;
+  // When they need it (Derek, 2026-10-05), optional. The team still sets the
+  // real due date; this goes on the request so they see it.
+  const neededBy = typeof payload?.neededBy === "string" && /^\d{4}-\d{2}-\d{2}$/.test(payload.neededBy) && payload.neededBy >= todayPacific() ? payload.neededBy : null;
+  const neededLine = neededBy ? `Needed by ${new Date(`${neededBy}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}` : "";
+  const text = [(payload?.body ?? "").slice(0, 10000).trim(), neededLine].filter(Boolean).join("\n\n");
   // Never trust the caller's attachment objects — rebuild each from a storage
   // path we can prove belongs to this client (see sanitizeWaitingAttachments).
   const attachments = sanitizeWaitingAttachments(payload?.attachments, scope.clientId);
@@ -81,7 +85,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const assignee = await resolveNotifyRecipient(scope.assignedTo);
   const contactId = scope.clientId.startsWith("cl_") ? scope.clientId.slice(3) : null;
 
-  const title = text ? (text.length > 80 ? text.slice(0, 77) + "…" : text) : "New request";
+  const firstLine = (payload?.body ?? "").trim() || text;
+  const title = firstLine ? (firstLine.length > 80 ? firstLine.slice(0, 77) + "…" : firstLine) : "New request";
   const taskId = "t_" + randomUUID();
   const nowIso = new Date().toISOString();
   const { error } = await supabaseAdmin.from("tasks").insert({
@@ -93,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     status: "todo", priority: "client_request", assignee_id: assignee,
     contact_id: contactId,
     due: todayPacific(),
-    client_response: { body: text, attachments, submittedAt: nowIso },
+    client_response: { body: text, attachments, submittedAt: nowIso, ...(neededBy ? { neededBy } : {}) },
     created_by: "client",
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
@@ -116,5 +121,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, taskId });
 }
