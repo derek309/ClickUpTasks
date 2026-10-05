@@ -344,11 +344,11 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
             {t.hasFiles && <span title="Has attachments" className="opacity-60">📎</span>}
             <span className="sm:group-hover:hidden">{t.snoozed && t.snoozedUntil ? `⏰ ${shortTime(t.snoozedUntil)}` : shortTime(t.latest.at)}</span>
             <span className="hidden gap-2 font-normal sm:group-hover:flex">
-              <button onClick={stop(onArchive)} title="Archive" aria-label="Archive" className={act}>🗄</button>
-              <button onClick={stop(onSnooze)} title="Snooze until tomorrow, 9 AM" aria-label="Snooze" className={act}>⏰</button>
-              <button onClick={stop(onDelete)} title={t.trashed ? "Restore" : "Delete"} aria-label={t.trashed ? "Restore" : "Delete"} className={act}>{t.trashed ? "↩" : "🗑"}</button>
+              <button onClick={stop(onArchive)} title="Archive (E)" aria-label="Archive" className={act}>🗄</button>
+              <button onClick={stop(onSnooze)} title="Snooze until tomorrow, 9 AM (S)" aria-label="Snooze" className={act}>⏰</button>
+              <button onClick={stop(onDelete)} title={t.trashed ? "Restore" : "Delete (D)"} aria-label={t.trashed ? "Restore" : "Delete"} className={act}>{t.trashed ? "↩" : "🗑"}</button>
             </span>
-            <button onClick={stop(() => p.inbox.star([t.key], !t.starred))} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar" : "Star"}
+            <button onClick={stop(() => p.inbox.star([t.key], !t.starred))} aria-label={t.starred ? "Unstar" : "Star"} title={t.starred ? "Unstar (F)" : "Star (F)"}
               className={`ml-1.5 w-6 text-[19px] font-normal leading-none ${t.starred ? "text-[#d97706]" : "invisible text-muted/50 hover:text-[#d97706] group-hover:visible"}`}>{t.starred ? "★" : "☆"}</button>
           </span>
         </div>
@@ -409,11 +409,11 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
   return (
     <div className="@container flex min-h-0 flex-1 flex-col">
       <div className="relative flex flex-wrap gap-0.5 border-b px-2 py-1.5 sm:px-3">
-        <button onClick={back} title="Back" aria-label="Back" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">←<span className="hidden sm:inline"> Back</span></button>
-        <button onClick={done} title="Archive: out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">🗄<span className="hidden sm:inline"> Archive</span></button>
-        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} aria-label={t.starred ? "Starred" : "Star"} title={t.starred ? "Starred" : "Star"} className={`h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★" : "☆"}<span className="hidden sm:inline">{t.starred ? " Starred" : " Star"}</span></button>
+        <button onClick={back} title="Back to the list (Esc)" aria-label="Back" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">←<span className="hidden sm:inline"> Back</span></button>
+        <button onClick={done} title="Archive (E): out of your Inbox and your Gmail inbox; never deleted" aria-label="Archive" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">🗄<span className="hidden sm:inline"> Archive</span></button>
+        <button onClick={() => p.inbox.star([t.key], !t.starred)} aria-pressed={t.starred} aria-label={t.starred ? "Starred" : "Star"} title={t.starred ? "Starred (F)" : "Star (F)"} className={`h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground ${t.starred ? "text-[#d97706]" : ""}`}>{t.starred ? "★" : "☆"}<span className="hidden sm:inline">{t.starred ? " Starred" : " Star"}</span></button>
         <div className="relative">
-          <button onClick={() => setSnoozeOpen(!snoozeOpen)} title="Snooze" aria-label="Snooze" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">⏰<span className="hidden sm:inline"> Snooze</span></button>
+          <button onClick={() => setSnoozeOpen(!snoozeOpen)} title="Snooze (S)" aria-label="Snooze" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">⏰<span className="hidden sm:inline"> Snooze</span></button>
           {snoozeOpen && (
             <Menu onClose={() => setSnoozeOpen(false)}>
               {([["1h", "In 1 hour"], ["3h", "In 3 hours"], ["tomorrow", "Tomorrow, 9 AM"], ["monday", "Monday, 9 AM"]] as const).map(([k, l]) => (
@@ -422,8 +422,8 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
             </Menu>
           )}
         </div>
-        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} title="Mark as unread" aria-label="Mark as unread" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">✉<span className="hidden sm:inline"> Mark as unread</span></button>
-        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Moves it to Trash here and in Gmail (kept 30 days)" : "Moves it to Trash here"} aria-label={t.trashed ? "Restore" : "Delete"} className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">{t.trashed ? "↩" : "🗑"}<span className="hidden sm:inline">{t.trashed ? " Restore" : " Delete"}</span></button>
+        <button onClick={async () => { await p.inbox.markUnread([t.key]); back(); }} title="Mark as unread (R)" aria-label="Mark as unread" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">✉<span className="hidden sm:inline"> Mark as unread</span></button>
+        <button onClick={del} title={t.trashed ? "Bring it back" : t.channel === "email" ? "Delete (D): to Trash here and in Gmail (kept 30 days)" : "Delete (D): to Trash here"} aria-label={t.trashed ? "Restore" : "Delete"} className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">{t.trashed ? "↩" : "🗑"}<span className="hidden sm:inline">{t.trashed ? " Restore" : " Delete"}</span></button>
         {t.peerAddress && !t.trashed && (
           <div className="relative">
             <button onClick={() => setBlockOpen(!blockOpen)} title="Block sender" aria-label="Block sender" className="h-9 rounded-md px-2.5 font-semibold text-muted hover:bg-background hover:text-foreground">⛔<span className="hidden sm:inline"> Block</span></button>
