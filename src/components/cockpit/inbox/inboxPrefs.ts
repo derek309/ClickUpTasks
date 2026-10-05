@@ -39,6 +39,8 @@ export type InboxPrefs = {
   defaultCalendarId?: string | null;
   /** Booking links folded away under Hidden on the Calendar (calendar ids). */
   hiddenBookingLinks?: string[];
+  /** Booking links starred to the top of the Calendar's list (calendar ids). */
+  starredBookingLinks?: string[];
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

@@ -5,13 +5,13 @@ import { loadBookingLinks, type BookingLink } from "./useCalendar";
 
 // 📅 Booking link (Derek, 2026-10-05): a GoHighLevel booking page, put in the
 // email as clickable words. Yours first, then the shared ones, then the rest.
-export function BookingLinkMenu({ me, onPick, label = "Booking link", up = true, icon = "📅", title = "Put a booking link in the email", hidden = [] }: { me: string; onPick: (l: BookingLink) => void; label?: string; up?: boolean; icon?: string; title?: string; hidden?: string[] }) {
+export function BookingLinkMenu({ me, onPick, label = "Booking link", up = true, icon = "📅", title = "Put a booking link in the email", hidden = [], starred = [] }: { me: string; onPick: (l: BookingLink) => void; label?: string; up?: boolean; icon?: string; title?: string; hidden?: string[]; starred?: string[] }) {
   const [open, setOpen] = useState(false);
   // The ones hidden on the Calendar wait behind More (Derek, 2026-10-05).
   const [more, setMore] = useState(false);
   const [links, setLinks] = useState<BookingLink[] | null>(null);
   const toggle = () => { setOpen(!open); if (!open && links === null) loadBookingLinks().then(setLinks); };
-  const sorted = [...(links ?? [])].sort((a, b) => Number(b.memberId === me) - Number(a.memberId === me) || Number(a.shared) - Number(b.shared));
+  const sorted = [...(links ?? [])].sort((a, b) => Number(starred.includes(b.calendarId)) - Number(starred.includes(a.calendarId)) || Number(b.memberId === me) - Number(a.memberId === me) || Number(a.shared) - Number(b.shared));
   const seen = new Set<string>();
   const all = sorted.filter((l) => (seen.has(l.url) ? false : (seen.add(l.url), true)));
   const shownList = all.filter((l) => !hidden.includes(l.calendarId));

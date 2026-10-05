@@ -37,10 +37,21 @@ export type CalendarBoardProps = {
   /** Links folded under Hidden, and how to change that (saved with Inbox settings). */
   hiddenLinks?: string[];
   onSetHidden?: (ids: string[]) => void;
+  /** Links starred to the top (Derek, 2026-10-05), saved with Inbox settings. */
+  starredLinks?: string[];
+  onSetStarred?: (ids: string[]) => void;
   pushToast: (text: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
+  const starred = new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]);
+  // One click stars, one click unstars, the default calendar included.
+  const toggleStar = (id: string) => {
+    if (starred.has(id)) {
+      if (starredLinks.includes(id)) onSetStarred?.(starredLinks.filter((x) => x !== id));
+      if (id === defaultCalendarId) onSetDefault?.(null);
+    } else onSetStarred?.([...starredLinks, id]);
+  };
   // Only the links you use show; the rest fold under Hidden (Derek, 2026-10-05).
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const hidden = new Set(hiddenLinks);
@@ -98,6 +109,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   };
   // Booking links in a column on the right (Derek, 2026-10-05): A to Z, one
   // row per page (a shared one lists both people), and a search box.
+  const starredKey = useMemo(() => new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]), [starredLinks, defaultCalendarId]);
   const linkRows = useMemo(() => {
     const byUrl = new Map<string, { label: string; url: string; who: string[]; calendarId: string; group: string }>();
     for (const l of links) {
@@ -106,8 +118,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
       // Grouped by sub-account (Derek, 2026-10-05): "ClickUpLocal Agency" reads "Agency".
       else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId], calendarId: l.calendarId, group: (l.locationName || "Other").replace(/^ClickUpLocal\s+/i, "") });
     }
-    return [...byUrl.values()].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
-  }, [links]);
+    // Starred ones (and the default calendar) on top, in a group of their own.
+    const rows = [...byUrl.values()].map((r) => (starredKey.has(r.calendarId) ? { ...r, group: "★ Starred" } : r));
+    return rows.sort((a, b) => Number(b.group === "★ Starred") - Number(a.group === "★ Starred") || a.group.localeCompare(b.group) || a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+  }, [links, starredKey]);
   const linkWords = linkQ.toLowerCase().split(/\s+/).filter(Boolean);
   const linksShown = linkRows.filter((r) => linkWords.every((w) => `${r.label} ${r.who.map(nameOf).join(" ")}`.toLowerCase().includes(w)));
   const copyRow = (r: { label: string; url: string }) => copy(r);
@@ -142,7 +156,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </span>
         <button onClick={onRefresh} disabled={loading} title="Read GoHighLevel again" className="h-10 rounded-md px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-60"><span className={loading ? "inline-block animate-spin" : ""}>↻</span></button>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {/* The links column is as wide as its longest name needs, within reason. */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,max-content)]">
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
@@ -190,11 +205,12 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </div>
       )}
       </div>
-      <aside className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4">
+      <aside className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4 lg:max-w-[460px]">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">📅 Booking links</h2>
           <span className="text-[14px] text-muted">{linkRows.length}</span>
         </div>
+        <p className="-mt-1 text-[14px] text-muted">☆ keeps a link at the top. The eye hides it under Hidden.</p>
         <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Search booking links" aria-label="Search booking links"
           className="h-10 w-full min-w-0 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
         {(() => {
@@ -202,9 +218,14 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
           const row = (r: Row, isHidden: boolean) => (
             <div key={r.url} className="group flex min-w-0 items-center gap-1.5 border-b py-1.5 last:border-0">
               <span className="min-w-0 flex-1">
-                <b className={`block truncate font-semibold ${isHidden ? "text-muted" : ""}`} title={r.label}>{r.calendarId === defaultCalendarId ? "★ " : ""}{r.label}</b>
+                {/* The whole name, a size smaller (Derek, 2026-10-05: no cut off titles). */}
+                {/* The name opens the booking page (Derek, 2026-10-05: no separate arrow). */}
+                <a href={r.url} target="_blank" rel="noopener noreferrer" title={`Open the ${r.label} booking page`}
+                  className={`block text-[15px] font-semibold leading-snug hover:text-accent hover:underline ${isHidden ? "text-muted" : ""}`}>{r.label}{r.calendarId === defaultCalendarId && <span className="ml-1 text-[14px] font-normal text-muted">(default)</span>}</a>
                 <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
               </span>
+              {onSetStarred && <button onClick={() => toggleStar(r.calendarId)} title={starred.has(r.calendarId) ? "Starred. Click to unstar." : "Star it to keep it at the top"} aria-pressed={starred.has(r.calendarId)}
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-[18px] hover:bg-background ${starred.has(r.calendarId) ? "text-amber-500" : "text-muted/70 hover:text-foreground"}`}>{starred.has(r.calendarId) ? "★" : "☆"}</button>}
               {/* Always there, small (Derek couldn't find it as a hover button). */}
               {onSetHidden && <button onClick={() => toggleHidden(r.calendarId)} title={isHidden ? "Show it in the list" : "Hide it (it stays under Hidden)"} aria-label={isHidden ? `Show ${r.label}` : `Hide ${r.label}`}
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted/70 hover:bg-background hover:text-foreground">
@@ -214,7 +235,6 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                     : <path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22" />}
                 </svg>
               </button>}
-              <a href={r.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-1.5 py-1 text-muted hover:text-foreground">↗</a>
               <button onClick={() => copyRow(r)} title="Copy the booking link" aria-label={`Copy ${r.label}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-accent ring-1 ring-[var(--border)] hover:bg-background">
                 <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 9h13v13H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
               </button>
