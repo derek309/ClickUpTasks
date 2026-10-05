@@ -1068,18 +1068,21 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 // ── The reply box ─────────────────────────────────────────────────────────
 // The AI helpers in one menu (Derek, 2026-10-05: fold them). Suggest times
 // opens its calendar list in the same menu.
-function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, onDraft, onImprove, onShorter, onSuggest }: {
-  busy: string | null; hasText: boolean; canDraft: boolean; canSuggest: boolean; meId: string; defaultId?: string | null;
+function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, hidden = [], onDraft, onImprove, onShorter, onSuggest }: {
+  busy: string | null; hasText: boolean; canDraft: boolean; canSuggest: boolean; meId: string; defaultId?: string | null; hidden?: string[];
   onDraft: () => void; onImprove: () => void; onShorter: () => void; onSuggest: (l: BookingLink) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"main" | "times">("main");
   const [links, setLinks] = useState<BookingLink[] | null>(null);
-  const close = () => { setOpen(false); setStep("main"); };
+  const [more, setMore] = useState(false);
+  const close = () => { setOpen(false); setStep("main"); setMore(false); };
   const toTimes = () => { setStep("times"); if (links === null) loadBookingLinks().then(setLinks); };
   const seen = new Set<string>();
   const calendars = [...(links ?? [])].sort((a, b) => Number(b.calendarId === defaultId) - Number(a.calendarId === defaultId) || Number(b.memberId === meId) - Number(a.memberId === meId) || a.label.localeCompare(b.label))
     .filter((l) => (seen.has(l.calendarId) ? false : (seen.add(l.calendarId), true)));
+  const shownCals = calendars.filter((l) => !hidden.includes(l.calendarId));
+  const calList = more || !shownCals.length ? calendars : shownCals;
   const working = busy === "improve" ? "Improving…" : busy === "shorter" ? "Cutting…" : busy === "draft" ? "Drafting…" : busy === "times" ? "Finding times…" : null;
   const item = "flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent";
   return (
@@ -1097,11 +1100,14 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, onDraft,
           </> : <>
             <button onClick={() => setStep("main")} className="w-full rounded-md px-3 py-1.5 text-left font-semibold text-muted hover:bg-background">‹ Suggest times from…</button>
             {links === null ? <div className="px-3 py-2 text-muted">Reading GoHighLevel…</div>
-              : calendars.length ? calendars.map((l) => (
+              : calList.length ? calList.map((l) => (
                 <button key={l.calendarId} onClick={() => { close(); onSuggest(l); }} className={item}>
                   <span className="min-w-0"><b className="block truncate font-semibold">{l.label}</b><span className="text-[14px] text-muted">{l.calendarId === defaultId ? "★ default · " : ""}{l.minutes} min{l.shared ? " · shared" : l.memberId === meId ? " · yours" : ""}</span></span>
                 </button>
               )) : <div className="px-3 py-2 text-muted">No calendars found.</div>}
+            {links !== null && shownCals.length > 0 && calendars.length > shownCals.length && (
+              <button onClick={() => setMore(!more)} className="w-full rounded-md px-3 py-1.5 text-left font-semibold text-muted hover:bg-background">{more ? "▴ Fewer" : `▸ More (${calendars.length - shownCals.length})`}</button>
+            )}
           </>}
         </div>
       </>}
@@ -1451,10 +1457,10 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
             )}
           </div>
         )}
-        {rich && <BookingLinkMenu me={p.me.id} onPick={(l) => insertLink(l.url, "book a time here")} />}
+        {rich && <BookingLinkMenu me={p.me.id} hidden={p.prefs.hiddenBookingLinks} onPick={(l) => insertLink(l.url, "book a time here")} />}
         {compact
           ? <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Improve with AI" className="h-9 rounded-lg bg-[#f3efff] px-2.5 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : <>✨<span className="hidden sm:inline"> Improve with AI</span></>}</button>
-          : <AiMenu busy={busy} hasText={hasText} canDraft={rich} canSuggest={rich && /^(gm|ghl):/.test(t.key)} meId={p.me.id} defaultId={p.prefs.defaultCalendarId}
+          : <AiMenu busy={busy} hasText={hasText} canDraft={rich} canSuggest={rich && /^(gm|ghl):/.test(t.key)} meId={p.me.id} defaultId={p.prefs.defaultCalendarId} hidden={p.prefs.hiddenBookingLinks}
               onDraft={() => draft()} onImprove={() => improve()} onShorter={() => improve("shorter")} onSuggest={suggestTimes} />}
         {rich && hasBcc && (
           <label title="A hidden copy goes to your GoHighLevel Auto BCC Sync address, so it's logged on the contact" className="flex h-10 cursor-pointer items-center gap-2 px-1 font-semibold text-muted">
@@ -2335,7 +2341,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             {kind === "email" && <>
               <button onClick={() => fileRef.current?.click()} title="Attach files (or drag them onto the email)" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
-              <BookingLinkMenu me={p.me.id} onPick={insertBooking} />
+              <BookingLinkMenu me={p.me.id} hidden={p.prefs.hiddenBookingLinks} onPick={insertBooking} />
               <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
             </>}
             <button disabled={busy !== null || !hasText} onClick={() => ai("fix")} title="Fix spelling and grammar" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Working…" : "✨ Improve"}</button>

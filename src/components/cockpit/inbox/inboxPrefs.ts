@@ -37,6 +37,8 @@ export type InboxPrefs = {
   ghlBcc?: { agency?: string; directory?: string };
   /** The starred calendar the booking window opens on (Derek, 2026-10-05). */
   defaultCalendarId?: string | null;
+  /** Booking links folded away under Hidden on the Calendar (calendar ids). */
+  hiddenBookingLinks?: string[];
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

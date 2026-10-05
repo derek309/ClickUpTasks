@@ -34,10 +34,17 @@ export type CalendarBoardProps = {
   contacts: { id: string; name: string; email?: string | null; company?: string | null; ghlContactId?: string | null }[];
   defaultCalendarId?: string | null;
   onSetDefault?: (id: string | null) => void;
+  /** Links folded under Hidden, and how to change that (saved with Inbox settings). */
+  hiddenLinks?: string[];
+  onSetHidden?: (ids: string[]) => void;
   pushToast: (text: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden }: CalendarBoardProps) {
+  // Only the links you use show; the rest fold under Hidden (Derek, 2026-10-05).
+  const [hiddenOpen, setHiddenOpen] = useState(false);
+  const hidden = new Set(hiddenLinks);
+  const toggleHidden = (id: string) => onSetHidden?.(hidden.has(id) ? hiddenLinks.filter((x) => x !== id) : [...hiddenLinks, id]);
   // Phase 2 (Derek, 2026-10-05): book, move and cancel, written to GoHighLevel.
   const [booking, setBooking] = useState<BookTarget | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -92,11 +99,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   // Booking links in a column on the right (Derek, 2026-10-05): A to Z, one
   // row per page (a shared one lists both people), and a search box.
   const linkRows = useMemo(() => {
-    const byUrl = new Map<string, { label: string; url: string; who: string[] }>();
+    const byUrl = new Map<string, { label: string; url: string; who: string[]; calendarId: string }>();
     for (const l of links) {
       const had = byUrl.get(l.url);
       if (had) { if (!had.who.includes(l.memberId)) had.who.push(l.memberId); }
-      else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId] });
+      else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId], calendarId: l.calendarId });
     }
     return [...byUrl.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   }, [links]);
@@ -189,19 +196,39 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </div>
         <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Search booking links" aria-label="Search booking links"
           className="h-10 w-full min-w-0 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
-          {linksShown.map((r) => (
-            <div key={r.url} className="flex min-w-0 items-center gap-2 border-b py-1.5 last:border-0">
+        {(() => {
+          type Row = (typeof linksShown)[number];
+          const row = (r: Row, isHidden: boolean) => (
+            <div key={r.url} className="group flex min-w-0 items-center gap-1.5 border-b py-1.5 last:border-0">
               <span className="min-w-0 flex-1">
-                <b className="block truncate font-semibold" title={r.label}>{r.label}</b>
+                <b className={`block truncate font-semibold ${isHidden ? "text-muted" : ""}`} title={r.label}>{r.calendarId === defaultCalendarId ? "★ " : ""}{r.label}</b>
                 <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
               </span>
+              {onSetHidden && <button onClick={() => toggleHidden(r.calendarId)} title={isHidden ? "Show it in the list" : "Hide it (it stays under Hidden)"}
+                className={`shrink-0 rounded-md px-1.5 py-1 text-[14px] font-semibold text-muted hover:text-foreground ${isHidden ? "" : "opacity-0 focus:opacity-100 group-hover:opacity-100"}`}>{isHidden ? "Show" : "Hide"}</button>}
               <a href={r.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-1.5 py-1 text-muted hover:text-foreground">↗</a>
               <button onClick={() => copyRow(r)} className="h-8 shrink-0 rounded-md px-3 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">Copy</button>
             </div>
-          ))}
-          {!linksShown.length && <div className="py-2 text-muted">{loading ? "Reading GoHighLevel…" : linkQ ? "No booking link matches." : "No booking pages found."}</div>}
-        </div>
+          );
+          // Searching looks through every link, hidden or not.
+          const visible = linkQ ? linksShown : linksShown.filter((r) => !hidden.has(r.calendarId));
+          const folded = linkQ ? [] : linksShown.filter((r) => hidden.has(r.calendarId));
+          return <>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
+              {visible.map((r) => row(r, hidden.has(r.calendarId)))}
+              {!visible.length && !folded.length && <div className="py-2 text-muted">{loading ? "Reading GoHighLevel…" : linkQ ? "No booking link matches." : "No booking pages found."}</div>}
+              {!visible.length && folded.length > 0 && <div className="py-2 text-muted">All hidden. Open Hidden below, or search.</div>}
+            </div>
+            {folded.length > 0 && (
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] border-t pt-1">
+                <button onClick={() => setHiddenOpen(!hiddenOpen)} aria-expanded={hiddenOpen} className="flex items-center justify-between py-1.5 text-left font-semibold text-muted hover:text-foreground">
+                  <span>{hiddenOpen ? "▾" : "▸"} Hidden</span><span className="text-[14px]">{folded.length}</span>
+                </button>
+                {hiddenOpen && folded.map((r) => row(r, true))}
+              </div>
+            )}
+          </>;
+        })()}
       </aside>
       </div>
       {booking && <BookAppointment target={booking} meId={meId} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} onClose={() => setBooking(null)} onDone={() => { onRefresh(); refreshSoon(); }} pushToast={pushToast} />}
