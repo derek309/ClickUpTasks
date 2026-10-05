@@ -12,6 +12,7 @@ import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
+import { InlineDate } from "../GroupedList";
 import type { Editor } from "@tiptap/react";
 import {
   CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, linksOnTask, matchesSearch, shortTime, snoozeUntil, whereIs,
@@ -198,11 +199,11 @@ export default function InboxView(p: InboxViewProps) {
       <nav className={`hidden shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r bg-background/40 md:flex ${slim ? "w-[68px] items-center px-2 py-3" : "w-48 p-2.5"}`}>
         <button onClick={() => { setComposeNew({}); setOpenKey(null); setFolder("inbox"); }} title="New message" aria-label="New message"
           className={`mb-3 h-11 shrink-0 rounded-lg bg-accent font-semibold text-white ${slim ? "w-11 text-[20px]" : "w-full"}`}>{slim ? "＋" : "＋ New message"}</button>
-        {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
+        {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
         {slim ? <div className="my-2 h-px w-8 bg-[var(--border)]" /> : <div className="mx-2.5 mb-1 mt-3 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>}
-        {FILTERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); }} />)}
+        {FILTERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
         <div className={`mt-auto border-t pt-3 ${slim ? "flex w-full flex-col items-center gap-0.5" : ""}`}>
-          <FolderButton f={{ id: "inbox", label: "Settings", icon: "⚙️" }} slim={slim} active={folder === "settings"} count={0} onClick={() => { setFolder("settings"); setOpenKey(null); }} />
+          <FolderButton f={{ id: "inbox", label: "Settings", icon: "⚙️" }} slim={slim} active={folder === "settings"} count={0} onClick={() => { setFolder("settings"); setOpenKey(null); setComposeNew(false); }} />
           <FolderButton f={{ label: slim ? "Show folder names" : "Icons only", icon: slim ? "»" : "«" }} slim={slim} active={false} count={0} onClick={() => p.setPrefs({ railCollapsed: !slim })} />
         </div>
       </nav>
@@ -212,7 +213,7 @@ export default function InboxView(p: InboxViewProps) {
         {/* Hidden while a conversation is open: it is the list's, and the phone needs the room. */}
         <div className={`gap-2 border-b p-3 md:hidden ${open || composeNew ? "hidden" : "flex"}`}>
           <button onClick={() => { setComposeNew({}); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
-          <select aria-label="Folder" value={folder} onChange={(e) => { setFolder(e.target.value as Folder | "settings"); setOpenKey(null); }} className="h-11 min-w-0 flex-1 rounded-lg border bg-surface px-3 font-semibold">
+          <select aria-label="Folder" value={folder} onChange={(e) => { setFolder(e.target.value as Folder | "settings"); setOpenKey(null); setComposeNew(false); }} className="h-11 min-w-0 flex-1 rounded-lg border bg-surface px-3 font-semibold">
             {[...FOLDERS, ...FILTERS].map((f) => <option key={f.id} value={f.id}>{f.label}{count(f.id) ? ` (${count(f.id)})` : ""}</option>)}
             <option value="settings">Settings</option>
           </select>
@@ -1498,6 +1499,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't link it."); }
     finally { setBusy(false); }
   };
+  const [ownerOpen, setOwnerOpen] = useState(false);
   const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
   const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
@@ -1524,15 +1526,30 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                 </Menu>
               )}
             </span>
-            {task.due && <span className="h-8 rounded-full bg-background px-3 leading-8 ring-1 ring-[var(--border)]">📅 {dueLabel(task.due)}</span>}
             {task.waitingOnClient && <span className="h-8 rounded-full bg-highlight-soft px-3 font-semibold leading-8 text-highlight">Waiting on client</span>}
           </div>
-          {(task.followUpAt || owner) && (
-            <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
-              {task.followUpAt && <><dt className="text-muted">Follow up</dt><dd>{dueLabel(task.followUpAt.slice(0, 10))}</dd></>}
-              {owner && <><dt className="text-muted">On</dt><dd>{owner}</dd></>}
-            </dl>
-          )}
+          {/* Who it's on, when it's due and when to follow up, changed right
+              here (Derek, 2026-10-05). */}
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1">
+            <dt className="text-muted">On</dt>
+            <dd className="relative min-w-0">
+              <button onClick={() => setOwnerOpen(!ownerOpen)} className="max-w-full truncate rounded px-1 py-0.5 text-left font-semibold hover:bg-background">{owner ?? "Nobody"} ▾</button>
+              {ownerOpen && (
+                <Menu onClose={() => setOwnerOpen(false)}>
+                  {[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))).map((m) => (
+                    <button key={m.id} onClick={() => { setOwnerOpen(false); if (m.id !== task.assigneeId) { p.onPatchTask(task.id, { assigneeId: m.id }); p.pushToast(`On ${m.id === p.me.id ? "you" : m.name} now`); } }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>
+                      {m.id === p.me.id ? "You" : m.name}{m.id === task.assigneeId ? " ✓" : ""}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </dd>
+            <dt className="text-muted">Due</dt>
+            <dd className="min-w-0"><InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="Set a date" formatValue={dueLabel as (iso: string) => string} className="font-semibold" /></dd>
+            <dt className="text-muted">Follow up</dt>
+            <dd className="min-w-0"><InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="Set a date" formatValue={dueLabel as (iso: string) => string} className="font-semibold" /></dd>
+          </dl>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             {task.status === "done"
               ? <button onClick={() => { p.onPatchTask(task.id, { status: before ?? "todo" }); setBefore(null); }} className="h-9 rounded-lg px-3 font-semibold text-muted ring-1 ring-[var(--border)] hover:bg-background">✓ Done · Undo</button>
