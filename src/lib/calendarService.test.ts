@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/supabaseAdmin", () => ({ supabaseAdmin: {} }));
 vi.mock("@/lib/ghlTokens", () => ({ configuredLocations: async () => [], tokenForLocation: async () => null }));
-const { normalizeEvent, mergeEvents, isLiveAppointment, bookingUrl, startOfPacificDay, isAllDay } = await import("./calendarService");
+const { normalizeEvent, mergeEvents, isLiveAppointment, bookingUrl, startOfPacificDay, isAllDay, meetingTaskReset } = await import("./calendarService");
 
 const names = new Map([["cal1", "Derek & Justin"]]);
 const appt = { id: "e1", startTime: "2026-10-06T16:00:00-07:00", endTime: "2026-10-06T16:30:00-07:00", title: "Pamela Macias w/ Derek & Justin", calendarId: "cal1", contactId: "g1", address: "https://zoom.us/j/1", appointmentStatus: "confirmed" };
@@ -47,5 +47,15 @@ describe("calendar events from GoHighLevel", () => {
   });
   it("starts the day at midnight in Los Angeles", () => {
     expect(new Date(startOfPacificDay(Date.parse("2026-10-06T03:30:00Z"))).toISOString()).toBe("2026-10-05T07:00:00.000Z");
+  });
+  it("puts the meeting task back when the meeting is cancelled, and only that task", () => {
+    const task = { title: "Meeting with Derek Fox", due: "2026-10-08", attachments: [{ name: "Meeting location" }, { name: "brief.pdf" }], comments: [] };
+    const r = meetingTaskReset(task, "2026-10-08T13:00:00-07:00", "2026-10-05", "2026-10-05T16:00:00Z")!;
+    expect(r.title).toBe("Rebook Derek Fox (meeting cancelled)");
+    expect(r.due).toBe("2026-10-05");
+    expect(r.attachments).toEqual([{ name: "brief.pdf" }]);
+    expect((r.comments[0] as { body: string }).body).toBe("Meeting on Thu, Oct 8, 1:00 PM cancelled");
+    expect(meetingTaskReset({ ...task, due: "2026-10-20" }, "2026-10-08T13:00:00-07:00", "2026-10-05", "x")).toBeNull();
+    expect(meetingTaskReset({ ...task, title: "Replied by email" }, "2026-10-08T13:00:00-07:00", "2026-10-05", "x")).toBeNull();
   });
 });

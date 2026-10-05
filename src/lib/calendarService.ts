@@ -10,7 +10,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { contactHome } from "@/lib/ghlPerson";
-import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, bumpStatusToInterview } from "@/lib/ghlConversationTask";
+import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, todayPacific, bumpStatusToInterview } from "@/lib/ghlConversationTask";
 import { titleCase } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -352,5 +352,33 @@ export async function cancelAppointment(_actor: CalendarActor, id: string): Prom
   });
   if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't cancel it (${res.status}).` };
   slotCache.clear(); eventCache = null;
+  if (found.appt.contactId) await resetMeetingTask(String(found.appt.contactId), String(found.appt.startTime)).catch(() => {});
   return { ok: true };
+}
+
+/** What a cancelled meeting does to the client's Conversation task (Derek,
+ *  2026-10-05: "reset the task on cancel"): "Meeting with X" on that date
+ *  becomes "Rebook X (meeting cancelled)", due today, without the join link,
+ *  with a line in its history. A task that has moved on since is left alone. */
+export function meetingTaskReset(task: { title: string; due: string | null; attachments?: { name?: string }[] | null; comments?: unknown[] | null }, meetingStart: string, today: string, now: string, authorId = "u_derek") {
+  if (!/^meeting with /i.test(task.title.trim()) || task.due !== toPacificDate(meetingStart)) return null;
+  const who = task.title.trim().replace(/^meeting with /i, "");
+  const when = new Date(meetingStart).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return {
+    title: `Rebook ${who} (meeting cancelled)`,
+    due: today,
+    last_activity_at: now,
+    attachments: (task.attachments ?? []).filter((a) => a?.name !== "Meeting location"),
+    comments: [...(Array.isArray(task.comments) ? task.comments : []), { id: "cm_" + crypto.randomUUID(), authorId, body: `Meeting on ${when} cancelled`, at: now, kind: "event" }],
+  };
+}
+
+async function resetMeetingTask(ghlContactId: string, meetingStart: string) {
+  const { contact } = await contactFor(ghlContactId);
+  if (!contact) return;
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, title, due, attachments, comments")
+    .eq("contact_id", contact.id).eq("priority", "conversation").neq("status", "done").is("deleted_at", null).limit(1).maybeSingle();
+  if (!task) return;
+  const patch = meetingTaskReset(task as any, meetingStart, todayPacific(), new Date().toISOString());
+  if (patch) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", (task as any).id);
 }

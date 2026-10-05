@@ -304,7 +304,8 @@ export function conversationSignalRank(title: string | null | undefined): number
 // comment is a system-logged event, not something the client sent (Derek,
 // 2026-09-09). Everything else defaults to true: an unread reply must never
 // be missed because its title didn't match a known non-message pattern.
-const NON_MESSAGE_CONVERSATION_TITLES = [/^Meeting with /];
+// A cancelled meeting's task ("Rebook X (meeting cancelled)", calendarService) is to do, not to read.
+const NON_MESSAGE_CONVERSATION_TITLES = [/^Meeting with /, /\(meeting cancelled\)$/];
 export function isMessageConversationTask(title: string | null | undefined): boolean {
   if (!title) return true;
   return !NON_MESSAGE_CONVERSATION_TITLES.some((p) => p.test(title));
