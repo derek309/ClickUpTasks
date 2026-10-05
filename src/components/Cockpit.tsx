@@ -2317,19 +2317,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           renderer died. macOS overlay scrollbars take no width, which is why
           it only ever happened to Michaella. */}
       <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-52 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        {/* Account block, promoted from the sidebar footer to the top in place
-            of the old app-branding header (Derek's call). */}
-        {/* Account block. Borderless icon buttons, not bordered boxes, which
-            crowded the name down to "De…". Theme and sign out have since moved
-            into Settings > Account (Derek), leaving the gear as the only icon
-            here: two things nobody touches twice a week were costing width on
-            every screen. */}
-        <div className="flex shrink-0 items-center gap-1 border-b px-3 py-3">
-          <span className="inline-flex shrink-0 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ width: 30, height: 30, background: me.color }}>{me.initials}</span>
-          <div className="ml-1 min-w-0 flex-1 leading-tight"><div className="truncate text-[15px] font-medium">{me.name}</div><div className="text-[13px] capitalize text-muted">{me.role}</div></div>
-          <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title="Settings" className="shrink-0 rounded-lg p-1.5 text-muted hover:bg-background hover:text-foreground"><I.gear /></button>
-        </div>
-
         {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
             block (Derek: put them together "so they use less space") — no
             divider/gap between them, just Pinned below stays its own
@@ -2345,11 +2332,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               happens here so there was nothing left to come to it for. */}
           {/* Search you can click, with its key written for this computer
               (Derek, 2026-10-05: Michaella is on Windows and couldn't find it). */}
-          <button onClick={() => setCmdkOpen(true)} title={`Search everything (${shortcut("K")})`}
-            className="mb-1 flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-muted ring-1 ring-[var(--border)] transition hover:bg-background hover:text-foreground">
-            <I.search className="shrink-0" /><span className="flex-1 text-[15px]">Search</span>
-            <kbd className="rounded border border-b-2 px-1.5 text-[12px] font-semibold">{shortcut("K")}</kbd>
-          </button>
+          {/* Search first, then you and Settings at the end of the same row
+              (Derek, 2026-10-05); the account block above it is gone. */}
+          <div className="mb-1 flex items-center gap-1 pt-3">
+            <button onClick={() => setCmdkOpen(true)} title={`Search everything (${shortcut("K")})`}
+              className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-muted ring-1 ring-[var(--border)] transition hover:bg-background hover:text-foreground">
+              <I.search className="shrink-0" /><span className="flex-1 truncate text-[15px]">Search</span>
+              <kbd className="rounded border border-b-2 px-1.5 text-[12px] font-semibold">{shortcut("K")}</kbd>
+            </button>
+            <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title={`${me.name} (${me.role}): Settings`} aria-label="Settings"
+              className="flex shrink-0 items-center gap-1 rounded-lg p-1 text-muted hover:bg-background hover:text-foreground">
+              <span className="inline-flex items-center justify-center rounded-full text-[13px] font-semibold text-white" style={{ width: 28, height: 28, background: me.color }}>{me.initials}</span>
+              <I.gear />
+            </button>
+          </div>
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
           <div className="grid grid-cols-4 gap-1">

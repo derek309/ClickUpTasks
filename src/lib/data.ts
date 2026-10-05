@@ -208,7 +208,7 @@ export interface Me {
   role: Role;
   canSendMessages: boolean; // admins always true; VAs only when an admin grants it
 }
-export type TaskStatus = "todo" | "get_started" | "in_progress" | "review" | "changes_requested" | "waiting" | "approved" | "delegated" | "done";
+export type TaskStatus = "todo" | "get_started" | "in_progress" | "review" | "changes_requested" | "waiting" | "on_hold" | "approved" | "delegated" | "done";
 export type Priority = "client_request" | "conversation" | "urgent" | "normal" | "none";
 export type Recurrence = "none" | "daily" | "weekday" | "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" | "custom";
 export const RECURRENCE_ORDER: Recurrence[] = ["none", "daily", "weekday", "weekly", "biweekly", "monthly", "quarterly", "yearly", "custom"];
@@ -981,6 +981,10 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   review: { label: "Review", dot: "#f59e0b", chip: "#fffbeb" },
   changes_requested: { label: "Changes requested", dot: "#ef4444", chip: "#fef2f2" },
   waiting: { label: "Waiting", dot: "#14b8a6", chip: "#f0fdfa" },
+  // Paused, usually because the client asked (Derek, 2026-10-05: "back
+  // burner"). Unlike Waiting it never nudges the client and is never late;
+  // the follow up date is when to ask again.
+  on_hold: { label: "On hold", dot: "#a8a29e", chip: "#f5f5f4" },
   // The client said go. Deliberately not Done: their yes and your delivery
   // are two different events, and collapsing them loses the gap between them.
   approved: { label: "Approved", dot: "#8b5cf6", chip: "#f5f3ff" },
@@ -989,7 +993,7 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   delegated: { label: "Delegated", dot: "#7c3aed", chip: "#f5f3ff" },
   done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
 };
-export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "delegated", "approved", "done"];
+export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "delegated", "approved", "done"];
 
 // Stages nobody picks by hand. They arrive by doing the thing that sets them
 // (delegating), so offering them in a stage menu just adds a way to lie about
@@ -1745,7 +1749,7 @@ export function startSignal(
   // Waiting is deliberately silent. You are blocked on someone else, so
   // neither "start" nor "wrap up" is advice you can act on; the follow-up date
   // is the tool for that stage.
-  if (task.status === "waiting") return NONE;
+  if (task.status === "waiting" || task.status === "on_hold") return NONE;
   const left = daysUntilDue(task.due, today);
   if (left === null) return NONE;
   const burn = windowBurn(task.createdAt, task.due, today);

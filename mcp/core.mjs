@@ -9,7 +9,7 @@ import { z } from "zod";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
-const STATUSES = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "delegated", "done"];
+const STATUSES = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "approved", "delegated", "done"];
 const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36";
@@ -444,7 +444,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("set_task_status",
-    `Set a task's status (${STATUSES.join(" | ")}). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column.`,
+    `Set a task's status (${STATUSES.join(" | ")}). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column. \"on_hold\" pauses it (the client put it on the back burner); it never nudges the client and is never late.`,
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
       const before = await loadTask(id, "status,follow_up_at");

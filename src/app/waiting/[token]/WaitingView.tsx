@@ -743,8 +743,8 @@ export default function WaitingView({ token }: { token: string }) {
     const status = isDone ? (
       <span className="text-[16px] text-muted">{note?.text ?? "Completed"}</span>
     ) : (
-      <span className={`rounded-full px-2 py-0.5 text-[16px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : "bg-accent-soft text-accent"}`}>
-        {t.needsResponse ? "Needs your input" : "In progress"}
+      <span className={`rounded-full px-2 py-0.5 text-[16px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : t.status === "on_hold" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
+        {t.needsResponse ? "Needs your input" : t.status === "on_hold" ? "On hold" : "In progress"}
       </span>
     );
     return (

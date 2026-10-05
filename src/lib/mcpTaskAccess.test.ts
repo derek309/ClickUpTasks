@@ -110,7 +110,7 @@ describe("what the MCP tools may see", () => {
     const tools = (await (await connect()).listTools()).tools;
     const tool = tools.find((t) => t.name === "set_task_status")!;
     const statuses = (tool.inputSchema as any).properties.status.enum;
-    expect(statuses).toEqual(["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "approved", "delegated", "done"]);
+    expect(statuses).toEqual(["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "approved", "delegated", "done"]);
     for (const s of statuses) expect(tool.description).toContain(s);
   });
 
