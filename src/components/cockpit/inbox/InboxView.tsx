@@ -2094,7 +2094,22 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   const [q, setQ] = useState("");
   const [ccOpen, setCcOpen] = useState(false);
   const [cc, setCc] = useState(""); const [bcc, setBcc] = useState("");
-  const [subject, setSubject] = useState(""); const [body, setBody] = useState(start.body ?? "");
+  const [subject, setSubject] = useState("");
+  // An email is written with formatting, like a reply (Derek, 2026-10-05); a
+  // text stays plain.
+  const [body, setBody] = useState(() => ((start.kind ?? "email") === "email" && start.body ? plainTextToHtml(start.body) : start.body ?? ""));
+  const [nonce, setNonce] = useState(0);
+  const put = (v: string) => { setBody(v); setNonce((n) => n + 1); };
+  const plain = kind === "email" ? htmlToText(body) : body;
+  const hasText = !!plain.trim();
+  const [signature, setSignature] = useState("");
+  useEffect(() => { loadSignature().then(setSignature); }, []);
+  const switchKind = (k: "email" | "text" | "team") => {
+    if (k === kind) return;
+    if (k === "email" && kind === "text") put(body.trim() ? plainTextToHtml(body) : "");
+    if (k === "text" && kind === "email") put(htmlToText(body));
+    setKind(k); setTo(null);
+  };
   const [files, setFiles] = useState<Attachment[]>([]);
   const [task, setTask] = useState<Task | null>(null);
   const [taskQ, setTaskQ] = useState("");
@@ -2116,42 +2131,53 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
     for (const f of Array.from(list ?? [])) { const a = await p.onUpload(`inbox/${p.me.id}`, f); if (a) setFiles((x) => [...x, a]); }
   };
   const send = async () => {
-    if (!to || !body.trim()) return;
+    if (!to || !hasText) return;
     setBusy("send");
     try {
       const r = kind === "email"
         ? await p.inbox.send({ to: to.address, cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean), subject, body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })) })
-        : await p.inbox.send({ channel: "sms", contactId: to.contactId, body });
+        : await p.inbox.send({ channel: "sms", contactId: to.contactId, body: body.trim() });
       if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
       p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
       onClose();
     } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
     finally { setBusy(null); }
   };
-  const row = "flex items-center gap-3 border-b py-2";
+  const row = "flex items-center gap-3 border-b py-1.5";
+  // Room inside each box, and a soft fill instead of the heavy focus frame.
+  const field = "h-10 min-w-0 flex-1 rounded-md bg-transparent px-2.5 outline-none! hover:bg-background focus:bg-background";
+  const ai = async (mode: "fix" | "shorter") => {
+    setBusy("ai");
+    const r = await p.inbox.improve(kind === "email" ? body : plain, kind === "email" ? "email" : "sms", mode).catch(() => null);
+    setBusy(null);
+    if (r?.changed) put(kind === "email" ? (looksLikeHtml(r.text) ? r.text : plainTextToHtml(r.text)) : r.text);
+    p.pushToast(!r ? "Couldn't do that." : !r.changed ? (mode === "shorter" ? "It's already short." : "Looks good already.") : mode === "shorter" ? "Made it shorter" : "Fixed spelling and grammar");
+  };
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-4 py-5 sm:px-5 lg:px-7">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <button onClick={onClose} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">← Back</button>
         <h1 className="text-[26px] font-extrabold">New message</h1>
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
-          <button onClick={() => { setKind("email"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "email" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>✉️ Email</button>
-          <button onClick={() => { setKind("text"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "text" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>💬 Text</button>
-          <button onClick={() => { setKind("team"); setTo(null); }} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "team" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>🤝 Team</button>
+          <button onClick={() => switchKind("email")} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "email" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>✉️ Email</button>
+          <button onClick={() => switchKind("text")} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "text" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>💬 Text</button>
+          <button onClick={() => switchKind("team")} className={`rounded-md px-3 py-1.5 font-semibold ${kind === "team" ? "bg-surface ring-1 ring-[var(--border)]" : ""}`}>🤝 Team</button>
         </span>
       </div>
       {kind === "team" ? <TeamNew p={p} onClose={onClose} /> : <>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex min-h-0 min-w-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-          <div className="mb-1 text-muted">{kind === "email" ? "From your Gmail" : "From the contact's GoHighLevel number"}</div>
+      {/* Side by side only when the conversation area has the room, not the window. */}
+      <div className="@container">
+      <div className="grid grid-cols-1 items-start gap-4 @min-[880px]:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex min-w-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+          <div className={row}><span className="w-16 shrink-0 text-muted">From</span><span className="min-w-0 flex-1 truncate px-2.5">{kind === "email" ? (p.me.email ?? "Your Gmail") : "Their sub-account's GoHighLevel number"}</span></div>
           <div className={`relative ${row}`}>
             <span className="w-16 shrink-0 text-muted">To</span>
             {to ? (
-              <span className="flex min-w-0 flex-1 items-center gap-2"><span className="truncate rounded-full bg-accent-soft px-3 py-1 font-semibold text-accent">{to.name}{to.name !== to.address ? ` · ${to.address}` : ""}</span><button onClick={() => setTo(null)} aria-label="Remove" className="text-muted">✕</button></span>
+              <span className="flex min-w-0 flex-1 items-center gap-2 px-1"><span className="truncate rounded-full bg-accent-soft px-3 py-1 font-semibold text-accent">{to.name}{to.name !== to.address ? ` · ${to.address}` : ""}</span><button onClick={() => setTo(null)} aria-label="Remove" className="text-muted">✕</button></span>
             ) : (
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={kind === "email" ? "Search contacts, or type an email" : "Search contacts by name or phone"}
                 onKeyDown={(e) => { if (e.key === "Enter" && typedEmail) { setTo({ name: typedEmail, address: typedEmail }); setQ(""); } }}
-                className="h-9 min-w-0 flex-1 bg-transparent outline-none" />
+                className={field} />
             )}
             {kind === "email" && <button onClick={() => setCcOpen(!ccOpen)} className="shrink-0 rounded-md px-2 py-1 font-semibold text-accent hover:bg-background">CC / BCC</button>}
             {!to && (hits.length > 0 || typedEmail) && (
@@ -2167,35 +2193,52 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             )}
           </div>
           {kind === "email" && ccOpen && <>
-            <label className={row}><span className="w-16 shrink-0 text-muted">CC</span><input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Add people, separated by commas" className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>
-            <label className={row}><span className="w-16 shrink-0 text-muted">BCC</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Add people, separated by commas" className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>
+            <label className={row}><span className="w-16 shrink-0 text-muted">CC</span><input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Add people, separated by commas" className={field} /></label>
+            <label className={row}><span className="w-16 shrink-0 text-muted">BCC</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Add people, separated by commas" className={field} /></label>
           </>}
-          {kind === "email" && <label className={row}><span className="w-16 shrink-0 text-muted">Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} className="h-9 min-w-0 flex-1 bg-transparent outline-none" /></label>}
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder={kind === "email" ? "Write your email" : "Write a text"} className="min-h-48 w-full flex-1 resize-none bg-transparent py-3 leading-relaxed outline-none" />
+          {kind === "email" && <label className={row}><span className="w-16 shrink-0 text-muted">Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="What it's about" className={field} /></label>}
+          {kind === "email" ? (
+            <div className="flex-1 pt-2 [&_.rte-content]:min-h-48 [&_.ProseMirror]:px-2.5 [&_.ProseMirror]:outline-none! [&_.rte-toolbar]:border-0"
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}
+              onDropCapture={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); upload(e.dataTransfer.files); } }}>
+              <RichTextEditor key={`new-${nonce}`} variant="email" value={body} onChange={setBody} placeholder="Write your email" />
+              <div className="mt-1 border-t border-dashed px-2.5 pt-2 text-muted">
+                {signature.trim()
+                  ? <div className="opacity-70 [&_a]:underline" title="Your signature, added when it sends. Change it in Settings." dangerouslySetInnerHTML={{ __html: looksLikeHtml(signature) ? signature : plainTextToHtml(signature) }} />
+                  : <span>No signature yet. Add one in Settings and it goes on every email.</span>}
+              </div>
+            </div>
+          ) : (
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a text"
+              onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}
+              className="min-h-48 w-full flex-1 resize-none rounded-md bg-transparent px-2.5 py-3 leading-relaxed outline-none!" />
+          )}
           {files.length > 0 && <div className="flex flex-wrap gap-2 pb-2">{files.map((f) => <span key={f.id} className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 ring-1 ring-[var(--border)]">{f.kind === "image" ? "🖼️" : "📄"} {f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`Remove ${f.name}`} className="text-muted">✕</button></span>)}</div>}
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             {kind === "email" && <>
-              <button onClick={() => fileRef.current?.click()} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
+              <button onClick={() => fileRef.current?.click()} title="Attach files (or drag them onto the email)" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
               <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
             </>}
-            <button disabled={busy !== null || !body.trim()} onClick={async () => { setBusy("ai"); const r = await p.inbox.improve(body, kind === "email" ? "email" : "sms").catch(() => null); setBusy(null); if (r?.changed) setBody(r.text); p.pushToast(r ? (r.changed ? "Fixed spelling and grammar" : "Looks good already") : "Couldn't improve it"); }} className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Improving…" : "✨ Improve with AI"}</button>
+            <button disabled={busy !== null || !hasText} onClick={() => ai("fix")} title="Fix spelling and grammar" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Working…" : "✨ Improve"}</button>
+            <button disabled={busy !== null || !hasText} onClick={() => ai("shorter")} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">✂️ Shorter</button>
             <span className="flex-1" />
             {kind === "text" && <span className="tabular-nums text-muted">{body.length} / 160</span>}
-            <button disabled={busy !== null || !to || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
+            <button disabled={busy !== null || !to || !hasText} onClick={send} title="Send (⌘Enter)" className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
           </div>
         </div>
         <aside className="min-w-0 space-y-3">
           <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-            <div className="mb-2 text-[14px] font-bold tracking-wide text-accent">LINK TO A TASK</div>
+            <div className="mb-2 text-[14px] font-bold tracking-wide text-muted">LINK TO A TASK</div>
             {task ? (
               <div className="flex items-start gap-2 rounded-lg bg-success-soft px-3 py-2.5"><span className="min-w-0 flex-1"><b className="block">{task.title}</b><span className="text-[14px] text-muted">{p.clientName(task.clientId)}</span></span><button onClick={() => setTask(null)} aria-label="Remove" className="text-muted">✕</button></div>
             ) : <>
-              <p className="mb-2 text-muted">Optional. Replies land on the task too.</p>
+              <p className="mb-2 text-muted">Optional. Their replies land on the task too.</p>
               <input value={taskQ} onChange={(e) => setTaskQ(e.target.value)} placeholder="Search tasks" className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
               <div className="mt-1.5 space-y-1">{taskHits.map((t) => <button key={t.id} onClick={() => { setTask(t); setTaskQ(""); }} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">{t.title}<span className="block text-[14px] text-muted">{p.clientName(t.clientId)}</span></button>)}</div>
             </>}
           </div>
         </aside>
+      </div>
       </div>
       </>}
     </div>
