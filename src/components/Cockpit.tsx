@@ -2313,14 +2313,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               open all day; the directory of every client is still there, one
               click back through a client's breadcrumb, and adding a client now
               happens here so there was nothing left to come to it for. */}
-          {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text). */}
-          <div className="grid grid-cols-2 gap-1">
+          {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
+              then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
+          <div className="grid grid-cols-4 gap-1">
             <button onClick={() => goToView("inbox")} title="Inbox: your email, texts and task chats (press 6)" aria-label="Inbox"
               className={`relative grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "inbox" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>
               📥{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-2 top-1 rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
             </button>
             <button onClick={() => goToView("calendar")} title="Calendar: the next two weeks, from GoHighLevel" aria-label="Calendar"
               className={`grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "calendar" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>📅</button>
+            {([["c_agency", "7B0Y8xCOblcTHzYnM1Kc", "Agency", "🏢"], ["c_directory", "GN4HK1ybbTBWcolEjLHl", "Directory", "📍"]] as const).map(([cid, fallback, label, icon]) => (
+              <a key={cid} href={`https://app.gohighlevel.com/v2/location/${clientById(cid)?.ghlLocationId || fallback}/dashboard`} target="_blank" rel="noopener noreferrer"
+                title={`Open the ${label} sub-account in GoHighLevel`} aria-label={`${label} in GoHighLevel`}
+                className="grid h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background">{icon}</a>
+            ))}
           </div>
           <SideItem active={myWork} title="Clients (press 1)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is

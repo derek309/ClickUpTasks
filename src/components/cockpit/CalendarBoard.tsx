@@ -221,8 +221,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                 {/* The whole name, a size smaller (Derek, 2026-10-05: no cut off titles). */}
                 {/* The name opens the booking page (Derek, 2026-10-05: no separate arrow). */}
                 <a href={r.url} target="_blank" rel="noopener noreferrer" title={`Open the ${r.label} booking page`}
-                  className={`block text-[15px] font-semibold leading-snug hover:text-accent hover:underline ${isHidden ? "text-muted" : ""}`}>{r.label}{r.calendarId === defaultCalendarId && <span className="ml-1 text-[14px] font-normal text-muted">(default)</span>}</a>
-                <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
+                  className={`block text-[15px] font-semibold leading-snug hover:text-accent hover:underline ${isHidden ? "text-muted" : ""}`}>{r.label}</a>
+                <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}{r.calendarId === defaultCalendarId ? " · default" : ""}</span>
               </span>
               {onSetStarred && <button onClick={() => toggleStar(r.calendarId)} title={starred.has(r.calendarId) ? "Starred. Click to unstar." : "Star it to keep it at the top"} aria-pressed={starred.has(r.calendarId)}
                 className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-[18px] hover:bg-background ${starred.has(r.calendarId) ? "text-amber-500" : "text-muted/70 hover:text-foreground"}`}>{starred.has(r.calendarId) ? "★" : "☆"}</button>}
