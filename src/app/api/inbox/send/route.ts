@@ -47,6 +47,10 @@ type Body = {
 // The sender's GoHighLevel Auto BCC Sync address for the sub-account the
 // contact lives in: Directory for a listed business, else Agency (Derek's rule:
 // Agency for anyone buying from us). Saved by each person in Inbox Settings.
+// Used when nobody has saved one (Derek, 2026-10-05: "it just works because
+// we're used to using it"). The setting still overrides it.
+const DEFAULT_GHL_BCC = "GN4HK1ybbTBWcolEjLHl@email.usercontent.site";
+
 async function ghlBccFor(memberId: string | null, contactId: string | null): Promise<string | null> {
   if (!memberId) return null;
   // The address is the sub-account's (its id @email.usercontent.site), the same
@@ -56,7 +60,6 @@ async function ghlBccFor(memberId: string | null, contactId: string | null): Pro
   const all = ((rows ?? []) as any[]).map((r) => ({ mine: r.member_id === memberId, bcc: (r.prefs?.ghlBcc ?? {}) as { agency?: string; directory?: string } }));
   const pick = (k: "agency" | "directory") => [...all.filter((x) => x.mine), ...all.filter((x) => !x.mine)].map((x) => (x.bcc[k] ?? "").trim()).find(Boolean) ?? "";
   const saved = { agency: pick("agency"), directory: pick("directory") };
-  if (!saved.agency && !saved.directory) return null;
   let which: "agency" | "directory" = "agency";
   if (contactId) {
     const { data: c } = await supabaseAdmin.from("contacts").select("ghl_contact_id").eq("id", contactId).maybeSingle();
@@ -66,7 +69,7 @@ async function ghlBccFor(memberId: string | null, contactId: string | null): Pro
       if (dir?.ghl_location_id && dir.ghl_location_id === home.locationId) which = "directory";
     }
   }
-  const addr = (saved[which] || "").trim();
+  const addr = (saved[which] || DEFAULT_GHL_BCC).trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) ? addr : null;
 }
 
