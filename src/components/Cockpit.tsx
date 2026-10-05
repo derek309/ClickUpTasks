@@ -962,8 +962,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Toasts with an action (undo) linger ~4x longer — 2.8s is not enough time
   // to read what happened and decide to reverse it.
-  const pushToast = (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => {
+  // quiet: no toast, but ⌘Z can still undo it (Derek, 2026-10-05: deleting
+  // fast stacked a toast per conversation; the Trash keeps them anyway).
+  const pushToast = (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }, opts?: { quiet?: boolean }) => {
     const id = newId("toast_");
+    if (opts?.quiet) { if (action && /^undo$/i.test(action.label)) rememberUndo(lastUndoRef, id, action.run); return; }
     const lifetime = action ? 11000 : 2800;
     setToasts((t) => [...t, { id, text, action, secondaryAction }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), lifetime);

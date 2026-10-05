@@ -44,7 +44,7 @@ export type InboxViewProps = {
   onSendChat: (t: InboxThread, body: string) => Promise<void>;
   /** Send later, for a client's conversation (the app's scheduled sends). */
   onSchedule: ((t: InboxThread, body: string, at: Date) => Promise<void>) | null;
-  pushToast: (text: string, action?: { label: string; run: () => void }) => void;
+  pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }, opts?: { quiet?: boolean }) => void;
   /** For Add to a client and a new text. */
   clients: { id: string; name: string }[];
   canAdmin: boolean;
@@ -86,7 +86,10 @@ export default function InboxView(p: InboxViewProps) {
   const [folder, setFolder] = useState<Folder | "settings">("inbox");
   const [q, setQ] = useState("");
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+  // The highlighted row, and where it was: when it leaves the list (archived,
+  // deleted, snoozed) the one that slides into its place is highlighted, so you
+  // work down the list without reaching for the mouse (Derek, 2026-10-05).
+  const [cursorAt, setCursorAt] = useState<{ key: string | null; i: number }>({ key: null, i: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pulling, setPulling] = useState(false);
   const [composeNew, setComposeNew] = useState<false | NewStart>(false);
@@ -115,6 +118,9 @@ export default function InboxView(p: InboxViewProps) {
     return folder === "starred" ? list : [...list.filter((t) => t.starred), ...list.filter((t) => !t.starred)];
   }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
+  const cursor = cursorAt.key && visible.some((t) => t.key === cursorAt.key) ? cursorAt.key
+    : cursorAt.key ? visible[Math.min(cursorAt.i, visible.length - 1)]?.key ?? null : null;
+  const setCursor = (key: string | null) => setCursorAt({ key, i: Math.max(0, visible.findIndex((t) => t.key === key)) });
 
   const count = (f: Folder) => f === "drafts" ? drafts.size : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
 
@@ -127,7 +133,14 @@ export default function InboxView(p: InboxViewProps) {
   const del = async (keys: string[], restore = false) => {
     const { undo, gmailNote } = await inbox.trash(keys, restore);
     const what = keys.length > 1 ? `${keys.length} conversations` : "Conversation";
-    undoToast(restore ? `${what} restored` : `${what} moved to Trash${gmailNote ? ` (Gmail: ${gmailNote})` : ""}`, undo);
+    // A delete shows nothing: the Trash keeps it, and ⌘Z still brings the last one back.
+    p.pushToast(restore ? `${what} restored` : `${what} moved to Trash${gmailNote ? ` (Gmail: ${gmailNote})` : ""}`, { label: "Undo", run: () => { undo(); } }, undefined, { quiet: !restore && !gmailNote });
+  };
+  // From the list, S or the row's ⏰: until tomorrow morning.
+  const snoozeRow = async (key: string) => {
+    const until = snoozeUntil("tomorrow");
+    const undo = await inbox.snooze([key], until);
+    undoToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, undo);
   };
   const openThread = (t: InboxThread) => {
     setOpenKey(t.key); setCursor(t.key); setComposeNew(false);
@@ -137,7 +150,7 @@ export default function InboxView(p: InboxViewProps) {
     if (!visible.length) return;
     const cur = openKey ?? cursor;
     const i = visible.findIndex((t) => t.key === cur);
-    const n = visible[Math.min(visible.length - 1, Math.max(0, i < 0 ? 0 : i + d))];
+    const n = visible[i < 0 ? 0 : Math.min(visible.length - 1, Math.max(0, i + d))];
     if (openKey) openThread(n); else setCursor(n.key);
   };
   const back = () => { if (openKey) setCursor(openKey); setOpenKey(null); setComposeNew(false); };
@@ -153,14 +166,15 @@ export default function InboxView(p: InboxViewProps) {
       // A panel or photo open over the Inbox has the keys (its arrows are its own).
       if (document.querySelector('.inbox-slide, [role="dialog"]')) return;
       const k = e.key.toLowerCase();
-      if (k === "arrowright") { e.preventDefault(); step(1); }
-      else if (k === "arrowleft") { e.preventDefault(); step(-1); }
+      if (k === "arrowright" || (k === "arrowdown" && !openKey)) { e.preventDefault(); step(1); }
+      else if (k === "arrowleft" || (k === "arrowup" && !openKey)) { e.preventDefault(); step(-1); }
       else if ((k === " " || k === "enter") && !openKey && cursor) { e.preventDefault(); const t = visible.find((x) => x.key === cursor); if (t) openThread(t); }
       else if (k === "escape" && openKey) back();
       else if (k === "e" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); done([key]); }
       else if (k === "d" && (open || cursor)) { e.preventDefault(); const key = open?.key ?? cursor!; if (open) back(); del([key]); }
       else if (k === "r" && open) { e.preventDefault(); if (open.unread) inbox.markRead([open.key]); else inbox.markUnread([open.key]); }
       else if (k === "s" && open) { e.preventDefault(); setSnoozeOpen(true); }
+      else if (k === "s" && cursor) { e.preventDefault(); snoozeRow(cursor); }
       else if (k === "t" && open) { e.preventDefault(); linkSearchRef.current?.focus(); }
       else if (k === "f" && (open || cursor)) { e.preventDefault(); const t = open ?? visible.find((x) => x.key === cursor); if (t) inbox.star([t.key], !t.starred); }
     };
@@ -242,13 +256,13 @@ export default function InboxView(p: InboxViewProps) {
                         onCheck={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(t.key); else n.delete(t.key); return n; })}
                         onOpen={() => openThread(t)} picking={selected.size > 0}
                         onArchive={() => done([t.key])} onDelete={() => del([t.key], t.trashed)}
-                        onSnooze={async () => { const until = snoozeUntil("tomorrow"); const undo = await inbox.snooze([t.key], until); undoToast(`Snoozed until ${until.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`, undo); }} />
+                        onSnooze={() => snoozeRow(t.key)} />
                     </div>
                   );
                 })}
               </div>
               <div className="hidden gap-4 border-t bg-background/40 px-5 py-2 text-[14px] text-muted lg:flex">
-                <span><Kbd>→</Kbd> Next</span><span><Kbd>←</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Archive</span><span><Kbd>F</Kbd> Star</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
+                <span><Kbd>↓</Kbd> Next</span><span><Kbd>↑</Kbd> Previous</span><span><Kbd>Space</Kbd> Open</span><span><Kbd>E</Kbd> Archive</span><span><Kbd>F</Kbd> Star</span><span><Kbd>D</Kbd> Delete</span><span><Kbd>R</Kbd> Read</span><span><Kbd>S</Kbd> Snooze</span><span><Kbd>T</Kbd> Link task</span>
               </div>
             </>
           )}
@@ -302,8 +316,11 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
   // Room between them so a quick move doesn't hit the wrong one (Derek, 2026-10-02).
   const act = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
   const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
+  // The highlighted row stays on screen as the arrows move it.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (active) ref.current?.scrollIntoView({ block: "nearest" }); }, [active]);
   return (
-    <div onClick={onOpen} className={`group relative grid cursor-pointer grid-cols-[40px_minmax(0,1fr)] items-center gap-3 border-b px-5 py-2.5 ${checked ? "bg-accent-soft" : active ? "bg-accent-soft/60" : "hover:bg-background/60"}`}>
+    <div ref={ref} onClick={onOpen} aria-current={active || undefined} className={`group relative grid cursor-pointer grid-cols-[40px_minmax(0,1fr)] items-center gap-3 border-b px-5 py-2.5 ${checked ? "bg-accent-soft" : active ? "bg-accent-soft/60 shadow-[inset_3px_0_0_var(--accent)]" : "hover:bg-background/60"}`}>
       {t.unread && <span aria-label="Unread" className="absolute left-1.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-[#2563eb]" />}
       <span className="relative h-10 w-10">
         <span className={picking || checked ? "invisible" : "group-hover:invisible"}><Avatar t={t} /></span>
@@ -898,10 +915,11 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
   return (
     <>
       {!showImages && (
-        <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-background px-3 py-2 text-muted">
-          <span><span className="sm:hidden">Pictures hidden.</span><span className="hidden sm:inline">Pictures are hidden so the sender can&apos;t tell you opened this.</span></span>
-          <button onClick={() => setImagesOn(true)} className="font-semibold text-accent hover:underline">Show<span className="hidden sm:inline"> pictures</span></button>
-          {sender && <button onClick={() => p.setPrefs({ imageSenders: [...(p.prefs.imageSenders ?? []), sender] })} title={`Always show pictures from ${sender}`} className="font-semibold text-accent hover:underline">Always<span className="hidden sm:inline"> show from {sender}</span></button>}
+        // One short line (Derek, 2026-10-05); the why and the address are in the hover.
+        <div className="mb-2 flex items-center gap-4 whitespace-nowrap rounded-lg bg-background px-3 py-1.5 text-muted" title="Pictures are hidden so the sender can't tell you opened this.">
+          <span>🖼 Pictures hidden</span>
+          <button onClick={() => setImagesOn(true)} className="font-semibold text-accent hover:underline">Show</button>
+          {sender && <button onClick={() => p.setPrefs({ imageSenders: [...(p.prefs.imageSenders ?? []), sender] })} title={`Always show pictures from ${sender}`} className="font-semibold text-accent hover:underline">Always show from this sender</button>}
         </div>
       )}
       <div className="overflow-hidden bg-white">
