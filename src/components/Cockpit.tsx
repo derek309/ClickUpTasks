@@ -2324,19 +2324,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
           <div className="grid grid-cols-4 gap-1">
-            <button onClick={() => goToView("inbox")} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
+            {/* Links, so right click offers new tab, new window or side panel (Derek, 2026-10-05). */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
+            <a href="/?view=mail" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); goToView("inbox"); }} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
               className={`relative grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "inbox" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>
               📥{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-2 top-1 rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
-            </button>
-            <button onClick={() => goToView("calendar")} title="Calendar: the next two weeks, from GoHighLevel" aria-label="Calendar"
-              className={`grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "calendar" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>📅</button>
+            </a>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
+            <a href="/?view=calendar" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); goToView("calendar"); }} title="Calendar: the next two weeks, from GoHighLevel" aria-label="Calendar"
+              className={`grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "calendar" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>📅</a>
             {([["c_agency", "7B0Y8xCOblcTHzYnM1Kc", "Agency", "🏢"], ["c_directory", "GN4HK1ybbTBWcolEjLHl", "Directory", "📍"]] as const).map(([cid, fallback, label, icon]) => (
               <a key={cid} href={`https://app.gohighlevel.com/v2/location/${clientById(cid)?.ghlLocationId || fallback}/dashboard`} target="_blank" rel="noopener noreferrer"
                 title={`Open the ${label} sub-account in GoHighLevel`} aria-label={`${label} in GoHighLevel`}
                 className="grid h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background">{icon}</a>
             ))}
           </div>
-          <SideItem active={myWork} title="Clients (press 2)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
+          <SideItem href="/?view=work" active={myWork} title="Clients (press 2)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
               shortcut at first, to avoid shifting every row below it down one
@@ -2347,16 +2350,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 3)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
+          <SideItem href="/" active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 3)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
               own task-driven tiers); a third place to check the same signal
               was redundant, not additional coverage. */}
           {clients.some((c) => c.id === WORKSPACE_CLIENT_ID) && (
-            <SideItem active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
+            <SideItem href="/?view=projects" active={dirView === "projects"} title="Projects (press 4)" onClick={() => goToView("projects")}><I.folder className="text-muted" /> <span>Projects</span><span className="ml-auto text-[13px] text-muted">{workspaceProjects.length}</span></SideItem>
           )}
-          <SideItem active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
+          <SideItem href="/?view=personal" active={personalView} title="Personal (press 5)" onClick={() => goToView("personal")}><I.check className="text-muted" /> <span>Personal</span><span className="ml-auto text-[13px] text-muted">{myPersonalTasks.filter((t) => t.status !== "done").length}</span></SideItem>
           {/* Teammate chats sit under Personal rather than between the work
               views (Derek, 2026-09-28): they are people, not places work
               lives, and they were splitting My Work and All Tasks off from
@@ -2379,7 +2382,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
-                  <SideItem key={c.id} active={active} drag={pinDrag("client", c.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={c.id} href={`/?client=${encodeURIComponent(c.id)}`} active={active} drag={pinDrag("client", c.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
                     <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
@@ -2393,7 +2396,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 // subtitle for the same ambiguity.
                 const clientName = clientById(p.clientId)?.name;
                 return (
-                  <SideItem key={p.id} active={active} drag={pinDrag("list", p.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                  <SideItem key={p.id} href={`/?client=${encodeURIComponent(p.clientId)}&project=${encodeURIComponent(p.id)}`} active={active} drag={pinDrag("list", p.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(p.clientId); setActiveProject(p.id); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <I.list className="shrink-0 text-muted" />
                     <span className="min-w-0 flex-1 text-left">
                       {clientName && <span className="block truncate text-[11px] leading-tight text-muted">{clientName}</span>}

@@ -106,19 +106,29 @@ export function kindFromName(name: string): Attachment["kind"] {
 
 // --- small building blocks --------------------------------------------------
 
-export function SideItem({ active, onClick, children, title, drag }: {
+export function SideItem({ active, onClick, children, title, drag, href }: {
   active: boolean; onClick: () => void; children: React.ReactNode; title?: string;
   /** Pinned rows are draggable so they can be put in the order you want
    *  (Derek, 2026-09-28). Passed straight through to the button, so a row
    *  without it behaves exactly as it always did. */
   drag?: { draggable: boolean; onDragStart: () => void; onDragEnd: () => void; onDragOver: (e: React.DragEvent) => void; onDrop: (e: React.DragEvent) => void; dragging?: boolean; over?: boolean };
+  /** Its address (Derek, 2026-10-05): a real link, so right click offers the
+   *  browser's own Open in new tab, new window or side panel, and ⌘ or Ctrl
+   *  click opens it in a new tab. A plain click still moves in the app. */
+  href?: string;
 }) {
+  const className = `flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${drag?.dragging ? "opacity-40" : ""} ${drag?.over ? "ring-2 ring-accent" : ""}`;
+  const dragProps = { draggable: drag?.draggable, onDragStart: drag?.onDragStart, onDragEnd: drag?.onDragEnd, onDragOver: drag?.onDragOver, onDrop: drag?.onDrop };
+  if (href) {
+    return (
+      <a href={href} title={title} {...dragProps} className={className}
+        onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); onClick(); }}>
+        {children}
+      </a>
+    );
+  }
   return (
-    <button onClick={onClick} title={title}
-      draggable={drag?.draggable}
-      onDragStart={drag?.onDragStart} onDragEnd={drag?.onDragEnd}
-      onDragOver={drag?.onDragOver} onDrop={drag?.onDrop}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[15px] transition ${active ? "bg-accent-soft font-medium text-accent" : "text-foreground hover:bg-background"} ${drag?.dragging ? "opacity-40" : ""} ${drag?.over ? "ring-2 ring-accent" : ""}`}>
+    <button onClick={onClick} title={title} {...dragProps} className={className}>
       {children}
     </button>
   );

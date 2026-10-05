@@ -111,7 +111,7 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
     <>
       <div className="fixed inset-0 z-[60] bg-black/30" onClick={onClose} />
       <div role="dialog" aria-label={target.kind === "book" ? `Book ${target.name}` : "Move appointment"}
-        className="fixed left-1/2 top-20 z-[61] grid max-h-[80vh] w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-surface text-[16px] shadow-2xl ring-1 ring-[var(--border)]">
+        className="fixed left-1/2 top-20 z-[61] grid max-h-[80vh] w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-surface text-[16px] shadow-2xl ring-1 ring-[var(--border)]">
         <div className="flex items-start gap-3 border-b px-5 py-4">
           <div className="min-w-0 flex-1">
             <h2 className="text-[20px] font-bold leading-tight">{target.kind === "book" ? `Book ${target.name}` : `Move: ${target.title}`}</h2>
@@ -119,14 +119,14 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-md px-2 py-1 text-muted hover:bg-background">✕</button>
         </div>
-        <div className="grid content-start gap-3 overflow-y-auto px-5 py-4">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-3 overflow-y-auto px-5 py-4">
           {target.kind === "book" && (
             calendars === null ? <div className="text-muted">Reading the calendars…</div>
               : !calendars.length ? <div className="text-muted">No calendar in their sub-account to book on.</div>
               : (
-                <label className="grid gap-1">
+                <label className="grid min-w-0 gap-1">
                   <span className="font-semibold">Calendar</span>
-                  <span className="flex gap-2">
+                  <span className="flex min-w-0 gap-2">
                     <select value={calendarId} onChange={(e) => pickCalendar(e.target.value)} className="h-10 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
                       {calendars.map((c) => <option key={c.calendarId} value={c.calendarId}>{c.calendarId === defaultCalendarId ? "★ " : ""}{c.label}{c.minutes ? ` (${c.minutes} min)` : ""}</option>)}
                     </select>
