@@ -156,6 +156,9 @@ function rememberUndo(ref: { current: LastUndo | null }, id: string, run: () => 
 const undoTooOld = (at: number) => Date.now() - at > 60_000;
 
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  // Your sign in address, which is your Gmail: shown as From in the Inbox.
+  const [myEmail, setMyEmail] = useState<string | null>(null);
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setMyEmail(data.user?.email ?? null)).catch(() => {}); }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -2649,7 +2652,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">
-            <InboxView inbox={inbox} me={{ id: me.id, name: me.name }} team={users.map((u) => ({ id: u.id, name: u.name }))}
+            <InboxView inbox={inbox} me={{ id: me.id, name: me.name, email: myEmail }} team={users.map((u) => ({ id: u.id, name: u.name }))}
               prefs={inboxPrefs} setPrefs={setInboxPrefs} clientName={(id) => (id ? clientById(id)?.name ?? null : null)}
               tasks={tasks} onOpenTask={(id, from) => { setInboxBackLabel(from ?? null); setOpenTaskId(id); }} onNewTask={newTaskFromThread}
               onUpload={uploadOneImage} onSignedUrl={(path) => signedUrlForFile(path)}

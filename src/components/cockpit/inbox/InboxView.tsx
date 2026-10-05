@@ -1332,7 +1332,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         onKeyDown={compact ? (e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } : undefined}
         // Under a chat it starts at one line and grows with what you write, up to about six.
         ref={compact ? (el) => { if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 168)}px`; } } : undefined}
-        className={compact ? "w-full resize-none overflow-y-auto rounded-2xl bg-background px-4 py-2.5 leading-relaxed outline-none ring-1 ring-[var(--border)] focus:ring-accent" : "mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none"} />}
+        className={compact ? "w-full resize-none overflow-y-auto rounded-lg bg-background px-4 py-2.5 leading-relaxed outline-none ring-1 ring-[var(--border)] focus:ring-accent" : "mt-1 w-full resize-y bg-transparent py-2 leading-relaxed outline-none"} />}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2 pb-2">
           {files.map((f) => <span key={f.id} className="flex items-center gap-2 rounded-lg bg-background px-3 py-1.5 ring-1 ring-[var(--border)]">{f.kind === "image" ? "🖼️" : "📄"} {f.name}<button onClick={() => setFiles((x) => x.filter((y) => y.id !== f.id))} aria-label={`Remove ${f.name}`} className="text-muted">✕</button></span>)}
@@ -2393,7 +2393,7 @@ function InboxSettings(p: InboxViewProps) {
           <Switch on={prefs.sound} set={(v) => setPrefs({ sound: v })} label="Play a sound" />
         </Box>
         <Box title="Where messages come from" help="Your Gmail is read every 15 minutes, and GoHighLevel 7 minutes after. Tokens are in Settings, Integrations.">
-          <div>✉️ <b>Gmail</b>: {p.me.email}</div>
+          <div>✉️ <b>Gmail</b>: {p.me.email ? `${p.me.email}, every tab (Primary to Inbox, the rest to Updates)` : "your Google Workspace mailbox, every tab"}</div>
           <div>💬 <b>GoHighLevel</b>: texts, calls, Facebook, Instagram, website chat and Google Business, for every connected sub-account</div>
         </Box>
       </div>
