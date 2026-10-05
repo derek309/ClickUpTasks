@@ -1990,11 +1990,14 @@ function TeamNew({ p, onClose }: { p: InboxViewProps; onClose: () => void }) {
   const [to, setTo] = useState<string>(others[0]?.id ?? "all");
   const [q, setQ] = useState("");
   const [taskId, setTaskId] = useState<string | null>(null);
+  // The task is optional, so its search stays folded until asked for
+  // (Derek, 2026-10-05: "I'm not sure what to do on this page").
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const open = p.tasks.filter((t) => t.status !== "done" && !t.private);
-  const hits = (words.length ? open.filter((t) => words.every((w) => `${t.title} ${p.clientName(t.clientId) ?? ""}`.toLowerCase().includes(w))) : open.filter((t) => t.assigneeId === to || t.assigneeId === p.me.id)).slice(0, 5);
+  const hits = (words.length ? open.filter((t) => words.every((w) => `${t.title} ${p.clientName(t.clientId) ?? ""}`.toLowerCase().includes(w))) : open.filter((t) => t.assigneeId === to || t.assigneeId === p.me.id)).slice(0, 3);
   const picked = taskId ? p.tasks.find((t) => t.id === taskId) ?? null : null;
   const name = (id: string) => p.team.find((m) => m.id === id)?.name ?? "";
   const send = async () => {
@@ -2010,38 +2013,52 @@ function TeamNew({ p, onClose }: { p: InboxViewProps; onClose: () => void }) {
     finally { setBusy(false); }
   };
   const chip = (on: boolean) => `inline-flex items-center gap-2 rounded-full py-1 pl-1 pr-3 font-semibold ring-1 ${on ? "bg-accent-soft text-accent ring-accent" : "ring-[var(--border)] hover:bg-background"}`;
+  const first = (id: string) => name(id).split(/\s+/)[0];
+  // Where it goes, said plainly before you send.
+  const where = picked
+    ? (to === "all" ? `Posts in the chat on "${picked.title}". Everyone on the task sees it there.` : `Posts in the chat on "${picked.title}" and tags ${first(to)}, so it lands in their Inbox. It stays with the task.`)
+    : to === "all" ? "Goes to the team group chat. Everyone sees it in their Inbox, under Team." : `A private message to ${first(to)}. Only the two of you see it, in your Inboxes under Team.`;
   return (
-    <div className="grid max-w-2xl gap-3 rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-      <span className="text-muted">To</span>
-      <div className="flex flex-wrap gap-2">
-        {others.map((m) => (
-          <button key={m.id} onClick={() => setTo(m.id)} className={chip(to === m.id)}>
-            <span className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>{m.name}
-          </button>
-        ))}
-        <button onClick={() => setTo("all")} className={chip(to === "all")}><span className="grid h-7 w-7 place-items-center rounded-full bg-background">🤝</span>Everyone</button>
-      </div>
-      <span className="text-muted">About</span>
-      {picked ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg bg-success-soft px-3 py-2 font-semibold text-success">
-          <span className="min-w-0 truncate">✓ {picked.title}</span>
-          <button onClick={() => setTaskId(null)} aria-label="No task" className="shrink-0 text-muted">✕</button>
-        </div>
-      ) : <>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks (or leave it for no task)" aria-label="Search tasks" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
-        <div className="grid gap-1">
-          {hits.map((t) => (
-            <button key={t.id} onClick={() => { setTaskId(t.id); setQ(""); }} className="rounded-lg px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-accent-soft">
-              <b className="block truncate">✓ {t.title}</b><span className="text-[15px] text-muted">{p.clientName(t.clientId)}</span>
+    <div className="grid max-w-2xl gap-4 rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
+      <div className="grid gap-2">
+        <span className="font-semibold">Who is it for?</span>
+        <div className="flex flex-wrap gap-2">
+          {others.map((m) => (
+            <button key={m.id} onClick={() => setTo(m.id)} className={chip(to === m.id)}>
+              <span className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>{m.name}
             </button>
           ))}
+          <button onClick={() => setTo("all")} className={chip(to === "all")}><span className="grid h-7 w-7 place-items-center rounded-full bg-background">🤝</span>Everyone</button>
         </div>
-      </>}
-      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={to === "all" ? "Write to everyone" : `Write to ${name(to).split(/\s+/)[0]}`}
+      </div>
+      <textarea autoFocus value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={to === "all" ? "Write to everyone" : `Write to ${first(to)}`}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}
         className="rounded-lg border bg-surface px-3 py-2 leading-relaxed outline-none focus:border-accent" />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted">{picked ? "Goes in the task's chat" : to === "all" ? "Goes in the team group" : "A direct message"}</span>
-        <button disabled={busy || !body.trim()} onClick={send} className="h-10 rounded-lg bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Sending…" : "Send"}</button>
+      {picked ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-success-soft px-3 py-2 font-semibold text-success">
+          <span className="min-w-0 truncate">📌 About: {picked.title}</span>
+          <button onClick={() => setTaskId(null)} title="Not about a task" aria-label="Not about a task" className="shrink-0 text-muted">✕</button>
+        </div>
+      ) : !aboutOpen ? (
+        <button onClick={() => setAboutOpen(true)} className="justify-self-start font-semibold text-accent hover:underline">📌 Is it about a task? Pick one (optional)</button>
+      ) : (
+        <div className="grid gap-1.5 rounded-lg bg-background p-2.5">
+          <div className="flex items-center gap-2">
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks or clients" aria-label="Search tasks" className="h-10 min-w-0 flex-1 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+            <button onClick={() => { setAboutOpen(false); setQ(""); }} className="shrink-0 px-2 font-semibold text-muted hover:text-foreground">Not about a task</button>
+          </div>
+          {!words.length && hits.length > 0 && <span className="px-1 text-[15px] text-muted">{to === "all" ? "Your open tasks" : `Open tasks for ${first(to)} or you`}</span>}
+          {hits.map((t) => (
+            <button key={t.id} onClick={() => { setTaskId(t.id); setQ(""); setAboutOpen(false); }} className="rounded-lg bg-surface px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-accent-soft">
+              <b className="block truncate">{t.title}</b><span className="text-[15px] text-muted">{p.clientName(t.clientId)}</span>
+            </button>
+          ))}
+          {words.length > 0 && !hits.length && <span className="px-1 text-muted">No open task matches.</span>}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        <span className="min-w-0 flex-1 text-muted">{picked ? "💬" : to === "all" ? "🤝" : "🔒"} {where}</span>
+        <button disabled={busy || !body.trim()} onClick={send} className="h-10 shrink-0 rounded-lg bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Sending…" : picked ? "Post on task" : to === "all" ? "Send to everyone" : `Send to ${first(to)}`}</button>
       </div>
     </div>
   );
