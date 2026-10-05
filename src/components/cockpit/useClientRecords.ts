@@ -25,7 +25,7 @@ export type UseClientRecordsDeps = {
   clientById: (id: string) => Client | null;
 };
 
-export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById }: UseClientRecordsDeps) {
+export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, setDmMessages, notify, setClientNotes, projectById, clientById }: UseClientRecordsDeps) {
   // --- client links -----------------------------------------------------
   const saveLink = (clientId: string, initial: ClientLink | undefined, v: { label: string; url: string; groupLabel: string; color: string }) => {
     if (initial) {
@@ -56,13 +56,6 @@ export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, se
   const sendDmMessage = (otherUserId: string, body: string, attachments?: Attachment[], replyToId?: string | null) => {
     if (!body.trim() && !attachments?.length) return;
     const cid = dmConversationId(me.id, otherUserId);
-    // Only email the FIRST message of a burst — if the newest message in this
-    // thread so far is already mine, the recipient's inbox has been pinged and
-    // a rapid-fire follow-up shouldn't add another email. The in-app bell still
-    // fires every time; a reply from them resets "first of burst".
-    const prior = dmMessages.filter((mm) => mm.conversationId === cid);
-    const newest = prior.length ? prior.reduce((a, b) => (b.at > a.at ? b : a)) : null;
-    const firstOfBurst = !newest || newest.authorId !== me.id;
     const m: DmMessage = { id: newId("dm_"), conversationId: cid, authorId: me.id, recipientId: otherUserId, body: body.trim(), at: new Date().toISOString(), replyToId: replyToId ?? null, attachments: attachments ?? [] };
     setDmMessages((ms) => [...ms, m]);
     insertDmMessage(m);
@@ -72,7 +65,9 @@ export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, se
     // to where the message is"). The recipient is the one reading the mail,
     // so the thread they need is the one with ME in it.
     notify(otherUserId, `${me.name} sent you a message`, null, {
-      kind: "dm", skipEmail: !firstOfBurst, link: `${DM_LINK_PREFIX}&dm=${encodeURIComponent(me.id)}`,
+      // No email when it is sent: the Inbox has it. One that waits 2 hours
+      // unanswered gets a reminder email instead (api/cron/missed-messages).
+      kind: "dm", skipEmail: true, link: `${DM_LINK_PREFIX}&dm=${encodeURIComponent(me.id)}`,
     });
   };
   const deleteDmMessage = (id: string) => {
