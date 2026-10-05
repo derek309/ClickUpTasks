@@ -32,10 +32,12 @@ export type CalendarBoardProps = {
   onRefresh: () => void;
   /** Contacts to book, searched by name, email or company. */
   contacts: { id: string; name: string; email?: string | null; company?: string | null; ghlContactId?: string | null }[];
+  defaultCalendarId?: string | null;
+  onSetDefault?: (id: string | null) => void;
   pushToast: (text: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault }: CalendarBoardProps) {
   // Phase 2 (Derek, 2026-10-05): book, move and cancel, written to GoHighLevel.
   const [booking, setBooking] = useState<BookTarget | null>(null);
   const [findOpen, setFindOpen] = useState(false);
@@ -202,7 +204,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </div>
       </aside>
       </div>
-      {booking && <BookAppointment target={booking} meId={meId} onClose={() => setBooking(null)} onDone={() => { onRefresh(); refreshSoon(); }} pushToast={pushToast} />}
+      {booking && <BookAppointment target={booking} meId={meId} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} onClose={() => setBooking(null)} onDone={() => { onRefresh(); refreshSoon(); }} pushToast={pushToast} />}
     </div>
   );
 }

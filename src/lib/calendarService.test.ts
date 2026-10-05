@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/supabaseAdmin", () => ({ supabaseAdmin: {} }));
 vi.mock("@/lib/ghlTokens", () => ({ configuredLocations: async () => [], tokenForLocation: async () => null }));
-const { normalizeEvent, mergeEvents, isLiveAppointment, bookingUrl, startOfPacificDay, isAllDay, meetingTaskReset } = await import("./calendarService");
+const { normalizeEvent, mergeEvents, isLiveAppointment, bookingUrl, startOfPacificDay, isAllDay, meetingTaskReset, pacificToIso } = await import("./calendarService");
 
 const names = new Map([["cal1", "Derek & Justin"]]);
 const appt = { id: "e1", startTime: "2026-10-06T16:00:00-07:00", endTime: "2026-10-06T16:30:00-07:00", title: "Pamela Macias w/ Derek & Justin", calendarId: "cal1", contactId: "g1", address: "https://zoom.us/j/1", appointmentStatus: "confirmed" };
@@ -57,5 +57,10 @@ describe("calendar events from GoHighLevel", () => {
     expect((r.comments[0] as { body: string }).body).toBe("Meeting on Thu, Oct 8, 1:00 PM cancelled");
     expect(meetingTaskReset({ ...task, due: "2026-10-20" }, "2026-10-08T13:00:00-07:00", "2026-10-05", "x")).toBeNull();
     expect(meetingTaskReset({ ...task, title: "Replied by email" }, "2026-10-08T13:00:00-07:00", "2026-10-05", "x")).toBeNull();
+  });
+  it("turns a typed Pacific date and time into an instant, summer and winter", () => {
+    expect(pacificToIso("2026-10-13", "07:30")).toBe("2026-10-13T14:30:00.000Z");
+    expect(pacificToIso("2026-12-01", "09:00")).toBe("2026-12-01T17:00:00.000Z");
+    expect(pacificToIso("2026-10-13", "7:30")).toBeNull();
   });
 });

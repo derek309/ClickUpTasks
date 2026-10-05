@@ -15,12 +15,24 @@ const dayName = (iso: string) => new Date(iso).toLocaleDateString("en-US", { tim
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
 const LAST_KEY = "cul-calendar-last";
 
+/** A date and time typed in Los Angeles, as an instant (same as calendarService's). */
+function pacificToIso(date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+  const guess = Date.parse(`${date}T${time}:00Z`);
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  const wall = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute));
+  return new Date(guess - (wall - guess)).toISOString();
+}
+
 export type BookTarget =
   | { kind: "book"; ghlContactId: string; name: string }
   | { kind: "move"; appointmentId: string; calendarId: string; name: string; title: string };
 
-export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
+export function BookAppointment({ target, meId, onClose, onDone, pushToast, defaultCalendarId, onSetDefault }: {
   target: BookTarget; meId: string; onClose: () => void; onDone: () => void; pushToast: (text: string) => void;
+  /** The starred calendar it opens on, and how to star another (saved with Inbox settings). */
+  defaultCalendarId?: string | null; onSetDefault?: (id: string | null) => void;
 }) {
   const [calendars, setCalendars] = useState<BookingLink[] | null>(null);
   const [calendarId, setCalendarId] = useState<string>(target.kind === "move" ? target.calendarId : "");
@@ -29,6 +41,11 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Other time (Derek, 2026-10-05): a typed date and time, booked even when it isn't open.
+  const [otherOpen, setOtherOpen] = useState(false);
+  const [otherDate, setOtherDate] = useState("");
+  const [otherTime, setOtherTime] = useState("");
+  const custom = otherOpen && !!picked;
 
   // The calendars this person can be booked on, yours first, one row each.
   useEffect(() => {
@@ -43,10 +60,11 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
       setCalendars(list);
       let last = "";
       try { last = localStorage.getItem(LAST_KEY) ?? ""; } catch { /* private window */ }
-      setCalendarId((cur) => cur || (list.find((l) => l.calendarId === last) ?? list[0])?.calendarId || "");
+      // The starred calendar, else the last one used, else the first.
+      setCalendarId((cur) => cur || (list.find((l) => l.calendarId === defaultCalendarId) ?? list.find((l) => l.calendarId === last) ?? list[0])?.calendarId || "");
     }).catch(() => { if (live) setCalendars([]); });
     return () => { live = false; };
-  }, [target, meId]);
+  }, [target, meId]); // eslint-disable-line react-hooks/exhaustive-deps -- the star is read once, on open
 
   // The open times on the chosen calendar.
   useEffect(() => {
@@ -77,8 +95,8 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
     setBusy(true); setError(null);
     try {
       const r = target.kind === "book"
-        ? await authedFetch("/api/calendar/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ghlContactId: target.ghlContactId, start: picked }) })
-        : await authedFetch("/api/calendar/appointment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target.appointmentId, start: picked }) });
+        ? await authedFetch("/api/calendar/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ghlContactId: target.ghlContactId, start: picked, custom }) })
+        : await authedFetch("/api/calendar/appointment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target.appointmentId, start: picked, custom }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "That didn't work.");
       pushToast(target.kind === "book" ? `Booked ${first} for ${dayName(picked)}, ${timeOf(picked)}` : `Moved to ${dayName(picked)}, ${timeOf(picked)}`);
@@ -108,9 +126,16 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
               : (
                 <label className="grid gap-1">
                   <span className="font-semibold">Calendar</span>
-                  <select value={calendarId} onChange={(e) => pickCalendar(e.target.value)} className="h-10 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
-                    {calendars.map((c) => <option key={c.calendarId} value={c.calendarId}>{c.label}{c.minutes ? ` (${c.minutes} min)` : ""}</option>)}
-                  </select>
+                  <span className="flex gap-2">
+                    <select value={calendarId} onChange={(e) => pickCalendar(e.target.value)} className="h-10 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
+                      {calendars.map((c) => <option key={c.calendarId} value={c.calendarId}>{c.calendarId === defaultCalendarId ? "★ " : ""}{c.label}{c.minutes ? ` (${c.minutes} min)` : ""}</option>)}
+                    </select>
+                    {onSetDefault && calendarId && (
+                      <button type="button" onClick={() => { const on = calendarId !== defaultCalendarId; onSetDefault(on ? calendarId : null); pushToast(on ? `${calName} is your default calendar` : "No default calendar"); }}
+                        title={calendarId === defaultCalendarId ? "Your default calendar. Click to unstar." : "Make this your default calendar"} aria-pressed={calendarId === defaultCalendarId}
+                        className={`grid h-10 w-10 shrink-0 place-items-center rounded-md text-[20px] ring-1 ring-[var(--border)] hover:bg-background ${calendarId === defaultCalendarId ? "text-amber-500" : "text-muted"}`}>{calendarId === defaultCalendarId ? "★" : "☆"}</button>
+                    )}
+                  </span>
                 </label>
               )
           )}
@@ -121,16 +146,29 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast }: {
                 <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{dayName(day[0])}</b>
                 <div className="flex flex-wrap gap-1.5">
                   {day.map((s) => (
-                    <button key={s} onClick={() => setPicked(s)}
+                    <button key={s} onClick={() => { setOtherOpen(false); setPicked(s); }}
                       className={`h-9 rounded-md px-3 font-semibold tabular-nums ring-1 ${picked === s ? "bg-accent text-white ring-accent" : "ring-[var(--border)] hover:bg-background"}`}>{timeOf(s)}</button>
                   ))}
                 </div>
               </div>
             )))}
+          {calendarId && (otherOpen ? (
+            <div className="grid gap-2 rounded-md bg-background p-3">
+              <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">Other time</b>
+              <div className="flex flex-wrap gap-2">
+                <input type="date" value={otherDate} min={new Date().toLocaleDateString("en-CA", { timeZone: TZ })} onChange={(e) => { setOtherDate(e.target.value); setPicked(pacificToIso(e.target.value, otherTime)); }} aria-label="Date" className="h-10 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]" />
+                <input type="time" step={900} value={otherTime} onChange={(e) => { setOtherTime(e.target.value); setPicked(pacificToIso(otherDate, e.target.value)); }} aria-label="Time" className="h-10 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]" />
+                <button type="button" onClick={() => { setOtherOpen(false); setPicked(null); }} className="h-10 px-2 font-semibold text-muted hover:text-foreground">Back to open times</button>
+              </div>
+              <span className="text-muted">Pacific time. Not one of the open times, so it&apos;s booked even if you&apos;re busy then.</span>
+            </div>
+          ) : (
+            <button type="button" onClick={() => { setOtherOpen(true); setPicked(pacificToIso(otherDate, otherTime)); }} className="justify-self-start font-semibold text-accent hover:underline">＋ Other time…</button>
+          ))}
           {error && <div className="rounded-md bg-danger-soft px-3 py-2 font-semibold text-danger">{error}</div>}
         </div>
         <div className="flex items-center gap-3 border-t px-5 py-3">
-          <span className="min-w-0 flex-1 truncate text-muted">{picked ? `${dayName(picked)}, ${timeOf(picked)}, ${minutes} min${calName ? ` · ${calName}` : ""}` : "Pick a time"}</span>
+          <span className="min-w-0 flex-1 truncate text-muted">{picked ? `${dayName(picked)}, ${timeOf(picked)}, ${minutes} min${custom ? " (not an open time)" : ""}${calName ? ` · ${calName}` : ""}` : "Pick a time"}</span>
           <button onClick={onClose} className="h-10 rounded-md px-3 font-semibold text-muted hover:bg-background">Cancel</button>
           <button disabled={!picked || busy} onClick={confirm} className="h-10 rounded-md bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Saving…" : target.kind === "book" ? "Book" : "Move"}</button>
         </div>

@@ -9,9 +9,9 @@ export async function PATCH(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { id?: string; start?: string };
+  const b = (await req.json().catch(() => ({}))) as { id?: string; start?: string; custom?: boolean };
   if (!b.id || !b.start) return NextResponse.json({ error: "Pick a new time." }, { status: 400 });
-  const r = await rescheduleAppointment({ id: caller.id, memberId: caller.memberId }, { id: b.id, start: b.start });
+  const r = await rescheduleAppointment({ id: caller.id, memberId: caller.memberId }, { id: b.id, start: b.start, custom: b.custom === true });
   return r.ok ? NextResponse.json(r) : NextResponse.json({ error: r.error }, { status: r.status });
 }
 

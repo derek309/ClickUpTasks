@@ -286,7 +286,7 @@ export type BookResult = { ok: true; id: string; start: string; calendarName: st
 
 /** Book a contact on a calendar at one of its open times. The person booking is
  *  the one it's assigned to when they're on that calendar. */
-export async function bookAppointment(actor: CalendarActor, input: { calendarId: string; ghlContactId: string; start: string }): Promise<BookResult> {
+export async function bookAppointment(actor: CalendarActor, input: { calendarId: string; ghlContactId: string; start: string; custom?: boolean }): Promise<BookResult> {
   const found = await findCalendar(input.calendarId);
   if (!found) return { ok: false, status: 404, error: "That calendar isn't in GoHighLevel any more." };
   const { contact, locationId } = await contactFor(input.ghlContactId);
@@ -302,7 +302,9 @@ export async function bookAppointment(actor: CalendarActor, input: { calendarId:
   const res = await fetch(`${API}/calendars/events/appointments`, {
     method: "POST", headers: { ...headers(found.token), "Content-Type": "application/json" },
     body: JSON.stringify({ calendarId: found.cal.id, locationId: found.cal.locationId, contactId: input.ghlContactId, startTime: input.start,
-      endTime: new Date(startMs + found.cal.minutes * 60_000).toISOString(), title, appointmentStatus: "confirmed", ...(assignedUserId ? { assignedUserId } : {}), toNotify: true }),
+      endTime: new Date(startMs + found.cal.minutes * 60_000).toISOString(), title, appointmentStatus: "confirmed", ...(assignedUserId ? { assignedUserId } : {}), toNotify: true,
+      // A time someone typed (Derek, 2026-10-05): GoHighLevel books it even when it isn't an open slot.
+      ...(input.custom ? { ignoreFreeSlotValidation: true } : {}) }),
   });
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok || !j?.id) return { ok: false, status: res.status === 400 || res.status === 422 ? 409 : 502, error: /slot|available/i.test(String(j?.message ?? "")) ? "That time was just taken. Pick another." : `GoHighLevel didn't book it (${res.status}). ${String(j?.message ?? "").slice(0, 120)}` };
@@ -323,7 +325,7 @@ async function appointmentOf(id: string): Promise<{ appt: any; token: string } |
 }
 
 /** Move an appointment to another open time on its calendar. */
-export async function rescheduleAppointment(_actor: CalendarActor, input: { id: string; start: string }): Promise<BookResult> {
+export async function rescheduleAppointment(_actor: CalendarActor, input: { id: string; start: string; custom?: boolean }): Promise<BookResult> {
   const found = await appointmentOf(input.id);
   if (!found) return { ok: false, status: 404, error: "That appointment isn't in GoHighLevel any more." };
   const cal = await findCalendar(String(found.appt.calendarId));
@@ -332,7 +334,7 @@ export async function rescheduleAppointment(_actor: CalendarActor, input: { id: 
   const length = Date.parse(found.appt.endTime) - Date.parse(found.appt.startTime);
   const res = await fetch(`${API}/calendars/events/appointments/${encodeURIComponent(input.id)}`, {
     method: "PUT", headers: { ...headers(found.token), "Content-Type": "application/json" },
-    body: JSON.stringify({ calendarId: found.appt.calendarId, startTime: input.start, endTime: new Date(startMs + (length > 0 ? length : (cal?.cal.minutes ?? 30) * 60_000)).toISOString(), toNotify: true }),
+    body: JSON.stringify({ calendarId: found.appt.calendarId, startTime: input.start, endTime: new Date(startMs + (length > 0 ? length : (cal?.cal.minutes ?? 30) * 60_000)).toISOString(), toNotify: true, ...(input.custom ? { ignoreFreeSlotValidation: true } : {}) }),
   });
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't move it (${res.status}). ${String(j?.message ?? "").slice(0, 120)}` };
@@ -381,4 +383,14 @@ async function resetMeetingTask(ghlContactId: string, meetingStart: string) {
   if (!task) return;
   const patch = meetingTaskReset(task as any, meetingStart, todayPacific(), new Date().toISOString());
   if (patch) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", (task as any).id);
+}
+
+/** A date and a time typed in Los Angeles ("2026-10-13", "07:30"), as an instant. */
+export function pacificToIso(date: string, time: string, timeZone = "America/Los_Angeles"): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+  const guess = Date.parse(`${date}T${time}:00Z`);
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  const wall = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour) % 24, Number(p.minute));
+  return new Date(guess - (wall - guess)).toISOString();
 }

@@ -1068,8 +1068,8 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
 // ── The reply box ─────────────────────────────────────────────────────────
 // The AI helpers in one menu (Derek, 2026-10-05: fold them). Suggest times
 // opens its calendar list in the same menu.
-function AiMenu({ busy, hasText, canDraft, canSuggest, meId, onDraft, onImprove, onShorter, onSuggest }: {
-  busy: string | null; hasText: boolean; canDraft: boolean; canSuggest: boolean; meId: string;
+function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, onDraft, onImprove, onShorter, onSuggest }: {
+  busy: string | null; hasText: boolean; canDraft: boolean; canSuggest: boolean; meId: string; defaultId?: string | null;
   onDraft: () => void; onImprove: () => void; onShorter: () => void; onSuggest: (l: BookingLink) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1078,7 +1078,7 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, onDraft, onImprove,
   const close = () => { setOpen(false); setStep("main"); };
   const toTimes = () => { setStep("times"); if (links === null) loadBookingLinks().then(setLinks); };
   const seen = new Set<string>();
-  const calendars = [...(links ?? [])].sort((a, b) => Number(b.memberId === meId) - Number(a.memberId === meId) || a.label.localeCompare(b.label))
+  const calendars = [...(links ?? [])].sort((a, b) => Number(b.calendarId === defaultId) - Number(a.calendarId === defaultId) || Number(b.memberId === meId) - Number(a.memberId === meId) || a.label.localeCompare(b.label))
     .filter((l) => (seen.has(l.calendarId) ? false : (seen.add(l.calendarId), true)));
   const working = busy === "improve" ? "Improving…" : busy === "shorter" ? "Cutting…" : busy === "draft" ? "Drafting…" : busy === "times" ? "Finding times…" : null;
   const item = "flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent";
@@ -1099,7 +1099,7 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, onDraft, onImprove,
             {links === null ? <div className="px-3 py-2 text-muted">Reading GoHighLevel…</div>
               : calendars.length ? calendars.map((l) => (
                 <button key={l.calendarId} onClick={() => { close(); onSuggest(l); }} className={item}>
-                  <span className="min-w-0"><b className="block truncate font-semibold">{l.label}</b><span className="text-[14px] text-muted">{l.minutes} min{l.shared ? " · shared" : l.memberId === meId ? " · yours" : ""}</span></span>
+                  <span className="min-w-0"><b className="block truncate font-semibold">{l.label}</b><span className="text-[14px] text-muted">{l.calendarId === defaultId ? "★ default · " : ""}{l.minutes} min{l.shared ? " · shared" : l.memberId === meId ? " · yours" : ""}</span></span>
                 </button>
               )) : <div className="px-3 py-2 text-muted">No calendars found.</div>}
           </>}
@@ -1454,7 +1454,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         {rich && <BookingLinkMenu me={p.me.id} onPick={(l) => insertLink(l.url, "book a time here")} />}
         {compact
           ? <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Improve with AI" className="h-9 rounded-lg bg-[#f3efff] px-2.5 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "improve" ? "✨ Improving…" : <>✨<span className="hidden sm:inline"> Improve with AI</span></>}</button>
-          : <AiMenu busy={busy} hasText={hasText} canDraft={rich} canSuggest={rich && /^(gm|ghl):/.test(t.key)} meId={p.me.id}
+          : <AiMenu busy={busy} hasText={hasText} canDraft={rich} canSuggest={rich && /^(gm|ghl):/.test(t.key)} meId={p.me.id} defaultId={p.prefs.defaultCalendarId}
               onDraft={() => draft()} onImprove={() => improve()} onShorter={() => improve("shorter")} onSuggest={suggestTimes} />}
         {rich && hasBcc && (
           <label title="A hidden copy goes to your GoHighLevel Auto BCC Sync address, so it's logged on the contact" className="flex h-10 cursor-pointer items-center gap-2 px-1 font-semibold text-muted">
@@ -1890,7 +1890,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
       {form && (contact
         ? <ContactForm p={p} contact={contact} onClose={() => setForm(false)} />
         : <AddPersonForm p={p} t={t} x={x} onClose={() => setForm(false)} />)}
-      {booking && contact?.ghlContactId && <BookAppointment target={{ kind: "book", ghlContactId: contact.ghlContactId, name }} meId={p.me.id} onClose={() => setBooking(false)} onDone={() => {}} pushToast={(m) => p.pushToast(m)} />}
+      {booking && contact?.ghlContactId && <BookAppointment target={{ kind: "book", ghlContactId: contact.ghlContactId, name }} meId={p.me.id} defaultCalendarId={p.prefs.defaultCalendarId ?? null} onSetDefault={(id) => p.setPrefs({ defaultCalendarId: id })} onClose={() => setBooking(false)} onDone={() => {}} pushToast={(m) => p.pushToast(m)} />}
     </div>
   );
 }

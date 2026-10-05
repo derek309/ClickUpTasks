@@ -35,6 +35,8 @@ export type InboxPrefs = {
    *  2026-10-05): an email you send is BCC'd there, so it is logged on the
    *  contact in GoHighLevel. GoHighLevel's API doesn't give it out. */
   ghlBcc?: { agency?: string; directory?: string };
+  /** The starred calendar the booking window opens on (Derek, 2026-10-05). */
+  defaultCalendarId?: string | null;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

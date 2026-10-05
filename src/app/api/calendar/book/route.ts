@@ -10,8 +10,8 @@ export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { calendarId?: string; ghlContactId?: string; start?: string };
+  const b = (await req.json().catch(() => ({}))) as { calendarId?: string; ghlContactId?: string; start?: string; custom?: boolean };
   if (!b.calendarId || !b.ghlContactId || !b.start) return NextResponse.json({ error: "Pick a calendar, a person and a time." }, { status: 400 });
-  const r = await bookAppointment({ id: caller.id, memberId: caller.memberId }, { calendarId: b.calendarId, ghlContactId: b.ghlContactId, start: b.start });
+  const r = await bookAppointment({ id: caller.id, memberId: caller.memberId }, { calendarId: b.calendarId, ghlContactId: b.ghlContactId, start: b.start, custom: b.custom === true });
   return r.ok ? NextResponse.json(r) : NextResponse.json({ error: r.error }, { status: r.status });
 }
