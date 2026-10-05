@@ -2,11 +2,13 @@
 
 // What needs doing for this client, as the top of their page (Derek,
 // 2026-10-05, header mockup C https://claude.ai/artifact/Uti7wovPQfhAeB3jPLHbCh):
-// what's overdue, what's waiting on them, and their next meeting. Each box
+// their latest message, what's waiting on them, and their next meeting
+// (mockup D: overdue moved beside the name). Each box
 // carries the one button that deals with it.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import type { CalendarEvent } from "./useCalendar";
+import { timeAgo } from "@/lib/data";
 
 const TZ = "America/Los_Angeles";
 
@@ -22,16 +24,20 @@ function loadEvents(): Promise<CalendarEvent[]> {
   return eventsOnce;
 }
 
+const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOverdue, onOpenOverdue, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
+export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
   first: string;
-  overdue: number;
-  oldestOverdue: { title: string; daysLate: number } | null;
-  onOpenOverdue: () => void;
+  /** Their latest email or text, and ours (Derek, 2026-10-05, mockup D). */
+  lastIn: { at: string; channel: "email" | "sms"; preview: string; unread: boolean } | null;
+  lastOut: { at: string; channel: "email" | "sms" } | null;
+  onReply: (() => void) | null;
+  onEmail: (() => void) | null;
+  onText: (() => void) | null;
   waiting: number;
   oldestWaiting: string | null;
   onRemind: (() => void) | null;
@@ -55,16 +61,23 @@ export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOver
   }, [clientId, ghlContactId]);
   const meeting = next?.clientId === clientId ? next.event : undefined;
 
+  // Our turn when their latest came after ours.
+  const theirTurn = !!lastIn && (!lastOut || lastIn.at > lastOut.at);
+  const last = !lastIn ? lastOut : !lastOut ? lastIn : lastIn.at > lastOut.at ? lastIn : lastOut;
   const box = "flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5";
   const btn = "h-9 shrink-0 rounded-md bg-surface px-3 text-[15px] font-semibold ring-1 hover:bg-background";
   return (
     <div className="grid gap-2.5 sm:grid-cols-3">
-      <div className={`${box} ${overdue ? "bg-danger-soft" : "bg-background"}`}>
+      {/* Messages: their reply waiting on us, else when we last talked. */}
+      <div className={`${box} ${theirTurn ? "bg-accent-soft" : "bg-background"}`}>
         <div className="min-w-0 flex-1">
-          <b className={`block ${overdue ? "text-danger" : ""}`}>{overdue ? `${overdue} overdue` : "Nothing overdue"}</b>
-          <span className="block truncate text-[14px] text-muted">{oldestOverdue ? `Oldest: ${oldestOverdue.title}, ${oldestOverdue.daysLate} ${oldestOverdue.daysLate === 1 ? "day" : "days"} late` : "Every date is on track"}</span>
+          <b className={`block ${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
+          <span className="block truncate text-[14px] text-muted">{theirTurn ? lastIn!.preview : last ? (last === lastOut ? "You wrote last" : `${first} wrote last`) : `Say hello to ${first}`}</span>
         </div>
-        {overdue > 0 && <button onClick={onOpenOverdue} title="Open the oldest one" className={`${btn} ring-danger/40`}>Open</button>}
+        {theirTurn && onReply ? <button onClick={onReply} title="Answer them" className="h-9 shrink-0 rounded-md bg-accent px-3 text-[15px] font-semibold text-white hover:opacity-90">Reply</button> : <>
+          {onEmail && <button onClick={onEmail} className={`${btn} ring-[var(--border)]`}>Email</button>}
+          {onText && <button onClick={onText} className={`${btn} ring-[var(--border)]`}>Text</button>}
+        </>}
       </div>
       <div className={`${box} ${waiting ? "bg-highlight-soft" : "bg-background"}`}>
         <div className="min-w-0 flex-1">

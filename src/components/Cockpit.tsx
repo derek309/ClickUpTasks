@@ -10,7 +10,6 @@ import {
   effectivePriority,
   effectiveStatus,
   TODAY,
-  daysUntilDue,
   addDaysIso,
   DUE_BUCKETS,
   dueBucketOf,
@@ -2273,17 +2272,29 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
   // The Overdue, Waiting and Meeting boxes (Derek, 2026-10-05, mockup C).
+  // Overdue, beside the name (mockup D): open past-due work that isn't waiting
+  // on the client or on hold, oldest first.
+  const clientLate = clientView && clientById(activeClient)
+    ? (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold" && !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""))
+    : [];
   const needsStrip = clientView && clientTab !== "chat" && clientById(activeClient) ? (() => {
-          const all = (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold");
-          const late = all.filter((t) => !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""));
           const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
-          const oldest = late[0];
+          const ct = contactForClient(activeClient);
+          const talk = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms")) : [];
+          const latest = (dir: "inbound" | "outbound") => talk.filter((m) => m.direction === dir).reduce<Message | null>((a, m) => (!a || m.at > a.at ? m : a), null);
+          const inn = latest("inbound"); const out = latest("outbound");
+          const plain = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+          const canMsg = canMessageClient(activeClient);
           return (
-              <ClientNeeds clientId={activeClient} ghlContactId={contactForClient(activeClient)?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
-                overdue={late.length} oldestOverdue={oldest ? { title: oldest.title, daysLate: -(daysUntilDue(oldest.due) ?? 0) } : null} onOpenOverdue={() => oldest && setOpenTaskId(oldest.id)}
-                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMessageClient(activeClient) ? () => openRemindClient(activeClient) : null}
-                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)}
-                onRequest={canMessageClient(activeClient) ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
+              <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
+                lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms", preview: `${inn.channel === "sms" ? "Text" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
+                lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" } : null}
+                onReply={canMsg && inn ? () => { if (inn.channel === "sms") { setActiveProject(null); openCompose("sms"); } else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
+                onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
+                onText={canMsg && ct?.phone ? () => { setActiveProject(null); openCompose("sms"); } : null}
+                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
+                canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
+                onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
           );
         })() : null;
   const overflowControl = (
@@ -2614,6 +2625,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 )}
                 {/* Who follows them, beside the name (Derek, 2026-10-05). */}
                 {clientView && followingControl && <span className="text-[15px] font-normal">{followingControl}</span>}
+                {clientLate.length > 0 && (
+                  <button onClick={() => setOpenTaskId(clientLate[0].id)} title={`Open the oldest: ${clientLate[0].title}`}
+                    className="rounded-[5px] bg-danger-soft px-2 py-0.5 text-[13px] font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">{clientLate.length} overdue</button>
+                )}
               </h1>
               <div className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
