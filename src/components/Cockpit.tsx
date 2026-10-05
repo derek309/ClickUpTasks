@@ -638,12 +638,34 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const url = getClientShareUrl(clientId);
     if (!url) pushToast("No portal link could be made for this client, so the reminder has no link. An admin needs to create the share link first.");
     const link = url ? { url, label: "Reply or upload everything here" } : null;
+    // Grouped by list, in the client's list order (Derek, 2026-10-05); one
+    // list needs no heading.
+    const order = projectsForClient(clientId);
+    const groups = [...order.map((pr) => ({ name: pr.name, items: waiting.filter((t) => t.projectId === pr.id) })),
+      { name: "Other", items: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)) }].filter((g) => g.items.length);
+    const headed = groups.length > 1;
+    const listHtml = groups.map((g) => `${headed ? `<p><strong>${escapeHtml(g.name)}</strong></p>` : ""}<ul>${g.items.map((t) => `<li><p>${escapeHtml(t.title)}</p></li>`).join("")}</ul>`).join("");
     openClientEmail(clientId, {
       subject: `Quick check on a few things for ${name || "you"}`,
       body: `<p>Hi ${escapeHtml(firstName)},</p><p>We are still waiting on a few things from you before we can move forward:</p>`
-        + `<ul>${waiting.map((t) => `<li><p>${escapeHtml(t.title)}</p></li>`).join("")}</ul>${draftLinkHtml(link)}<p>Thanks!</p>`,
+        + `${listHtml}${draftLinkHtml(link)}<p>Thanks!</p>`,
       link,
-      aiContext: `A friendly reminder that we are still waiting on these items from the client before we can move forward:\n${waiting.map((t) => `• ${t.title}`).join("\n")}`,
+      aiContext: `A friendly reminder that we are still waiting on these items from the client before we can move forward, grouped by list:\n${groups.map((g) => `${g.name}:\n${g.items.map((t) => `• ${t.title}`).join("\n")}`).join("\n")}`,
+    });
+  };
+  // Send client link (Derek, 2026-10-05): the portal link in an email to them,
+  // opened for review before it goes. From a list, the link opens on that list.
+  const openSendClientLink = (clientId: string, projectId?: string | null) => {
+    const name = clientById(clientId)?.name ?? "";
+    const firstName = name.trim().split(/\s+/)[0] || "there";
+    const url = getClientShareUrl(clientId, projectId ? { projectId } : undefined);
+    if (!url) return;
+    const link = { url, label: "Open your page" };
+    openClientEmail(clientId, {
+      subject: "Your page for everything we're working on",
+      body: `<p>Hi ${escapeHtml(firstName)},</p><p>Here is your own page for everything we're working on together. You can see what we need from you, what's in progress and what's done, add a new request, and upload files. No login needed, so bookmark it.</p>${draftLinkHtml(link)}<p>Thanks!</p>`,
+      link,
+      aiContext: "Sending the client the link to their own page, where they see what we need from them, what is in progress and what is done, and can add requests and upload files.",
     });
   };
   // The mind-dump composer. Null when closed; otherwise the group its plus
@@ -2228,9 +2250,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Share</div>
           <button onClick={() => { setHeaderMoreOpen(false); copyLink({ view: null, client: activeClient, project: activeProject, task: null, clientTab, vaultFolder: null, dm: null, assignee: null, sub: null }); }}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy link</button>
-          {activeClient !== "all" && !activeProject && clientById(activeClient) && (
+          {/* On every list too (Derek, 2026-10-05), not just the client's home. */}
+          {activeClient !== "all" && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyClientShareLink(activeClient); }} title="A public, no-login link showing this client what we're waiting on them for"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.link /> Copy client link</button>
+          )}
+          {activeClient !== "all" && clientById(activeClient) && canMessageClient(activeClient) && (
+            <button onClick={() => { setHeaderMoreOpen(false); openSendClientLink(activeClient); }} title="Email them their page. Opens for you to check before it sends."
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.comment /> Send client link</button>
           )}
           {activeClient !== "all" && activeProject && projectById(activeProject) && (
             <button onClick={() => { setHeaderMoreOpen(false); copyProjectShareLink(activeProject); }} title="A separate public link scoped to only this list — nothing else on the client is reachable from it"

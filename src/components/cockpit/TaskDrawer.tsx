@@ -996,12 +996,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Type-to-filter rather than a plain select: this list is every client
           on the account, far past where scrolling a native dropdown is fast. */}
       <Row label="Client" icon={<I.folder />}><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] transition hover:border-border hover:bg-background" /></Row>
-      <Row label="Project" icon={<I.list />}>
+      <Row label="List" icon={<I.list />}>
         <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }}
           className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">
           {clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
           {clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "List"}</option>}
-          <option value="__new">+ New project…</option>
+          <option value="__new">+ New list…</option>
         </select>
       </Row>
       <Row label="Contact" icon={<I.user />}>
