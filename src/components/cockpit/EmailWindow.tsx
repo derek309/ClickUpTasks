@@ -425,7 +425,7 @@ export function EmailWindow({
 
           <div className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
             {/* A GoHighLevel booking page, copied to paste into the email (Derek, 2026-10-05). */}
-            <BookingLinkMenu me="" up={false} label="Copy booking link" onPick={async (l) => {
+            <BookingLinkMenu me="" inline label="Copy booking link" onPick={async (l) => {
               try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}. Paste it into the email.`); }
               catch { pushToast(`Couldn't copy. The link is ${l.url}`); }
             }} />
