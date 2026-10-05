@@ -2655,7 +2655,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : dirView === "calendar" ? (
           <div className="min-h-0 flex-1 overflow-y-auto bg-surface">
             <CalendarView meId={me.id} colorOf={(id) => users.find((u) => u.id === id)?.color ?? "#64748b"}
-              clientName={(id) => clientById(id)?.name ?? null} onOpenClient={(id) => openClientList(id, null)} pushToast={(text) => pushToast(text)} />
+              clientName={(id) => clientById(id)?.name ?? null} onOpenClient={(id) => openClientList(id, null)} pushToast={(text) => pushToast(text)} contacts={contacts} />
           </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">

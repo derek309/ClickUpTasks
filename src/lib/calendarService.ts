@@ -9,6 +9,9 @@
 // sub-account, across every calendar they are on, plus their blocked time.
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
+import { contactHome } from "@/lib/ghlPerson";
+import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, bumpStatusToInterview } from "@/lib/ghlConversationTask";
+import { titleCase } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -56,6 +59,7 @@ export type CalendarEvent = {
   title: string;
   /** Member ids of the people it's for (both on a shared meeting). */
   people: string[];
+  calendarId: string | null;
   calendarName: string | null;
   ghlContactId: string | null;
   clientId: string | null;
@@ -75,6 +79,7 @@ export function normalizeEvent(ev: any, o: { busy: boolean; memberId: string; ca
     end: String(ev.endTime ?? ev.startTime),
     title: (typeof ev.title === "string" && ev.title.trim()) || (o.busy ? "Busy" : "Appointment"),
     people: [o.memberId],
+    calendarId: o.busy ? null : ev.calendarId ?? null,
     calendarName: ev.calendarId ? o.calendarNames.get(ev.calendarId) ?? null : null,
     ghlContactId: o.busy ? null : ev.contactId ?? null,
     clientId: null,
@@ -136,10 +141,12 @@ async function locationInfo(locationId: string, token: string): Promise<{ calend
 let eventCache: { at: number; days: number; events: CalendarEvent[]; errors: string[] } | null = null;
 
 /** The next `days` days for everyone with a calendar, read live (60 second cache). */
-export async function listEvents(_actor: CalendarActor, opts: { days?: number } = {}): Promise<{ people: CalendarPerson[]; events: CalendarEvent[]; errors: string[] }> {
+export async function listEvents(_actor: CalendarActor, opts: { days?: number; fresh?: boolean } = {}): Promise<{ people: CalendarPerson[]; events: CalendarEvent[]; errors: string[] }> {
   const days = Math.min(Math.max(opts.days ?? 14, 1), 31);
   const people = await calendarPeople();
-  if (eventCache && eventCache.days === days && Date.now() - eventCache.at < 60_000) return { people, events: eventCache.events, errors: eventCache.errors };
+  // fresh: right after a booking, move or cancel. Each route runs on its own
+  // in production, so the one that wrote can't empty this cache itself.
+  if (!opts.fresh && eventCache && eventCache.days === days && Date.now() - eventCache.at < 60_000) return { people, events: eventCache.events, errors: eventCache.errors };
 
   // From the start of today, Pacific, so this morning's meetings still show.
   const now = Date.now();
@@ -190,7 +197,7 @@ export function startOfPacificDay(nowMs: number): number {
   return nowMs - sinceMidnight;
 }
 
-export type BookingLink = { memberId: string; label: string; url: string; shared: boolean };
+export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number };
 
 /** Every active calendar each person is on, with its public booking page (Derek's pick). */
 // The actor is for the MCP tools to come (Phase 4); every teammate sees the same links today.
@@ -210,9 +217,140 @@ export async function bookingLinks(_actor: CalendarActor): Promise<BookingLink[]
       for (const p of people) {
         // A personal calendar with no team list belongs to whoever it's named for.
         const mine = members.includes(p.ghlUserId) || (!members.length && String(c.name ?? "").toLowerCase().startsWith(p.name.toLowerCase()));
-        if (mine) out.push({ memberId: p.memberId, label: String(c.name ?? "Booking page"), url, shared: members.length > 1 });
+        if (mine) out.push({ memberId: p.memberId, label: String(c.name ?? "Booking page"), url, shared: members.length > 1, calendarId: String(c.id), locationId, minutes: slotMinutes(c) });
       }
     }
   }
   return out.sort((a, b) => Number(a.shared) - Number(b.shared) || a.label.localeCompare(b.label));
+}
+
+// ── Phase 2: book, reschedule and cancel (Derek, 2026-10-05) ──────────────
+// Written to GoHighLevel, which sends its own confirmations and reminders by
+// each calendar's settings. Nothing is stored here; the client's Conversation
+// task moves to the meeting date straight away, as the hourly sync would.
+
+/** A calendar's meeting length in minutes (slotDuration, in mins or hours). */
+export function slotMinutes(c: any): number {
+  const n = Number(c?.slotDuration) || 30;
+  return String(c?.slotDurationUnit ?? "mins").startsWith("hour") ? n * 60 : n;
+}
+
+type CalendarRef = { id: string; locationId: string; name: string; minutes: number; members: string[] };
+async function findCalendar(calendarId: string): Promise<{ cal: CalendarRef; token: string } | null> {
+  for (const locationId of await configuredLocations()) {
+    const token = await tokenForLocation(locationId);
+    if (!token) continue;
+    let info: { calendars: any[] };
+    try { info = await locationInfo(locationId, token); } catch { continue; }
+    const c = info.calendars.find((x: any) => String(x.id) === calendarId);
+    if (c) return { token, cal: { id: calendarId, locationId, name: String(c.name ?? ""), minutes: slotMinutes(c), members: ((c.teamMembers ?? []) as any[]).map((t) => String(t?.userId ?? "")).filter(Boolean) } };
+  }
+  return null;
+}
+
+const slotCache = new Map<string, { at: number; slots: string[] }>();
+/** Open start times on a calendar for the next `days` days, Pacific (60 second cache). */
+export async function freeSlots(calendarId: string, days = 7): Promise<{ slots: string[]; minutes: number; locationId: string } | { error: string }> {
+  const found = await findCalendar(calendarId);
+  if (!found) return { error: "That calendar isn't in GoHighLevel any more." };
+  const key = `${calendarId}|${days}`;
+  const hit = slotCache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return { slots: hit.slots, minutes: found.cal.minutes, locationId: found.cal.locationId };
+  const from = Date.now();
+  const res = await fetch(`${API}/calendars/${encodeURIComponent(calendarId)}/free-slots?startDate=${from}&endDate=${from + days * 86_400_000}&timezone=America/Los_Angeles`, { headers: headers(found.token), signal: AbortSignal.timeout(15000) });
+  if (!res.ok) return { error: `GoHighLevel didn't give the open times (${res.status}).` };
+  const j: any = await res.json().catch(() => ({}));
+  const slots = Object.keys(j).filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort().flatMap((k) => ((j[k]?.slots ?? []) as string[]))
+    .filter((t) => Date.parse(t) > from);
+  slotCache.set(key, { at: Date.now(), slots });
+  return { slots, minutes: found.cal.minutes, locationId: found.cal.locationId };
+}
+
+/** The contact behind a GoHighLevel id, and the sub-account it lives in. */
+async function contactFor(ghlContactId: string) {
+  const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, client_id").eq("ghl_contact_id", ghlContactId).maybeSingle();
+  const home = await contactHome(ghlContactId);
+  return { contact: contact as { id: string; name: string; client_id: string } | null, locationId: home?.locationId ?? null };
+}
+
+/** The meeting's date on the client's Conversation task, as the hourly sync does. */
+async function bumpTask(ghlContactId: string, startIso: string, title: string, joinUrl: string | null) {
+  const { contact } = await contactFor(ghlContactId);
+  if (!contact) return;
+  contact.client_id = await resolveOrPromoteTrackedClient(contact);
+  await bumpStatusToInterview(contact.client_id);
+  await upsertConversationTask(contact, ghlContactId, { due: toPacificDate(startIso), title, location: joinUrl });
+}
+
+export type BookResult = { ok: true; id: string; start: string; calendarName: string } | { ok: false; error: string; status: number };
+
+/** Book a contact on a calendar at one of its open times. The person booking is
+ *  the one it's assigned to when they're on that calendar. */
+export async function bookAppointment(actor: CalendarActor, input: { calendarId: string; ghlContactId: string; start: string }): Promise<BookResult> {
+  const found = await findCalendar(input.calendarId);
+  if (!found) return { ok: false, status: 404, error: "That calendar isn't in GoHighLevel any more." };
+  const { contact, locationId } = await contactFor(input.ghlContactId);
+  if (!locationId) return { ok: false, status: 400, error: "This person isn't a GoHighLevel contact yet. Add them first." };
+  if (locationId !== found.cal.locationId) return { ok: false, status: 400, error: "That calendar is in the other sub-account from this contact. Pick one of their sub-account's calendars." };
+  const startMs = Date.parse(input.start);
+  if (!Number.isFinite(startMs) || startMs < Date.now()) return { ok: false, status: 400, error: "Pick a time that hasn't passed." };
+  const { data: me } = actor.memberId ? await supabaseAdmin.from("profiles").select("ghl_user_id").eq("member_id", actor.memberId).maybeSingle() : { data: null };
+  const mine = String((me as any)?.ghl_user_id ?? "").trim();
+  const assignedUserId = mine && found.cal.members.includes(mine) ? mine : found.cal.members[0] ?? (mine || undefined);
+  const name = contact?.name ? titleCase(contact.name) : "Client";
+  const title = `${name} + ${found.cal.name}`;
+  const res = await fetch(`${API}/calendars/events/appointments`, {
+    method: "POST", headers: { ...headers(found.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ calendarId: found.cal.id, locationId: found.cal.locationId, contactId: input.ghlContactId, startTime: input.start,
+      endTime: new Date(startMs + found.cal.minutes * 60_000).toISOString(), title, appointmentStatus: "confirmed", ...(assignedUserId ? { assignedUserId } : {}), toNotify: true }),
+  });
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok || !j?.id) return { ok: false, status: res.status === 400 || res.status === 422 ? 409 : 502, error: /slot|available/i.test(String(j?.message ?? "")) ? "That time was just taken. Pick another." : `GoHighLevel didn't book it (${res.status}). ${String(j?.message ?? "").slice(0, 120)}` };
+  slotCache.clear(); eventCache = null;
+  await bumpTask(input.ghlContactId, input.start, `Meeting with ${name}`, typeof j.address === "string" && /^https?:/.test(j.address) ? j.address : null).catch(() => {});
+  return { ok: true, id: String(j.id), start: input.start, calendarName: found.cal.name };
+}
+
+async function appointmentOf(id: string): Promise<{ appt: any; token: string } | null> {
+  for (const locationId of await configuredLocations()) {
+    const token = await tokenForLocation(locationId);
+    if (!token) continue;
+    const res = await fetch(`${API}/calendars/events/appointments/${encodeURIComponent(id)}`, { headers: headers(token), signal: AbortSignal.timeout(10000) }).catch(() => null);
+    const appt = res?.ok ? (await res.json().catch(() => null))?.appointment : null;
+    if (appt && appt.locationId === locationId && !appt.deleted) return { appt, token };
+  }
+  return null;
+}
+
+/** Move an appointment to another open time on its calendar. */
+export async function rescheduleAppointment(_actor: CalendarActor, input: { id: string; start: string }): Promise<BookResult> {
+  const found = await appointmentOf(input.id);
+  if (!found) return { ok: false, status: 404, error: "That appointment isn't in GoHighLevel any more." };
+  const cal = await findCalendar(String(found.appt.calendarId));
+  const startMs = Date.parse(input.start);
+  if (!Number.isFinite(startMs) || startMs < Date.now()) return { ok: false, status: 400, error: "Pick a time that hasn't passed." };
+  const length = Date.parse(found.appt.endTime) - Date.parse(found.appt.startTime);
+  const res = await fetch(`${API}/calendars/events/appointments/${encodeURIComponent(input.id)}`, {
+    method: "PUT", headers: { ...headers(found.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ calendarId: found.appt.calendarId, startTime: input.start, endTime: new Date(startMs + (length > 0 ? length : (cal?.cal.minutes ?? 30) * 60_000)).toISOString(), toNotify: true }),
+  });
+  const j: any = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't move it (${res.status}). ${String(j?.message ?? "").slice(0, 120)}` };
+  slotCache.clear(); eventCache = null;
+  if (found.appt.contactId) await bumpTask(String(found.appt.contactId), input.start, String(found.appt.title ?? "Meeting"), null).catch(() => {});
+  return { ok: true, id: input.id, start: input.start, calendarName: cal?.cal.name ?? "" };
+}
+
+/** Cancel an appointment: marked cancelled in GoHighLevel, which tells the
+ *  client by the calendar's settings. Kept there, never deleted. */
+export async function cancelAppointment(_actor: CalendarActor, id: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const found = await appointmentOf(id);
+  if (!found) return { ok: false, status: 404, error: "That appointment isn't in GoHighLevel any more." };
+  const res = await fetch(`${API}/calendars/events/appointments/${encodeURIComponent(id)}`, {
+    method: "PUT", headers: { ...headers(found.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ calendarId: found.appt.calendarId, appointmentStatus: "cancelled", toNotify: true }),
+  });
+  if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't cancel it (${res.status}).` };
+  slotCache.clear(); eventCache = null;
+  return { ok: true };
 }

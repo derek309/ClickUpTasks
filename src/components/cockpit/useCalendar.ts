@@ -9,10 +9,10 @@ import { authedFetch } from "@/lib/supabase";
 export type CalendarPerson = { memberId: string; name: string; ghlUserId: string };
 export type CalendarEvent = {
   id: string; start: string; end: string; title: string; people: string[];
-  calendarName: string | null; ghlContactId: string | null; clientId: string | null; contactName: string | null;
+  calendarId: string | null; calendarName: string | null; ghlContactId: string | null; clientId: string | null; contactName: string | null;
   joinUrl: string | null; busy: boolean;
 };
-export type BookingLink = { memberId: string; label: string; url: string; shared: boolean };
+export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number };
 
 export function useCalendar() {
   const [people, setPeople] = useState<CalendarPerson[]>([]);
@@ -21,10 +21,11 @@ export function useCalendar() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // fresh skips the server's one minute cache: after a change, and on ↻.
+  const load = useCallback(async (fresh = false) => {
     setLoading(true);
     try {
-      const r = await authedFetch("/api/calendar?days=14");
+      const r = await authedFetch(`/api/calendar?days=14${fresh ? "&fresh=1" : ""}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "Couldn't read the calendars.");
       setPeople(j.people ?? []); setEvents(j.events ?? []); setLinks(j.links ?? []);
@@ -40,7 +41,7 @@ export function useCalendar() {
     return () => { clearTimeout(first); clearInterval(id); };
   }, [load]);
 
-  return { people, events, links, loading, error, reload: load };
+  return { people, events, links, loading, error, reload: () => load(true) };
 }
 
 // Booking links for the composers, read once per session.

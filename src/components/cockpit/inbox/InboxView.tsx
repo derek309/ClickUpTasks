@@ -15,6 +15,7 @@ import { RichTextEditor } from "../RichTextEditor";
 import { InlineDate } from "../GroupedList";
 import { type BookingLink } from "../useCalendar";
 import { BookingLinkMenu } from "../BookingLinkMenu";
+import { BookAppointment } from "../BookAppointment";
 import type { Editor } from "@tiptap/react";
 import {
   CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, linksOnTask, matchesSearch, shortTime, snoozeUntil, whereIs,
@@ -52,7 +53,7 @@ export type InboxViewProps = {
   clients: { id: string; name: string }[];
   canAdmin: boolean;
   /** Everyone in GoHighLevel, for New message. */
-  contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null }[];
+  contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; ghlContactId?: string | null }[];
   /** The side panel's live task card: status, Mark done. */
   onPatchTask: (taskId: string, patch: Partial<Task>) => void;
   /** Team chat: a task's chat (as a comment), a direct message, or the team group. */
@@ -1758,6 +1759,7 @@ const ICO: Record<string, string> = {
   check: "M20 6 9 17l-5-5",
   bolt: "M13 2 3 14h9l-1 8 10-12h-9z",
   text: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
+  calendar: "M3 5h18v16H3zM16 3v4M8 3v4M3 10h18",
 };
 function Ico({ n, className = "" }: { n: keyof typeof ICO; className?: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-[18px] w-[18px] shrink-0 fill-none stroke-current ${className}`} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d={ICO[n]} /></svg>;
@@ -1770,6 +1772,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
 }) {
   const [show, setShow] = useState<"email" | "phone" | null>(null);
   const [form, setForm] = useState(false);
+  const [booking, setBooking] = useState(false);
   const name = contact?.name || x.name || x.address;
   const company = contact?.company || (main ? p.clientName(clientId) : null);
   const ib = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground";
@@ -1804,6 +1807,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
         {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /></button>}
         {main && clientId && <button onClick={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></button>}
         {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /></button>}
+        {contact?.ghlContactId && <button onClick={() => setBooking(true)} title={`Book ${name.split(/\s+/)[0]} in GoHighLevel`} aria-label="Book a time" className={ib}><Ico n="calendar" /></button>}
         {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
       </div>
       {show && (
@@ -1819,6 +1823,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
       {form && (contact
         ? <ContactForm p={p} contact={contact} onClose={() => setForm(false)} />
         : <AddPersonForm p={p} t={t} x={x} onClose={() => setForm(false)} />)}
+      {booking && contact?.ghlContactId && <BookAppointment target={{ kind: "book", ghlContactId: contact.ghlContactId, name }} meId={p.me.id} onClose={() => setBooking(false)} onDone={() => {}} pushToast={(m) => p.pushToast(m)} />}
     </div>
   );
 }

@@ -4,7 +4,9 @@
 // live from GoHighLevel, as an agenda by day. GoHighLevel stays the calendar:
 // this shows it, and hands out booking links. Nothing is booked from here.
 import { useMemo, useState } from "react";
+import { authedFetch } from "@/lib/supabase";
 import { useCalendar, type BookingLink, type CalendarEvent, type CalendarPerson } from "./useCalendar";
+import { BookAppointment, type BookTarget } from "./BookAppointment";
 
 const TZ = "America/Los_Angeles";
 const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -28,17 +30,37 @@ export type CalendarBoardProps = {
   clientName: (clientId: string) => string | null;
   onOpenClient: (clientId: string) => void;
   onRefresh: () => void;
+  /** Contacts to book, searched by name, email or company. */
+  contacts: { id: string; name: string; email?: string | null; company?: string | null; ghlContactId?: string | null }[];
   pushToast: (text: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts }: CalendarBoardProps) {
+  // Phase 2 (Derek, 2026-10-05): book, move and cancel, written to GoHighLevel.
+  const [booking, setBooking] = useState<BookTarget | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQ, setFindQ] = useState("");
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  // Cancelled here: gone at once. GoHighLevel's list catches up a moment
+  // later, so after any change the list reads again after a short wait.
+  const [gone, setGone] = useState<Set<string>>(new Set());
+  const refreshSoon = () => setTimeout(onRefresh, 2500);
+  const findWords = findQ.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = findWords.length ? contacts.filter((c) => c.ghlContactId && findWords.every((w) => `${c.name} ${c.email ?? ""} ${c.company ?? ""}`.toLowerCase().includes(w))).slice(0, 8) : [];
+  const cancel = async (e: CalendarEvent) => {
+    setCancelId(null);
+    const r = await authedFetch(`/api/calendar/appointment?id=${encodeURIComponent(e.id)}`, { method: "DELETE" }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    pushToast(r?.ok ? `Cancelled: ${e.title}` : j.error ?? "Couldn't cancel it.");
+    if (r?.ok) { setGone((g) => new Set(g).add(e.id)); refreshSoon(); }
+  };
   const [who, setWho] = useState<string>("all");
   const [showBusy, setShowBusy] = useState(true);
   const [linkQ, setLinkQ] = useState("");
   const nameOf = (id: string) => people.find((p) => p.memberId === id)?.name ?? "";
   const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 
-  const shown = events.filter((e) => (who === "all" || e.people.includes(who)) && (showBusy || !e.busy));
+  const shown = events.filter((e) => !gone.has(e.id) && (who === "all" || e.people.includes(who)) && (showBusy || !e.busy));
   // Days with something on them, and today always.
   const days = useMemo(() => {
     const today = dayKey(new Date().toISOString());
@@ -61,7 +83,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     return key === today ? `Today · ${long}` : long;
   };
 
-  const copy = async (l: BookingLink) => {
+  const copy = async (l: Pick<BookingLink, "label" | "url">) => {
     try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}`); }
     catch { pushToast("Couldn't copy. The link is " + l.url); }
   };
@@ -78,7 +100,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   }, [links]);
   const linkWords = linkQ.toLowerCase().split(/\s+/).filter(Boolean);
   const linksShown = linkRows.filter((r) => linkWords.every((w) => `${r.label} ${r.who.map(nameOf).join(" ")}`.toLowerCase().includes(w)));
-  const copyRow = (r: { label: string; url: string }) => copy({ label: r.label, url: r.url, memberId: "", shared: false });
+  const copyRow = (r: { label: string; url: string }) => copy(r);
   const tab = (on: boolean) => `h-9 rounded-md px-3 font-semibold ${on ? "bg-surface ring-1 ring-[var(--border)]" : "text-muted hover:text-foreground"}`;
 
   return (
@@ -91,6 +113,23 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </span>
         <label className="ml-1 flex cursor-pointer items-center gap-2 text-muted"><input type="checkbox" checked={showBusy} onChange={(e) => setShowBusy(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time</label>
         <span className="flex-1" />
+        <span className="relative">
+          <button onClick={() => { setFindOpen(!findOpen); setFindQ(""); }} className="h-10 rounded-md bg-accent px-4 font-semibold text-white">＋ Book</button>
+          {findOpen && <>
+            <div className="fixed inset-0 z-40" onClick={() => setFindOpen(false)} />
+            <div className="absolute right-0 top-12 z-50 grid w-[min(22rem,90vw)] gap-1 rounded-lg bg-surface p-2 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              <input autoFocus value={findQ} onChange={(e) => setFindQ(e.target.value)} placeholder="Who are you booking?" aria-label="Search contacts"
+                className="h-10 w-full rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
+              {found.map((c) => (
+                <button key={c.id} onClick={() => { setFindOpen(false); setBooking({ kind: "book", ghlContactId: c.ghlContactId!, name: c.name }); }} className="rounded-md px-3 py-2 text-left hover:bg-background">
+                  <b className="block truncate font-semibold">{c.name}</b>
+                  <span className="block truncate text-[14px] text-muted">{[c.company, c.email].filter(Boolean).join(" · ")}</span>
+                </button>
+              ))}
+              {findWords.length > 0 && !found.length && <div className="px-3 py-2 text-muted">No GoHighLevel contact matches.</div>}
+            </div>
+          </>}
+        </span>
         <button onClick={onRefresh} disabled={loading} title="Read GoHighLevel again" className="h-10 rounded-md px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-60"><span className={loading ? "inline-block animate-spin" : ""}>↻</span></button>
       </div>
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -120,6 +159,12 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                         {e.calendarName && <span>{e.calendarName}</span>}
                         {e.clientId && <button onClick={() => onOpenClient(e.clientId!)} className="font-semibold text-accent hover:underline">{clientName(e.clientId) ?? e.contactName ?? "Open client"}</button>}
                         {e.joinUrl && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent hover:underline">Join ↗</a>}
+                        {e.calendarId && Date.parse(e.start) > Date.now() && <>
+                          <button onClick={() => setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title })} className="font-semibold text-accent hover:underline">Move</button>
+                          {cancelId === e.id
+                            ? <span className="font-semibold text-danger">Cancel it? <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>
+                            : <button onClick={() => setCancelId(e.id)} className="font-semibold text-muted hover:text-danger hover:underline">Cancel</button>}
+                        </>}
                       </span>
                     )}
                   </span>
@@ -157,6 +202,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         </div>
       </aside>
       </div>
+      {booking && <BookAppointment target={booking} meId={meId} onClose={() => setBooking(null)} onDone={() => { onRefresh(); refreshSoon(); }} pushToast={pushToast} />}
     </div>
   );
 }
