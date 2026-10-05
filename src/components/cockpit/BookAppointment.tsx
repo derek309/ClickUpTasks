@@ -46,6 +46,10 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   const [otherDate, setOtherDate] = useState("");
   const [otherTime, setOtherTime] = useState("");
   const custom = otherOpen && !!picked;
+  // Share times (Derek, 2026-10-05: "pick the days and times so we can share
+  // in an SMS"): tap several open times, copy them as a text with the booking link.
+  const [share, setShare] = useState(false);
+  const [picks, setPicks] = useState<string[]>([]);
 
   // The calendars this person can be booked on, yours first, one row each.
   useEffect(() => {
@@ -106,6 +110,13 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   };
 
   const calName = calendars?.find((c) => c.calendarId === calendarId)?.label;
+  // The text: their first name, the times on their own lines, and the booking link.
+  const copyTimes = async () => {
+    const url = calendars?.find((c) => c.calendarId === calendarId)?.url;
+    const text = [`Hi ${first}, here are a few times that work for me (Pacific):`, ...picks.map((s) => `${dayName(s)}, ${timeOf(s)}`), url ? `Pick one, or book any open time here: ${url}` : "Which works best for you?"].join("\n");
+    try { await navigator.clipboard.writeText(text); pushToast("Copied. Paste it in a text."); onClose(); }
+    catch { window.prompt("Copy this:", text); }
+  };
   // At the page's top level, so a panel it opens from can't clip or trap it.
   return createPortal(
     <>
@@ -146,13 +157,19 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
                 <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{dayName(day[0])}</b>
                 <div className="flex flex-wrap gap-1.5">
                   {day.map((s) => (
-                    <button key={s} onClick={() => { setOtherOpen(false); setPicked(s); }}
-                      className={`h-9 rounded-md px-3 font-semibold tabular-nums ring-1 ${picked === s ? "bg-accent text-white ring-accent" : "ring-[var(--border)] hover:bg-background"}`}>{timeOf(s)}</button>
+                    <button key={s} onClick={() => { if (share) { setPicks((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s].sort())); return; } setOtherOpen(false); setPicked(s); }}
+                      className={`h-9 rounded-md px-3 font-semibold tabular-nums ring-1 ${(share ? picks.includes(s) : picked === s) ? (share ? "bg-success text-white ring-success" : "bg-accent text-white ring-accent") : "ring-[var(--border)] hover:bg-background"}`}>{share && picks.includes(s) ? "✓ " : ""}{timeOf(s)}</button>
                   ))}
                 </div>
               </div>
             )))}
-          {calendarId && (otherOpen ? (
+          {target.kind === "book" && calendarId && (
+            <button type="button" onClick={() => { setShare(!share); setPicks([]); setPicked(null); setOtherOpen(false); }}
+              className={`justify-self-start rounded-md px-3 py-1.5 font-semibold ring-1 ${share ? "bg-success-soft text-success ring-success" : "text-accent ring-[var(--border)] hover:bg-background"}`}>
+              {share ? "✓ Picking times to text them. Tap to stop." : "💬 Pick times to text them"}
+            </button>
+          )}
+          {!share && calendarId && (otherOpen ? (
             <div className="grid gap-2 rounded-md bg-background p-3">
               <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">Other time</b>
               <div className="flex flex-wrap gap-2">
@@ -168,9 +185,15 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
           {error && <div className="rounded-md bg-danger-soft px-3 py-2 font-semibold text-danger">{error}</div>}
         </div>
         <div className="flex items-center gap-3 border-t px-5 py-3">
+          {share ? <>
+            <span className="min-w-0 flex-1 truncate text-muted">{picks.length ? `${picks.length} ${picks.length === 1 ? "time" : "times"} picked` : "Tap the times you can do"}</span>
+            <button onClick={onClose} className="h-10 rounded-md px-3 font-semibold text-muted hover:bg-background">Cancel</button>
+            <button disabled={!picks.length} onClick={copyTimes} className="h-10 rounded-md bg-success px-5 font-bold text-white disabled:opacity-50">Copy for a text</button>
+          </> : <>
           <span className="min-w-0 flex-1 truncate text-muted">{picked ? `${dayName(picked)}, ${timeOf(picked)}, ${minutes} min${custom ? " (not an open time)" : ""}${calName ? ` · ${calName}` : ""}` : "Pick a time"}</span>
           <button onClick={onClose} className="h-10 rounded-md px-3 font-semibold text-muted hover:bg-background">Cancel</button>
           <button disabled={!picked || busy} onClick={confirm} className="h-10 rounded-md bg-accent px-5 font-bold text-white disabled:opacity-50">{busy ? "Saving…" : target.kind === "book" ? "Book" : "Move"}</button>
+          </>}
         </div>
       </div>
     </>,

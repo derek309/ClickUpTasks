@@ -111,6 +111,7 @@ import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 import { shortcut } from "@/lib/platform";
+import { BookAppointment } from "./cockpit/BookAppointment";
 
 
 /** Team chat as Inbox messages: each task's comments (on tasks you own, made,
@@ -1524,6 +1525,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Stable, so the drawer's GoHighLevel check can list it as a dependency.
   const noteSaasUrl = useCallback((contactId: string, url: string) =>
     setContacts((cs) => cs.map((c) => (c.id === contactId ? { ...c, saasUrl: url } : c))), []);
+  const [bookClient, setBookClient] = useState<string | null>(null);
   const contactForClient = (clientId: string): Contact | null => {
     const c = clientById(clientId);
     if (c?.linkedContactId) return contactById(c.linkedContactId);
@@ -2542,6 +2544,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.plus /> New task
             </button>
           )}
+          {/* Book the client in GoHighLevel, or pick times to text them (Derek, 2026-10-05). */}
+          {!inboxView && !settingsView && !dirView && !myWork && !personalView && activeClient !== "all" && contactForClient(activeClient)?.ghlContactId && (
+            <button onClick={() => setBookClient(activeClient)} title="Book a time, or pick times to text them"
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">📅 Book</button>
+          )}
           {/* Adding a client happens here now that this page is Clients (Derek,
               2026-09-28: "just make it so we can add clients from that page").
               It opens the new client straight away, as it always has. */}
@@ -3121,6 +3128,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </div>
       </>)}
+      {bookClient && contactForClient(bookClient)?.ghlContactId && (
+        <BookAppointment target={{ kind: "book", ghlContactId: contactForClient(bookClient)!.ghlContactId, name: contactForClient(bookClient)!.name || clientById(bookClient)?.name || "Client" }}
+          meId={me.id} onClose={() => setBookClient(null)} onDone={() => {}} pushToast={(m) => pushToast(m)}
+          defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
+      )}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         pinnedClients={[...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"))}
         pinnedLists={[...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p)}
