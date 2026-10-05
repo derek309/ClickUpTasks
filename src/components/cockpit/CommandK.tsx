@@ -38,7 +38,9 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
     (c.linkedContactId ? contacts.find((ct) => ct.id === c.linkedContactId) : undefined)
     ?? contacts.find((ct) => ct.clientId === c.id)
     ?? (c.id.startsWith("cl_") ? contacts.find((ct) => ct.id === c.id.slice(3)) : undefined);
-  const goItems = onGo ? GO.filter((g) => !ql || g.label.toLowerCase().includes(ql)) : [];
+  // The places sit in their own column on the right (Derek, 2026-10-05), so
+  // the arrows and Enter stay on the search results.
+  const goItems: typeof GO = [];
   // Before you type: the places, then what is pinned, then tasks.
   // Order matches how people think about the hierarchy: Clients → Projects → Tasks.
   const clientItems = (ql ? clients.filter((c) => { const ct = contactOf(c); return c.name.toLowerCase().includes(ql) || (c.ghlLocationId ?? "").toLowerCase().includes(ql) || (ct?.company ?? "").toLowerCase().includes(ql) || (ct?.email ?? "").toLowerCase().includes(ql); }).slice(0, 6) : pinnedClients);
@@ -72,22 +74,15 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/30" onClick={onClose} />
-      <div className="fixed left-1/2 top-24 z-50 w-full max-w-xl -translate-x-1/2 overflow-hidden rounded-2xl border bg-surface shadow-2xl">
+      <div className={`fixed left-1/2 top-24 z-50 w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-2xl border bg-surface shadow-2xl ${onGo ? "max-w-3xl" : "max-w-xl"}`}>
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <I.search className="text-muted" />
-          <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey} placeholder={onGo ? "Search, or press 1 to 5 to go to a place" : "Search clients, projects, and tasks…"} className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
+          <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey} placeholder="Search clients, projects, and tasks…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
           <span className="rounded border px-1.5 py-0.5 text-[13px] text-muted">Esc</span>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto p-1.5">
+        <div className="flex">
+        <div className="max-h-[60vh] min-w-0 flex-1 overflow-y-auto p-1.5">
           {total === 0 && <div className="px-3 py-6 text-center text-[13px] text-muted">No matches</div>}
-          {goItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Go to</div>}
-          {goItems.map((g, i) => (
-            <button key={g.view} onMouseEnter={() => setIdx(i)} onClick={() => activate(i)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left ${idx === i ? "bg-background" : ""}`}>
-              <span className="w-5 shrink-0 text-center">{g.icon}</span>
-              <span className="min-w-0 flex-1 truncate text-[15px]">{g.label}</span>
-              {!q && <kbd className="shrink-0 rounded border border-b-2 px-1.5 text-[13px] text-muted">{GO.indexOf(g) + 1}</kbd>}
-            </button>
-          ))}
           {clientItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{q ? "Clients" : "Pinned"}</div>}
           {clientItems.map((c, ci) => { const i = G + ci; const ct = contactOf(c); const sub = [ct?.company, ct?.email].filter(Boolean).join(" · "); return (
             <button key={c.id} onMouseEnter={() => setIdx(i)} onClick={() => activate(i)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${idx === i ? "bg-background" : ""}`}>
@@ -121,6 +116,19 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
               <span className="shrink-0 text-[13px] text-accent">Add as client</span>
             </button>
           ); })}
+        </div>
+        {onGo && (
+          <nav aria-label="Go to" className="hidden w-48 shrink-0 border-l bg-background/50 p-1.5 sm:block">
+            <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Go to</div>
+            {GO.map((g, i) => (
+              <button key={g.view} onClick={() => onGo(g.view)} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-surface">
+                <span className="w-5 shrink-0 text-center">{g.icon}</span>
+                <span className="min-w-0 flex-1 truncate text-[15px]">{g.label}</span>
+                <kbd className="shrink-0 rounded border border-b-2 bg-surface px-1.5 text-[13px] text-muted">{i + 1}</kbd>
+              </button>
+            ))}
+          </nav>
+        )}
         </div>
       </div>
     </>
