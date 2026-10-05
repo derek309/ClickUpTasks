@@ -232,7 +232,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     if (!j.needsClient) load();
     return j as { clientId?: string; contactId?: string; needsClient?: boolean; address?: string; name?: string };
   }, [post, load]);
-  const send = useCallback(async (body: { threadKey?: string | null; channel?: "sms"; contactId?: string; to?: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; attachments?: { path: string; name: string }[] }) => {
+  const send = useCallback(async (body: { threadKey?: string | null; channel?: "sms"; contactId?: string; to?: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; attachments?: { path: string; name: string }[]; ghlLog?: boolean }) => {
     const j = await post("/api/inbox/send", body);
     load();
     return j as { messageId: string; threadKey: string | null };

@@ -1116,6 +1116,10 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [taskOpen, setTaskOpen] = useState(false);
   const [reviews, setReviews] = useState<{ id: string; name: string; url: string; opened: boolean }[] | null>(null);
   const [askReplace, setAskReplace] = useState(false);
+  // Log in GoHighLevel: on for someone who is a contact, off for a stranger, so
+  // a newsletter reply doesn't make a contact there.
+  const hasBcc = !!(p.prefs.ghlBcc?.agency || p.prefs.ghlBcc?.directory);
+  const [ghlLog, setGhlLog] = useState(!!t.contactId);
   const [repliesOpen, setRepliesOpen] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1201,6 +1205,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
       ...(forward && t.subject ? { subject: /^fwd?:/i.test(t.subject) ? t.subject : `Fwd: ${t.subject}` } : {}),
       cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean),
       body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })),
+      ...(email ? { ghlLog: hasBcc && ghlLog } : {}),
     });
   };
 
@@ -1379,6 +1384,11 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         {rich && <button onClick={() => draft()} disabled={busy !== null} title="Draft a reply from their email and the task" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "draft" ? "✍️ Drafting…" : <>✍️<span className="hidden sm:inline"> Draft</span></>}</button>}
         <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Fix spelling and grammar" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> {rich ? "Improve" : "Improve with AI"}</span></>}</button>
         {!compact && <button onClick={() => improve("shorter")} disabled={busy !== null || !hasText} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "shorter" ? "✂️ Cutting…" : <>✂️<span className="hidden sm:inline"> Shorter</span></>}</button>}
+        {rich && hasBcc && (
+          <label title="A hidden copy goes to your GoHighLevel Auto BCC Sync address, so it's logged on the contact" className="flex h-10 cursor-pointer items-center gap-2 px-1 font-semibold text-muted">
+            <input type="checkbox" checked={ghlLog} onChange={(e) => setGhlLog(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Log in GoHighLevel
+          </label>
+        )}
         {(hasText || files.length > 0) && <button onClick={discard} title="Throw this draft away" className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-foreground">🗑{!rich && " Discard"}</button>}
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
@@ -2104,6 +2114,10 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   const hasText = !!plain.trim();
   const [signature, setSignature] = useState("");
   useEffect(() => { loadSignature().then(setSignature); }, []);
+  const hasBcc = !!(p.prefs.ghlBcc?.agency || p.prefs.ghlBcc?.directory);
+  // Unchecked for a typed address: it may be nobody GoHighLevel should hold.
+  const [ghlLog, setGhlLog] = useState(true);
+  const logIt = hasBcc && ghlLog && !!to?.contactId;
   const switchKind = (k: "email" | "text" | "team") => {
     if (k === kind) return;
     if (k === "email" && kind === "text") put(body.trim() ? plainTextToHtml(body) : "");
@@ -2135,7 +2149,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
     setBusy("send");
     try {
       const r = kind === "email"
-        ? await p.inbox.send({ to: to.address, cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean), subject, body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })) })
+        ? await p.inbox.send({ to: to.address, cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean), subject, body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })), ghlLog: logIt })
         : await p.inbox.send({ channel: "sms", contactId: to.contactId, body: body.trim() });
       if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
       p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
@@ -2221,6 +2235,11 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             </>}
             <button disabled={busy !== null || !hasText} onClick={() => ai("fix")} title="Fix spelling and grammar" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Working…" : "✨ Improve"}</button>
             <button disabled={busy !== null || !hasText} onClick={() => ai("shorter")} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">✂️ Shorter</button>
+            {kind === "email" && hasBcc && (
+              <label title={to && !to.contactId ? "Only for someone who is a contact" : "A hidden copy goes to your GoHighLevel Auto BCC Sync address, so it's logged on the contact"} className={`flex h-10 items-center gap-2 px-1 font-semibold text-muted ${to && !to.contactId ? "opacity-50" : "cursor-pointer"}`}>
+                <input type="checkbox" disabled={!!to && !to.contactId} checked={logIt || (!to && ghlLog)} onChange={(e) => setGhlLog(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Log in GoHighLevel
+              </label>
+            )}
             <span className="flex-1" />
             {kind === "text" && <span className="tabular-nums text-muted">{body.length} / 160</span>}
             <button disabled={busy !== null || !to || !hasText} onClick={send} title="Send (⌘Enter)" className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
@@ -2286,6 +2305,25 @@ function AllowBox({ p }: { p: InboxViewProps }) {
   );
 }
 
+// Each person's GoHighLevel Auto BCC Sync addresses (Derek, 2026-10-05: emails
+// sent from here weren't reaching GoHighLevel). Saved on blur.
+function GhlBccBox({ prefs, setPrefs }: { prefs: InboxPrefs; setPrefs: (patch: Partial<InboxPrefs>) => void }) {
+  const saved = prefs.ghlBcc ?? {};
+  const [agency, setAgency] = useState(saved.agency ?? "");
+  const [directory, setDirectory] = useState(saved.directory ?? "");
+  const ok = (v: string) => !v.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+  const save = () => { if (ok(agency) && ok(directory)) setPrefs({ ghlBcc: { agency: agency.trim(), directory: directory.trim() } }); };
+  const input = "h-10 min-w-0 flex-1 rounded-lg border bg-surface px-3 outline-none focus:border-accent";
+  return (
+    <Box title="Log emails in GoHighLevel" help="Emails you send from here go out through your Gmail, and GoHighLevel doesn't see them. Paste your Auto BCC Sync address from each sub-account and every email you send gets a hidden copy there, so it's logged on the contact. In GoHighLevel it is in your profile settings, under Auto BCC Sync.">
+      <label className="grid gap-1"><b className="font-semibold">Agency sub-account</b><input value={agency} onChange={(e) => setAgency(e.target.value)} onBlur={save} placeholder="Paste the address" className={input} /></label>
+      <label className="grid gap-1"><b className="font-semibold">Directory sub-account</b><input value={directory} onChange={(e) => setDirectory(e.target.value)} onBlur={save} placeholder="Paste the address" className={input} /></label>
+      {(!ok(agency) || !ok(directory)) && <span className="font-semibold text-danger">That isn&apos;t an email address.</span>}
+      <span className="text-muted">A listed business is logged in Directory, everyone else in Agency. Uncheck &ldquo;Log in GoHighLevel&rdquo; on an email to skip it.</span>
+    </Box>
+  );
+}
+
 function Switch({ on, set, label, help }: { on: boolean; set: (v: boolean) => void; label: string; help?: string }) {
   return (
     <label className="flex cursor-pointer items-center justify-between gap-4 py-1.5">
@@ -2330,6 +2368,7 @@ function InboxSettings(p: InboxViewProps) {
           <Switch on={prefs.gmailRead} set={(v) => setPrefs({ gmailRead: v })} label="Mark read in Gmail too" help="Opening a message here marks it read there; Mark as unread puts it back" />
           <Switch on={prefs.gmailArchive} set={(v) => setPrefs({ gmailArchive: v })} label="Archive here archives in Gmail too" help="It leaves your Gmail inbox but is never deleted; Undo puts it back" />
         </Box>
+        <GhlBccBox prefs={prefs} setPrefs={setPrefs} />
         <Box title="Blocked senders" help="Nothing from these shows in your Inbox. Block someone from the ⛔ Block button on their message.">
           {p.inbox.blocks.length ? p.inbox.blocks.map((b) => (
             <div key={b} className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2">

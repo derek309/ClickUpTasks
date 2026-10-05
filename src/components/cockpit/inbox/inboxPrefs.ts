@@ -31,6 +31,10 @@ export type InboxPrefs = {
   railCollapsed: boolean;
   /** The open conversation's side panel width in pixels, dragged by hand. */
   sideWidth: number;
+  /** Your GoHighLevel Auto BCC Sync address in each sub-account (Derek,
+   *  2026-10-05): an email you send is BCC'd there, so it is logged on the
+   *  contact in GoHighLevel. GoHighLevel's API doesn't give it out. */
+  ghlBcc?: { agency?: string; directory?: string };
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

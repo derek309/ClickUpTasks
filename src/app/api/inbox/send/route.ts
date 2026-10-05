@@ -40,7 +40,30 @@ type Body = {
   /** A new text: the contact to text (their GoHighLevel contact). */
   contactId?: string;
   subject?: string; body?: string; attachments?: { path: string; name: string }[];
+  /** Log it in GoHighLevel through the sender's Auto BCC Sync address (default on). */
+  ghlLog?: boolean;
 };
+
+// The sender's GoHighLevel Auto BCC Sync address for the sub-account the
+// contact lives in: Directory for a listed business, else Agency (Derek's rule:
+// Agency for anyone buying from us). Saved by each person in Inbox Settings.
+async function ghlBccFor(memberId: string | null, contactId: string | null): Promise<string | null> {
+  if (!memberId) return null;
+  const { data: row } = await supabaseAdmin.from("inbox_prefs").select("prefs").eq("member_id", memberId).maybeSingle();
+  const saved = ((row?.prefs as any)?.ghlBcc ?? {}) as { agency?: string; directory?: string };
+  if (!saved.agency && !saved.directory) return null;
+  let which: "agency" | "directory" = "agency";
+  if (contactId) {
+    const { data: c } = await supabaseAdmin.from("contacts").select("ghl_contact_id").eq("id", contactId).maybeSingle();
+    const home = c?.ghl_contact_id ? await contactHome(c.ghl_contact_id as string) : null;
+    if (home) {
+      const { data: dir } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", "c_directory").maybeSingle();
+      if (dir?.ghl_location_id && dir.ghl_location_id === home.locationId) which = "directory";
+    }
+  }
+  const addr = (saved[which] || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) ? addr : null;
+}
 
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
@@ -99,6 +122,10 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   }
 
   const { data: prof } = await supabaseAdmin.from("profiles").select("name, email_signature").eq("id", caller.id).maybeSingle();
+  // A hidden copy to GoHighLevel's Auto BCC Sync, so the email is logged on the
+  // contact there; kept off the stored copy, which lists only real people.
+  const sync = b.ghlLog === false ? null : await ghlBccFor(caller.memberId, contactId);
+  const sendBcc = sync && !bcc.includes(sync) ? [...bcc, sync] : bcc;
   // The Inbox email box writes HTML (bold, lists, links); the rest is plain.
   const rich = looksLikeHtml(text);
   if (rich && !htmlToText(text).trim()) return NextResponse.json({ error: "Write something first." }, { status: 400 });
@@ -144,7 +171,7 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
 
   try {
     const { id, threadId } = await sendGmailAs(sender, {
-      to, cc: cc.length ? cc : undefined, bcc: bcc.length ? bcc : undefined, subject, body: html, isHtml: true,
+      to, cc: cc.length ? cc : undefined, bcc: sendBcc.length ? sendBcc : undefined, subject, body: html, isHtml: true,
       fromName: (prof?.name as string | null)?.trim() || undefined, attachments: attParts.length ? attParts : undefined, replyTo,
     });
     const rfc822 = await sentRfc822(sender, id);
