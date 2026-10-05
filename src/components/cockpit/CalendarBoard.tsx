@@ -55,11 +55,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, d]) => ({ key, list: d.list, allDay: d.allDay, today }));
   }, [shown]);
+  // Today keeps its word; every other day is just its date (Derek, 2026-10-05).
   const dayLabel = (key: string, today: string) => {
-    const d = new Date(`${key}T12:00:00`);
-    const tomorrow = new Date(`${today}T12:00:00`); tomorrow.setDate(tomorrow.getDate() + 1);
-    const long = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
-    return key === today ? `Today · ${long}` : key === tomorrow.toLocaleDateString("en-CA") ? `Tomorrow · ${long}` : long;
+    const long = new Date(`${key}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+    return key === today ? `Today · ${long}` : long;
   };
 
   const copy = async (l: BookingLink) => {
