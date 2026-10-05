@@ -1118,7 +1118,8 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [askReplace, setAskReplace] = useState(false);
   // Log in GoHighLevel: on for someone who is a contact, off for a stranger, so
   // a newsletter reply doesn't make a contact there.
-  const hasBcc = !!(p.prefs.ghlBcc?.agency || p.prefs.ghlBcc?.directory);
+  // Shown to everyone: the address is the sub-account's, and one teammate saving it covers all.
+  const hasBcc = true;
   const [ghlLog, setGhlLog] = useState(!!t.contactId);
   const [repliesOpen, setRepliesOpen] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
@@ -2114,7 +2115,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   const hasText = !!plain.trim();
   const [signature, setSignature] = useState("");
   useEffect(() => { loadSignature().then(setSignature); }, []);
-  const hasBcc = !!(p.prefs.ghlBcc?.agency || p.prefs.ghlBcc?.directory);
+  const hasBcc = true;
   // Unchecked for a typed address: it may be nobody GoHighLevel should hold.
   const [ghlLog, setGhlLog] = useState(true);
   const logIt = hasBcc && ghlLog && !!to?.contactId;
@@ -2315,7 +2316,7 @@ function GhlBccBox({ prefs, setPrefs }: { prefs: InboxPrefs; setPrefs: (patch: P
   const save = () => { if (ok(agency) && ok(directory)) setPrefs({ ghlBcc: { agency: agency.trim(), directory: directory.trim() } }); };
   const input = "h-10 min-w-0 flex-1 rounded-lg border bg-surface px-3 outline-none focus:border-accent";
   return (
-    <Box title="Log emails in GoHighLevel" help="Emails you send from here go out through your Gmail, and GoHighLevel doesn't see them. Paste your Auto BCC Sync address from each sub-account and every email you send gets a hidden copy there, so it's logged on the contact. In GoHighLevel it is in your profile settings, under Auto BCC Sync.">
+    <Box title="Log emails in GoHighLevel" help="Emails you send from here go out through your Gmail, and GoHighLevel doesn't see them. Paste the Auto BCC Sync address from each sub-account and every email sent from here gets a hidden copy there, so it's logged on the contact. It is the sub-account's address, so one person saving it covers the whole team.">
       <label className="grid gap-1"><b className="font-semibold">Agency sub-account</b><input value={agency} onChange={(e) => setAgency(e.target.value)} onBlur={save} placeholder="Paste the address" className={input} /></label>
       <label className="grid gap-1"><b className="font-semibold">Directory sub-account</b><input value={directory} onChange={(e) => setDirectory(e.target.value)} onBlur={save} placeholder="Paste the address" className={input} /></label>
       {(!ok(agency) || !ok(directory)) && <span className="font-semibold text-danger">That isn&apos;t an email address.</span>}

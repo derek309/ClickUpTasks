@@ -49,8 +49,13 @@ type Body = {
 // Agency for anyone buying from us). Saved by each person in Inbox Settings.
 async function ghlBccFor(memberId: string | null, contactId: string | null): Promise<string | null> {
   if (!memberId) return null;
-  const { data: row } = await supabaseAdmin.from("inbox_prefs").select("prefs").eq("member_id", memberId).maybeSingle();
-  const saved = ((row?.prefs as any)?.ghlBcc ?? {}) as { agency?: string; directory?: string };
+  // The address is the sub-account's (its id @email.usercontent.site), the same
+  // for the whole team, so one teammate saving it covers everyone: the
+  // sender's own first, else whoever saved one.
+  const { data: rows } = await supabaseAdmin.from("inbox_prefs").select("member_id, prefs");
+  const all = ((rows ?? []) as any[]).map((r) => ({ mine: r.member_id === memberId, bcc: (r.prefs?.ghlBcc ?? {}) as { agency?: string; directory?: string } }));
+  const pick = (k: "agency" | "directory") => [...all.filter((x) => x.mine), ...all.filter((x) => !x.mine)].map((x) => (x.bcc[k] ?? "").trim()).find(Boolean) ?? "";
+  const saved = { agency: pick("agency"), directory: pick("directory") };
   if (!saved.agency && !saved.directory) return null;
   let which: "agency" | "directory" = "agency";
   if (contactId) {
