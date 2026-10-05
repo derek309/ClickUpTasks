@@ -41,6 +41,10 @@ export type InboxPrefs = {
   hiddenBookingLinks?: string[];
   /** Booking links starred to the top of the Calendar's list (calendar ids). */
   starredBookingLinks?: string[];
+  /** Kinds kept out of this person's Inbox, its count and its pop ups ("email",
+   *  "sms", "social", "call"). Still readable on the task (Derek, 2026-10-05:
+   *  Michaella only needs team and client chats). */
+  hideKinds?: string[];
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

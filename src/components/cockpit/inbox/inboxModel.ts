@@ -293,3 +293,9 @@ export function linksOnTask(task: { description?: string | null; comments?: { ki
   take(task.description ?? "");
   return [...out].slice(0, 6).map(([url, label]) => ({ url, label }));
 }
+
+/** A conversation of a kind this person keeps out of their Inbox (prefs.hideKinds). */
+export function isHiddenKind(t: { channel: string }, hide: string[] | undefined): boolean {
+  if (!hide?.length) return false;
+  return hide.includes(t.channel) || (hide.includes("social") && (SOCIAL as readonly string[]).includes(t.channel));
+}

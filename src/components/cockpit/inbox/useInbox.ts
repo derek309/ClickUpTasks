@@ -11,7 +11,7 @@ import { supabase, authedFetch } from "@/lib/supabase";
 import { rowToMessage } from "@/lib/db";
 import type { Message, Task } from "@/lib/data";
 import { threadKeyOf as thKey, isBlocked } from "@/lib/inbox";
-import { buildThreads, mergeById, mergeStates, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
+import { buildThreads, isHiddenKind, mergeById, mergeStates, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -32,12 +32,14 @@ export type UseInboxDeps = {
   gmailSync: { read: boolean; archive: boolean };
   /** Always to Inbox, which keeps a sender out of Updates. */
   allows?: string[];
+  /** Kinds kept out of the Inbox for this person (prefs.hideKinds). */
+  hide?: string[];
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
 };
 
 const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, starredAt: r.starred_at, updatedAt: r.updated_at });
 
-export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, allows, pushToast }: UseInboxDeps) {
+export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, allows, hide, pushToast }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
@@ -110,8 +112,8 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     // Blocked senders stay out, except what is already in the Trash, and so
     // does a conversation you just handed to someone else.
     return buildThreads([...byId.values()], states, { now, nameOf, convs, allows })
-      .filter((t) => (t.trashed || !isBlocked(t.peerAddress, blocks)) && !(t.ghlConversationId && handedOff.has(t.ghlConversationId)));
-  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff, allows]);
+      .filter((t) => (t.trashed || !isBlocked(t.peerAddress, blocks)) && !(t.ghlConversationId && handedOff.has(t.ghlConversationId)) && !isHiddenKind(t, hide));
+  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff, allows, hide]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);

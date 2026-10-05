@@ -1762,7 +1762,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const { error } = await supabase.from("team_messages").insert({ id: row.id, author_id: row.author_id, body: row.body });
     if (error) { setTeamFeed((f) => f.filter((x) => x.id !== row.id)); throw new Error(error.message); }
   };
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, pushToast });
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, hide: inboxPrefs.hideKinds, pushToast });
   // Updates don't count toward the badge or pop alerts: they are robots.
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.

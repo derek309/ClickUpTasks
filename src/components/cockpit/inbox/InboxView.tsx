@@ -205,7 +205,7 @@ export default function InboxView(p: InboxViewProps) {
           className={`mb-3 h-11 shrink-0 rounded-lg bg-accent font-semibold text-white ${slim ? "w-11 text-[20px]" : "w-full"}`}>{slim ? "＋" : "＋ New message"}</button>
         {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
         {slim ? <div className="my-2 h-px w-8 bg-[var(--border)]" /> : <div className="mx-2.5 mb-1 mt-3 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>}
-        {FILTERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
+        {FILTERS.filter((f) => !(prefs.hideKinds ?? []).includes(f.id)).map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
         <div className={`mt-auto border-t pt-3 ${slim ? "flex w-full flex-col items-center gap-0.5" : ""}`}>
           <FolderButton f={{ id: "inbox", label: "Settings", icon: "⚙️" }} slim={slim} active={folder === "settings"} count={0} onClick={() => { setFolder("settings"); setOpenKey(null); setComposeNew(false); }} />
           <FolderButton f={{ label: slim ? "Show folder names" : "Icons only", icon: slim ? "»" : "«" }} slim={slim} active={false} count={0} onClick={() => p.setPrefs({ railCollapsed: !slim })} />
@@ -218,7 +218,7 @@ export default function InboxView(p: InboxViewProps) {
         <div className={`gap-2 border-b p-3 md:hidden ${open || composeNew ? "hidden" : "flex"}`}>
           <button onClick={() => { setComposeNew({}); setOpenKey(null); }} className="h-11 shrink-0 rounded-lg bg-accent px-4 font-semibold text-white">＋ New</button>
           <select aria-label="Folder" value={folder} onChange={(e) => { setFolder(e.target.value as Folder | "settings"); setOpenKey(null); setComposeNew(false); }} className="h-11 min-w-0 flex-1 rounded-lg border bg-surface px-3 font-semibold">
-            {[...FOLDERS, ...FILTERS].map((f) => <option key={f.id} value={f.id}>{f.label}{count(f.id) ? ` (${count(f.id)})` : ""}</option>)}
+            {[...FOLDERS, ...FILTERS.filter((f) => !(prefs.hideKinds ?? []).includes(f.id))].map((f) => <option key={f.id} value={f.id}>{f.label}{count(f.id) ? ` (${count(f.id)})` : ""}</option>)}
             <option value="settings">Settings</option>
           </select>
         </div>
@@ -2475,6 +2475,11 @@ function InboxSettings(p: InboxViewProps) {
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, like Running late" className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
           <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="The reply" rows={2} className="rounded-lg border bg-surface px-3 py-2 outline-none focus:border-accent" />
           <button disabled={!name.trim() || !text.trim()} onClick={() => { setPrefs({ replies: [...prefs.replies, { name: name.trim(), text: text.trim() }] }); setName(""); setText(""); }} className="h-10 rounded-lg border font-semibold hover:bg-background disabled:opacity-50">＋ Add saved reply</button>
+        </Box>
+        <Box title="What shows in my Inbox" help="Turn off what you don't need here. It stays out of your Inbox, its count and its pop ups, and you can still read it on the task. Team and client chats always show.">
+          {([["email", "Email"], ["sms", "Texts"], ["social", "Social (Facebook, Instagram, website chat, Google)"], ["call", "Calls"]] as const).map(([k, label]) => (
+            <Switch key={k} on={!(prefs.hideKinds ?? []).includes(k)} set={(v) => setPrefs({ hideKinds: v ? (prefs.hideKinds ?? []).filter((x) => x !== k) : [...(prefs.hideKinds ?? []), k] })} label={label} />
+          ))}
         </Box>
         <Box title="Gmail" help="Keeps your Gmail in step with this Inbox, so its unread count matches. Texts and GoHighLevel messages are never changed.">
           <Switch on={prefs.gmailRead} set={(v) => setPrefs({ gmailRead: v })} label="Mark read in Gmail too" help="Opening a message here marks it read there; Mark as unread puts it back" />
