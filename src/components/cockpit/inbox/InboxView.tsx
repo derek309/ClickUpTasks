@@ -1580,7 +1580,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             <span className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
               {moreOpen && (
-                <Menu onClose={() => setMoreOpen(false)}>
+                <Menu right onClose={() => setMoreOpen(false)}>
                   <button onClick={() => { setMoreOpen(false); p.onOpenTask(task.id, t.subject || t.peerName); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Open task</button>
                   <button disabled={busy} onClick={() => { setMoreOpen(false); link(null); }} className="block w-full rounded-md px-3 py-2 text-left text-danger hover:bg-background">Unlink from this conversation</button>
                 </Menu>

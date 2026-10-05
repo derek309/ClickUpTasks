@@ -31,6 +31,26 @@ export function addDaysIso(iso: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 export const TOMORROW = addDaysIso(TODAY, 1);
+
+/** When to follow up on a task due `due` (Derek, 2026-10-05: a follow up goes
+ *  with every due date, as a reminder): 3 days before when it is further out
+ *  than that, else the day before, never earlier than today. A follow up in
+ *  the future keeps the task quiet until then (isSnoozed), so this is the day
+ *  it comes back to you. */
+export function followUpForDue(due: string, today: string = todayIso()): string {
+  const early = addDaysIso(due, -3);
+  if (early > today) return early;
+  const dayBefore = addDaysIso(due, -1);
+  return dayBefore > today ? dayBefore : today;
+}
+
+/** The follow up a due date change brings with it, or undefined to leave it:
+ *  only when the due date really changes to a date and the same change doesn't
+ *  set a follow up of its own. */
+export function followUpWithDue(before: { due: string | null }, patch: { due?: string | null; followUpAt?: string | null }, today: string = todayIso()): string | undefined {
+  if (patch.followUpAt !== undefined || !patch.due || patch.due === before.due) return undefined;
+  return followUpForDue(patch.due, today);
+}
 // Skips weekends. "Check back in 3 days" from a Thursday lands on a Sunday,
 // which is not a day anyone checks anything, so the client gets an extra two
 // days of silence and the task sits in Sunday's bucket looking overdue by
