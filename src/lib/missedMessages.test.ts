@@ -19,7 +19,10 @@ describe("messages waiting on someone", () => {
     expect(waitingOn([row("1", "m", 3), row("2", "d", 1)], now)).toEqual([]);
     expect(waitingOn([row("1", "m", 1)], now)).toEqual([]);
     expect(waitingOn([row("1", "m", 3, { reminded_at: "x" })], now)).toEqual([]);
-    expect(waitingOn([row("1", "m", 80)], now)).toEqual([]);
+    expect(waitingOn([row("1", "m", 30)], now)).toEqual([]);
+    expect(waitingOn([row("1", "m", 3, { body: "Perfect thank you." })], now)).toEqual([]);
+    expect(waitingOn([row("1", "m", 3, { body: "👍" })], now)).toEqual([]);
+    expect(waitingOn([row("1", "m", 3, { body: "Thanks, can you send the file?" })], now)).toHaveLength(1);
   });
   it("says it needs attention and quotes the message", () => {
     const e = reminderEmail({ authorName: "Michaella Pastrana", messages: [{ body: "Can you check the logo?", created_at: "2026-10-05T17:00:00Z" }], url: "https://x/?view=mail" });

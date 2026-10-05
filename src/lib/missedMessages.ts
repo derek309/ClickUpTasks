@@ -4,7 +4,15 @@
 
 export const WAIT_MS = 2 * 60 * 60 * 1000;
 /** Older than this is history, not something to be reminded about. */
-export const TOO_OLD_MS = 3 * 24 * 60 * 60 * 1000;
+export const TOO_OLD_MS = 24 * 60 * 60 * 1000;
+
+/** A sign off that needs no answer: "Perfect thank you.", "ok", "👍". */
+export function needsNoAnswer(body: string): boolean {
+  const t = body.trim().toLowerCase().replace(/[!.,\s]+$/g, "");
+  if (!t) return true;
+  if (/^[\p{Extended_Pictographic}\s]+$/u.test(t)) return true;
+  return t.length <= 40 && !t.includes("?") && /^(ok(ay)?|k|cool|great|perfect|awesome|nice|sounds good|got it|thanks?( you)?( so much)?|thank you( so much)?|ty|thx|will do|done|yes|yep|sure|love it|amazing)\b/.test(t);
+}
 
 export type DmRow = { id: string; conversation_id: string; author_id: string; recipient_id: string; body: string; created_at: string; reminded_at: string | null };
 
@@ -23,6 +31,7 @@ export function waitingOn(rows: DmRow[], now: number): { recipientId: string; au
     const run: DmRow[] = [];
     for (let i = sorted.length - 1; i >= 0 && sorted[i].author_id === last.author_id; i--) run.unshift(sorted[i]);
     if (run.some((m) => m.reminded_at)) continue;
+    if (needsNoAnswer(last.body)) continue;
     const first = new Date(run[0].created_at).getTime();
     if (now - first < WAIT_MS || now - first > TOO_OLD_MS) continue;
     out.push({ recipientId: last.recipient_id, authorId: last.author_id, conversationId, messages: run });
