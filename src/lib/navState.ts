@@ -78,13 +78,15 @@ export function parseSearch(search: string): NavState {
 
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
+// The same order as ⌘K's Go to (Derek, 2026-10-05: "match the number keys"):
+// 1 Inbox, 2 Clients, 3 Tasks, 4 Projects, 5 Personal; All clients keeps 6.
 export const NAV_KEY_VIEWS: Record<string, "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox"> = {
-  "1": "dashboard",
-  "2": "alltasks",
-  "3": "clients",
+  "1": "inbox",
+  "2": "dashboard",
+  "3": "alltasks",
   "4": "projects",
   "5": "personal",
-  "6": "inbox",
+  "6": "clients",
 };
 
 // The first half of a deep link to a direct message, for notification emails:

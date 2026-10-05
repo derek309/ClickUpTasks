@@ -257,11 +257,12 @@ export function LinkFormModal({ initial, onSubmit, onCancel }: LinkFormSpec & { 
 // Until this existed the only way to find out that j and k walk the task list,
 // or that the number keys jump between views, was to be told.
 const SHORTCUTS: { keys: string[]; what: string }[] = [
-  { keys: ["1"], what: "Clients" },
-  { keys: ["2"], what: "Tasks" },
-  { keys: ["3"], what: "All clients" },
+  { keys: ["1"], what: "Inbox" },
+  { keys: ["2"], what: "Clients" },
+  { keys: ["3"], what: "Tasks" },
   { keys: ["4"], what: "Projects" },
   { keys: ["5"], what: "Personal" },
+  { keys: ["6"], what: "All clients" },
   { keys: ["C"], what: "New task" },
   { keys: [modKey(), "K"], what: "Search everything" },
   { keys: ["J", "↓"], what: "Next task, with one open" },

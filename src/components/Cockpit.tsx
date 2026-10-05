@@ -2324,7 +2324,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
           <div className="grid grid-cols-4 gap-1">
-            <button onClick={() => goToView("inbox")} title="Inbox: your email, texts and task chats (press 6)" aria-label="Inbox"
+            <button onClick={() => goToView("inbox")} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
               className={`relative grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "inbox" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>
               📥{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-2 top-1 rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
             </button>
@@ -2336,7 +2336,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="grid h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background">{icon}</a>
             ))}
           </div>
-          <SideItem active={myWork} title="Clients (press 1)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
+          <SideItem active={myWork} title="Clients (press 2)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
               shortcut at first, to avoid shifting every row below it down one
@@ -2347,7 +2347,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 2)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
+          <SideItem active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 3)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
