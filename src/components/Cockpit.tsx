@@ -2551,7 +2551,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
-              <h1 className="flex items-center gap-1.5 truncate text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}</h1>
+              <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}{followingControl && <span className="ml-1 text-[15px] font-normal">{followingControl}</span>}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
@@ -2563,7 +2563,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     done, it's just clutter"). */}
               </p>
             </>) : (<>
-              <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
+              {/* Not truncate: it clipped the Following menu beside the name. */}
+              <h1 className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[20px] font-semibold">
                 {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {/* The health pill is gone: the Overdue box under the header says it
                     with the count (Derek, 2026-10-05, header mockup C). */}
@@ -2574,13 +2575,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <span role="button" tabIndex={-1} onClick={() => toggleStar(activeClient)} title={starred.has(activeClient) ? "Unpin from sidebar" : "Pin to sidebar"}
                     className={`shrink-0 rounded p-0.5 hover:bg-background ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></span>
                 )}
+                {/* Who follows them, beside the name (Derek, 2026-10-05). */}
+                {clientView && followingControl && <span className="text-[15px] font-normal">{followingControl}</span>}
               </h1>
               <div className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
                     when a specific client is the thing being viewed. */}
                 {/* Company, then who follows them (Derek, 2026-10-05, mockup C). */}
                 <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
-                {clientView && followingControl && <>{clientCompany(clientById(activeClient)) && <span className="opacity-50">·</span>}{followingControl}</>}
               </div>
             </>)}
           </div>
