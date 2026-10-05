@@ -1111,7 +1111,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [cc, setCc] = useState(mode === "replyAll" ? allOthers.join(", ") : ""); const [bcc, setBcc] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [note, setNote] = useState<{ kind: "ai" | "error"; text: string; before?: string } | null>(null);
-  const [busy, setBusy] = useState<"improve" | "shorter" | "draft" | "send" | null>(null);
+  const [busy, setBusy] = useState<"improve" | "shorter" | "draft" | "times" | "send" | null>(null);
   const editorRef = useRef<Editor | null>(null);
   // Insert from task (Derek, 2026-10-02): the linked task's review links,
   // other links and files, one click into the email.
@@ -1174,6 +1174,29 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
       putAndKeep(asRich(r.text));
       setNote({ kind: "ai", text: r.usedTask && task ? `Drafted from their email and the task "${task.title}". Check it before you send.` : "Drafted from their email. Check it before you send.", before });
     } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't draft it." }); }
+    finally { setBusy(null); }
+  };
+  // Suggest times (Phase 4, Derek, 2026-10-05): three real open times from the
+  // chosen calendar and its booking page, written into the reply where the
+  // cursor is. A draft to check and send; nothing is booked.
+  const suggestTimes = async (l: BookingLink) => {
+    setBusy("times"); setNote(null);
+    try {
+      const r = await p.inbox.proposeTimes(t.key, l.calendarId);
+      const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const linkHtml = r.url ? `<a href="${r.url.replace(/"/g, "&quot;")}">book a time here</a>` : "";
+      let html = r.text.split(/\n{2,}/).map((para) => para.trim()).filter(Boolean).map((para) => {
+        const lines = para.split("\n").map((x) => x.trim());
+        if (lines.every((x) => /^- /.test(x))) return `<ul>${lines.map((x) => `<li><p>${esc(x.slice(2))}</p></li>`).join("")}</ul>`;
+        return `<p>${lines.map(esc).join("<br>")}</p>`;
+      }).join("");
+      html = html.includes("[[LINK]]") ? html.replace(/\[\[LINK\]\]/g, linkHtml) : html + (linkHtml ? `<p>Or pick any open time: ${linkHtml}</p>` : "");
+      const before = text;
+      const ed = editorRef.current;
+      if (ed && !ed.isDestroyed && hasText) ed.chain().focus().insertContent(html).run();
+      else putAndKeep(html);
+      setNote({ kind: "ai", text: `Offered 3 open times from ${r.calendarName ?? "your calendar"}. Check them before you send.`, before });
+    } catch (e) { setNote({ kind: "error", text: e instanceof Error ? e.message : "Couldn't suggest times." }); }
     finally { setBusy(null); }
   };
   const openTaskMenu = () => {
@@ -1386,6 +1409,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
           </div>
         )}
         {rich && <BookingLinkMenu me={p.me.id} onPick={(l) => insertLink(l.url, "book a time here")} />}
+        {rich && t.key.match(/^(gm|ghl):/) && <BookingLinkMenu me={p.me.id} icon={busy === "times" ? "⏳" : "🗓"} label={busy === "times" ? "Finding times…" : "Suggest times"} title="Offer three open times from a calendar, with its booking page" onPick={suggestTimes} />}
         {rich && <button onClick={() => draft()} disabled={busy !== null} title="Draft a reply from their email and the task" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "draft" ? "✍️ Drafting…" : <>✍️<span className="hidden sm:inline"> Draft</span></>}</button>}
         <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Fix spelling and grammar" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> {rich ? "Improve" : "Improve with AI"}</span></>}</button>
         {!compact && <button onClick={() => improve("shorter")} disabled={busy !== null || !hasText} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "shorter" ? "✂️ Cutting…" : <>✂️<span className="hidden sm:inline"> Shorter</span></>}</button>}

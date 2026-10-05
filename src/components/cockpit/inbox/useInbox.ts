@@ -248,6 +248,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     await load();
   }, [meMemberId, load]);
   const improve = useCallback(async (text: string, channel: string, mode: "fix" | "shorter" = "fix") => (await post("/api/ai/improve", { text, channel, mode })) as { text: string; changed: boolean }, [post]);
+  const proposeTimes = useCallback(async (threadKey: string, calendarId: string) => (await post("/api/ai/propose-times", { threadKey, calendarId })) as { text: string; times: string[]; url: string | null; calendarName: string | null }, [post]);
   const draftReply = useCallback(async (threadKey: string, taskId: string | null) => (await post("/api/ai/draft-reply", { threadKey, taskId })) as { text: string; usedTask: boolean }, [post]);
   const taskReviews = useCallback(async (taskId: string) => {
     const r = await authedFetch(`/api/inbox/task-reviews?task=${encodeURIComponent(taskId)}`);
@@ -256,7 +257,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     return (j.reviews ?? []) as { id: string; kind: string; name: string; url: string; opened: boolean; status: string }[];
   }, []);
 
-  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve, draftReply, taskReviews };
+  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve, draftReply, proposeTimes, taskReviews };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {

@@ -25,6 +25,7 @@ import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "../../../../mcp/core.mjs";
 import { createReviewServices } from "@/lib/mcpReviewServices";
+import { createCalendarServices } from "@/lib/mcpCalendarServices";
 import { sameSecret } from "@/lib/sameSecret";
 
 function json(body: unknown, status: number) {
@@ -57,7 +58,8 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
     key: process.env.SUPABASE_SERVICE_ROLE_KEY,
     memberId,
     // The review tools run the app's own review code, so only this server has them.
-    services: createReviewServices({ memberId }),
+    // Calendar tools (lib/mcpCalendarServices) ride on the same gate.
+    services: { ...createReviewServices({ memberId }), ...createCalendarServices({ memberId }) },
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);

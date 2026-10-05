@@ -690,6 +690,30 @@ export function createServer(opts = {}) {
       "Put images the outside person sent back (file ids from get_project_instructions; JPG, PNG, WebP or GIF only, up to 10) into the task's image review as its next version, NOT sent. Two images read as Front and Back. The client sees nothing until send_for_review.",
       { task_id: z.string(), file_ids: z.array(z.string()).min(1).max(10) },
       async ({ task_id, file_ids }) => reply(await services.moveSentBackToImageReview(task_id, file_ids)));
+
+    // Calendars (Phase 4, Derek, 2026-10-05): read live from GoHighLevel, which
+    // stays the calendar and sends its own confirmations. src/lib/mcpCalendarServices.ts.
+    if (services.listCalendars) {
+      server.tool("list_calendars",
+        "Who has a GoHighLevel calendar (today Derek and Justin), and each calendar they can be booked on: name, id, meeting length and public booking page.",
+        {},
+        async () => reply(await services.listCalendars()));
+
+      server.tool("upcoming_appointments",
+        "What's booked in the next days (Pacific time), for one person (first name) or everyone, with appointment ids.",
+        { days: z.number().int().min(1).max(31).optional(), person: z.string().optional().describe("e.g. Justin") },
+        async ({ days, person }) => reply(await services.upcoming(days ?? 7, person)));
+
+      server.tool("find_open_times",
+        "Open start times on one calendar (id from list_calendars) for the next days, by day, Pacific time. Each time is followed by the exact value book_appointment takes.",
+        { calendar_id: z.string(), days: z.number().int().min(1).max(21).optional() },
+        async ({ calendar_id, days }) => reply(await services.findTimes(calendar_id, days ?? 7)));
+
+      server.tool("book_appointment",
+        "Book a GoHighLevel contact on a calendar at one of its open times (from find_open_times, passed exactly). The contact is a GoHighLevel id, an email or an exact name. GoHighLevel sends its usual confirmation to them. Confirm the time with the user before booking.",
+        { calendar_id: z.string(), contact: z.string(), start: z.string().describe("an open time exactly as find_open_times gave it") },
+        async ({ calendar_id, contact, start }) => reply(await services.book(calendar_id, contact, start)));
+    }
   }
 
   server.tool("check_item",

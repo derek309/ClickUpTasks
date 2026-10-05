@@ -16,3 +16,17 @@ describe("Improve, Shorter and Draft prompts", () => {
     expect(p.indexOf("THEM: hi")).toBeLessThan(p.indexOf("Title: Homepage"));
   });
 });
+
+describe("suggest times", async () => {
+  const { pickThreeTimes, proposeTimesPrompt } = await import("./improveText");
+  it("picks the first time on each of three days, skipping the next two hours", () => {
+    const now = Date.parse("2026-10-05T17:00:00Z"); // 10 AM Pacific
+    const slots = ["2026-10-05T11:00:00-07:00", "2026-10-05T14:00:00-07:00", "2026-10-05T15:00:00-07:00", "2026-10-06T09:00:00-07:00", "2026-10-06T10:00:00-07:00", "2026-10-08T13:00:00-07:00", "2026-10-09T13:00:00-07:00"];
+    expect(pickThreeTimes(slots, now)).toEqual(["2026-10-05T14:00:00-07:00", "2026-10-06T09:00:00-07:00", "2026-10-08T13:00:00-07:00"]);
+  });
+  it("gives the AI the exact times and the link marker", () => {
+    const p = proposeTimesPrompt({ me: "Derek", them: "James", conversation: "THEM: can we meet?", times: ["Tue, Oct 6, 9:00 AM"], minutes: 45 });
+    expect(p).toMatch(/- Tue, Oct 6, 9:00 AM/);
+    expect(p).toMatch(/\[\[LINK\]\]/);
+  });
+});

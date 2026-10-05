@@ -49,3 +49,35 @@ export function draftReplyPrompt(o: { me: string | null; them: string | null; co
     o.task,
   ].filter((l) => l !== null).join("\n");
 }
+
+/** Three real open times, spread over different days (Phase 4): the first time on
+ *  each of the first three days that have one, at least two hours from now. */
+export function pickThreeTimes(slots: string[], nowMs: number, timeZone = "America/Los_Angeles"): string[] {
+  const out: string[] = [];
+  const days = new Set<string>();
+  for (const s of [...slots].sort()) {
+    if (Date.parse(s) < nowMs + 2 * 3_600_000) continue;
+    const d = new Date(s).toLocaleDateString("en-CA", { timeZone });
+    if (days.has(d)) continue;
+    days.add(d); out.push(s);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
+/** Offer times in a reply (Phase 4): the AI writes the words around times it is
+ *  given, never its own, and marks where the booking link goes with [[LINK]]. */
+export function proposeTimesPrompt(o: { me: string | null; them: string | null; conversation: string; times: string[]; minutes: number }): string {
+  return [
+    `Write a short reply email${o.me ? ` from ${o.me}` : ""}${o.them ? ` to ${o.them}` : ""} offering to meet, answering the newest message in the conversation below.`,
+    `Offer exactly these ${o.times.length} times, each on its own line starting with "- ", written exactly as given (they are Pacific time, ${o.minutes} minutes):`,
+    ...o.times.map((t) => `- ${t}`),
+    "Then say that if none of those work they can pick any open time, and write [[LINK]] alone on its own line right after that sentence.",
+    "Sound like a friendly small business owner: plain, warm, short. Start with a short greeting using their first name. Do not add a sign off or a name at the end; the signature is added on its own.",
+    "Never invent other times or dates. Never write a web address. Never use em dashes or en dashes.",
+    "Reply with the email text only, paragraphs separated by a blank line: no subject, no quotes, no notes.",
+    "",
+    "CONVERSATION:",
+    o.conversation,
+  ].join("\n");
+}
