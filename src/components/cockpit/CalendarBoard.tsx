@@ -6,7 +6,7 @@
 import { useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { useCalendar, type BookingLink, type CalendarEvent, type CalendarPerson } from "./useCalendar";
-import { BookAppointment, type BookTarget } from "./BookAppointment";
+import { BookAppointment, pacificToIso, type BookTarget } from "./BookAppointment";
 
 const TZ = "America/Los_Angeles";
 const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -17,6 +17,21 @@ const minutes = (a: string, b: string) => Math.max(0, Math.round((Date.parse(b) 
 // at midnight UTC, which is 5 PM the day before here, so those keep their own date.
 const isAllDay = (e: { start: string; end: string }) => Date.parse(e.end) - Date.parse(e.start) >= 23 * 3_600_000;
 const allDayKey = (iso: string) => { const d = new Date(iso); return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? d.toISOString().slice(0, 10) : dayKey(iso); };
+// "10–10:30 AM": the first time drops AM or PM when both share it.
+const clock = (ms: number, suffix: boolean) => {
+  const t = new Date(ms).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).replace(":00", "");
+  return suffix ? t : t.replace(/\s?[AP]M$/, "");
+};
+const meridiem = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric" }).slice(-2);
+const range = (a: number, b: number) => `${clock(a, meridiem(a) !== meridiem(b))}–${clock(b, true)}`;
+// Overlapping stretches joined into one.
+const merge = (spans: [number, number][]) => spans.sort((x, y) => x[0] - y[0]).reduce<[number, number][]>((out, [a, b]) => {
+  const last = out[out.length - 1];
+  if (last && a <= last[1]) last[1] = Math.max(last[1], b); else out.push([a, b]);
+  return out;
+}, []);
+// Free time is looked for between 9 and 5, Pacific.
+const WORK_FROM = "09:00", WORK_TO = "17:00";
 const length = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
 
 export type CalendarBoardProps = {
@@ -75,33 +90,71 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     if (r?.ok) { setGone((g) => new Set(g).add(e.id)); refreshSoon(); }
   };
   const [who, setWho] = useState<string>("all");
-  const [showBusy, setShowBusy] = useState(true);
+  // Busy time folds into one grey line a day; this lists it in full (Derek, 2026-10-05, mockup
+  // https://claude.ai/artifact/Ct4k8xUMqn97ghoUxRU1Xq).
+  const [busyFull, setBusyFull] = useState(false);
+  const [week, setWeek] = useState<0 | 1>(0);
   const [linkQ, setLinkQ] = useState("");
+  const [now] = useState(() => Date.now());
   const nameOf = (id: string) => people.find((p) => p.memberId === id)?.name ?? "";
+  const first = (id: string) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0]);
   const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 
-  const shown = events.filter((e) => !gone.has(e.id) && (who === "all" || e.people.includes(who)) && (showBusy || !e.busy));
-  // Days with something on them, and today always.
-  const days = useMemo(() => {
-    const today = dayKey(new Date().toISOString());
-    const map = new Map<string, { list: CalendarEvent[]; allDay: CalendarEvent[] }>([[today, { list: [], allDay: [] }]]);
+  const shown = events.filter((e) => !gone.has(e.id) && (who === "all" || e.people.includes(who)));
+  // This week runs from today to Sunday; next week is Monday to Sunday.
+  const range7 = useMemo(() => {
+    const today = dayKey(new Date(now).toISOString());
+    const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
+    const add = (k: string, n: number) => new Date(Date.parse(`${k}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+    const sunday = add(today, (7 - dow) % 7);
+    const keys: string[] = [];
+    if (week === 0) for (let k = today; k <= sunday; k = add(k, 1)) keys.push(k);
+    else for (let i = 1; i <= 7; i++) keys.push(add(sunday, i));
+    return { today, keys };
+  }, [week, now]);
+  const days = useMemo(() => range7.keys.map((key) => {
+    const list: CalendarEvent[] = [], busy: CalendarEvent[] = [], allDay: CalendarEvent[] = [];
     for (const e of shown) {
       const all = isAllDay(e);
-      const k = all ? allDayKey(e.start) : dayKey(e.start);
-      if (k < today) continue;
-      const day = map.get(k) ?? { list: [], allDay: [] };
+      if ((all ? allDayKey(e.start) : dayKey(e.start)) !== key) continue;
       // The same working location can come stored two ways; once a day is enough.
-      if (all && day.allDay.some((x) => x.title === e.title && x.people.join() === e.people.join())) continue;
-      (all ? day.allDay : day.list).push(e);
-      map.set(k, day);
+      if (all) { if (!allDay.some((x) => x.title === e.title && x.people.join() === e.people.join())) allDay.push(e); }
+      else (e.busy ? busy : list).push(e);
     }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, d]) => ({ key, list: d.list, allDay: d.allDay, today }));
-  }, [shown]);
-  // Today keeps its word; every other day is just its date (Derek, 2026-10-05).
-  const dayLabel = (key: string, today: string) => {
-    const long = new Date(`${key}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
-    return key === today ? `Today · ${long}` : long;
+    list.sort((a, b) => a.start.localeCompare(b.start));
+    const busySpans = merge(busy.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number]));
+    // Open time between 9 and 5, after everything booked or blocked; half an hour or more.
+    const from = Date.parse(pacificToIso(key, WORK_FROM) ?? ""), to = Date.parse(pacificToIso(key, WORK_TO) ?? "");
+    const taken = merge([...busySpans.map((x) => [...x] as [number, number]), ...list.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number])]);
+    const free: [number, number][] = [];
+    let cursor = Math.max(from, key === range7.today ? Math.ceil(now / 1_800_000) * 1_800_000 : from);
+    for (const [a, b] of taken) { if (a > cursor) free.push([cursor, Math.min(a, to)]); cursor = Math.max(cursor, b); if (cursor >= to) break; }
+    if (cursor < to) free.push([cursor, to]);
+    return { key, list, busy: busy.sort((a, b) => a.start.localeCompare(b.start)), busySpans, allDay, free: free.filter(([a, b]) => b - a >= 30 * 60_000) };
+  }), [shown, range7, now]);
+  const nextUp = shown.filter((e) => !e.busy && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
+  const meetings = days.reduce((n, d) => n + d.list.length, 0);
+  const openHours = Math.round(days.reduce((n, d) => n + d.free.reduce((m, [a, b]) => m + (b - a), 0), 0) / 3_600_000);
+  const dayLabel = (key: string) => {
+    const short = new Date(`${key}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    return key === range7.today ? `Today · ${short}` : short;
   };
+  const whenLabel = (e: CalendarEvent) => {
+    const mins = Math.round((Date.parse(e.start) - now) / 60_000);
+    if (Date.parse(e.start) <= now) return "Happening now";
+    if (mins < 90) return `In ${mins} min`;
+    const k = dayKey(e.start);
+    return k === range7.today ? `Today ${time(e.start)}` : `${new Date(`${k}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}, ${time(e.start)}`;
+  };
+  // A meeting's clientId is its sub-account; the client is the GoHighLevel
+  // contact's own page when there is one (cl_ct_ghl_<contact id>).
+  const clientOf = (e: CalendarEvent): string | null => {
+    const own = e.ghlContactId ? `cl_ct_ghl_${e.ghlContactId}` : null;
+    return own && clientName(own) ? own : e.clientId;
+  };
+  // The calendar's name, unless it only repeats who's in the meeting.
+  const calName = (e: CalendarEvent) => (e.calendarName && !e.people.some((id) => nameOf(id) === e.calendarName) ? e.calendarName : null);
+  const weekend = (k: string) => { const d = new Date(`${k}T12:00:00Z`).getUTCDay(); return d === 0 || d === 6; };
 
   const copy = async (l: Pick<BookingLink, "label" | "url">) => {
     try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}`); }
@@ -132,10 +185,13 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     <div className="w-full px-4 py-5 text-[16px] sm:px-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
+          <button onClick={() => setWeek(0)} className={tab(week === 0)}>This week</button>
+          <button onClick={() => setWeek(1)} className={tab(week === 1)}>Next week</button>
+        </span>
+        <span className="inline-flex gap-1 rounded-lg bg-background p-1">
           <button onClick={() => setWho("all")} className={tab(who === "all")}>Both</button>
           {people.map((p) => <button key={p.memberId} onClick={() => setWho(p.memberId)} className={tab(who === p.memberId)}>{p.name.split(/\s+/)[0]}</button>)}
         </span>
-        <label className="ml-1 flex cursor-pointer items-center gap-2 text-muted"><input type="checkbox" checked={showBusy} onChange={(e) => setShowBusy(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time</label>
         <span className="flex-1" />
         <span className="relative">
           <button onClick={() => { setFindOpen(!findOpen); setFindQ(""); }} className="h-10 rounded-md bg-accent px-4 font-semibold text-white">＋ Book</button>
@@ -161,47 +217,75 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
-        <div className="grid gap-5">
-          {days.map(({ key, list, allDay, today }) => (
-            <section key={key}>
-              <h2 className={`mb-1.5 border-b pb-1.5 text-[14px] font-extrabold uppercase tracking-wider ${key === today ? "text-accent" : "text-muted"}`}>{dayLabel(key, today)}</h2>
-              {allDay.length > 0 && (
-                <div className="mb-1 flex flex-wrap gap-x-4 gap-y-1 text-muted">
-                  {allDay.map((e) => <span key={e.id + e.people.join()}>All day: <b className="font-semibold text-foreground/80">{e.title}</b> ({e.people.map((id) => nameOf(id).split(/\s+/)[0]).join(", ")})</span>)}
+        <div className="grid gap-3">
+          {/* Next up (mockup): the next real meeting, with Join and the client. */}
+          {nextUp && (
+            <div className="flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-bold uppercase tracking-wider text-white/70">Next up · {whenLabel(nextUp)}</div>
+                <b className="block truncate text-[20px]">{nextUp.title}</b>
+                <div className="text-white/80">{time(nextUp.start)}, {length(minutes(nextUp.start, nextUp.end))} · {nextUp.people.map(first).join(" and ")}{calName(nextUp) ? ` · ${calName(nextUp)}` : ""}</div>
+              </div>
+              {nextUp.joinUrl && <a href={nextUp.joinUrl} target="_blank" rel="noopener noreferrer" className="grid h-11 place-items-center rounded-lg bg-surface px-6 text-[16px] font-bold text-accent hover:opacity-90">Join</a>}
+              {clientOf(nextUp) && <button onClick={() => onOpenClient(clientOf(nextUp)!)} className="h-11 rounded-lg px-4 font-semibold text-white ring-1 ring-white/40 hover:bg-white/10">Open {clientName(clientOf(nextUp)!) ?? nextUp.contactName ?? "client"}</button>}
+            </div>
+          )}
+          {days.map(({ key, list, busy, busySpans, allDay, free }) => {
+            const quietWeekend = weekend(key) && !list.length;
+            if (quietWeekend && weekend(key) && new Date(`${key}T12:00:00Z`).getUTCDay() === 0 && !days.some((d) => d.key < key && weekend(d.key) && d.list.length)) {
+              return <div key={key} className="px-1 text-muted">Weekend: nothing booked</div>;
+            }
+            if (quietWeekend) return null;
+            const where = allDay.map((e) => `${e.people.map(first).join(" & ")} at ${e.title}`).join(" · ");
+            return (
+              <section key={key} className="rounded-xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]">
+                <div className="flex flex-wrap items-baseline gap-x-3">
+                  <h2 className={`text-[16px] font-bold ${key === range7.today ? "text-accent" : ""}`}>{dayLabel(key)}</h2>
+                  <span className="text-[14px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
                 </div>
-              )}
-              {!list.length && <div className="py-2 text-muted">Nothing booked.</div>}
-              {list.map((e) => (
-                <div key={e.id} className={`grid grid-cols-[6.5rem_minmax(0,1fr)_auto] items-start gap-3 border-b py-2.5 last:border-0 ${e.busy ? "text-muted" : ""}`}>
-                  <span className="tabular-nums">
-                    <b className={e.busy ? "font-semibold" : ""}>{time(e.start)}</b>
-                    <span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span>
-                  </span>
-                  <span className="min-w-0">
-                    <span className={`block truncate ${e.busy ? "" : "font-semibold"}`}>{e.busy && <span className="mr-1.5 rounded bg-background px-1.5 text-[14px] ring-1 ring-[var(--border)]">Busy</span>}{e.title}</span>
-                    {!e.busy && (
+                {list.map((e) => (
+                  <div key={e.id} className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b py-2.5">
+                    <span className="tabular-nums"><b>{time(e.start)}</b><span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span></span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">{e.title}</span>
                       <span className="flex flex-wrap items-center gap-x-3 text-[15px] text-muted">
-                        {e.calendarName && <span>{e.calendarName}</span>}
-                        {e.clientId && <button onClick={() => onOpenClient(e.clientId!)} className="font-semibold text-accent hover:underline">{clientName(e.clientId) ?? e.contactName ?? "Open client"}</button>}
-                        {e.joinUrl && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent hover:underline">Join ↗</a>}
-                        {e.calendarId && Date.parse(e.start) > Date.now() && <>
+                        <span>{e.people.map(first).join(", ")}</span>
+                        {clientOf(e) && <button onClick={() => onOpenClient(clientOf(e)!)} className="font-semibold text-accent hover:underline">{clientName(clientOf(e)!) ?? e.contactName ?? "Open client"}</button>}
+                        {e.calendarId && Date.parse(e.start) > now && <>
                           <button onClick={() => setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title })} className="font-semibold text-accent hover:underline">Move</button>
                           {cancelId === e.id
                             ? <span className="font-semibold text-danger">Cancel it? <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>
                             : <button onClick={() => setCancelId(e.id)} className="font-semibold text-muted hover:text-danger hover:underline">Cancel</button>}
                         </>}
                       </span>
-                    )}
-                  </span>
-                  <span className="flex -space-x-1.5 pt-0.5">
-                    {e.people.map((id) => (
-                      <span key={id} title={nameOf(id)} className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white ring-2 ring-surface" style={{ background: colorOf(id), opacity: e.busy ? 0.55 : 1 }}>{initials(nameOf(id))}</span>
-                    ))}
-                  </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      {e.joinUrl && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="rounded-md px-3 py-1.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Join</a>}
+                      <span className="flex -space-x-1.5">
+                        {e.people.map((id) => <span key={id} title={nameOf(id)} className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white ring-2 ring-surface" style={{ background: colorOf(id) }}>{initials(nameOf(id))}</span>)}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                {/* Busy time, one quiet line; in full when asked. Someone else's
+                    busy time never shows its title (it's their own life). */}
+                {busyFull ? busy.map((e) => (
+                  <div key={e.id} className="flex items-center gap-3 border-b py-1.5 text-[15px] text-muted">
+                    <span className="w-[5.5rem] tabular-nums">{time(e.start)}</span>
+                    <span className="min-w-0 flex-1 truncate">{e.people.includes(meId) ? e.title : `Busy (${e.people.map(first).join(", ")})`}</span>
+                  </div>
+                )) : null}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 text-[15px]">
+                  {!busyFull && busySpans.length > 0 && <span className="min-w-0 text-muted"><b className="font-semibold text-foreground/70">Busy</b> {busySpans.map(([a, b]) => range(a, b)).join(", ")}</span>}
+                  <span className="flex-1" />
+                  {free.length > 0
+                    ? <span className="font-semibold text-success">Free {free.map(([a, b]) => range(a, b)).join(", ")}</span>
+                    : <span className="text-muted">No open time between 9 and 5</span>}
+                  {free.length > 0 && <button onClick={() => { setFindOpen(true); setFindQ(""); }} className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">Book</button>}
                 </div>
-              ))}
-            </section>
-          ))}
+              </section>
+            );
+          })}
         </div>
       )}
       </div>
@@ -265,6 +349,12 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
             )}
           </>;
         })()}
+        <div className="mt-2 grid gap-1.5 border-t pt-3">
+          <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{week ? "Next week" : "This week"}</h2>
+          <div className="flex justify-between"><span>Client meetings</span><b>{meetings}</b></div>
+          <div className="flex justify-between"><span>Open hours to book</span><b>{openHours}</b></div>
+          <label className="mt-1 flex cursor-pointer items-center gap-2 text-[15px] text-muted"><input type="checkbox" checked={busyFull} onChange={(e) => setBusyFull(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time in full</label>
+        </div>
       </aside>
       </div>
       {booking && <BookAppointment target={booking} meId={meId} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} onClose={() => setBooking(null)} onDone={() => { onRefresh(); refreshSoon(); }} pushToast={pushToast} />}

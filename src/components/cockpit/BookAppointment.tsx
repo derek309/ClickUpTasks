@@ -16,7 +16,7 @@ const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { time
 const LAST_KEY = "cul-calendar-last";
 
 /** A date and time typed in Los Angeles, as an instant (same as calendarService's). */
-function pacificToIso(date: string, time: string): string | null {
+export function pacificToIso(date: string, time: string): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
   const guess = Date.parse(`${date}T${time}:00Z`);
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })

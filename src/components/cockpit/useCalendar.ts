@@ -25,7 +25,7 @@ export function useCalendar() {
   const load = useCallback(async (fresh = false) => {
     setLoading(true);
     try {
-      const r = await authedFetch(`/api/calendar?days=14${fresh ? "&fresh=1" : ""}`);
+      const r = await authedFetch(`/api/calendar?days=16${fresh ? "&fresh=1" : ""}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "Couldn't read the calendars.");
       setPeople(j.people ?? []); setEvents(j.events ?? []); setLinks(j.links ?? []);
