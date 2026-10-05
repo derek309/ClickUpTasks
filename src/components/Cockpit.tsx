@@ -3015,7 +3015,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             history={ct ? messages.filter((m) => m.contactId === ct.id && m.channel === "sms").sort((a, b) => a.at.localeCompare(b.at)) : []}
             onSend={allowed ? (body) => sendMessage(cid, "sms", "", body) : undefined}
             onSchedule={allowed ? (body, whenIso) => scheduleMessage(cid, "sms", "", body, whenIso) : undefined}
-            onAiDraft={(instruction) => draftMessage(cid, "sms", instruction || undefined, null)} />
+            onAiDraft={(instruction) => draftMessage(cid, "sms", instruction || undefined, null)}
+            onPageLink={() => getClientShareUrl(cid)} />
         );
       })()}
       {dumpGroup && (
