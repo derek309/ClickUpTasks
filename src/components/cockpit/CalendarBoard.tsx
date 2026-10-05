@@ -93,6 +93,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   };
   // How a meeting went (Derek, 2026-10-05), GoHighLevel's own status menu.
   const [statusOf, setStatusOf] = useState<Record<string, string>>({});
+  const [menuId, setMenuId] = useState<string | null>(null);
   const setStatus = async (e: CalendarEvent, status: string) => {
     if (status === "cancelled") { setCancelId(e.id); return; }
     const before = statusOf[e.id] ?? e.status ?? "confirmed";
@@ -268,21 +269,38 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                       <span className="flex flex-wrap items-center gap-x-3 text-[15px] text-muted">
                         <span>{e.people.map(first).join(", ")}</span>
                         {clientOf(e) && <button onClick={() => onOpenClient(clientOf(e)!)} className="font-semibold text-accent hover:underline">{clientName(clientOf(e)!) ?? e.contactName ?? "Open client"}</button>}
+                        {/* One menu per meeting (Derek, 2026-10-05): its status, then Move and
+                            Cancel, so the row stays clean. */}
                         {e.calendarId && (() => {
                           const st = statusOf[e.id] ?? e.status ?? "confirmed";
+                          const upcoming = Date.parse(e.start) > now;
+                          const item = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-background";
                           return (
-                            <select value={st} onChange={(ev) => void setStatus(e, ev.target.value)} aria-label={`Status of ${e.title}`} title="Appointment status in GoHighLevel"
-                              className={`h-8 rounded-md bg-surface px-1.5 text-[15px] font-semibold ring-1 ring-[var(--border)] ${STATUS_TONE[st] ?? "text-foreground"}`}>
-                              {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                            </select>
+                            <span className="relative">
+                              <button onClick={() => setMenuId(menuId === e.id ? null : e.id)} aria-expanded={menuId === e.id} title="Status, move or cancel"
+                                className={`inline-flex h-8 items-center gap-1 rounded-md bg-surface px-2.5 text-[15px] font-semibold ring-1 ring-[var(--border)] hover:bg-background ${STATUS_TONE[st] ?? "text-foreground"}`}>
+                                {STATUS_LABEL[st] ?? st}<span aria-hidden className="text-muted">▾</span>
+                              </button>
+                              {menuId === e.id && <>
+                                <div className="fixed inset-0 z-40" onClick={() => setMenuId(null)} />
+                                <div className="absolute left-0 top-9 z-50 w-56 rounded-lg bg-surface p-1.5 text-[15px] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                                  <div className="px-3 pb-1 pt-0.5 text-[13px] font-bold uppercase tracking-wider text-muted">Status</div>
+                                  {Object.entries(STATUS_LABEL).filter(([v]) => v !== "cancelled").map(([v, l]) => (
+                                    <button key={v} onClick={() => { setMenuId(null); if (v !== st) void setStatus(e, v); }} className={`${item} ${STATUS_TONE[v] ?? ""}`}>
+                                      <span className="w-4 text-accent">{v === st ? "✓" : ""}</span>{l}
+                                    </button>
+                                  ))}
+                                  {upcoming && <>
+                                    <div className="my-1 border-t" />
+                                    <button onClick={() => { setMenuId(null); setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title }); }} className={item}><span className="w-4" />Move to another time…</button>
+                                    <button onClick={() => { setMenuId(null); setCancelId(e.id); }} className={`${item} text-danger`}><span className="w-4" />Cancel meeting…</button>
+                                  </>}
+                                </div>
+                              </>}
+                            </span>
                           );
                         })()}
-                        {e.calendarId && Date.parse(e.start) > now && <>
-                          <button onClick={() => setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title })} className="font-semibold text-accent hover:underline">Move</button>
-                          {cancelId === e.id
-                            ? <span className="font-semibold text-danger">Cancel it? <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>
-                            : <button onClick={() => setCancelId(e.id)} className="font-semibold text-muted hover:text-danger hover:underline">Cancel</button>}
-                        </>}
+                        {cancelId === e.id && <span className="font-semibold text-danger">Cancel it? GoHighLevel tells them. <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>}
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
