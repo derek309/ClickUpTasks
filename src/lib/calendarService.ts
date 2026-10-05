@@ -59,6 +59,8 @@ export type CalendarEvent = {
   title: string;
   /** Member ids of the people it's for (both on a shared meeting). */
   people: string[];
+  /** GoHighLevel's appointment status: confirmed, showed, noshow (null for busy time). */
+  status?: string | null;
   calendarId: string | null;
   calendarName: string | null;
   ghlContactId: string | null;
@@ -86,6 +88,7 @@ export function normalizeEvent(ev: any, o: { busy: boolean; memberId: string; ca
     contactName: null,
     joinUrl: /^https?:\/\//i.test(address) ? address : null,
     busy: o.busy,
+    status: o.busy ? null : String(ev.appointmentStatus ?? ev.appoinmentStatus ?? "confirmed").toLowerCase() || null,
   };
 }
 
@@ -355,6 +358,23 @@ export async function cancelAppointment(_actor: CalendarActor, id: string): Prom
   if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't cancel it (${res.status}).` };
   slotCache.clear(); eventCache = null;
   if (found.appt.contactId) await resetMeetingTask(String(found.appt.contactId), String(found.appt.startTime)).catch(() => {});
+  return { ok: true };
+}
+
+/** Mark how a meeting went (Derek, 2026-10-05): confirmed, showed or no show,
+ *  as GoHighLevel's own status menu does. Nobody is notified. Cancelling goes
+ *  through cancelAppointment, which also resets the meeting task. */
+export const APPOINTMENT_STATUSES = ["confirmed", "showed", "noshow", "invalid"] as const;
+export async function setAppointmentStatus(_actor: CalendarActor, id: string, status: string): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  if (!(APPOINTMENT_STATUSES as readonly string[]).includes(status)) return { ok: false, status: 400, error: "That isn't a status GoHighLevel knows." };
+  const found = await appointmentOf(id);
+  if (!found) return { ok: false, status: 404, error: "That appointment isn't in GoHighLevel any more." };
+  const res = await fetch(`${API}/calendars/events/appointments/${encodeURIComponent(id)}`, {
+    method: "PUT", headers: { ...headers(found.token), "Content-Type": "application/json" },
+    body: JSON.stringify({ calendarId: found.appt.calendarId, appointmentStatus: status, toNotify: false }),
+  });
+  if (!res.ok) return { ok: false, status: 502, error: `GoHighLevel didn't take the change (${res.status}).` };
+  eventCache = null;
   return { ok: true };
 }
 

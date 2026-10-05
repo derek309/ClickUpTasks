@@ -30,6 +30,8 @@ const merge = (spans: [number, number][]) => spans.sort((x, y) => x[0] - y[0]).r
   if (last && a <= last[1]) last[1] = Math.max(last[1], b); else out.push([a, b]);
   return out;
 }, []);
+const STATUS_LABEL: Record<string, string> = { confirmed: "Confirmed", showed: "Showed", noshow: "No show", cancelled: "Cancelled", invalid: "Invalid" };
+const STATUS_TONE: Record<string, string> = { showed: "text-success", noshow: "text-danger", invalid: "text-muted" };
 // Free time is looked for between 9 and 5, Pacific.
 const WORK_FROM = "09:00", WORK_TO = "17:00";
 const length = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
@@ -88,6 +90,17 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     const j = r ? await r.json().catch(() => ({})) : {};
     pushToast(r?.ok ? `Cancelled: ${e.title}` : j.error ?? "Couldn't cancel it.");
     if (r?.ok) { setGone((g) => new Set(g).add(e.id)); refreshSoon(); }
+  };
+  // How a meeting went (Derek, 2026-10-05), GoHighLevel's own status menu.
+  const [statusOf, setStatusOf] = useState<Record<string, string>>({});
+  const setStatus = async (e: CalendarEvent, status: string) => {
+    if (status === "cancelled") { setCancelId(e.id); return; }
+    const before = statusOf[e.id] ?? e.status ?? "confirmed";
+    setStatusOf((m) => ({ ...m, [e.id]: status }));
+    const r = await authedFetch("/api/calendar/appointment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: e.id, status }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    if (r?.ok) { pushToast(`${e.title}: ${STATUS_LABEL[status] ?? status}`); refreshSoon(); }
+    else { setStatusOf((m) => ({ ...m, [e.id]: before })); pushToast(j.error ?? "Couldn't change the status."); }
   };
   const [who, setWho] = useState<string>("all");
   // Busy time folds into one grey line a day; this lists it in full (Derek, 2026-10-05, mockup
@@ -255,6 +268,15 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                       <span className="flex flex-wrap items-center gap-x-3 text-[15px] text-muted">
                         <span>{e.people.map(first).join(", ")}</span>
                         {clientOf(e) && <button onClick={() => onOpenClient(clientOf(e)!)} className="font-semibold text-accent hover:underline">{clientName(clientOf(e)!) ?? e.contactName ?? "Open client"}</button>}
+                        {e.calendarId && (() => {
+                          const st = statusOf[e.id] ?? e.status ?? "confirmed";
+                          return (
+                            <select value={st} onChange={(ev) => void setStatus(e, ev.target.value)} aria-label={`Status of ${e.title}`} title="Appointment status in GoHighLevel"
+                              className={`h-8 rounded-md bg-surface px-1.5 text-[15px] font-semibold ring-1 ring-[var(--border)] ${STATUS_TONE[st] ?? "text-foreground"}`}>
+                              {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                            </select>
+                          );
+                        })()}
                         {e.calendarId && Date.parse(e.start) > now && <>
                           <button onClick={() => setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title })} className="font-semibold text-accent hover:underline">Move</button>
                           {cancelId === e.id

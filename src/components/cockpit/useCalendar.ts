@@ -11,6 +11,8 @@ export type CalendarEvent = {
   id: string; start: string; end: string; title: string; people: string[];
   calendarId: string | null; calendarName: string | null; ghlContactId: string | null; clientId: string | null; contactName: string | null;
   joinUrl: string | null; busy: boolean;
+  /** confirmed, showed, noshow (null for busy time). */
+  status?: string | null;
 };
 export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number; locationName: string };
 
