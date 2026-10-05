@@ -25,6 +25,7 @@ import type { useInbox } from "./useInbox";
 import { draftKeys, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
 import { allowEntry } from "@/lib/inbox";
 import { guessFromSignature } from "@/lib/signature";
+import { shortcut } from "@/lib/platform";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -836,7 +837,7 @@ function TranscriptPanel({ title, when, them, lines, copied, onCopy, onClose }: 
         </div>
         <div className="flex gap-2 border-b px-5 py-3">
           <button onClick={copy} className="h-10 rounded-lg bg-accent px-4 font-bold text-white">{copied ? "✓ Copied" : "📋 Copy transcript"}</button>
-          {selected && !copied && <span className="self-center text-muted">Selected. Press ⌘C to copy.</span>}
+          {selected && !copied && <span className="self-center text-muted">Selected. Press {shortcut("C")} to copy.</span>}
         </div>
         <div ref={body} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 leading-relaxed">
           {lines.map((l, i) => (
@@ -2353,7 +2354,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             )}
             <span className="flex-1" />
             {kind === "text" && <span className="tabular-nums text-muted">{body.length} / 160</span>}
-            <button disabled={busy !== null || !to || !hasText} onClick={send} title="Send (⌘Enter)" className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
+            <button disabled={busy !== null || !to || !hasText} onClick={send} title={`Send (${shortcut("Enter")})`} className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
           </div>
         </div>
         <aside className="min-w-0 space-y-3">

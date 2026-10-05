@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { I } from "./ui";
 import { ActionMenu } from "./ActionMenu";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { shortcut } from "@/lib/platform";
 
 export const quietButton = "rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
@@ -456,7 +457,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
             </button>
           </>
         )}
-        <button onClick={() => void post()} disabled={!canPost} title="Post comment (⌘ Enter)" aria-label="Post comment"
+        <button onClick={() => void post()} disabled={!canPost} title={`Post comment (${shortcut("Enter")})`} aria-label="Post comment"
           style={canPost ? buttonStyle : undefined}
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[18px] font-semibold transition ${canPost ? "bg-accent text-white" : "bg-surface text-muted"}`}>
           {posting ? "…" : "↑"}
@@ -504,7 +505,7 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
         )}
         {/* The ⌘ Enter hint lives in Post's tooltip: as text it wrapped onto two lines in a narrow card. */}
         {onClearQuote && <button onClick={onClearQuote} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
-        <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined} title="Post (⌘ Enter)"
+        <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined} title={`Post (${shortcut("Enter")})`}
           className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white transition disabled:opacity-40">
           {posting ? "Posting…" : "Post"}
         </button>

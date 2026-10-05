@@ -110,6 +110,7 @@ import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
+import { shortcut } from "@/lib/platform";
 
 
 /** Team chat as Inbox messages: each task's comments (on tasks you own, made,
@@ -2313,6 +2314,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               open all day; the directory of every client is still there, one
               click back through a client's breadcrumb, and adding a client now
               happens here so there was nothing left to come to it for. */}
+          {/* Search you can click, with its key written for this computer
+              (Derek, 2026-10-05: Michaella is on Windows and couldn't find it). */}
+          <button onClick={() => setCmdkOpen(true)} title={`Search everything (${shortcut("K")})`}
+            className="mb-1 flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-muted ring-1 ring-[var(--border)] transition hover:bg-background hover:text-foreground">
+            <I.search className="shrink-0" /><span className="flex-1 text-[15px]">Search</span>
+            <kbd className="rounded border border-b-2 px-1.5 text-[12px] font-semibold">{shortcut("K")}</kbd>
+          </button>
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
           <div className="grid grid-cols-4 gap-1">

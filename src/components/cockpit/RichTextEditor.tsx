@@ -21,6 +21,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { I } from "./ui";
+import { modKey } from "@/lib/platform";
 
 function ToolbarButton({ onClick, active, title, children, large }: { onClick: () => void; active?: boolean; title: string; children: React.ReactNode; large?: boolean }) {
   return (
@@ -56,7 +57,7 @@ export function RichTextEditor({ value, onChange, placeholder, autoFocus, editab
       Underline,
       TaskList,
       TaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { title: "⌘-click to open" } }),
+      Link.configure({ openOnClick: false, autolink: true, HTMLAttributes: { title: `${modKey()}+click to open` } }),
       Placeholder.configure({ placeholder: placeholder ?? "Add a description…" }),
       ...(doc ? [CommentHighlights] : []),
     ],

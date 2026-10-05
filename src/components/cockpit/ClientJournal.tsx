@@ -26,6 +26,7 @@ import { ConfirmModal, type ConfirmSpec } from "./modals";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { SchedulePopover } from "./SchedulePopover";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { shortcut } from "@/lib/platform";
 
 // A2: the old ten equal pills (note kinds, Message, Task Activity, attachment
 // types) mixed three different axes into one row. Split into a primary
@@ -905,7 +906,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
               <div className="relative min-h-[160px] flex-1 overflow-auto"
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitMessage(); } }}>
                 <textarea ref={msgBodyRef} value={msgBody} onChange={(e) => setMsgBody(e.target.value)}
-                  placeholder="Write a text… (⌘↵ to send, Enter for a new line)"
+                  placeholder={`Write a text… (${shortcut("Enter")} to send, Enter for a new line)`}
                   className="h-full min-h-[160px] w-full resize-none rounded-xl border bg-background px-3 py-2 text-[15px] outline-none placeholder:text-muted focus:border-accent" />
               </div>
               {scheduled && scheduled.length > 0 && (

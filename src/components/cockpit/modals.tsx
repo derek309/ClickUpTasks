@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LINK_COLORS, randomLinkColor, STATUS_META, clientStatusMeta, type TaskStatus, type Client, type Contact } from "@/lib/data";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { modKey } from "@/lib/platform";
 
 export type ConfirmSpec = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void };
 export function ConfirmModal({ title, message, confirmLabel = "Confirm", danger = true, onConfirm, onCancel }: ConfirmSpec & { onCancel: () => void }) {
@@ -262,7 +263,7 @@ const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ["4"], what: "Projects" },
   { keys: ["5"], what: "Personal" },
   { keys: ["C"], what: "New task" },
-  { keys: ["⌘", "K"], what: "Search everything" },
+  { keys: [modKey(), "K"], what: "Search everything" },
   { keys: ["J", "↓"], what: "Next task, with one open" },
   { keys: ["K", "↑"], what: "Previous task" },
   { keys: ["Esc"], what: "Close what is on top" },

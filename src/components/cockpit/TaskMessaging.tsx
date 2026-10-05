@@ -20,6 +20,7 @@ import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
 import { SchedulePopover } from "./SchedulePopover";
 import { CHANNEL_TONE } from "./channelTone";
+import { shortcut } from "@/lib/platform";
 
 // A field change as a plain sentence with the new value in bold. Coloured
 // value pills made a run of status changes louder than the client's own
@@ -382,7 +383,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
-          placeholder="Write a message… (⌘↵ to send, paste to attach an image)"
+          placeholder={`Write a message… (${shortcut("Enter")} to send, paste to attach an image)`}
           className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
           <span className="text-[16px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"} · {smsSegments(msgBody).count} segment{smsSegments(msgBody).count === 1 ? "" : "s"}{smsSegments(msgBody).count > 0 ? ` (${smsSegments(msgBody).encoding})` : ""}</span>
@@ -403,7 +404,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}
-          placeholder="Type a message… (⌘↵ to send, paste to attach an image)"
+          placeholder={`Type a message… (${shortcut("Enter")} to send, paste to attach an image)`}
           className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
         <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
           <span className="text-[16px] text-muted">{wordCount(msgBody)} word{wordCount(msgBody) === 1 ? "" : "s"}</span>
@@ -477,7 +478,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitComment(); return; }
           if (e.key === "Enter" && !e.shiftKey && mentionOpen) { e.preventDefault(); pickMention(mentionCands[0].name); }
         }}
-        placeholder="Write a team message… (type @ to mention a teammate, ⌘↵ to send, paste to attach an image)"
+        placeholder={`Write a team message… (type @ to mention a teammate, ${shortcut("Enter")} to send, paste to attach an image)`}
         className="min-h-[100px] w-full resize-none [field-sizing:content] rounded-xl border bg-background px-3 py-2 text-[16px] outline-none placeholder:text-muted focus:border-accent" />
       <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
         <span className="text-[16px] text-muted">{wordCount(comment)} word{wordCount(comment) === 1 ? "" : "s"}</span>

@@ -27,6 +27,7 @@ import { type Me, type User, type Attachment, type DmMessage, userById, timeAgo 
 import { I, Avatar, renderRichText, useStickyBottom, JumpToLatestButton } from "./cockpit/ui";
 import { AttachmentThumbs } from "./cockpit/AttachmentThumbs";
 import { AttachmentTile } from "./cockpit/AttachmentTile";
+import { shortcut } from "@/lib/platform";
 
 type ChatMessage = DmMessage;
 
@@ -228,7 +229,7 @@ export default function DmChat({ me, other, messages, onSend, onDelete, onPin, o
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submit(); return; }
               // Plain Enter picks the top match only while the list is open.
             }}
-            placeholder={`Message ${other.name}… (⌘↵ to send)`}
+            placeholder={`Message ${other.name}… (${shortcut("Enter")} to send)`}
             rows={2}
             className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-[14px] outline-none focus:border-accent"
           />
