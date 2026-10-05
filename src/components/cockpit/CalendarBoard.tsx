@@ -217,10 +217,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
-        <div className="grid gap-3">
+        <div className="grid gap-1">
           {/* Next up (mockup): the next real meeting, with Join and the client. */}
           {nextUp && (
-            <div className="flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
+            <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-bold uppercase tracking-wider text-white/70">Next up · {whenLabel(nextUp)}</div>
                 <b className="block truncate text-[20px]">{nextUp.title}</b>
@@ -233,16 +233,20 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
           {days.map(({ key, list, busy, busySpans, allDay, free }) => {
             const quietWeekend = weekend(key) && !list.length;
             if (quietWeekend && weekend(key) && new Date(`${key}T12:00:00Z`).getUTCDay() === 0 && !days.some((d) => d.key < key && weekend(d.key) && d.list.length)) {
-              return <div key={key} className="px-1 text-muted">Weekend: nothing booked</div>;
+              return <div key={key} className="mt-4 flex items-center gap-3 text-[14px] font-extrabold uppercase tracking-wider text-muted"><span>Weekend</span><span className="h-px flex-1 bg-[var(--border)]" /><span className="font-normal normal-case tracking-normal">Nothing booked</span></div>;
             }
             if (quietWeekend) return null;
             const where = allDay.map((e) => `${e.people.map(first).join(" & ")} at ${e.title}`).join(" · ");
             return (
-              <section key={key} className="rounded-xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]">
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <h2 className={`text-[16px] font-bold ${key === range7.today ? "text-accent" : ""}`}>{dayLabel(key)}</h2>
-                  <span className="text-[14px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
+              <section key={key}>
+                {/* A date spacer between days (Derek, 2026-10-05: "easier on the
+                    eye"); today's is the loud one. */}
+                <div className={`flex items-center gap-3 ${key === range7.today ? "mb-2 mt-1" : "mb-1.5 mt-4"}`}>
+                  <h2 className={key === range7.today ? "shrink-0 rounded-md bg-accent px-3 py-1 text-[16px] font-extrabold uppercase tracking-wider text-white" : "shrink-0 text-[14px] font-extrabold uppercase tracking-wider text-muted"}>{dayLabel(key)}</h2>
+                  <span className="h-px flex-1 bg-[var(--border)]" />
+                  <span className="shrink-0 text-[14px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
                 </div>
+                <div className={`rounded-xl px-4 py-2 ${key === range7.today ? "bg-surface shadow-sm ring-2 ring-accent" : "bg-surface ring-1 ring-[var(--border)]"}`}>
                 {list.map((e) => (
                   <div key={e.id} className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b py-2.5">
                     <span className="tabular-nums"><b>{time(e.start)}</b><span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span></span>
@@ -282,6 +286,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                     ? <span className="font-semibold text-success">Free {free.map(([a, b]) => range(a, b)).join(", ")}</span>
                     : <span className="text-muted">No open time between 9 and 5</span>}
                   {free.length > 0 && <button onClick={() => { setFindOpen(true); setFindQ(""); }} className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">Book</button>}
+                </div>
                 </div>
               </section>
             );
