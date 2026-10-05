@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task, type TaskStatus } from "@/lib/data";
+import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
@@ -1483,8 +1483,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't change it."); }
     finally { setBusy(false); }
   };
-  // Mark done remembers what it was, so Undo puts it back.
-  const [before, setBefore] = useState<TaskStatus | null>(null);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
   const client = p.clientName(t.clientId);
   const contact = t.contactId ? p.contacts.find((x) => x.id === t.contactId) ?? null : null;
@@ -1511,6 +1509,9 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     finally { setBusy(false); }
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const fieldBox = "grid w-full gap-0.5 rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent";
+  const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? null : null;
   const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
   const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
@@ -1521,11 +1522,16 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
       <div className={card}>
         <div className={label}>{task ? "LINKED TASK" : "LINK TO A TASK"}</div>
         {task ? <>
+          {/* Four boxes, one column (Derek, 2026-10-05, mockup
+              https://claude.ai/artifact/7dKMyY11n8qXpwfpVM7Nhj, B): status, who
+              it's on, due and follow up, each a click to change. */}
           <b className="block text-[18px] leading-snug">{task.title}</b>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="relative">
-              <button onClick={() => setStatusOpen(!statusOpen)} className="h-8 rounded-full px-3 font-semibold" style={{ background: STATUS_META[task.status].chip }}>
-                <span className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label} ▾
+          {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
+          <div className="mt-3 grid gap-2">
+            <div className="relative">
+              <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
+                <span className="text-[14px] text-muted">Status</span>
+                <span className="flex items-center gap-2 font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
               </button>
               {statusOpen && (
                 <Menu onClose={() => setStatusOpen(false)}>
@@ -1536,15 +1542,15 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                   ))}
                 </Menu>
               )}
-            </span>
-            {task.waitingOnClient && <span className="h-8 rounded-full bg-highlight-soft px-3 font-semibold leading-8 text-highlight">Waiting on client</span>}
-          </div>
-          {/* Who it's on, when it's due and when to follow up, changed right
-              here (Derek, 2026-10-05). */}
-          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1">
-            <dt className="text-muted">On</dt>
-            <dd className="relative min-w-0">
-              <button onClick={() => setOwnerOpen(!ownerOpen)} className="max-w-full truncate rounded px-1 py-0.5 text-left font-semibold hover:bg-background">{owner ?? "Nobody"} ▾</button>
+            </div>
+            <div className="relative">
+              <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
+                <span className="text-[14px] text-muted">On</span>
+                <span className="flex min-w-0 items-center gap-2 font-semibold">
+                  {ownerMember && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(ownerMember.name) }}>{initials(ownerMember.name)}</span>}
+                  <span className="truncate">{owner ?? "Nobody yet"}</span>
+                </span>
+              </button>
               {ownerOpen && (
                 <Menu onClose={() => setOwnerOpen(false)}>
                   {[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))).map((m) => (
@@ -1555,18 +1561,30 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                   ))}
                 </Menu>
               )}
-            </dd>
-            <dt className="text-muted">Due</dt>
-            <dd className="min-w-0"><InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="Set a date" formatValue={dueLabel as (iso: string) => string} className="font-semibold" /></dd>
-            <dt className="text-muted">Follow up</dt>
-            <dd className="min-w-0"><InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="Set a date" formatValue={dueLabel as (iso: string) => string} className="font-semibold" /></dd>
-          </dl>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-            {task.status === "done"
-              ? <button onClick={() => { p.onPatchTask(task.id, { status: before ?? "todo" }); setBefore(null); }} className="h-9 rounded-lg px-3 font-semibold text-muted ring-1 ring-[var(--border)] hover:bg-background">✓ Done · Undo</button>
-              : <button onClick={() => { setBefore(task.status); p.onPatchTask(task.id, { status: "done" }); p.pushToast("Marked done"); }} className="h-9 rounded-lg bg-success px-3 font-bold text-white">✓ Mark done</button>}
-            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task</button>
-            <button disabled={busy} onClick={() => link(null)} className={linkBtn}>Unlink</button>
+            </div>
+            <div className={`${fieldBox} cursor-default`}>
+              <span className="text-[14px] text-muted">Due</span>
+              <InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
+                className={`-mx-1 font-semibold ${!task.due ? "text-accent" : task.status !== "done" && isOverdue(task.due) ? "text-danger" : ""}`} />
+            </div>
+            <div className={`${fieldBox} cursor-default`}>
+              <span className="text-[14px] text-muted">Follow up</span>
+              <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
+                className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3 border-t pt-3">
+            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</button>
+            <span className="flex-1" />
+            <span className="relative">
+              <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
+              {moreOpen && (
+                <Menu onClose={() => setMoreOpen(false)}>
+                  <button onClick={() => { setMoreOpen(false); p.onOpenTask(task.id, t.subject || t.peerName); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Open task</button>
+                  <button disabled={busy} onClick={() => { setMoreOpen(false); link(null); }} className="block w-full rounded-md px-3 py-2 text-left text-danger hover:bg-background">Unlink from this conversation</button>
+                </Menu>
+              )}
+            </span>
           </div>
         </> : <>
           <p className="mb-2 text-muted">Link it and every new message here lands on the task too.</p>
