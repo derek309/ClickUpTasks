@@ -100,6 +100,7 @@ import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { FolderRail } from "./cockpit/FolderRail";
 import InboxView from "./cockpit/inbox/InboxView";
+import { CalendarView } from "./cockpit/CalendarBoard";
 import { useInbox } from "./cockpit/inbox/useInbox";
 import { useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
 import type { InboxThread } from "./cockpit/inbox/inboxModel";
@@ -218,7 +219,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // resets it alongside the others.
   // "inbox" is the Inbox (every email, text and task chat, 2026-10-01), a
   // full page like the directories, so it shares their flag.
-  const [dirView, setDirView] = useState<"clients" | "projects" | "inbox" | null>(null);
+  const [dirView, setDirView] = useState<"clients" | "projects" | "inbox" | "calendar" | null>(null);
   // Dashboard's own Work/Completed split — Completed relocated here from the
   // Clients directory (Derek: "makes more sense there") — see the myWork
   // content branch below. The Activity tab (notifications inbox) was cut
@@ -347,11 +348,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // set identical state by construction rather than by two hand-maintained
   // copies that quietly drift — and so adding a view later is one edit, not
   // five. NAV_KEY_VIEWS maps the number keys onto these.
-  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox") => {
+  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox" | "calendar") => {
     setMyWork(view === "dashboard");
     setPersonalView(view === "personal");
     setInboxView(false);
-    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : view === "inbox" ? "inbox" : null);
+    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : view === "inbox" ? "inbox" : view === "calendar" ? "calendar" : null);
     setDmUserId(null);
     setSettingsView(false);
 
@@ -744,7 +745,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // bare view=inbox with no dm (an old bookmark) must not open a blank page.
     setInboxView(s.view === "inbox" && !!s.dm);
     setDmUserId(s.view === "inbox" ? s.dm : null);
-    setDirView(s.view === "clients" || s.view === "projects" ? s.view : s.view === "mail" ? "inbox" : null);
+    setDirView(s.view === "clients" || s.view === "projects" || s.view === "calendar" ? s.view : s.view === "mail" ? "inbox" : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
@@ -1987,7 +1988,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
-  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
@@ -2313,6 +2314,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               click back through a client's breadcrumb, and adding a client now
               happens here so there was nothing left to come to it for. */}
           <SideItem active={dirView === "inbox"} title="Your email, texts and task chats (press 6)" onClick={() => goToView("inbox")}><span className="text-muted">📥</span> <span>Inbox</span>{inboxPrefs.badge && inboxUnread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[12px] font-semibold text-white">{inboxUnread}</span>}</SideItem>
+          <SideItem active={dirView === "calendar"} title="The next two weeks, from GoHighLevel" onClick={() => goToView("calendar")}><span className="text-muted">📅</span> <span>Calendar</span></SideItem>
           <SideItem active={myWork} title="Clients (press 1)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
@@ -2481,7 +2483,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               </p>
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
-                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
                 {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
                 {/* Same star as the Clients directory row — pinning to the
                     sidebar shouldn't require leaving the client's own page
@@ -2500,7 +2502,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">All clients</button>
                   <span>›</span>
                 </>)}
-                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private — only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos — only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
               </p>
             </>)}
           </div>
@@ -2650,6 +2652,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             messages={dmMessages.filter((m) => m.conversationId === dmConversationId(me.id, dmUserId))}
             onSend={(body, attachments, replyToId) => sendDmMessage(dmUserId, body, attachments, replyToId)} onDelete={deleteDmMessage}
             onPin={pinDmMessage} onUploadFile={(file) => uploadOneImage(`dm/${dmConversationId(me.id, dmUserId)}`, file)} onOpenFile={downloadFile} onGetSignedUrl={signedUrlForFile} />
+        ) : dirView === "calendar" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto bg-surface">
+            <CalendarView meId={me.id} colorOf={(id) => users.find((u) => u.id === id)?.color ?? "#64748b"}
+              clientName={(id) => clientById(id)?.name ?? null} onOpenClient={(id) => openClientList(id, null)} pushToast={(text) => pushToast(text)} />
+          </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">
             <InboxView inbox={inbox} me={{ id: me.id, name: me.name, email: myEmail }} team={users.map((u) => ({ id: u.id, name: u.name }))}

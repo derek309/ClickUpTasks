@@ -13,6 +13,8 @@ import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
 import { InlineDate } from "../GroupedList";
+import { type BookingLink } from "../useCalendar";
+import { BookingLinkMenu } from "../BookingLinkMenu";
 import type { Editor } from "@tiptap/react";
 import {
   CHANNEL_ICON, CHANNEL_LABEL, CHAT_PAGE, chatItems, bodyParts, isLinkHeavy, dayGroup, dayLabel, inFolder, linksOnTask, matchesSearch, shortTime, snoozeUntil, whereIs,
@@ -1382,6 +1384,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
             )}
           </div>
         )}
+        {rich && <BookingLinkMenu me={p.me.id} onPick={(l) => insertLink(l.url, "book a time here")} />}
         {rich && <button onClick={() => draft()} disabled={busy !== null} title="Draft a reply from their email and the task" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "draft" ? "✍️ Drafting…" : <>✍️<span className="hidden sm:inline"> Draft</span></>}</button>}
         <button onClick={() => improve()} disabled={busy !== null || !hasText} title="Fix spelling and grammar" className={`${compact ? "h-9 px-2.5" : "h-10 px-3"} rounded-lg bg-[#f3efff] font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50`}>{busy === "improve" ? "✨ Improving…" : <>✨<span className={compact ? "hidden sm:inline" : ""}> {rich ? "Improve" : "Improve with AI"}</span></>}</button>
         {!compact && <button onClick={() => improve("shorter")} disabled={busy !== null || !hasText} title="Make it shorter" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "shorter" ? "✂️ Cutting…" : <>✂️<span className="hidden sm:inline"> Shorter</span></>}</button>}
@@ -2133,6 +2136,12 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   const [body, setBody] = useState(() => ((start.kind ?? "email") === "email" && start.body ? plainTextToHtml(start.body) : start.body ?? ""));
   const [nonce, setNonce] = useState(0);
   const put = (v: string) => { setBody(v); setNonce((n) => n + 1); };
+  const newEditor = useRef<Editor | null>(null);
+  const insertBooking = (l: BookingLink) => {
+    const ed = newEditor.current;
+    if (ed && !ed.isDestroyed) ed.chain().focus().insertContent([{ type: "text", text: "book a time here", marks: [{ type: "link", attrs: { href: l.url } }] }, { type: "text", text: " " }]).run();
+    else put(`${body}<p><a href="${l.url}">book a time here</a></p>`);
+  };
   const plain = kind === "email" ? htmlToText(body) : body;
   const hasText = !!plain.trim();
   const [signature, setSignature] = useState("");
@@ -2238,7 +2247,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             <div className="flex-1 pt-2 [&_.rte-content]:min-h-48 [&_.ProseMirror]:px-2.5 [&_.ProseMirror]:outline-none! [&_.rte-toolbar]:border-0"
               onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}
               onDropCapture={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); e.stopPropagation(); upload(e.dataTransfer.files); } }}>
-              <RichTextEditor key={`new-${nonce}`} variant="email" value={body} onChange={setBody} placeholder="Write your email" />
+              <RichTextEditor key={`new-${nonce}`} variant="email" value={body} onChange={setBody} placeholder="Write your email" onEditor={(e) => { newEditor.current = e; }} />
               <div className="mt-1 border-t border-dashed px-2.5 pt-2 text-muted">
                 {signature.trim()
                   ? <div className="opacity-70 [&_a]:underline" title="Your signature, added when it sends. Change it in Settings." dangerouslySetInnerHTML={{ __html: looksLikeHtml(signature) ? signature : plainTextToHtml(signature) }} />
@@ -2254,6 +2263,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             {kind === "email" && <>
               <button onClick={() => fileRef.current?.click()} title="Attach files (or drag them onto the email)" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">📎 Attach</button>
+              <BookingLinkMenu me={p.me.id} onPick={insertBooking} />
               <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { upload(e.target.files); e.target.value = ""; }} />
             </>}
             <button disabled={busy !== null || !hasText} onClick={() => ai("fix")} title="Fix spelling and grammar" className="h-10 rounded-lg bg-[#f3efff] px-3 font-semibold text-[#7c3aed] ring-1 ring-[#7c3aed] disabled:opacity-50">{busy === "ai" ? "✨ Working…" : "✨ Improve"}</button>

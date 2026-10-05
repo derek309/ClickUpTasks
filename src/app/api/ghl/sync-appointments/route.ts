@@ -3,6 +3,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { titleCase } from "@/lib/data";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
+import { ghlCalendars, ghlEvents } from "@/lib/calendarService";
 import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, bumpStatusToInterview } from "@/lib/ghlConversationTask";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,7 +32,6 @@ import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, b
 
 export const maxDuration = 60;
 
-const GHL_VERSION = "2021-04-15";
 const WINDOW_PAST_MS = 60 * 60 * 1000; // still catch a meeting that just started
 const WINDOW_FUTURE_DAYS = 30;
 
@@ -60,15 +60,12 @@ async function run(req: NextRequest) {
   for (const locationId of locations) {
     const token = await tokenForLocation(locationId);
     if (!token) continue;
-    const headers = { Authorization: `Bearer ${token}`, Version: GHL_VERSION, Accept: "application/json" };
-
+    // The endpoints live in lib/calendarService, shared with the calendar view.
     let calendars: any[] = [];
     try {
-      const res = await fetch(`https://services.leadconnectorhq.com/calendars/?locationId=${encodeURIComponent(locationId)}`, { headers });
-      if (!res.ok) { errors.push(`${locationId}: calendars ${res.status}`); continue; }
-      calendars = (await res.json())?.calendars ?? [];
+      calendars = await ghlCalendars(locationId, token);
     } catch (e: any) {
-      errors.push(`${locationId}: calendars fetch failed (${String(e?.message ?? e)})`);
+      errors.push(`${locationId}: ${String(e?.message ?? e)}`);
       continue;
     }
 
@@ -80,12 +77,9 @@ async function run(req: NextRequest) {
     for (const cal of calendars) {
       let events: any[] = [];
       try {
-        const url = `https://services.leadconnectorhq.com/calendars/events?locationId=${encodeURIComponent(locationId)}&calendarId=${encodeURIComponent(cal.id)}&startTime=${startTime}&endTime=${endTime}`;
-        const res = await fetch(url, { headers });
-        if (!res.ok) { errors.push(`${locationId}/${cal.id}: events ${res.status}`); continue; }
-        events = (await res.json())?.events ?? [];
+        events = await ghlEvents(locationId, token, { calendarId: cal.id }, startTime, endTime);
       } catch (e: any) {
-        errors.push(`${locationId}/${cal.id}: events fetch failed (${String(e?.message ?? e)})`);
+        errors.push(`${locationId}/${cal.id}: ${String(e?.message ?? e)}`);
         continue;
       }
 

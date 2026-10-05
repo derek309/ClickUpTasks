@@ -19,6 +19,7 @@ import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "
 import { signedUrlForFile } from "@/lib/db";
 import { placeDraftLink, draftLinkAsButton, escapeHtml } from "@/lib/draftLink";
 import { RichTextEditor } from "./RichTextEditor";
+import { BookingLinkMenu } from "./BookingLinkMenu";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { SchedulePopover } from "./SchedulePopover";
 import {
@@ -423,6 +424,11 @@ export function EmailWindow({
           </div>
 
           <div className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
+            {/* A GoHighLevel booking page, copied to paste into the email (Derek, 2026-10-05). */}
+            <BookingLinkMenu me="" up={false} label="Copy booking link" onPick={async (l) => {
+              try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}. Paste it into the email.`); }
+              catch { pushToast(`Couldn't copy. The link is ${l.url}`); }
+            }} />
             <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
               {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
               {count > 0 && (
