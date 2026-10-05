@@ -1511,7 +1511,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // Label and value on one line (Derek, 2026-10-05: "more compact").
-  const fieldBox = "flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent [&>span:first-child]:w-20 [&>span:first-child]:shrink-0";
+  // Each box shares the card's two columns (subgrid), so the labels are only as
+  // wide as the longest one and the values always fit the card (Derek,
+  // 2026-10-05: "clean and tight").
+  const fieldBox = "col-span-2 grid min-h-10 min-w-0 grid-cols-subgrid items-center rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent";
   const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? null : null;
   const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
@@ -1528,11 +1531,11 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               it's on, due and follow up, each a click to change. */}
           <b className="block text-[18px] leading-snug">{task.title}</b>
           {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
-          <div className="mt-3 grid gap-2">
-            <div className="relative">
+          <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
               <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
                 <span className="text-muted">Status</span>
-                <span className="flex items-center gap-2 font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
+                <span className="flex min-w-0 items-center gap-2 truncate font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
               </button>
               {statusOpen && (
                 <Menu onClose={() => setStatusOpen(false)}>
@@ -1544,7 +1547,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                 </Menu>
               )}
             </div>
-            <div className="relative">
+            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
               <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
                 <span className="text-muted">On</span>
                 <span className="flex min-w-0 items-center gap-2 font-semibold">
