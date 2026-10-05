@@ -49,6 +49,8 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   // Share times (Derek, 2026-10-05: "pick the days and times so we can share
   // in an SMS"): tap several open times, copy them as a text with the booking link.
   const [share, setShare] = useState(false);
+  // When the window opened: "today" for the labels, read once.
+  const [openedAt] = useState(() => Date.now());
   const [picks, setPicks] = useState<string[]>([]);
 
   // The calendars this person can be booked on, yours first, one row each.
@@ -110,6 +112,20 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   };
 
   const calName = calendars?.find((c) => c.calendarId === calendarId)?.label;
+  // Quick copy (Derek, 2026-10-05): every open time, or one day's, as a message
+  // for a chat or a text, with Today and Tomorrow said that way.
+  const dayWord = (iso: string) => {
+    const today = new Date(openedAt).toLocaleDateString("en-CA", { timeZone: TZ });
+    const tomorrow = new Date(openedAt + 86_400_000).toLocaleDateString("en-CA", { timeZone: TZ });
+    const k = dayKey(iso);
+    return k === today ? `Today (${dayName(iso)})` : k === tomorrow ? `Tomorrow (${dayName(iso)})` : dayName(iso);
+  };
+  const copyDays = async (days: string[][]) => {
+    const url = calendars?.find((c) => c.calendarId === calendarId)?.url;
+    const text = [`Hi ${first}, here are my open times (Pacific):`, ...days.map((d) => `${dayWord(d[0])}: ${d.map(timeOf).join(", ")}`), url ? `Book one here: ${url}` : "Which works best for you?"].join("\n");
+    try { await navigator.clipboard.writeText(text); pushToast("Copied. Paste it in a chat or a text."); }
+    catch { window.prompt("Copy this:", text); }
+  };
   // The text: their first name, the times on their own lines, and the booking link.
   const copyTimes = async () => {
     const url = calendars?.find((c) => c.calendarId === calendarId)?.url;
@@ -154,7 +170,10 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
             : !byDay.length ? <div className="text-muted">No open times in the next week on this calendar.</div>
             : byDay.map((day) => (
               <div key={day[0]} className="grid gap-1.5">
-                <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{dayName(day[0])}</b>
+                <div className="flex items-center gap-2">
+                  <b className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{dayWord(day[0])}</b>
+                  {target.kind === "book" && <button type="button" onClick={() => copyDays([day])} title="Copy this day's times for a message" className="text-[14px] font-semibold text-accent hover:underline">📋 Copy</button>}
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {day.map((s) => (
                     <button key={s} onClick={() => { if (share) { setPicks((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s].sort())); return; } setOtherOpen(false); setPicked(s); }}
@@ -163,6 +182,9 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
                 </div>
               </div>
             )))}
+          {target.kind === "book" && calendarId && byDay.length > 0 && (
+            <button type="button" onClick={() => copyDays(byDay)} className="justify-self-start rounded-md px-3 py-1.5 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">📋 Copy all times</button>
+          )}
           {target.kind === "book" && calendarId && (
             <button type="button" onClick={() => { setShare(!share); setPicks([]); setPicked(null); setOtherOpen(false); }}
               className={`justify-self-start rounded-md px-3 py-1.5 font-semibold ring-1 ${share ? "bg-success-soft text-success ring-success" : "text-accent ring-[var(--border)] hover:bg-background"}`}>
