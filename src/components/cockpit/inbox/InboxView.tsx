@@ -1510,7 +1510,8 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const fieldBox = "grid w-full gap-0.5 rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent";
+  // Label and value on one line (Derek, 2026-10-05: "more compact").
+  const fieldBox = "flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent [&>span:first-child]:w-20 [&>span:first-child]:shrink-0";
   const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? null : null;
   const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
@@ -1530,7 +1531,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
           <div className="mt-3 grid gap-2">
             <div className="relative">
               <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
-                <span className="text-[14px] text-muted">Status</span>
+                <span className="text-muted">Status</span>
                 <span className="flex items-center gap-2 font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
               </button>
               {statusOpen && (
@@ -1545,7 +1546,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             </div>
             <div className="relative">
               <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
-                <span className="text-[14px] text-muted">On</span>
+                <span className="text-muted">On</span>
                 <span className="flex min-w-0 items-center gap-2 font-semibold">
                   {ownerMember && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(ownerMember.name) }}>{initials(ownerMember.name)}</span>}
                   <span className="truncate">{owner ?? "Nobody yet"}</span>
@@ -1563,12 +1564,12 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               )}
             </div>
             <div className={`${fieldBox} cursor-default`}>
-              <span className="text-[14px] text-muted">Due</span>
+              <span className="text-muted">Due</span>
               <InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
                 className={`-mx-1 font-semibold ${!task.due ? "text-accent" : task.status !== "done" && isOverdue(task.due) ? "text-danger" : ""}`} />
             </div>
             <div className={`${fieldBox} cursor-default`}>
-              <span className="text-[14px] text-muted">Follow up</span>
+              <span className="text-muted">Follow up</span>
               <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
                 className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
             </div>
