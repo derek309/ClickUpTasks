@@ -57,6 +57,8 @@ export type InboxViewProps = {
   contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; ghlContactId?: string | null }[];
   /** The side panel's live task card: status, Mark done. */
   onPatchTask: (taskId: string, patch: Partial<Task>) => void;
+  /** A client's lists, for the task card's List box. */
+  listsFor: (clientId: string) => { id: string; name: string }[];
   /** Team chat: a task's chat (as a comment), a direct message, or the team group. */
   onSendTeam: (threadKey: string, body: string) => Promise<void>;
   /** 📌 Add to task: an email onto the linked task as a comment. */
@@ -1588,6 +1590,8 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const lists = task ? p.listsFor(task.clientId) : [];
   // Label and value on one line (Derek, 2026-10-05: "more compact").
   // Each box shares the card's two columns (subgrid), so the labels are only as
   // wide as the longest one and the values always fit the card (Derek,
@@ -1625,6 +1629,25 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                 </Menu>
               )}
             </div>
+            {/* Which list it's in (Derek, 2026-10-05: "select the list as
+                well"). A new task from an email starts in the client's first. */}
+            {lists.length > 0 && (
+              <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
+                <button onClick={() => setListOpen(!listOpen)} className={fieldBox}>
+                  <span className="text-muted">List</span>
+                  <span className="truncate font-semibold">{lists.find((l) => l.id === task.projectId)?.name ?? "Pick a list"}</span>
+                </button>
+                {listOpen && (
+                  <Menu onClose={() => setListOpen(false)}>
+                    {lists.map((l) => (
+                      <button key={l.id} onClick={() => { setListOpen(false); if (l.id !== task.projectId) { p.onPatchTask(task.id, { projectId: l.id }); p.pushToast(`Moved to ${l.name}`); } }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                        {l.name}{l.id === task.projectId ? " ✓" : ""}
+                      </button>
+                    ))}
+                  </Menu>
+                )}
+              </div>
+            )}
             <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
               <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
                 <span className="text-muted">On</span>

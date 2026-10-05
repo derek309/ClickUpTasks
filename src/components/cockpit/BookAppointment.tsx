@@ -183,12 +183,14 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
               </div>
             )))}
           {target.kind === "book" && calendarId && byDay.length > 0 && (
-            <button type="button" onClick={() => copyDays(byDay)} className="justify-self-start rounded-md px-3 py-1.5 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">📋 Copy all times</button>
+            <button type="button" onClick={() => copyDays(byDay)} className="flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left ring-1 ring-[var(--border)] hover:bg-background">
+              <span>📋</span><span className="flex-1"><b className="block font-semibold">Copy all times</b><span className="text-[14px] text-muted">Every open time by day, with your booking link</span></span>
+            </button>
           )}
           {target.kind === "book" && calendarId && (
             <button type="button" onClick={() => { setShare(!share); setPicks([]); setPicked(null); setOtherOpen(false); }}
-              className={`justify-self-start rounded-md px-3 py-1.5 font-semibold ring-1 ${share ? "bg-success-soft text-success ring-success" : "text-accent ring-[var(--border)] hover:bg-background"}`}>
-              {share ? "✓ Picking times to text them. Tap to stop." : "💬 Pick times to text them"}
+              className={`flex w-full items-start gap-2.5 rounded-md px-3 py-2 text-left ring-1 ${share ? "bg-success-soft ring-success" : "ring-[var(--border)] hover:bg-background"}`}>
+              <span>{share ? "✓" : "💬"}</span><span className="flex-1"><b className={`block font-semibold ${share ? "text-success" : ""}`}>{share ? "Picking times to text them" : "Pick times to text them"}</b><span className="text-[14px] text-muted">{share ? "Tap the times you can do. Click here to stop." : "Choose a few times, then copy them for a text"}</span></span>
             </button>
           )}
           {!share && calendarId && (otherOpen ? (

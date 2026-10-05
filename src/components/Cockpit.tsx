@@ -2707,6 +2707,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               contacts={contacts}
               onSendTeam={sendTeam}
               onPatchTask={(id, patch) => patchTask(id, patch)}
+              listsFor={(cid) => projectsForClient(cid).map((x) => ({ id: x.id, name: x.name }))}
               onAddComment={(id, body) => addComment(id, body)}
               onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
               ghlUrlFor={(contactId) => { const ct = contactById(contactId); const sub = ct ? clientById(ct.clientId) : null; return ct?.ghlContactId && sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null; }}
