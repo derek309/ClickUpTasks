@@ -126,14 +126,14 @@ export async function calendarPeople(): Promise<CalendarPerson[]> {
 }
 
 // Calendars and a sub-account's domain change rarely; events change often.
-const calCache = new Map<string, { at: number; calendars: any[]; domain: string | null }>();
-async function locationInfo(locationId: string, token: string): Promise<{ calendars: any[]; domain: string | null }> {
+const calCache = new Map<string, { at: number; calendars: any[]; domain: string | null; name: string | null }>();
+async function locationInfo(locationId: string, token: string): Promise<{ calendars: any[]; domain: string | null; name: string | null }> {
   const hit = calCache.get(locationId);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit;
   const calendars = await ghlCalendars(locationId, token);
   const loc = await fetch(`${API}/locations/${encodeURIComponent(locationId)}`, { headers: headers(token, "2021-07-28"), signal: AbortSignal.timeout(10000) })
     .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  const info = { at: Date.now(), calendars, domain: (loc?.location?.domain as string | undefined) || null };
+  const info = { at: Date.now(), calendars, domain: (loc?.location?.domain as string | undefined) || null, name: (loc?.location?.name as string | undefined) || null };
   calCache.set(locationId, info);
   return info;
 }
@@ -197,7 +197,7 @@ export function startOfPacificDay(nowMs: number): number {
   return nowMs - sinceMidnight;
 }
 
-export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number };
+export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number; locationName: string };
 
 /** Every active calendar each person is on, with its public booking page (Derek's pick). */
 // The actor is for the MCP tools to come (Phase 4); every teammate sees the same links today.
@@ -208,7 +208,7 @@ export async function bookingLinks(_actor: CalendarActor): Promise<BookingLink[]
   for (const locationId of await configuredLocations()) {
     const token = await tokenForLocation(locationId);
     if (!token) continue;
-    let info: { calendars: any[]; domain: string | null };
+    let info: { calendars: any[]; domain: string | null; name: string | null };
     try { info = await locationInfo(locationId, token); } catch { continue; }
     for (const c of info.calendars) {
       if (!c?.id || c.isActive === false) continue;
@@ -217,7 +217,7 @@ export async function bookingLinks(_actor: CalendarActor): Promise<BookingLink[]
       for (const p of people) {
         // A personal calendar with no team list belongs to whoever it's named for.
         const mine = members.includes(p.ghlUserId) || (!members.length && String(c.name ?? "").toLowerCase().startsWith(p.name.toLowerCase()));
-        if (mine) out.push({ memberId: p.memberId, label: String(c.name ?? "Booking page"), url, shared: members.length > 1, calendarId: String(c.id), locationId, minutes: slotMinutes(c) });
+        if (mine) out.push({ memberId: p.memberId, label: String(c.name ?? "Booking page"), url, shared: members.length > 1, calendarId: String(c.id), locationId, minutes: slotMinutes(c), locationName: info.name ?? locationId });
       }
     }
   }

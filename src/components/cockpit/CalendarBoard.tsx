@@ -99,13 +99,14 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   // Booking links in a column on the right (Derek, 2026-10-05): A to Z, one
   // row per page (a shared one lists both people), and a search box.
   const linkRows = useMemo(() => {
-    const byUrl = new Map<string, { label: string; url: string; who: string[]; calendarId: string }>();
+    const byUrl = new Map<string, { label: string; url: string; who: string[]; calendarId: string; group: string }>();
     for (const l of links) {
       const had = byUrl.get(l.url);
       if (had) { if (!had.who.includes(l.memberId)) had.who.push(l.memberId); }
-      else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId], calendarId: l.calendarId });
+      // Grouped by sub-account (Derek, 2026-10-05): "ClickUpLocal Agency" reads "Agency".
+      else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId], calendarId: l.calendarId, group: (l.locationName || "Other").replace(/^ClickUpLocal\s+/i, "") });
     }
-    return [...byUrl.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+    return [...byUrl.values()].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
   }, [links]);
   const linkWords = linkQ.toLowerCase().split(/\s+/).filter(Boolean);
   const linksShown = linkRows.filter((r) => linkWords.every((w) => `${r.label} ${r.who.map(nameOf).join(" ")}`.toLowerCase().includes(w)));
@@ -214,7 +215,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                 </svg>
               </button>}
               <a href={r.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-1.5 py-1 text-muted hover:text-foreground">↗</a>
-              <button onClick={() => copyRow(r)} className="h-8 shrink-0 rounded-md px-3 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">Copy</button>
+              <button onClick={() => copyRow(r)} title="Copy the booking link" aria-label={`Copy ${r.label}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-accent ring-1 ring-[var(--border)] hover:bg-background">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 9h13v13H9zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+              </button>
             </div>
           );
           // Searching looks through every link, hidden or not.
@@ -222,7 +225,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
           const folded = linkQ ? [] : linksShown.filter((r) => hidden.has(r.calendarId));
           return <>
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
-              {visible.map((r) => row(r, hidden.has(r.calendarId)))}
+              {visible.map((r, i) => <div key={r.url} className="min-w-0">
+                {(i === 0 || visible[i - 1].group !== r.group) && <div className={`pb-0.5 text-[14px] font-bold uppercase tracking-wider text-muted ${i ? "pt-3" : "pt-1"}`}>{r.group}</div>}
+                {row(r, hidden.has(r.calendarId))}
+              </div>)}
               {!visible.length && !folded.length && <div className="py-2 text-muted">{loading ? "Reading GoHighLevel…" : linkQ ? "No booking link matches." : "No booking pages found."}</div>}
               {!visible.length && folded.length > 0 && <div className="py-2 text-muted">All hidden. Open Hidden below, or search.</div>}
             </div>
@@ -231,7 +237,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                 <button onClick={() => setHiddenOpen(!hiddenOpen)} aria-expanded={hiddenOpen} className="flex items-center justify-between py-1.5 text-left font-semibold text-muted hover:text-foreground">
                   <span>{hiddenOpen ? "▾" : "▸"} Hidden</span><span className="text-[14px]">{folded.length}</span>
                 </button>
-                {hiddenOpen && folded.map((r) => row(r, true))}
+                {hiddenOpen && folded.map((r, i) => <div key={r.url} className="min-w-0">
+                  {(i === 0 || folded[i - 1].group !== r.group) && <div className="pb-0.5 pt-2 text-[14px] font-bold uppercase tracking-wider text-muted/80">{r.group}</div>}
+                  {row(r, true)}
+                </div>)}
               </div>
             )}
           </>;

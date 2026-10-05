@@ -12,7 +12,7 @@ export type CalendarEvent = {
   calendarId: string | null; calendarName: string | null; ghlContactId: string | null; clientId: string | null; contactName: string | null;
   joinUrl: string | null; busy: boolean;
 };
-export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number };
+export type BookingLink = { memberId: string; label: string; url: string; shared: boolean; calendarId: string; locationId: string; minutes: number; locationName: string };
 
 export function useCalendar() {
   const [people, setPeople] = useState<CalendarPerson[]>([]);
