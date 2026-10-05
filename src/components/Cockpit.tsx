@@ -3085,6 +3085,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
       </>)}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
+        pinnedClients={[...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"))}
+        pinnedLists={[...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p)}
+        onGo={(view) => { goToView(view); setCmdkOpen(false); }}
         onOpenTask={(id) => { setOpenTaskId(id); setCmdkOpen(false); }}
         // Picking a client or list goes there the one way (openClientList), which
         // also closes an open task: search used to switch the client behind a
