@@ -34,7 +34,7 @@ export type CalendarBoardProps = {
 export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast }: CalendarBoardProps) {
   const [who, setWho] = useState<string>("all");
   const [showBusy, setShowBusy] = useState(true);
-  const [linksOpen, setLinksOpen] = useState(false);
+  const [linkQ, setLinkQ] = useState("");
   const nameOf = (id: string) => people.find((p) => p.memberId === id)?.name ?? "";
   const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 
@@ -66,9 +66,20 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
     try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}`); }
     catch { pushToast("Couldn't copy. The link is " + l.url); }
   };
-  const mineFirst = [...links].sort((a, b) => Number(b.memberId === meId) - Number(a.memberId === meId));
-  const linkGroups = people.map((p) => ({ p, list: mineFirst.filter((l) => l.memberId === p.memberId) })).filter((g) => g.list.length)
-    .sort((a, b) => Number(b.p.memberId === meId) - Number(a.p.memberId === meId));
+  // Booking links in a column on the right (Derek, 2026-10-05): A to Z, one
+  // row per page (a shared one lists both people), and a search box.
+  const linkRows = useMemo(() => {
+    const byUrl = new Map<string, { label: string; url: string; who: string[] }>();
+    for (const l of links) {
+      const had = byUrl.get(l.url);
+      if (had) { if (!had.who.includes(l.memberId)) had.who.push(l.memberId); }
+      else byUrl.set(l.url, { label: l.label, url: l.url, who: [l.memberId] });
+    }
+    return [...byUrl.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+  }, [links]);
+  const linkWords = linkQ.toLowerCase().split(/\s+/).filter(Boolean);
+  const linksShown = linkRows.filter((r) => linkWords.every((w) => `${r.label} ${r.who.map(nameOf).join(" ")}`.toLowerCase().includes(w)));
+  const copyRow = (r: { label: string; url: string }) => copy({ label: r.label, url: r.url, memberId: "", shared: false });
   const tab = (on: boolean) => `h-9 rounded-md px-3 font-semibold ${on ? "bg-surface ring-1 ring-[var(--border)]" : "text-muted hover:text-foreground"}`;
 
   return (
@@ -81,27 +92,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
         <label className="ml-1 flex cursor-pointer items-center gap-2 text-muted"><input type="checkbox" checked={showBusy} onChange={(e) => setShowBusy(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time</label>
         <span className="flex-1" />
         <button onClick={onRefresh} disabled={loading} title="Read GoHighLevel again" className="h-10 rounded-md px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-60"><span className={loading ? "inline-block animate-spin" : ""}>↻</span></button>
-        <span className="relative">
-          <button onClick={() => setLinksOpen(!linksOpen)} className="h-10 rounded-md bg-accent px-4 font-semibold text-white">📅 Booking links ▾</button>
-          {linksOpen && <>
-            <div className="fixed inset-0 z-40" onClick={() => setLinksOpen(false)} />
-            <div className="absolute right-0 top-12 z-50 max-h-[70vh] w-[min(26rem,90vw)] overflow-y-auto rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-              {linkGroups.length ? linkGroups.map(({ p, list }) => (
-                <div key={p.memberId} className="pb-1">
-                  <div className="px-3 pb-1 pt-2 text-[14px] font-bold tracking-wide text-muted">{(p.memberId === meId ? "YOURS" : p.name.split(/\s+/)[0].toUpperCase())}</div>
-                  {list.map((l) => (
-                    <div key={l.url + p.memberId} className="flex items-center gap-2 rounded-md px-3 py-1.5 hover:bg-background">
-                      <span className="min-w-0 flex-1"><b className="block truncate font-semibold">{l.label}</b>{l.shared && <span className="text-[14px] text-muted">Shared</span>}</span>
-                      <a href={l.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-2 py-1 text-muted hover:text-foreground">↗</a>
-                      <button onClick={() => copy(l)} className="h-8 shrink-0 rounded-md px-3 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-surface">Copy</button>
-                    </div>
-                  ))}
-                </div>
-              )) : <div className="px-3 py-2 text-muted">{loading ? "Reading GoHighLevel…" : "No booking pages found."}</div>}
-            </div>
-          </>}
-        </span>
       </div>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
         <div className="grid gap-5">
@@ -141,6 +134,29 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
           ))}
         </div>
       )}
+      </div>
+      <aside className="grid gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">📅 Booking links</h2>
+          <span className="text-[14px] text-muted">{linkRows.length}</span>
+        </div>
+        <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Search booking links" aria-label="Search booking links"
+          className="h-10 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
+        <div className="grid">
+          {linksShown.map((r) => (
+            <div key={r.url} className="flex items-center gap-2 border-b py-1.5 last:border-0">
+              <span className="min-w-0 flex-1">
+                <b className="block truncate font-semibold" title={r.label}>{r.label}</b>
+                <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
+              </span>
+              <a href={r.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-1.5 py-1 text-muted hover:text-foreground">↗</a>
+              <button onClick={() => copyRow(r)} className="h-8 shrink-0 rounded-md px-3 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">Copy</button>
+            </div>
+          ))}
+          {!linksShown.length && <div className="py-2 text-muted">{loading ? "Reading GoHighLevel…" : linkQ ? "No booking link matches." : "No booking pages found."}</div>}
+        </div>
+      </aside>
+      </div>
     </div>
   );
 }
