@@ -204,8 +204,15 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                 <b className={`block truncate font-semibold ${isHidden ? "text-muted" : ""}`} title={r.label}>{r.calendarId === defaultCalendarId ? "★ " : ""}{r.label}</b>
                 <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}</span>
               </span>
-              {onSetHidden && <button onClick={() => toggleHidden(r.calendarId)} title={isHidden ? "Show it in the list" : "Hide it (it stays under Hidden)"}
-                className={`shrink-0 rounded-md px-1.5 py-1 text-[14px] font-semibold text-muted hover:text-foreground ${isHidden ? "" : "opacity-0 focus:opacity-100 group-hover:opacity-100"}`}>{isHidden ? "Show" : "Hide"}</button>}
+              {/* Always there, small (Derek couldn't find it as a hover button). */}
+              {onSetHidden && <button onClick={() => toggleHidden(r.calendarId)} title={isHidden ? "Show it in the list" : "Hide it (it stays under Hidden)"} aria-label={isHidden ? `Show ${r.label}` : `Hide ${r.label}`}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted/70 hover:bg-background hover:text-foreground">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px] fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  {isHidden
+                    ? <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                    : <path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22" />}
+                </svg>
+              </button>}
               <a href={r.url} target="_blank" rel="noopener noreferrer" title="Open the booking page" className="shrink-0 rounded-md px-1.5 py-1 text-muted hover:text-foreground">↗</a>
               <button onClick={() => copyRow(r)} className="h-8 shrink-0 rounded-md px-3 font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">Copy</button>
             </div>
