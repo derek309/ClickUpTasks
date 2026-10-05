@@ -49,7 +49,10 @@ type Body = {
 // Agency for anyone buying from us). Saved by each person in Inbox Settings.
 // Used when nobody has saved one (Derek, 2026-10-05: "it just works because
 // we're used to using it"). The setting still overrides it.
-const DEFAULT_GHL_BCC = "GN4HK1ybbTBWcolEjLHl@email.usercontent.site";
+const DEFAULT_GHL_BCC = {
+  agency: "7B0Y8xCOblcTHzYnM1Kc@email.usercontent.site",
+  directory: "GN4HK1ybbTBWcolEjLHl@email.usercontent.site",
+} as const;
 
 async function ghlBccFor(memberId: string | null, contactId: string | null): Promise<string | null> {
   if (!memberId) return null;
@@ -69,7 +72,7 @@ async function ghlBccFor(memberId: string | null, contactId: string | null): Pro
       if (dir?.ghl_location_id && dir.ghl_location_id === home.locationId) which = "directory";
     }
   }
-  const addr = (saved[which] || DEFAULT_GHL_BCC).trim();
+  const addr = (saved[which] || DEFAULT_GHL_BCC[which]).trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr) ? addr : null;
 }
 
