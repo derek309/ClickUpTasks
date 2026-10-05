@@ -218,7 +218,7 @@ export default function InboxView(p: InboxViewProps) {
               <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
                 <input type="checkbox" aria-label="Select all" className="h-5 w-5" checked={selected.size > 0 && selected.size === visible.length}
                   onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((t) => t.key)) : new Set())} />
-                <button onClick={async () => { setPulling(true); await inbox.pullNow(); setPulling(false); }} disabled={pulling} title="Check Gmail now" aria-label="Check Gmail now" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60"><span className={pulling ? "inline-block animate-spin" : ""}>↻</span></button>
+                <button onClick={async () => { setPulling(true); await inbox.pullNow(); setPulling(false); }} disabled={pulling} title="Check for new email, texts and messages now" aria-label="Check for new messages now" className="h-10 rounded-lg border px-3 font-semibold hover:bg-background disabled:opacity-60"><span className={pulling ? "inline-block animate-spin" : ""}>↻</span></button>
                 {selected.size > 0 && <>
                   <button onClick={async () => { const undo = await inbox.markRead([...selected]); setSelected(new Set()); undoToast(`${selected.size} marked read`, undo); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">Mark read</button>
                   <button onClick={() => { done([...selected]); setSelected(new Set()); }} className="h-10 rounded-lg border px-3 font-semibold hover:bg-background">🗄 Archive</button>

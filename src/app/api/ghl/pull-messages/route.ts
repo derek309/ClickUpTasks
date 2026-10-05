@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
+import { requireUser } from "@/lib/serverAuth";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { createLocator } from "@/lib/ghlLocate";
 import { pullContactConversations, pullStrangerConversation, ghlUsersToMembers, ghlConversationRow, strangerNeedsPull, withLocalAssign } from "@/lib/ghlPull";
@@ -28,6 +29,12 @@ import { isRealGhlId } from "@/lib/ghlMatch";
 //
 // Trigger: Vercel cron (vercel.json), or an admin, who may POST { days } (up
 // to 30) to catch up once.
+//
+// Quick: the Inbox's ↻ (Derek, 2026-10-05: "I want to pull them in faster")
+// POSTs { quick: true } as any signed-in teammate. It reads only the
+// conversations that changed in the last 45 minutes, one page per
+// sub-account, and stops after about 25 seconds. At most one runs every 20
+// seconds per server.
 export const maxDuration = 120;
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -36,18 +43,28 @@ const API = "https://services.leadconnectorhq.com";
 export async function GET(req: NextRequest) {
   return run(req, 2);
 }
+let lastQuick = 0;
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({} as any));
+  if (body?.quick === true) {
+    if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
+    if (!(await requireUser(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (Date.now() - lastQuick < 20_000) return NextResponse.json({ ok: true, skipped: "just checked" });
+    lastQuick = Date.now();
+    return run(req, 2, true);
+  }
   const days = typeof body?.days === "number" && body.days > 0 ? Math.min(Math.floor(body.days), 30) : 2;
   return run(req, days);
 }
 
-async function run(req: NextRequest, days: number) {
+async function run(req: NextRequest, days: number, quick = false) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
-  if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!quick && !(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const started = Date.now();
-  const sinceMs = started - days * DAY;
+  const sinceMs = quick ? started - 45 * 60_000 : started - days * DAY;
+  // How long this run may take before it stops and answers.
+  const budgetMs = quick ? 25_000 : (maxDuration - 40) * 1000;
   const errors: string[] = [];
   const rejectedTokens: string[] = [];
   // ghl contact id → location it was found in.
@@ -71,7 +88,7 @@ async function run(req: NextRequest, days: number) {
     for (const [ghlId, member] of members) ghlIdsByMember.set(member, new Set([...(ghlIdsByMember.get(member) ?? []), ghlId]));
     let startAfterDate: number | undefined;
     for (let page = 0; page < 5; page++) {
-      const q = new URLSearchParams({ locationId, sortBy: "last_message_date", sort: "desc", limit: "100" });
+      const q = new URLSearchParams({ locationId, sortBy: "last_message_date", sort: "desc", limit: quick ? "30" : "100" });
       if (startAfterDate) q.set("startAfterDate", String(startAfterDate));
       let res: Response;
       try {
@@ -93,7 +110,7 @@ async function run(req: NextRequest, days: number) {
           if (c?.contactId) convsByContact.set(c.contactId, [...(convsByContact.get(c.contactId) ?? []), { conv: c, token }]);
         }
       }
-      if (reachedOld || convs.length < 100) break;
+      if (quick || reachedOld || convs.length < 100) break;
       startAfterDate = Number(convs[convs.length - 1]?.lastMessageDate) || undefined;
       if (!startAfterDate) break;
     }
@@ -104,7 +121,7 @@ async function run(req: NextRequest, days: number) {
   // (matched by email) when it is blank or not one GoHighLevel knows, so a
   // mistyped id fixes itself (Derek's had a lowercase L for a capital I).
   let ghlIdsFixed = 0;
-  for (const p of team ?? []) {
+  for (const p of quick ? [] : team ?? []) {
     const ids = p.member_id ? ghlIdsByMember.get(p.member_id as string) : undefined;
     if (!ids?.size || ids.has(((p.ghl_user_id as string | null) ?? "").trim())) continue;
     const { error } = await supabaseAdmin.from("profiles").update({ ghl_user_id: [...ids][0] }).eq("member_id", p.member_id);
@@ -112,7 +129,7 @@ async function run(req: NextRequest, days: number) {
   }
 
   // 2. Local messages GoHighLevel has not confirmed yet.
-  const { data: pendingRows } = await supabaseAdmin
+  const { data: pendingRows } = quick ? { data: [] as any[] } : await supabaseAdmin
     .from("messages").select("contact_id, ghl_message_id")
     .in("channel", ["email", "sms", "call"])
     .gte("created_at", new Date(sinceMs).toISOString())
@@ -170,7 +187,7 @@ async function run(req: NextRequest, days: number) {
     if (!c) continue;
     // Leave room to answer before Vercel cuts the run off; the next run
     // picks up whoever was left.
-    if (Date.now() - started > (maxDuration - 40) * 1000) { left++; continue; }
+    if (Date.now() - started > budgetMs) { left++; continue; }
     try {
       const clientId = await resolveTrackedClientId(c.id, c.client_id);
       const r = await pullContactConversations({ contactId: c.id, clientId, locationId, ghlContactId, sinceMs, raiseTasks: true });
@@ -196,7 +213,7 @@ async function run(req: NextRequest, days: number) {
   }
   for (const { conv, token } of strangerConvs) {
     if (!strangerNeedsPull(Number(conv?.lastMessageDate), newestStored.get(conv.id))) { strangersSkipped++; continue; }
-    if (Date.now() - started > (maxDuration - 20) * 1000) { left++; continue; }
+    if (Date.now() - started > budgetMs + (quick ? 0 : 20_000)) { left++; continue; }
     try {
       strangers += await pullStrangerConversation({ conv, token, sinceMs });
     } catch (e) {
@@ -205,7 +222,7 @@ async function run(req: NextRequest, days: number) {
   }
 
   const out = {
-    ok: true, days, contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers, strangersSkipped, ghlIdsFixed,
+    ok: true, ...(quick ? { quick } : { days }), contacts, stamped, inserted, tasksRaised, held, left, conversations: convRows.length, strangers, strangersSkipped, ghlIdsFixed,
     unknownInGhl, noGhlId, notFound,
     ...(rejectedTokens.length ? { rejectedTokens } : {}),
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),

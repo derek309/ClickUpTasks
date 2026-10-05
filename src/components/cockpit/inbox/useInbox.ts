@@ -239,7 +239,12 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   }, [post, load]);
   // ↻: fetch your Gmail now instead of waiting up to 15 minutes for the timer.
   const pullNow = useCallback(async () => {
-    await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 1, member: meMemberId, all: true }) }).catch(() => null);
+    // Gmail and GoHighLevel at once (texts, social, calls), then the list.
+    const post = (url: string, body: unknown) => authedFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    await Promise.all([
+      post("/api/google/poll-replies", { days: 1, member: meMemberId, all: true }),
+      post("/api/ghl/pull-messages", { quick: true }),
+    ]);
     await load();
   }, [meMemberId, load]);
   const improve = useCallback(async (text: string, channel: string, mode: "fix" | "shorter" = "fix") => (await post("/api/ai/improve", { text, channel, mode })) as { text: string; changed: boolean }, [post]);
