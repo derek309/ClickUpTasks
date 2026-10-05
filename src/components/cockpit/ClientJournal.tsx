@@ -114,7 +114,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
   // A header Email/SMS button sets this to jump the composer straight into that
   // mode. `nonce` bumps on every click so the effect re-fires even when the
   // Journal is already open (the component isn't remounted then).
-  composeIntent?: { mode: "email" | "sms"; nonce: number } | null;
+  composeIntent?: { mode: "email" | "sms"; nonce: number; body?: string } | null;
   // Vault→Journal merge: the Filter menu's Photos/Links/Files already covers
   // "browse by kind" — folders are the one Vault capability without an
   // equivalent here, so they're folded straight into the same menu instead
@@ -169,6 +169,7 @@ export function ClientJournal({ notes, tasks, messages, me, onAdd, onEdit, onDel
     if (composeIntent.mode === "email") { onComposeEmail?.(); return; }
     setComposeMode("sms");
     setComposerCollapsed(false);
+    if (composeIntent.body) setMsgBody(composeIntent.body);
     requestAnimationFrame(() => msgBodyRef.current?.focus());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composeIntent?.nonce]);

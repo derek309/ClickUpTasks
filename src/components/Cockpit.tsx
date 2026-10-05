@@ -98,6 +98,11 @@ import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
+import { loadBookingLinks } from "./cockpit/useCalendar";
+import { pickThreeTimes } from "@/lib/improveText";
+
+// Read when a click needs the time, never while rendering.
+const nowMs = () => Date.now();
 import { FolderRail } from "./cockpit/FolderRail";
 import InboxView from "./cockpit/inbox/InboxView";
 import { CalendarView } from "./cockpit/CalendarBoard";
@@ -438,8 +443,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [addClientOpen, setAddClientOpen] = useState(false);
   // Set by the header Email/SMS buttons — jumps the Journal composer into that
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
-  const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number } | null>(null);
-  const openCompose = (mode: "email" | "sms") => { setClientTab("chat"); setComposeIntent((c) => ({ mode, nonce: (c?.nonce ?? 0) + 1 })); };
+  const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number; body?: string } | null>(null);
+  const openCompose = (mode: "email" | "sms", body?: string) => { setClientTab("chat"); setComposeIntent((c) => ({ mode, body, nonce: (c?.nonce ?? 0) + 1 })); };
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmSpec | null>(null);
   const [promptDialog, setPromptDialog] = useState<PromptSpec | null>(null);
@@ -666,6 +671,37 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       body: `<p>Hi ${escapeHtml(firstName)},</p><p>Here is your own page for everything we're working on together. You can see what we need from you, what's in progress and what's done, add a new request, and upload files. No login needed, so bookmark it.</p>${draftLinkHtml(link)}<p>Thanks!</p>`,
       link,
       aiContext: "Sending the client the link to their own page, where they see what we need from them, what is in progress and what is done, and can add requests and upload files.",
+    });
+  };
+  // Request a meeting (Derek, 2026-10-05): three open times from your default
+  // calendar (else your first) and its booking page, as an email or a text
+  // that opens for you to check. Nothing is booked until they pick.
+  const requestMeeting = async (clientId: string, channel: "email" | "sms", defaultCalendarId: string | null) => {
+    const first = (clientById(clientId)?.name ?? "").trim().split(/\s+/)[0] || "there";
+    const links = await loadBookingLinks();
+    const cal = links.find((l) => l.calendarId === defaultCalendarId) ?? links.find((l) => l.memberId === me.id) ?? links[0];
+    if (!cal) { pushToast("No GoHighLevel calendar found to offer times from."); return; }
+    let times: string[] = [];
+    try {
+      const r = await authedFetch(`/api/calendar/slots?calendarId=${encodeURIComponent(cal.calendarId)}&days=7`);
+      const j = await r.json().catch(() => ({}));
+      times = pickThreeTimes(j.slots ?? [], nowMs());
+    } catch { /* the link alone still works */ }
+    const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    if (channel === "sms") {
+      const body = [`Hi ${first}, do you have time to meet this week?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", `Or pick any time here: ${cal.url}`].filter(Boolean).join(" ");
+      setActiveProject(null);
+      openCompose("sms", body);
+      return;
+    }
+    const link = { url: cal.url, label: "Pick a time that works for you" };
+    openClientEmail(clientId, {
+      subject: "Time to meet?",
+      body: `<p>Hi ${escapeHtml(first)},</p><p>Do you have time to meet this week?${times.length ? " Here are a few times that work for me (Pacific):" : ""}</p>`
+        + (times.length ? `<ul>${times.map((t) => `<li><p>${escapeHtml(fmt(t))}</p></li>`).join("")}</ul>` : "")
+        + `${draftLinkHtml(link)}<p>Thanks!</p>`,
+      link,
+      aiContext: `Asking the client to meet. Offered times (Pacific): ${times.map(fmt).join("; ") || "none, just the booking link"}. Booking link: ${cal.url}`,
     });
   };
   // The mind-dump composer. Null when closed; otherwise the group its plus
@@ -2246,7 +2282,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <ClientNeeds clientId={activeClient} ghlContactId={contactForClient(activeClient)?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
                 overdue={late.length} oldestOverdue={oldest ? { title: oldest.title, daysLate: -(daysUntilDue(oldest.due) ?? 0) } : null} onOpenOverdue={() => oldest && setOpenTaskId(oldest.id)}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMessageClient(activeClient) ? () => openRemindClient(activeClient) : null}
-                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)} />
+                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)}
+                onRequest={canMessageClient(activeClient) ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
           );
         })() : null;
   const overflowControl = (

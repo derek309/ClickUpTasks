@@ -24,7 +24,7 @@ function loadEvents(): Promise<CalendarEvent[]> {
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOverdue, onOpenOverdue, waiting, oldestWaiting, onRemind, canBook, onBook }: {
+export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOverdue, onOpenOverdue, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -37,7 +37,10 @@ export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOver
   onRemind: (() => void) | null;
   canBook: boolean;
   onBook: () => void;
+  /** Ask them to pick a time, by email or text (Derek, 2026-10-05). */
+  onRequest: ((channel: "email" | "sms") => void) | null;
 }) {
+  const [askOpen, setAskOpen] = useState(false);
   // undefined while reading; null when nothing is booked.
   const [next, setNext] = useState<{ clientId: string; event: CalendarEvent | null } | null>(null);
   useEffect(() => {
@@ -73,8 +76,20 @@ export function ClientNeeds({ clientId, ghlContactId, first, overdue, oldestOver
       <div className={`${box} bg-background`}>
         <div className="min-w-0 flex-1">
           <b className="block">{meeting === undefined ? "Meetings" : meeting ? "Next meeting" : "No meeting booked"}</b>
-          <span className="block truncate text-[14px] text-muted">{meeting === undefined ? "Reading the calendar…" : meeting ? `${when(meeting.start)}${meeting.calendarName ? ` · ${meeting.calendarName}` : ""}` : canBook ? "Book one or text them times" : "Not in GoHighLevel yet"}</span>
+          <span className="block truncate text-[14px] text-muted">{meeting === undefined ? "Reading the calendar…" : meeting ? `${when(meeting.start)}${meeting.calendarName ? ` · ${meeting.calendarName}` : ""}` : canBook ? "Book one or ask them to pick" : "Not in GoHighLevel yet"}</span>
         </div>
+        {onRequest && (
+          <span className="relative shrink-0">
+            <button onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen} title="Ask them to pick a time" className={`${btn} ring-[var(--border)]`}>Request ▾</button>
+            {askOpen && <>
+              <div className="fixed inset-0 z-40" onClick={() => setAskOpen(false)} />
+              <div className="absolute right-0 top-11 z-50 w-56 rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                <button onClick={() => { setAskOpen(false); onRequest("email"); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Email them</b><span className="text-[14px] text-muted">Three open times and your link</span></button>
+                <button onClick={() => { setAskOpen(false); onRequest("sms"); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Text them</b><span className="text-[14px] text-muted">The same, short enough for a text</span></button>
+              </div>
+            </>}
+          </span>
+        )}
         {canBook && <button onClick={onBook} title="Book a time, or pick times to text them" className={`${btn} ring-[var(--border)]`}>Book</button>}
       </div>
     </div>
