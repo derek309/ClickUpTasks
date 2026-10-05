@@ -10,6 +10,7 @@ import {
   effectivePriority,
   effectiveStatus,
   TODAY,
+  daysUntilDue,
   addDaysIso,
   DUE_BUCKETS,
   dueBucketOf,
@@ -21,8 +22,6 @@ import {
   CLIENT_STATUS_META,
   clientStatusMeta,
   type ClientStatus,
-  HEALTH_META,
-  clientHealth,
   PRIORITY_META,
   PRIORITY_ORDER,
   isManuallyAssignable,
@@ -98,6 +97,7 @@ import { ReviewsBoard } from "./cockpit/ReviewsBoard";
 import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
+import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { FolderRail } from "./cockpit/FolderRail";
 import InboxView from "./cockpit/inbox/InboxView";
 import { CalendarView } from "./cockpit/CalendarBoard";
@@ -306,6 +306,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // column config all in one 290px panel — split into three focused menus
   // (item 6) plus Following moving to its own header avatar stack below.
   const [groupSortOpen, setGroupSortOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
@@ -466,7 +467,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [bulkDelegateOpen, setBulkDelegateOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
-  const [copiedForClaude, setCopiedForClaude] = useState(false);
   // New Client settings sheet (item 7) — replaces the three standing toggles
   // that used to live directly in the kebab menu (a menu mixing persistent
   // toggles with one-shot actions gave no signal about what closes it).
@@ -1622,8 +1622,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     ].filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(brief);
-      setCopiedForClaude(true);
-      setTimeout(() => setCopiedForClaude(false), 1800);
       pushToast("Copied client brief for Claude.");
     } catch {
       pushToast("Couldn't copy to clipboard.");
@@ -2107,15 +2105,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return noteCount + messageCount + activityCount;
   };
 
-  const groupSortControl = (
-    <div className="relative">
-      <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className={barButton}>
-        <I.list className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Grouped by <b className="font-semibold text-foreground">{GROUP_LABEL[groupBy]}</b> <span className="opacity-50">·</span> sorted by <b className="font-semibold text-foreground">{SORT_LABEL[sortBy] ?? sortBy}</b></span>
-      </button>
-      {groupSortOpen && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setGroupSortOpen(false)} />
-        <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+  // The three view panels, shared by their own buttons and by the client
+  // page's single View button (Derek, 2026-10-05, header mockup C).
+  const groupSortPanel = (<>
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
             {(sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
@@ -2135,6 +2127,54 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.plus /> Set up custom Kanban stages for this list
             </button>
           )}
+  </>);
+  const filterPanel = (<>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</span>
+            {filtersActive && <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent">Clear</button>}
+          </div>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
+  </>);
+  const columnsPanel = (<>
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
+          <div className="flex flex-col gap-0.5">
+            {LIST_COLUMNS.map((c) => (
+              <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
+                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${visibleCols.includes(c.key) ? "border-accent bg-accent text-white" : "border-border"}`}>{visibleCols.includes(c.key) && <I.check />}</span>
+                {c.label}
+              </button>
+            ))}
+          </div>
+  </>);
+  const viewControl = (
+    <div className="relative">
+      <button onClick={() => setViewOpen((o) => !o)} title="Group, sort, filter and columns" className={`${barButton} ${activeFilterCount > 0 ? "border-accent text-accent" : ""}`}>
+        <I.list className="h-3.5 w-3.5" />
+        <span>View: <b className="font-semibold text-foreground">by {GROUP_LABEL[groupBy]}</b>{activeFilterCount > 0 ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"}` : ""}</span>
+        <span aria-hidden>▾</span>
+      </button>
+      {viewOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setViewOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-72 max-w-[calc(100vw-1.5rem)] space-y-2.5 overflow-y-auto rounded-xl border bg-surface p-3 shadow-xl">
+          {groupSortPanel}
+          <div className="space-y-2.5 border-t pt-2.5">{filterPanel}</div>
+          <div className="border-t pt-2.5">{columnsPanel}</div>
+        </div>
+      </>)}
+    </div>
+  );
+  const groupSortControl = (
+    <div className="relative">
+      <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className={barButton}>
+        <I.list className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Grouped by <b className="font-semibold text-foreground">{GROUP_LABEL[groupBy]}</b> <span className="opacity-50">·</span> sorted by <b className="font-semibold text-foreground">{SORT_LABEL[sortBy] ?? sortBy}</b></span>
+      </button>
+      {groupSortOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setGroupSortOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
+          {groupSortPanel}
         </div>
       </>)}
     </div>
@@ -2153,13 +2193,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {filterMenuOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setFilterMenuOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 w-64 max-w-[calc(100vw-1.5rem)] space-y-2.5 rounded-xl border bg-surface p-3 shadow-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Filter</span>
-            {filtersActive && <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent">Clear</button>}
-          </div>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
+          {filterPanel}
         </div>
       </>)}
     </div>
@@ -2173,15 +2207,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {columnsOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setColumnsOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-xl border bg-surface p-3 shadow-xl">
-          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Columns</div>
-          <div className="flex flex-col gap-0.5">
-            {LIST_COLUMNS.map((c) => (
-              <button key={c.key} onClick={() => toggleCol(c.key)} className="flex items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-background">
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${visibleCols.includes(c.key) ? "border-accent bg-accent text-white" : "border-border"}`}>{visibleCols.includes(c.key) && <I.check />}</span>
-                {c.label}
-              </button>
-            ))}
-          </div>
+          {columnsPanel}
         </div>
       </>)}
     </div>
@@ -2210,18 +2236,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // an IIFE returning JSX there confused the React Compiler into treating it
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
-  const bulkAddControl = (
-    <button onClick={() => setDumpGroup({ key: null, personal: false })} title="Dump your notes and let AI create the tasks"
-      className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
-      <span aria-hidden>📋</span>
-    </button>
-  );
-  const copyForClaudeControl = (
-    <button onClick={copyClientForClaude} title="Copy this list as a brief for Claude"
-      className="rounded-md border bg-background px-2 py-1.5 text-[13px] leading-none text-muted hover:text-foreground">
-      <span aria-hidden>{copiedForClaude ? "✓" : "✳"}</span>
-    </button>
-  );
   const overflowControl = (
     <div className="relative">
       <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
@@ -2239,6 +2253,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.comment /> {clientTab === "chat" ? "Back to tasks" : `Journal · ${journalCount()}`}
             </button>
           )}
+          {/* The two icon buttons from the old bar, named (mockup C). */}
+          {clientView && (<>
+            <button onClick={() => { setHeaderMoreOpen(false); setDumpGroup({ key: null, personal: false }); }} title="Dump your notes and let AI create the tasks"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.plus /> Add tasks from notes</button>
+            <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }} title="Copy this list as a brief for Claude"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background"><I.copy /> Copy for Claude</button>
+          </>)}
           {activeClient !== "all" && !activeProject && canMessageClient(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); openCompose("email"); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><I.comment /> Email</button>
@@ -2282,8 +2303,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <button onClick={() => { setHeaderMoreOpen(false); linkClientToContact(activeClient, null); }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-muted hover:bg-background hover:text-danger"><I.close /> Unlink from GoHighLevel</button>
           )}
-          <button onClick={() => { setHeaderMoreOpen(false); copyClientForClaude(); }}
-            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background sm:hidden"><span aria-hidden>✳</span> Copy for Claude</button>
           <div className="mt-1 border-t px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">Manage</div>
           {canAdmin && activeClient !== "all" && !activeProject && clientById(activeClient) && (
             <button onClick={() => { setHeaderMoreOpen(false); setClientSettingsOpen(true); }}
@@ -2533,7 +2552,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>) : (<>
               <h1 className="flex items-center gap-2 truncate text-[20px] font-semibold">
                 {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
-                {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (() => { const h = HEALTH_META[clientHealth(activeClient, scopedTasks)]; return <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium" style={{ background: h.dot + "1a", color: h.dot }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: h.dot }} /> {h.label}</span>; })()}
+                {/* The health pill is gone: the Overdue box under the header says it
+                    with the count (Derek, 2026-10-05, header mockup C). */}
                 {/* Same star as the Clients directory row — pinning to the
                     sidebar shouldn't require leaving the client's own page
                     to do it. */}
@@ -2542,17 +2562,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     className={`shrink-0 rounded p-0.5 hover:bg-background ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></span>
                 )}
               </h1>
-              <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
+              <div className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
                     when a specific client is the thing being viewed. */}
-                {clientView && (<>
-                  <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
-                  <span>›</span>
-                  <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">All clients</button>
-                  <span>›</span>
-                </>)}
+                {/* Company, then who follows them (Derek, 2026-10-05, mockup C). */}
                 <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
-              </p>
+                {clientView && followingControl && <><span className="opacity-50">·</span>{followingControl}</>}
+              </div>
             </>)}
           </div>
 
@@ -2561,16 +2577,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               removed, and the only way to make a task at all from All Tasks,
               where the inline row is off because no client is selected.
               Hidden on the views that are not lists of tasks. */}
-          {!inboxView && !settingsView && !dirView && (
+          {!inboxView && !settingsView && !dirView && !clientView && (
             <button onClick={openComposer} title="New task (press c)"
               className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1.5 text-[13px] font-semibold text-white hover:opacity-90">
               <I.plus /> New task
             </button>
-          )}
-          {/* Book the client in GoHighLevel, or pick times to text them (Derek, 2026-10-05). */}
-          {!inboxView && !settingsView && !dirView && !myWork && !personalView && activeClient !== "all" && contactForClient(activeClient)?.ghlContactId && (
-            <button onClick={() => setBookClient(activeClient)} title="Book a time, or pick times to text them"
-              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[13px] font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background">📅 Book</button>
           )}
           {/* Adding a client happens here now that this page is Clients (Derek,
               2026-09-28: "just make it so we can add clients from that page").
@@ -2610,23 +2621,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </span>
                 );
               })()}
-              {/* Emailing the client what we are still waiting on used to live
-                  inside the weekly review strip, so it only appeared on a
-                  client the review cadence had raised. The cadence is gone
-                  (Derek, 2026-09-28); being blocked on a client is not, so
-                  this shows whenever there is something outstanding. */}
-              {!activeProject && waitingTasksFor(activeClient).length > 0 && canMessageClient(activeClient) && (
-                <button onClick={() => openRemindClient(activeClient)}
-                  title="Email this client the items we're still waiting on, with their portal link"
-                  className="rounded-md border border-teal-500/40 bg-teal-500/10 px-2.5 py-1.5 text-[13px] font-medium text-teal-600 hover:bg-teal-500/20">
-                  Remind ({waitingTasksFor(activeClient).length})
-                </button>
-              )}
               {/* Secondary/config actions folded into one overflow menu so the
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
                   / Review instead of a cluster of equal-weight buttons. Same
                   menu as the compact header — see overflowControl above. */}
               {overflowControl}
+              {/* New task last, on the far right (mockup C). */}
+              <button onClick={openComposer} title="New task (press c)"
+                className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[14px] font-semibold text-white hover:opacity-90">
+                <I.plus /> New task
+              </button>
             </div>
           )}
 
@@ -2654,14 +2658,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // The two that only appear on a client view sit at the END, right
             // before the bell, rather than at the front where their coming and
             // going shifted every other icon sideways between pages.
+            // A client page keeps these in one View button on the list row
+            // (mockup C); with no list row, the View button sits here.
+            clientView ? (railHidden ? viewControl : null) : (
             <div className="flex items-center gap-1.5">
               {followingControl}
               {groupSortControl}
               {filterMenuControl}
               {columnsControl}
-              {clientView && bulkAddControl}
-              {clientView && copyForClaudeControl}
-            </div>
+            </div>)
           )}
 
           {/* No notification bell (Derek, 2026-09-01: "not useful"). It
@@ -2674,6 +2679,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         </header>
 
+        {clientView && clientTab !== "chat" && clientById(activeClient) && (() => {
+          const all = (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold");
+          const late = all.filter((t) => !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""));
+          const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
+          const oldest = late[0];
+          return (
+            <div className="shrink-0 border-b bg-surface px-4 pb-3 sm:px-5">
+              <ClientNeeds clientId={activeClient} ghlContactId={contactForClient(activeClient)?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
+                overdue={late.length} oldestOverdue={oldest ? { title: oldest.title, daysLate: -(daysUntilDue(oldest.due) ?? 0) } : null} onOpenOverdue={() => oldest && setOpenTaskId(oldest.id)}
+                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMessageClient(activeClient) ? () => openRemindClient(activeClient) : null}
+                canBook={!!contactForClient(activeClient)?.ghlContactId} onBook={() => setBookClient(activeClient)} />
+            </div>
+          );
+        })()}
         {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
@@ -2844,7 +2863,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
                 onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder}
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
-                onAddTask={() => setDumpGroup({ key: null, personal: false })} />
+                trailing={viewControl} />
             );
           })()}
           {activeProject && stagesForProject(activeProject).length > 0 ? (

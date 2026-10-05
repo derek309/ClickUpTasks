@@ -12,7 +12,7 @@ export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onSelectFolder, onSelectList,
   onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
-  onReorderFolders, onReorderLists, onAddTask }: {
+  onReorderFolders, onReorderLists, onAddTask, trailing }: {
   folders: Folder[];           // this client's folders, in order
   lists: Project[];            // this client's lists (projects), all of them
   activeFolder: string | null;
@@ -38,6 +38,8 @@ export function FolderRail({
   // the right of this rail). Optional, because the personal list has no rail
   // and keeps its own per-group buttons.
   onAddTask?: () => void;
+  /** Sits at the right end in place of Add task: the client page's View button (Derek, 2026-10-05). */
+  trailing?: React.ReactNode;
 }) {
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
@@ -125,7 +127,8 @@ export function FolderRail({
       {/* ml-auto pushes it to the right edge once the row has room. Below lg
           the rail scrolls horizontally, where there is no free space to
           consume, so it trails the last pill instead of vanishing. */}
-      {onAddTask && (
+      {trailing && <span className="ml-auto shrink-0">{trailing}</span>}
+      {onAddTask && !trailing && (
         <button onClick={onAddTask} title="Add a task to this list"
           className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-[5px] border bg-surface px-2.5 py-1 text-[13px] font-semibold text-accent shadow-sm hover:bg-accent hover:text-white">
           <I.plus className="h-3.5 w-3.5" /> Add task
