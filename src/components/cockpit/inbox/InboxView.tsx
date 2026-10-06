@@ -1797,7 +1797,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         {(contact?.company || (client && client !== person)) && <div className="text-muted">🏢 {contact?.company || client}</div>}
         {(email || phone) && (
           <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
-            {email && <><span className="break-all">{email}</span><button onClick={() => copyText(email, p)} className={linkBtn}>Copy</button></>}
+            {email && <><span className="break-all">{email}</span><span className="flex gap-3">
+              {/* Email them from any conversation, a text one included (Derek, 2026-10-06). */}
+              {t.channel !== "email" && <button onClick={() => window.dispatchEvent(new CustomEvent("inbox-compose", { detail: { kind: "email", to: email, contactId: contact?.id, name: person ?? undefined } }))} title={`Write an email to ${person ?? email}`} className={`${linkBtn} font-semibold`}>Email</button>}
+              <button onClick={() => copyText(email, p)} className={linkBtn}>Copy</button></span></>}
             {phone && <><span>{phone}</span><button onClick={() => copyText(phone, p)} className={linkBtn}>Copy</button></>}
           </div>
         )}
