@@ -256,11 +256,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
             <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-bold uppercase tracking-wider text-white/70">Next up · {whenLabel(nextUp)}</div>
-                <b className="block truncate text-[20px]">{nextUp.title}</b>
-                <div className="text-white/80">{time(nextUp.start)}, {length(minutes(nextUp.start, nextUp.end))} · {nextUp.people.map(first).join(" and ")}{calName(nextUp) ? ` · ${calName(nextUp)}` : ""}</div>
+                <b className="block truncate text-[20px]">{headline(nextUp)}</b>
+                <div className="text-white/80">{[`${time(nextUp.start)}, ${length(minutes(nextUp.start, nextUp.end))}`, purpose(nextUp, headline(nextUp)), nextUp.people.map(first).join(" and "), clientOf(nextUp) && clientNote ? clientNote(clientOf(nextUp)!) : null].filter(Boolean).join(" · ")}</div>
               </div>
               {nextUp.joinUrl && <a href={nextUp.joinUrl} target="_blank" rel="noopener noreferrer" className="grid h-11 place-items-center rounded-lg bg-surface px-6 text-[16px] font-bold text-accent hover:opacity-90">Join</a>}
-              {clientOf(nextUp) && <button onClick={() => onOpenClient(clientOf(nextUp)!)} className="h-11 rounded-lg px-4 font-semibold text-white ring-1 ring-white/40 hover:bg-white/10">Open {clientName(clientOf(nextUp)!) ?? nextUp.contactName ?? "client"}</button>}
+              {clientOf(nextUp) && <button onClick={() => onOpenClient(clientOf(nextUp)!)} className="h-11 rounded-lg px-4 font-semibold text-white ring-1 ring-white/40 hover:bg-white/10">Open {headline(nextUp).split(/\s+/)[0]}&apos;s page</button>}
             </div>
           )}
           {days.map(({ key, list, busy, busySpans, allDay, free }) => {
