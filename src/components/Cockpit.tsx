@@ -2630,6 +2630,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 )}
                 {/* Who follows them, beside the name (Derek, 2026-10-05). */}
                 {clientView && followingControl && <span className="text-[15px] font-normal">{followingControl}</span>}
+                {/* Their SaaS account, one click from their page (Derek, 2026-10-06). */}
+                {clientView && contactForClient(activeClient)?.saasUrl && (
+                  <a href={contactForClient(activeClient)!.saasUrl} target="_blank" rel="noopener noreferrer" title="Open their SaaS account"
+                    className="rounded-[5px] bg-accent-soft px-2 py-0.5 text-[13px] font-bold text-accent ring-1 ring-accent/30 hover:ring-accent">SaaS account ↗</a>
+                )}
                 {clientLate.length > 0 && (
                   <button onClick={() => setOpenTaskId(clientLate[0].id)} title={`Open the oldest: ${clientLate[0].title}`}
                     className="rounded-[5px] bg-danger-soft px-2 py-0.5 text-[13px] font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">{clientLate.length} overdue</button>
