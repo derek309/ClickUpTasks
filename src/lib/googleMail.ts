@@ -194,8 +194,13 @@ export function gmailFiles(payload: any): GmailFile[] {
       // attachment): a signature's logo and social icons, even when the mail
       // program named it "image.png" (Derek, 2026-10-02: 14 of them on one email).
       const disposition = String(headers.find((x) => x.name?.toLowerCase() === "content-disposition")?.value ?? "").toLowerCase();
-      const inline = headers.some((x) => x.name?.toLowerCase() === "content-id") && !disposition.startsWith("attachment");
-      out.push({ name: part.filename || "image", mimeType: part.mimeType || "application/octet-stream", bytes: Number(part.body?.size) || 0, gmailAttachmentId: id, inline });
+      const cid = String(headers.find((x) => x.name?.toLowerCase() === "content-id")?.value ?? "");
+      const inline = !!cid && !disposition.startsWith("attachment");
+      // Pasted into the email in Gmail (its Content-ID starts "ii_"): a
+      // screenshot someone meant you to see, whatever its size (Derek,
+      // 2026-10-06: a 53 KB Stripe screenshot was dropped as a "logo").
+      const pasted = /^<?ii_/i.test(cid.trim());
+      out.push({ name: part.filename || "image", mimeType: part.mimeType || "application/octet-stream", bytes: Number(part.body?.size) || 0, gmailAttachmentId: id, inline: inline && !pasted });
     }
     for (const p of part.parts ?? []) walk(p);
   };
