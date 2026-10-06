@@ -313,6 +313,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (item 6) plus Following moving to its own header avatar stack below.
   const [groupSortOpen, setGroupSortOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
@@ -2710,11 +2711,33 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   / Review instead of a cluster of equal-weight buttons. Same
                   menu as the compact header — see overflowControl above. */}
               {overflowControl}
-              {/* New task last, on the far right (mockup C). */}
-              <button onClick={openComposer} title="New task (press c)"
-                className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[14px] font-semibold text-white hover:opacity-90">
-                <I.plus /> New task
-              </button>
+              {/* New last, on the far right (mockup C): a task, or an email or
+                  text to them (Derek, 2026-10-06). */}
+              {(() => {
+                const ct = contactForClient(activeClient);
+                const canMsg = canMessageClient(activeClient);
+                const first = (clientById(activeClient)?.name ?? "").trim().split(/\s+/)[0] || "them";
+                const item = "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-[15px] hover:bg-background";
+                return (
+                  <span className="relative inline-flex">
+                    <button onClick={openComposer} title="New task (press c)"
+                      className="inline-flex items-center gap-1 rounded-l-md bg-accent px-3 py-1.5 text-[14px] font-semibold text-white hover:opacity-90">
+                      <I.plus /> New task
+                    </button>
+                    <button onClick={() => setNewMenuOpen((o) => !o)} aria-expanded={newMenuOpen} aria-label="More ways to start" title="Email or text them"
+                      className="rounded-r-md border-l border-white/25 bg-accent px-2 text-[13px] text-white hover:opacity-90">▾</button>
+                    {newMenuOpen && <>
+                      <div className="fixed inset-0 z-40" onClick={() => setNewMenuOpen(false)} />
+                      <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                        <button onClick={() => { setNewMenuOpen(false); openComposer(); }} className={item}><I.plus /> New task</button>
+                        {canMsg && ct?.email && <button onClick={() => { setNewMenuOpen(false); openClientEmail(activeClient, {}); }} className={item}>✉️ Email {first}</button>}
+                        {canMsg && ct?.phone && <button onClick={() => { setNewMenuOpen(false); openClientText(activeClient); }} className={item}>💬 Text {first}</button>}
+                        {!canMsg && <div className="px-3 py-2 text-[14px] text-muted">Messages are off for this client.</div>}
+                      </div>
+                    </>}
+                  </span>
+                );
+              })()}
             </div>
           )}
 
