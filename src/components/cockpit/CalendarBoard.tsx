@@ -60,7 +60,7 @@ export type CalendarBoardProps = {
   pushToast: (text: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, colorOf, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
   const starred = new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]);
   // One click stars, one click unstars, the default calendar included.
   const toggleStar = (id: string) => {
@@ -112,7 +112,6 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   const [now] = useState(() => Date.now());
   const nameOf = (id: string) => people.find((p) => p.memberId === id)?.name ?? "";
   const first = (id: string) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0]);
-  const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
 
   const shown = events.filter((e) => !gone.has(e.id) && (who === "all" || e.people.includes(who)));
   // This week runs from today to Sunday; next week is Monday to Sunday.
@@ -168,6 +167,22 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
   };
   // The calendar's name, unless it only repeats who's in the meeting.
   const calName = (e: CalendarEvent) => (e.calendarName && !e.people.some((id) => nameOf(id) === e.calendarName) ? e.calendarName : null);
+  // The client's name leads a meeting's row; else the title, without the
+  // "[ClickUpLocal]" GoHighLevel puts on it.
+  const bare = (t: string) => t.replace(/\[[^\]]*\]/g, " ").replace(/clickuplocal/gi, " ").replace(/\s+/g, " ").trim();
+  const headline = (e: CalendarEvent) => {
+    const cid = clientOf(e);
+    return (cid?.startsWith("cl_") ? clientName(cid) : null) ?? e.contactName ?? (bare(e.title) || e.title);
+  };
+  // What the meeting is: the title once the names are taken out ("Zoom
+  // Meeting", "Check-In/Training"), else the calendar's own name.
+  const purpose = (e: CalendarEvent, head: string) => {
+    const names = [head, ...head.split(/\s+/), ...e.people.flatMap((id) => [nameOf(id), ...nameOf(id).split(/\s+/)])].filter((n) => n.length > 1);
+    let t = bare(e.title);
+    for (const n of names.sort((a, b) => b.length - a.length)) t = t.replace(new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), " ");
+    t = t.replace(/(^|\s)[+&x|\/-](?=\s|$)/gi, " ").replace(/\s+/g, " ").trim();
+    return t.length >= 3 ? t : calName(e) ?? "";
+  };
   const weekend = (k: string) => { const d = new Date(`${k}T12:00:00Z`).getUTCDay(); return d === 0 || d === 6; };
 
   const copy = async (l: Pick<BookingLink, "label" | "url">) => {
@@ -261,56 +276,65 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                   <span className="shrink-0 text-[14px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 <div className={`rounded-xl px-4 py-2 ${key === range7.today ? "bg-surface shadow-sm ring-2 ring-accent" : "bg-surface ring-1 ring-[var(--border)]"}`}>
-                {list.map((e) => (
-                  <div key={e.id} className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b py-2.5">
-                    <span className="tabular-nums"><b>{time(e.start)}</b><span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span></span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold">{e.title}</span>
-                      <span className="flex flex-wrap items-center gap-x-3 text-[15px] text-muted">
-                        <span>{e.people.map(first).join(", ")}</span>
-                        {clientOf(e) && <button onClick={() => onOpenClient(clientOf(e)!)} className="font-semibold text-accent hover:underline">{clientName(clientOf(e)!) ?? e.contactName ?? "Open client"}</button>}
-                        {/* One menu per meeting (Derek, 2026-10-05): its status, then Move and
-                            Cancel, so the row stays clean. */}
-                        {e.calendarId && (() => {
-                          const st = statusOf[e.id] ?? e.status ?? "confirmed";
-                          const upcoming = Date.parse(e.start) > now;
-                          const item = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-background";
-                          return (
-                            <span className="relative">
-                              <button onClick={() => setMenuId(menuId === e.id ? null : e.id)} aria-expanded={menuId === e.id} title="Status, move or cancel"
-                                className={`inline-flex h-8 items-center gap-1 rounded-md bg-surface px-2.5 text-[15px] font-semibold ring-1 ring-[var(--border)] hover:bg-background ${STATUS_TONE[st] ?? "text-foreground"}`}>
-                                {STATUS_LABEL[st] ?? st}<span aria-hidden className="text-muted">▾</span>
-                              </button>
-                              {menuId === e.id && <>
-                                <div className="fixed inset-0 z-40" onClick={() => setMenuId(null)} />
-                                <div className="absolute left-0 top-9 z-50 w-56 rounded-lg bg-surface p-1.5 text-[15px] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-                                  <div className="px-3 pb-1 pt-0.5 text-[13px] font-bold uppercase tracking-wider text-muted">Status</div>
-                                  {Object.entries(STATUS_LABEL).filter(([v]) => v !== "cancelled").map(([v, l]) => (
-                                    <button key={v} onClick={() => { setMenuId(null); if (v !== st) void setStatus(e, v); }} className={`${item} ${STATUS_TONE[v] ?? ""}`}>
-                                      <span className="w-4 text-accent">{v === st ? "✓" : ""}</span>{l}
-                                    </button>
-                                  ))}
-                                  {upcoming && <>
-                                    <div className="my-1 border-t" />
-                                    <button onClick={() => { setMenuId(null); setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title }); }} className={item}><span className="w-4" />Move to another time…</button>
-                                    <button onClick={() => { setMenuId(null); setCancelId(e.id); }} className={`${item} text-danger`}><span className="w-4" />Cancel meeting…</button>
-                                  </>}
-                                </div>
-                              </>}
-                            </span>
-                          );
-                        })()}
-                        {cancelId === e.id && <span className="font-semibold text-danger">Cancel it? GoHighLevel tells them. <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>}
-                      </span>
+                {list.map((e) => {
+                  // Cleaner rows (Derek, 2026-10-05, mockup "Cleaner meeting rows"):
+                  // the client's name leads, then what it is and who; Join and one ⋯
+                  // menu; after it ends, Showed / No show in one click.
+                  const st = statusOf[e.id] ?? e.status ?? "confirmed";
+                  const upcoming = Date.parse(e.start) > now;
+                  const over = Date.parse(e.end) <= now;
+                  const head = headline(e);
+                  const what = purpose(e, head);
+                  const item = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-background";
+                  const cid = clientOf(e);
+                  return (
+                  <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2.5">
+                    <span className="w-[5.5rem] shrink-0 tabular-nums"><b>{time(e.start)}</b><span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span></span>
+                    <span className="min-w-0 flex-1">
+                      {cid ? <button onClick={() => onOpenClient(cid)} title="Open their page" className="block max-w-full truncate text-left text-[16px] font-bold hover:text-accent hover:underline">{head}</button>
+                        : <b className="block truncate text-[16px]">{head}</b>}
+                      <span className="block truncate text-[15px] text-muted">{[what, e.people.map(first).join(" & ")].filter(Boolean).join(" · ")}</span>
+                      {cancelId === e.id && <span className="font-semibold text-danger">Cancel it? GoHighLevel tells them. <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>}
                     </span>
-                    <span className="flex items-center gap-2">
-                      {e.joinUrl && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="rounded-md px-3 py-1.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Join</a>}
-                      <span className="flex -space-x-1.5">
-                        {e.people.map((id) => <span key={id} title={nameOf(id)} className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-bold text-white ring-2 ring-surface" style={{ background: colorOf(id) }}>{initials(nameOf(id))}</span>)}
-                      </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {over && e.calendarId && st === "confirmed" ? <>
+                        <span className="text-[14px] text-muted">How did it go?</span>
+                        <button onClick={() => void setStatus(e, "showed")} className="h-9 rounded-md bg-success-soft px-3 font-bold text-success ring-1 ring-success/30 hover:ring-success">Showed</button>
+                        <button onClick={() => void setStatus(e, "noshow")} className="h-9 rounded-md bg-danger-soft px-3 font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">No show</button>
+                      </> : <>
+                        {st !== "confirmed" && <span className={`rounded-md bg-background px-2 py-1 text-[14px] font-semibold ${STATUS_TONE[st] ?? "text-muted"}`}>{STATUS_LABEL[st] ?? st}</span>}
+                        {e.joinUrl && !over && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="grid h-9 place-items-center rounded-md bg-accent px-4 font-bold text-white hover:opacity-90">Join</a>}
+                      </>}
+                      {(e.calendarId || cid) && (
+                        <span className="relative">
+                          <button onClick={() => setMenuId(menuId === e.id ? null : e.id)} aria-expanded={menuId === e.id} aria-label="Status, move or cancel" title="Status, move or cancel"
+                            className="grid h-9 w-9 place-items-center rounded-md text-[18px] text-muted ring-1 ring-[var(--border)] hover:bg-background hover:text-foreground">⋯</button>
+                          {menuId === e.id && <>
+                            <div className="fixed inset-0 z-40" onClick={() => setMenuId(null)} />
+                            <div className="absolute right-0 top-10 z-50 w-60 rounded-lg bg-surface p-1.5 text-[15px] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                              {e.calendarId && <>
+                                <div className="px-3 pb-1 pt-0.5 text-[13px] font-bold uppercase tracking-wider text-muted">Status</div>
+                                {Object.entries(STATUS_LABEL).filter(([v]) => v !== "cancelled").map(([v, l]) => (
+                                  <button key={v} onClick={() => { setMenuId(null); if (v !== st) void setStatus(e, v); }} className={`${item} ${STATUS_TONE[v] ?? ""}`}>
+                                    <span className="w-4 text-accent">{v === st ? "✓" : ""}</span>{l}
+                                  </button>
+                                ))}
+                                <div className="my-1 border-t" />
+                              </>}
+                              {cid && <button onClick={() => { setMenuId(null); onOpenClient(cid); }} className={item}><span className="w-4" />Open {head.split(/\s+/)[0]}&apos;s page</button>}
+                              {e.joinUrl && over && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" onClick={() => setMenuId(null)} className={item}><span className="w-4" />Join link</a>}
+                              {upcoming && e.calendarId && <>
+                                <button onClick={() => { setMenuId(null); setBooking({ kind: "move", appointmentId: e.id, calendarId: e.calendarId!, name: e.contactName ?? e.title, title: e.title }); }} className={item}><span className="w-4" />Move to another time…</button>
+                                <button onClick={() => { setMenuId(null); setCancelId(e.id); }} className={`${item} text-danger`}><span className="w-4" />Cancel meeting…</button>
+                              </>}
+                            </div>
+                          </>}
+                        </span>
+                      )}
                     </span>
                   </div>
-                ))}
+                  );
+                })}
                 {/* Busy time, one quiet line; in full when asked. Someone else's
                     busy time never shows its title (it's their own life). */}
                 {busyFull ? busy.map((e) => (
@@ -319,13 +343,17 @@ export function CalendarBoard({ people, events, links, loading, error, meId, col
                     <span className="min-w-0 flex-1 truncate">{e.people.includes(meId) ? e.title : `Busy (${e.people.map(first).join(", ")})`}</span>
                   </div>
                 )) : null}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 text-[15px]">
-                  {!busyFull && busySpans.length > 0 && <span className="min-w-0 text-muted"><b className="font-semibold text-foreground/70">Busy</b> {busySpans.map(([a, b]) => range(a, b)).join(", ")}</span>}
+                {/* Free time as chips; a chip starts a booking (mockup). */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 text-[15px]">
+                  {!busyFull && busySpans.length > 0 && <span className="min-w-0 text-muted/80">Busy {busySpans.map(([a, b]) => range(a, b)).join(", ")}</span>}
                   <span className="flex-1" />
-                  {free.length > 0
-                    ? <span className="font-semibold text-success">Free {free.map(([a, b]) => range(a, b)).join(", ")}</span>
-                    : <span className="text-muted">No open time between 9 and 5</span>}
-                  {free.length > 0 && <button onClick={() => { setFindOpen(true); setFindQ(""); }} className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">Book</button>}
+                  {free.length > 0 ? <>
+                    <span className="text-[14px] text-muted">Open</span>
+                    {free.map(([a, b]) => (
+                      <button key={a} onClick={() => { setFindOpen(true); setFindQ(""); }} title="Book someone in this time"
+                        className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">{range(a, b)}</button>
+                    ))}
+                  </> : <span className="text-muted">No open time between 9 and 5</span>}
                 </div>
                 </div>
               </section>
