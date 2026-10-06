@@ -1641,32 +1641,36 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
   // same clipboard hand-off pattern, just widened from one task to every
   // open task under the currently open client/project.
-  const copyClientForClaude = async () => {
+  // listId: just that list (Derek, 2026-10-06: "copy for Claude for these
+  // lists as well, so it's only the list"), from the list's ⋮ menu.
+  const copyClientForClaude = async (listId?: string) => {
     const client = clientById(activeClient);
     if (!client) return;
-    const project = activeProject ? projectById(activeProject) : null;
+    const scopeId = listId ?? activeProject;
+    const project = scopeId ? projectById(scopeId) : null;
     const contact = contactForClient(activeClient);
-    const openTasks = sortTasks(baseTasks.filter((t) => t.status !== "done"));
+    const openTasks = sortTasks((listId ? (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.projectId === listId) : baseTasks).filter((t) => t.status !== "done"));
     const shown = openTasks.slice(0, 30);
     const notes = clientNotes
-      .filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))
+      .filter((n) => (scopeId ? n.projectId === scopeId : n.clientId === activeClient && !n.projectId))
       .slice(0, 5);
     const ghlUrl = ghlContactUrlFor(activeClient);
     const brief = [
       `Work on this client/project from ClickUpTasks (https://clickuptasks.vercel.app):`,
       ``,
       `Client: ${client.name}${contact?.email ? ` (${contact.email})` : ""}`,
-      `Project: ${project ? project.name : "All projects"}`,
+      `List: ${project ? `${project.name} (list id ${project.id})` : "All lists"}`,
+      `Use the ClickUpTasks connection: get_task with a task id below for the full task.`,
       ``,
       `Open tasks (${openTasks.length}):`,
-      ...shown.map((t) => `- ${t.title} — ${STATUS_META[t.status].label} · ${PRIORITY_META[t.priority].label}${t.due ? ` · Due: ${t.due}` : ""}`),
+      ...shown.map((t) => `- ${t.title} [${t.id}] · ${STATUS_META[t.status].label} · ${PRIORITY_META[t.priority].label}${t.due ? ` · Due: ${t.due}` : ""}${t.assigneeId ? ` · On: ${userById(t.assigneeId)?.name ?? t.assigneeId}` : ""}`),
       openTasks.length > shown.length ? `...and ${openTasks.length - shown.length} more (showing top ${shown.length} by priority/due)` : "",
       notes.length ? `\nRecent chat notes:\n${notes.map((n) => `- ${userById(n.authorId)?.name ?? "?"}: ${n.body}`).join("\n")}` : "",
       ghlUrl ? `\nGHL contact: ${ghlUrl}` : "",
     ].filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(brief);
-      pushToast("Copied client brief for Claude.");
+      pushToast(project ? `Copied the ${project.name} list for Claude.` : "Copied client brief for Claude.");
     } catch {
       pushToast("Couldn't copy to clipboard.");
     }
@@ -2973,7 +2977,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
                 onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder}
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
-                trailing={viewControl} />
+                trailing={viewControl} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
             );
           })()}
           {activeProject && stagesForProject(activeProject).length > 0 ? (

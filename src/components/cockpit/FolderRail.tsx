@@ -12,7 +12,7 @@ export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onSelectFolder, onSelectList,
   onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
-  onReorderFolders, onReorderLists, onAddTask, trailing }: {
+  onReorderFolders, onReorderLists, onAddTask, trailing, onCopyListForClaude }: {
   folders: Folder[];           // this client's folders, in order
   lists: Project[];            // this client's lists (projects), all of them
   activeFolder: string | null;
@@ -40,6 +40,8 @@ export function FolderRail({
   onAddTask?: () => void;
   /** Sits at the right end in place of Add task: the client page's View button (Derek, 2026-10-05). */
   trailing?: React.ReactNode;
+  /** Copy one list's open tasks as a brief for Claude (Derek, 2026-10-06). */
+  onCopyListForClaude?: (id: string) => void;
 }) {
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
@@ -113,6 +115,7 @@ export function FolderRail({
           {folders.length > 0 && <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Move to</div>}
           {folders.map((f) => item(f.name, () => onMoveList(l.id, f.id), false, f.id))}
           <div className="my-0.5 border-t" />
+          {onCopyListForClaude && item("Copy for Claude", () => onCopyListForClaude(l.id))}
           {item("Rename list", () => onRenameList(l.id))}
           {item("Delete list", () => onDeleteList(l.id), true)}
         </>,
