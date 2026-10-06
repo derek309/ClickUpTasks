@@ -2794,7 +2794,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               clientName={(id) => clientById(id)?.name ?? null} onOpenClient={(id) => openClientList(id, null)} pushToast={(text) => pushToast(text)} contacts={contacts}
               defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })}
               hiddenLinks={inboxPrefs.hiddenBookingLinks ?? []} onSetHidden={(ids) => setInboxPrefs({ hiddenBookingLinks: ids })}
-              starredLinks={inboxPrefs.starredBookingLinks ?? []} onSetStarred={(ids) => setInboxPrefs({ starredBookingLinks: ids })} />
+              starredLinks={inboxPrefs.starredBookingLinks ?? []} onSetStarred={(ids) => setInboxPrefs({ starredBookingLinks: ids })}
+              clientNote={(cid) => {
+                // What's open with the client, under their meeting (Derek, 2026-10-05).
+                const c = clientById(cid);
+                if (!c) return null;
+                const open = (scopedTasksByClientId.get(cid) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold");
+                const waiting = waitingTasksFor(cid).length;
+                const late = open.filter((t) => !t.waitingOnClient && t.due && t.due < TODAY).length;
+                const first = c.name.trim().split(/\s+/)[0];
+                return [waiting ? `${waiting} waiting on ${first}` : "", late ? `${late} overdue` : ""].filter(Boolean).join(" · ") || null;
+              }} />
           </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">

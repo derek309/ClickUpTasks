@@ -4,7 +4,7 @@
 // pick a calendar, see its open times for the week, tap one, confirm. Booking
 // a contact uses only the calendars in their sub-account; moving keeps the
 // appointment's own calendar. GoHighLevel sends the confirmations.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { authedFetch } from "@/lib/supabase";
 import type { BookingLink } from "./useCalendar";
@@ -26,7 +26,8 @@ export function pacificToIso(date: string, time: string): string | null {
 }
 
 export type BookTarget =
-  | { kind: "book"; ghlContactId: string; name: string }
+  /** start: a free time picked on the Calendar, chosen when the window opens. */
+  | { kind: "book"; ghlContactId: string; name: string; start?: string }
   | { kind: "move"; appointmentId: string; calendarId: string; name: string; title: string };
 
 export function BookAppointment({ target, meId, onClose, onDone, pushToast, defaultCalendarId, onSetDefault }: {
@@ -52,6 +53,7 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   // When the window opened: "today" for the labels, read once.
   const [openedAt] = useState(() => Date.now());
   const [picks, setPicks] = useState<string[]>([]);
+  const startUsed = useRef(false);
 
   // The calendars this person can be booked on, yours first, one row each.
   useEffect(() => {
@@ -81,9 +83,23 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
       if (!live) return;
       if (!r.ok) { setError(j.error ?? "Couldn't read the open times."); setSlots([]); return; }
       setError(null); setSlots(j.slots ?? []); setMinutes(j.minutes ?? 30);
+      // A free time picked on the Calendar (Derek, 2026-10-05): chosen when it is
+      // one of the open times, else filled in as Other time.
+      if (target.kind === "book" && target.start && !startUsed.current) {
+        startUsed.current = true;
+        const at = Date.parse(target.start);
+        const hit = ((j.slots ?? []) as string[]).find((x) => Date.parse(x) === at);
+        if (hit) setPicked(hit);
+        else {
+          const d = new Date(at);
+          const date = d.toLocaleDateString("en-CA", { timeZone: TZ });
+          const hm = d.toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false });
+          setOtherOpen(true); setOtherDate(date); setOtherTime(hm); setPicked(pacificToIso(date, hm));
+        }
+      }
     }).catch(() => { if (live) { setError("Couldn't read the open times."); setSlots([]); } });
     return () => { live = false; };
-  }, [calendarId]);
+  }, [calendarId]); // eslint-disable-line react-hooks/exhaustive-deps -- target.start is read once, on open
 
   const byDay = useMemo(() => {
     const m = new Map<string, string[]>();

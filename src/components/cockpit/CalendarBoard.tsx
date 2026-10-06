@@ -58,9 +58,11 @@ export type CalendarBoardProps = {
   starredLinks?: string[];
   onSetStarred?: (ids: string[]) => void;
   pushToast: (text: string) => void;
+  /** "14 waiting on James · 5 overdue" for a client, shown under its meetings. */
+  clientNote?: (clientId: string) => string | null;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, clientName, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, clientName, clientNote, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
   const starred = new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]);
   // One click stars, one click unstars, the default calendar included.
   const toggleStar = (id: string) => {
@@ -77,6 +79,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
   const [booking, setBooking] = useState<BookTarget | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQ, setFindQ] = useState("");
+  // A free time chip remembers its time for the booking it starts.
+  const [pendingStart, setPendingStart] = useState<string | null>(null);
   const [cancelId, setCancelId] = useState<string | null>(null);
   // Cancelled here: gone at once. GoHighLevel's list catches up a moment
   // later, so after any change the list reads again after a short wait.
@@ -223,14 +227,14 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
         </span>
         <span className="flex-1" />
         <span className="relative">
-          <button onClick={() => { setFindOpen(!findOpen); setFindQ(""); }} className="h-10 rounded-md bg-accent px-4 font-semibold text-white">＋ Book</button>
+          <button onClick={() => { setFindOpen(!findOpen); setFindQ(""); setPendingStart(null); }} className="h-10 rounded-md bg-accent px-4 font-semibold text-white">＋ Book</button>
           {findOpen && <>
             <div className="fixed inset-0 z-40" onClick={() => setFindOpen(false)} />
-            <div className="absolute right-0 top-12 z-50 grid w-[min(22rem,90vw)] gap-1 rounded-lg bg-surface p-2 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-              <input autoFocus value={findQ} onChange={(e) => setFindQ(e.target.value)} placeholder="Who are you booking?" aria-label="Search contacts"
+            <div id="calendar-book-finder" className="absolute right-0 top-12 z-50 grid w-[min(22rem,90vw)] gap-1 rounded-lg bg-surface p-2 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              <input autoFocus value={findQ} onChange={(e) => setFindQ(e.target.value)} placeholder={pendingStart ? `Who are you booking at ${clock(Date.parse(pendingStart), true)}?` : "Who are you booking?"} aria-label="Search contacts"
                 className="h-10 w-full rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
               {found.map((c) => (
-                <button key={c.id} onClick={() => { setFindOpen(false); setBooking({ kind: "book", ghlContactId: c.ghlContactId!, name: c.name }); }} className="rounded-md px-3 py-2 text-left hover:bg-background">
+                <button key={c.id} onClick={() => { setFindOpen(false); setBooking({ kind: "book", ghlContactId: c.ghlContactId!, name: c.name, ...(pendingStart ? { start: pendingStart } : {}) }); }} className="rounded-md px-3 py-2 text-left hover:bg-background">
                   <b className="block truncate font-semibold">{c.name}</b>
                   <span className="block truncate text-[14px] text-muted">{[c.company, c.email].filter(Boolean).join(" · ")}</span>
                 </button>
@@ -293,7 +297,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                     <span className="min-w-0 flex-1">
                       {cid ? <button onClick={() => onOpenClient(cid)} title="Open their page" className="block max-w-full truncate text-left text-[16px] font-bold hover:text-accent hover:underline">{head}</button>
                         : <b className="block truncate text-[16px]">{head}</b>}
-                      <span className="block truncate text-[15px] text-muted">{[what, e.people.map(first).join(" & ")].filter(Boolean).join(" · ")}</span>
+                      <span className="block truncate text-[15px] text-muted">{[what, e.people.map(first).join(" & "), cid && clientNote ? clientNote(cid) : null].filter(Boolean).join(" · ")}</span>
                       {cancelId === e.id && <span className="font-semibold text-danger">Cancel it? GoHighLevel tells them. <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
@@ -350,7 +354,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                   {free.length > 0 ? <>
                     <span className="text-[14px] text-muted">Open</span>
                     {free.map(([a, b]) => (
-                      <button key={a} onClick={() => { setFindOpen(true); setFindQ(""); }} title="Book someone in this time"
+                      <button key={a} onClick={() => { setPendingStart(new Date(a).toISOString()); setFindOpen(true); setFindQ(""); requestAnimationFrame(() => document.getElementById("calendar-book-finder")?.scrollIntoView({ behavior: "smooth", block: "nearest" })); }} title={`Book someone at ${clock(a, true)}`}
                         className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">{range(a, b)}</button>
                     ))}
                   </> : <span className="text-muted">No open time between 9 and 5</span>}
