@@ -2795,6 +2795,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })}
               hiddenLinks={inboxPrefs.hiddenBookingLinks ?? []} onSetHidden={(ids) => setInboxPrefs({ hiddenBookingLinks: ids })}
               starredLinks={inboxPrefs.starredBookingLinks ?? []} onSetStarred={(ids) => setInboxPrefs({ starredBookingLinks: ids })}
+              workFrom={inboxPrefs.workFrom ?? "09:00"} workTo={inboxPrefs.workTo ?? "17:00"} onSetHours={(f, t) => setInboxPrefs({ workFrom: f, workTo: t })}
               clientNote={(cid) => {
                 // What's open with the client, under their meeting (Derek, 2026-10-05).
                 const c = clientById(cid);

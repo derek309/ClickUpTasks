@@ -32,8 +32,9 @@ const merge = (spans: [number, number][]) => spans.sort((x, y) => x[0] - y[0]).r
 }, []);
 const STATUS_LABEL: Record<string, string> = { confirmed: "Confirmed", showed: "Showed", noshow: "No show", cancelled: "Cancelled", invalid: "Invalid" };
 const STATUS_TONE: Record<string, string> = { showed: "text-success", noshow: "text-danger", invalid: "text-muted" };
-// Free time is looked for between 9 and 5, Pacific.
-const WORK_FROM = "09:00", WORK_TO = "17:00";
+// Free time is looked for between your working hours, Pacific; 9 to 5 unless set.
+const HOURS = Array.from({ length: 29 }, (_, i) => { const m = 6 * 60 + i * 30; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; });
+const hourLabel = (hm: string) => { const [h, m] = hm.split(":").map(Number); return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`; };
 const length = (m: number) => (m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}` : `${m} min`);
 
 export type CalendarBoardProps = {
@@ -60,9 +61,13 @@ export type CalendarBoardProps = {
   pushToast: (text: string) => void;
   /** "14 waiting on James · 5 overdue" for a client, shown under its meetings. */
   clientNote?: (clientId: string) => string | null;
+  /** Your working hours for free time, and how to change them (saved with Inbox settings). */
+  workFrom?: string;
+  workTo?: string;
+  onSetHours?: (from: string, to: string) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, clientName, clientNote, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
+export function CalendarBoard({ people, events, links, loading, error, meId, clientName, clientNote, workFrom = "09:00", workTo = "17:00", onSetHours, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
   const starred = new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]);
   // One click stars, one click unstars, the default calendar included.
   const toggleStar = (id: string) => {
@@ -140,15 +145,15 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     }
     list.sort((a, b) => a.start.localeCompare(b.start));
     const busySpans = merge(busy.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number]));
-    // Open time between 9 and 5, after everything booked or blocked; half an hour or more.
-    const from = Date.parse(pacificToIso(key, WORK_FROM) ?? ""), to = Date.parse(pacificToIso(key, WORK_TO) ?? "");
+    // Open time in your working hours, after everything booked or blocked; half an hour or more.
+    const from = Date.parse(pacificToIso(key, workFrom) ?? ""), to = Date.parse(pacificToIso(key, workTo) ?? "");
     const taken = merge([...busySpans.map((x) => [...x] as [number, number]), ...list.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number])]);
     const free: [number, number][] = [];
     let cursor = Math.max(from, key === range7.today ? Math.ceil(now / 1_800_000) * 1_800_000 : from);
     for (const [a, b] of taken) { if (a > cursor) free.push([cursor, Math.min(a, to)]); cursor = Math.max(cursor, b); if (cursor >= to) break; }
     if (cursor < to) free.push([cursor, to]);
     return { key, list, busy: busy.sort((a, b) => a.start.localeCompare(b.start)), busySpans, allDay, free: free.filter(([a, b]) => b - a >= 30 * 60_000) };
-  }), [shown, range7, now]);
+  }), [shown, range7, now, workFrom, workTo]);
   const nextUp = shown.filter((e) => !e.busy && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
   const meetings = days.reduce((n, d) => n + d.list.length, 0);
   const openHours = Math.round(days.reduce((n, d) => n + d.free.reduce((m, [a, b]) => m + (b - a), 0), 0) / 3_600_000);
@@ -357,7 +362,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                       <button key={a} onClick={() => { setPendingStart(new Date(a).toISOString()); setFindOpen(true); setFindQ(""); requestAnimationFrame(() => document.getElementById("calendar-book-finder")?.scrollIntoView({ behavior: "smooth", block: "nearest" })); }} title={`Book someone at ${clock(a, true)}`}
                         className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">{range(a, b)}</button>
                     ))}
-                  </> : <span className="text-muted">No open time between 9 and 5</span>}
+                  </> : <span className="text-muted">No open time between {hourLabel(workFrom)} and {hourLabel(workTo)}</span>}
                 </div>
                 </div>
               </section>
@@ -430,6 +435,16 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{week ? "Next week" : "This week"}</h2>
           <div className="flex justify-between"><span>Client meetings</span><b>{meetings}</b></div>
           <div className="flex justify-between"><span>Open hours to book</span><b>{openHours}</b></div>
+          {onSetHours && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[15px] text-muted">
+              <span>Free time between</span>
+              <select value={workFrom} onChange={(e) => onSetHours(e.target.value, e.target.value < workTo ? workTo : HOURS[Math.min(HOURS.indexOf(e.target.value) + 2, HOURS.length - 1)])} aria-label="Start of your working day"
+                className="h-8 rounded-md bg-surface px-1 text-foreground ring-1 ring-[var(--border)]">{HOURS.slice(0, -1).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+              <span>and</span>
+              <select value={workTo} onChange={(e) => onSetHours(workFrom, e.target.value)} aria-label="End of your working day"
+                className="h-8 rounded-md bg-surface px-1 text-foreground ring-1 ring-[var(--border)]">{HOURS.filter((h) => h > workFrom).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+            </div>
+          )}
           <label className="mt-1 flex cursor-pointer items-center gap-2 text-[15px] text-muted"><input type="checkbox" checked={busyFull} onChange={(e) => setBusyFull(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time in full</label>
         </div>
       </aside>

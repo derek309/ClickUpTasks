@@ -41,6 +41,9 @@ export type InboxPrefs = {
   hiddenBookingLinks?: string[];
   /** Booking links starred to the top of the Calendar's list (calendar ids). */
   starredBookingLinks?: string[];
+  /** Free time on the Calendar is looked for between these, Pacific ("09:00", "17:00"). */
+  workFrom?: string;
+  workTo?: string;
   /** Kinds kept out of this person's Inbox, its count and its pop ups ("email",
    *  "sms", "social", "call"). Still readable on the task (Derek, 2026-10-05:
    *  Michaella only needs team and client chats). */
