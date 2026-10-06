@@ -2427,8 +2427,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <kbd className="rounded border border-b-2 px-1.5 text-[12px] font-semibold">{shortcut("K")}</kbd>
             </button>
             <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title={`${me.name} (${me.role}): Settings`} aria-label="Settings"
-              className="flex shrink-0 items-center gap-1 rounded-lg p-1 text-muted hover:bg-background hover:text-foreground">
-              <span className="inline-flex items-center justify-center rounded-full text-[13px] font-semibold text-white" style={{ width: 28, height: 28, background: me.color }}>{me.initials}</span>
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground">
               <I.gear />
             </button>
           </div>
