@@ -2323,6 +2323,15 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   }, [q, kind, p.contacts]); // eslint-disable-line react-hooks/exhaustive-deps
   const typedEmail = kind === "email" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q.trim()) ? q.trim() : null;
   const taskHits = taskQ.trim() ? p.tasks.filter((t) => t.status !== "done" && `${t.title} ${p.clientName(t.clientId) ?? ""}`.toLowerCase().includes(taskQ.trim().toLowerCase())).slice(0, 6) : [];
+  // Their open tasks, most recently touched first, ready to click (Derek,
+  // 2026-10-06: "always list their most recent"): by the contact, or the
+  // client made from them.
+  const toContact = to?.contactId ? p.contacts.find((c) => c.id === to.contactId) ?? null : (to ? p.contacts.find((c) => (c.email ?? "").toLowerCase() === to.address.toLowerCase()) ?? null : null);
+  const toClient = toContact?.ghlContactId ? `cl_ct_ghl_${toContact.ghlContactId}` : null;
+  const theirTasks = toContact ? p.tasks
+    .filter((t) => t.status !== "done" && !t.private && (t.contactId === toContact.id || (!!toClient && t.clientId === toClient)))
+    .sort((a, b) => (b.lastActivityAt ?? b.createdAt ?? "").localeCompare(a.lastActivityAt ?? a.createdAt ?? ""))
+    .slice(0, 5) : [];
 
   const upload = async (list: FileList | null) => {
     for (const f of Array.from(list ?? [])) { const a = await p.onUpload(`inbox/${p.me.id}`, f); if (a) setFiles((x) => [...x, a]); }
@@ -2436,8 +2445,9 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
               <div className="flex items-start gap-2 rounded-lg bg-success-soft px-3 py-2.5"><span className="min-w-0 flex-1"><b className="block">{task.title}</b><span className="text-[14px] text-muted">{p.clientName(task.clientId)}</span></span><button onClick={() => setTask(null)} aria-label="Remove" className="text-muted">✕</button></div>
             ) : <>
               <p className="mb-2 text-muted">Optional. Their replies land on the task too.</p>
-              <input value={taskQ} onChange={(e) => setTaskQ(e.target.value)} placeholder="Search tasks" className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
-              <div className="mt-1.5 space-y-1">{taskHits.map((t) => <button key={t.id} onClick={() => { setTask(t); setTaskQ(""); }} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">{t.title}<span className="block text-[14px] text-muted">{p.clientName(t.clientId)}</span></button>)}</div>
+              <input value={taskQ} onChange={(e) => setTaskQ(e.target.value)} placeholder={theirTasks.length ? "Or search any task" : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+              <div className="mt-1.5 space-y-1">{(taskQ.trim() ? taskHits : theirTasks).map((t) => <button key={t.id} onClick={() => { setTask(t); setTaskQ(""); }} className="block w-full rounded-lg bg-background px-3 py-2 text-left hover:bg-accent-soft">{t.title}<span className="block text-[14px] text-muted">{taskQ.trim() ? p.clientName(t.clientId) : `${STATUS_META[t.status].label}${t.due ? ` · due ${new Date(`${t.due}T12:00:00`).toLocaleDateString([], { month: "short", day: "numeric" })}` : ""}`}</span></button>)}</div>
+              {!taskQ.trim() && to && !theirTasks.length && <p className="mt-1.5 text-[14px] text-muted">No open tasks for them. Search any task above.</p>}
             </>}
           </div>
         </aside>
