@@ -445,6 +445,27 @@ export async function readSentGmail(userEmail: string, query: string, max = 25):
   return out;
 }
 
+/** The conversation ids a Gmail search finds (ids only, so it's one cheap call
+ *  a page). Up to `pages` pages of 500. For telling which Inbox emails were
+ *  archived or deleted in Gmail (Derek, 2026-10-05). */
+export async function gmailThreadIds(userEmail: string, query: string, pages = 3): Promise<Set<string>> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const ids = new Set<string>();
+  let pageToken = "";
+  for (let i = 0; i < pages; i++) {
+    const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=500${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`Gmail thread list failed (${res.status})`);
+    const j = await res.json().catch(() => ({}));
+    for (const t of j.threads ?? []) if (t?.id) ids.add(String(t.id));
+    pageToken = j.nextPageToken ?? "";
+    if (!pageToken) break;
+  }
+  return ids;
+}
+
 /** Move a conversation to Gmail's Trash, or back out of it. Throws when the
  *  service account lacks gmail.modify (the Inbox then says so). */
 export async function trashGmailThread(mailbox: string, threadId: string, restore = false): Promise<void> {

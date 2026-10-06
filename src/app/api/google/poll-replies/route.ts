@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
-import { googleConfigured, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
+import { googleConfigured, gmailThreadIds, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, ingestTeammateCopy, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
 import { isBlocked, inboundGmailQuery, UPDATES_FROM } from "@/lib/inbox";
@@ -84,7 +84,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
   // A catch-up reads more than one poll's worth.
   const max = days > 2 ? 200 : 50;
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
-  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0;
+  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0, archivedInGmail = 0, trashedInGmail = 0;
   const errors: string[] = [];
 
   // Each teammate's Block sender list: their blocked strangers are not kept.
@@ -106,6 +106,9 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
     if (memberId) {
       try { readInGmail += await markReadFromGmail(memberId, emails); }
       catch (e) { errors.push(`${mailbox} read state: ${e instanceof Error ? e.message : "failed"}`); }
+      // Archived or deleted in Gmail: Done or Trash in their Inbox too.
+      try { const r = await clearFromGmail(memberId, mailbox); archivedInGmail += r.archived; trashedInGmail += r.trashed; }
+      catch (e) { errors.push(`${mailbox} archive state: ${e instanceof Error ? e.message : "failed"}`); }
     }
     for (const em of emails) {
       scanned++;
@@ -237,7 +240,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
 
   return NextResponse.json({
     ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, skippedAuto, mentionReplies,
-    sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail, teammateCopies,
+    sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail, archivedInGmail, trashedInGmail, teammateCopies,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
 }
@@ -266,4 +269,50 @@ async function markReadFromGmail(memberId: string, emails: { threadId: string; i
   const { error } = await supabaseAdmin.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
   if (error) throw new Error(error.message);
   return rows.length;
+}
+
+// Archived or deleted in Gmail: the same conversation leaves this teammate's
+// Inbox too, as Done or into Trash (Derek, 2026-10-05: "Gmail archive and
+// delete into the Inbox"). The mirror of Inbox Settings' "Done archives it in
+// Gmail", so it follows that same switch. Looks only at email from the last
+// two weeks that is still open in the Inbox, and only ever closes things: a
+// conversation a new email reopens comes back as it always does.
+async function clearFromGmail(memberId: string, mailbox: string): Promise<{ archived: number; trashed: number }> {
+  const { data: pref } = await supabaseAdmin.from("inbox_prefs").select("prefs").eq("member_id", memberId).maybeSingle();
+  if ((pref?.prefs as { gmailArchive?: boolean } | null)?.gmailArchive === false) return { archived: 0, trashed: 0 };
+  const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const { data: rows } = await supabaseAdmin.from("messages").select("gmail_thread_id, created_at")
+    .eq("mailbox_member_id", memberId).eq("channel", "email").eq("direction", "inbound").not("gmail_thread_id", "is", null).gte("created_at", since).limit(2000);
+  const newest = new Map<string, number>();
+  for (const r of rows ?? []) {
+    const id = r.gmail_thread_id as string, at = Date.parse(r.created_at as string);
+    if (at > (newest.get(id) ?? 0)) newest.set(id, at);
+  }
+  if (!newest.size) return { archived: 0, trashed: 0 };
+  const keys = [...newest.keys()].map((id) => `gm:${id}`);
+  const { data: states } = await supabaseAdmin.from("inbox_state").select("thread_key, done_at, trashed_at, snoozed_until").eq("member_id", memberId).in("thread_key", keys);
+  const stateOf = new Map((states ?? []).map((s: any) => [s.thread_key as string, s]));
+  // Still open here: nothing marks it done or trashed after its newest email.
+  const open = [...newest].filter(([id, at]) => {
+    const st = stateOf.get(`gm:${id}`);
+    const closed = Math.max(st?.done_at ? Date.parse(st.done_at) : 0, st?.trashed_at ? Date.parse(st.trashed_at) : 0);
+    // Snoozed here is left alone: it may be out of Gmail's inbox on purpose.
+    const snoozed = !!st?.snoozed_until && Date.parse(st.snoozed_until) > Date.now();
+    return closed < at && !snoozed;
+  });
+  if (!open.length) return { archived: 0, trashed: 0 };
+  const [inInbox, inTrash] = await Promise.all([gmailThreadIds(mailbox, "in:inbox newer_than:21d"), gmailThreadIds(mailbox, "in:trash newer_than:21d", 1)]);
+  // Gmail answered with nothing at all: don't read that as "everything was archived".
+  if (!inInbox.size) return { archived: 0, trashed: 0 };
+  const now = new Date().toISOString();
+  const out = open.filter(([id]) => !inInbox.has(id)).map(([id]) => {
+    const trashed = inTrash.has(id);
+    const had = stateOf.get(`gm:${id}`);
+    return { member_id: memberId, thread_key: `gm:${id}`, ...(trashed ? { trashed_at: now } : { done_at: now }), read_at: now, ...(had ? {} : { snoozed_until: null }), updated_at: now };
+  });
+  if (!out.length) return { archived: 0, trashed: 0 };
+  const { error } = await supabaseAdmin.from("inbox_state").upsert(out, { onConflict: "member_id,thread_key" });
+  if (error) throw new Error(error.message);
+  const trashed = out.filter((r) => "trashed_at" in r).length;
+  return { archived: out.length - trashed, trashed };
 }
