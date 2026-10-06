@@ -10,6 +10,7 @@ import {
   effectivePriority,
   effectiveStatus,
   TODAY,
+  followUpWithDue,
   addDaysIso,
   DUE_BUCKETS,
   dueBucketOf,
@@ -1844,14 +1845,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     n.onclick = () => { window.focus(); goToViewRef.current("inbox"); n.close(); };
     if (inboxPrefs.sound) { try { new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAABErAAABAAgAZGF0YQAAAAA=").play().catch(() => {}); } catch { /* no sound */ } }
   }, [inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
-  const newTaskFromThread = async (t: InboxThread): Promise<string | null> => {
+  // opts: what was typed in the Inbox's new task form (Derek, 2026-10-06:
+  // "more custom control"); without it, the old one click version.
+  const newTaskFromThread = async (t: InboxThread, opts?: { title?: string; projectId?: string | null; assigneeId?: string | null; due?: string | null }): Promise<string | null> => {
     const first = t.peerName.split(/\s+/)[0];
-    const project = t.clientId ? projectsForClient(t.clientId)[0] : null;
+    const lists = t.clientId ? projectsForClient(t.clientId) : [];
+    const project = (opts?.projectId ? lists.find((x) => x.id === opts.projectId) : null) ?? lists[0] ?? null;
     const clientId = project ? t.clientId! : PERSONAL_PROJECT_ID;
     const task: Task = {
       id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? clientId : PERSONAL_PROJECT_ID,
-      title: t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`, description: "",
-      status: "todo", priority: "normal", assigneeId: me.id, contactId: t.contactId, due: TODAY,
+      title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: "",
+      status: "todo", priority: "normal", assigneeId: opts && "assigneeId" in opts ? opts.assigneeId ?? null : me.id, contactId: t.contactId,
+      due: opts && "due" in opts ? opts.due ?? null : TODAY,
+      // A due date picked here sets its follow up, as it does anywhere else.
+      ...(opts?.due && opts.due !== TODAY ? { followUpAt: followUpWithDue({ due: null }, { due: opts.due }) ?? null } : {}),
       recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: !project, subtasks: [], attachments: [], comments: [],
       createdAt: new Date().toISOString(), createdBy: me.id,
     };

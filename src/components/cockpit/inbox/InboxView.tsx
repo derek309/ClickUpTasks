@@ -41,7 +41,7 @@ export type InboxViewProps = {
   /** from: what the task panel's "← back" says (the conversation). */
   onOpenTask: (taskId: string, from?: string) => void;
   /** Makes a task for a conversation and returns its id. */
-  onNewTask: (t: InboxThread) => Promise<string | null>;
+  onNewTask: (t: InboxThread, opts?: { title?: string; projectId?: string | null; assigneeId?: string | null; due?: string | null }) => Promise<string | null>;
   /** Uploads a file the person attached; returns where it went. */
   onUpload: (prefix: string, file: File) => Promise<Attachment | null>;
   onSignedUrl: (path: string) => Promise<string | null>;
@@ -1590,6 +1590,11 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newList, setNewList] = useState("");
+  const [newOn, setNewOn] = useState("");
+  const [newDue, setNewDue] = useState("");
   const [listOpen, setListOpen] = useState(false);
   const lists = task ? p.listsFor(task.clientId) : [];
   // Label and value on one line (Derek, 2026-10-05: "more compact").
@@ -1710,7 +1715,48 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             {!q && theirs.length === 0 && <p className="text-muted">No open tasks for them yet.</p>}
             {!q && theirs.length > 3 && !showAll && <button onClick={() => setShowAll(true)} className={linkBtn}>Show {Math.min(theirs.length, 12) - 3} more</button>}
           </div>
-          <button disabled={busy} onClick={async () => { setBusy(true); const id = await p.onNewTask(t); if (id) await link(id); setBusy(false); }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
+          {/* Type the task, then create it (Derek, 2026-10-06: "more custom
+              control"): title, list, who it's on and when it's due. */}
+          {!newOpen ? (
+            <button disabled={busy} onClick={() => {
+              const last = [...t.messages].reverse().find((m) => m.direction === "inbound");
+              const firstLine = (last?.body ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 90);
+              setNewTitle(t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : firstLine || `Follow up with ${t.peerName.split(/\s+/)[0]}`);
+              setNewList(t.clientId ? p.listsFor(t.clientId)[0]?.id ?? "" : "");
+              setNewOn(p.me.id); setNewDue(new Date().toLocaleDateString("en-CA")); setNewOpen(true);
+            }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
+          ) : (
+            <form className="mt-3 grid gap-2 rounded-lg bg-background p-3" onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newTitle.trim()) return;
+              setBusy(true);
+              const id = await p.onNewTask(t, { title: newTitle.trim(), projectId: newList || null, assigneeId: newOn || null, due: newDue || null });
+              if (id) await link(id);
+              setBusy(false); setNewOpen(false);
+            }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setNewOpen(false); } }}>
+              <b className="text-[14px] font-bold uppercase tracking-wide text-muted">New task</b>
+              <textarea autoFocus rows={2} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} aria-label="What needs doing"
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
+                placeholder="What needs doing?" className="w-full resize-none rounded-md bg-surface px-3 py-2 text-[16px] font-semibold outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
+              {t.clientId && p.listsFor(t.clientId).length > 0 && (
+                <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">List</span>
+                  <select value={newList} onChange={(e) => setNewList(e.target.value)} className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
+                    {p.listsFor(t.clientId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select></label>
+              )}
+              <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">On</span>
+                <select value={newOn} onChange={(e) => setNewOn(e.target.value)} className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
+                  {[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))).map((m) => <option key={m.id} value={m.id}>{m.id === p.me.id ? "You" : m.name}</option>)}
+                  <option value="">Nobody yet</option>
+                </select></label>
+              <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">Due</span>
+                <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]" /></label>
+              <div className="mt-1 flex items-center gap-2">
+                <button type="submit" disabled={busy || !newTitle.trim()} className="h-9 rounded-md bg-accent px-4 font-semibold text-white disabled:opacity-50">{busy ? "Creating…" : "Create task"}</button>
+                <button type="button" onClick={() => setNewOpen(false)} className="h-9 px-2 font-semibold text-muted hover:text-foreground">Cancel</button>
+              </div>
+            </form>
+          )}
         </>}
       </div>
 
