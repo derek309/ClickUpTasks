@@ -1266,7 +1266,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // alone still left them unreachable (Derek: "still not showing the
     // project in search").
     const workspace = clients.find((c) => c.id === WORKSPACE_CLIENT_ID);
-    return [
+    const all = [
       ...(workspace ? [...byClient.get(WORKSPACE_CLIENT_ID) ?? []].sort((x, y) => x.name.localeCompare(y.name))
         .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: workspace.name, dot: workspace.color, hollow: true })) : []),
       ...[...workableClients].sort((x, y) => x.name.localeCompare(y.name)).flatMap((c) => [
@@ -1278,7 +1278,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: c.name, dot: c.color, hollow: true })),
       ]),
     ];
-  }, [workableClients, clients, projects]);
+    // The client you're on comes first, its lists before anyone else's
+    // (Derek, 2026-10-06), minus the list you're already in.
+    if (activeClient === "all") return all;
+    const here = clients.find((c) => c.id === activeClient);
+    const mine = [...byClient.get(activeClient) ?? []].filter((p) => p.id !== activeProject).sort((x, y) => x.name.localeCompare(y.name))
+      .map((p) => ({ value: `p:${p.id}`, label: p.name, sub: here?.name ?? "This client", dot: here?.color, hollow: true }));
+    const firstValues = new Set(mine.map((o) => o.value));
+    return [...mine, ...all.filter((o) => !firstValues.has(o.value))];
+  }, [workableClients, clients, projects, activeClient, activeProject]);
   const workspaceProjects = useMemo(
     () => (clients.some((c) => c.id === WORKSPACE_CLIENT_ID) ? projects.filter((p) => p.clientId === WORKSPACE_CLIENT_ID) : []),
     [clients, projects]
