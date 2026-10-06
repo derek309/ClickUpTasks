@@ -121,6 +121,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
+  const [dragSub, setDragSub] = useState<string | null>(null);
+  const [dropSub, setDropSub] = useState<string | null>(null);
   // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
   // only re-renders this drawer, not the whole app; see useDebouncedCommit's
   // comment above for the sibling title/description fix to the same root
@@ -1297,6 +1299,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ))}
     </div>
   );
+  // Reorder: the dragged item goes where the one it was dropped on is,
+  // everything else (handoffs included) keeps its place.
+  const moveSub = (fromId: string, toId: string) => {
+    const list = [...task.subtasks];
+    const from = list.findIndex((x) => x.id === fromId);
+    const to = list.findIndex((x) => x.id === toId);
+    if (from < 0 || to < 0) return;
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    onPatch({ subtasks: list });
+  };
   const subtasksBlock = !showChecklist ? null : (
     <div className="rounded-xl border bg-surface p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -1319,9 +1332,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         )}
       </div>
       {plainSubs.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
+      {/* Drag the grip to reorder (Derek, 2026-10-06). Only the grip starts a
+          drag, so selecting text in an item still works. */}
       <div className="space-y-1">{plainSubs.map((s) => (
-        <div key={s.id}>
-          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[16px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
+        <div key={s.id} draggable={dragSub === s.id}
+          onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); }}
+          onDragEnd={() => { setDragSub(null); setDropSub(null); }}
+          onDragOver={(e) => { if (dragSub && dragSub !== s.id) { e.preventDefault(); setDropSub(s.id); } }}
+          onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== s.id) moveSub(dragSub, s.id); setDragSub(null); setDropSub(null); }}
+          className={`${dropSub === s.id ? "rounded-md ring-2 ring-accent/50" : ""} ${dragSub === s.id ? "opacity-50" : ""}`}>
+          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><span onMouseDown={() => setDragSub(s.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
+            className="-ml-1 mt-0.5 w-3 shrink-0 cursor-grab select-none text-[14px] leading-none text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing">⋮⋮</span><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[16px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
           {s.assigneeId && (
             <div className="mb-1 ml-7 flex items-center gap-1.5">
               <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[16px] font-medium uppercase tracking-wide text-accent">Delegated</span>
