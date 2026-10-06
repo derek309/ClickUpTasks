@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, REVIEW_FOLLOW_UP_DAYS, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
+  assignableUsers, type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
@@ -659,7 +659,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="hidden shrink-0 text-muted sm:inline">Owner</span>
         <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={chipSelect}>
           <option value="">Unassigned</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {assignableUsers().map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
       </label>
       <label className={`${chip} ${task.priority === "urgent" ? "text-danger" : ""}`} style={task.priority === "urgent" ? tint(PRIORITY_META.urgent.color) : undefined}>

@@ -5,7 +5,7 @@
 import { useMemo, useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 import {
-  users, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
+  users, assignableUsers, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedItemFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
   addDaysIso, dateQuickPicks, stepDateLabel,
@@ -632,7 +632,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
             <button onClick={(e) => { e.stopPropagation(); onSetWaiting(!waiting); setOpen(false); }} title={waiting ? "No longer waiting" : "Waiting on the client, and still yours to follow up"} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> <span className="min-w-0 flex-1 truncate">{client ? `Waiting on ${client.name}` : "Waiting on client"}</span>{waiting && <I.check />}</button>
           )}
           <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-background">Unassigned</button>
-          {users.map((u) => (
+          {assignableUsers().map((u) => (
             <button key={u.id} onClick={(e) => { e.stopPropagation(); onChange(u.id); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] hover:bg-background"><Avatar id={u.id} size={20} /> <span className="min-w-0 flex-1 truncate">{u.name}</span></button>
           ))}
         </div>

@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
+import { CLAUDE_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
@@ -1602,8 +1602,8 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   // wide as the longest one and the values always fit the card (Derek,
   // 2026-10-05: "clean and tight").
   const fieldBox = "col-span-2 grid min-h-10 min-w-0 grid-cols-subgrid items-center rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent";
-  const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? null : null;
-  const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : p.team.find((x) => x.id === task.assigneeId)?.name ?? null) : null;
+  const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? (task.assigneeId === CLAUDE_ID ? { id: CLAUDE_ID, name: "Claude" } : null) : null;
+  const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : ownerMember?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
   const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
   const label = "mb-1.5 text-[14px] font-bold tracking-wide text-muted";
@@ -1663,7 +1663,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               </button>
               {ownerOpen && (
                 <Menu onClose={() => setOwnerOpen(false)}>
-                  {[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))).map((m) => (
+                  {[...[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))), { id: CLAUDE_ID, name: "Claude" }].map((m) => (
                     <button key={m.id} onClick={() => { setOwnerOpen(false); if (m.id !== task.assigneeId) { p.onPatchTask(task.id, { assigneeId: m.id }); p.pushToast(`On ${m.id === p.me.id ? "you" : m.name} now`); } }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
                       <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>
                       {m.id === p.me.id ? "You" : m.name}{m.id === task.assigneeId ? " ✓" : ""}
@@ -1747,6 +1747,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">On</span>
                 <select value={newOn} onChange={(e) => setNewOn(e.target.value)} className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
                   {[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))).map((m) => <option key={m.id} value={m.id}>{m.id === p.me.id ? "You" : m.name}</option>)}
+                  <option value={CLAUDE_ID}>Claude</option>
                   <option value="">Nobody yet</option>
                 </select></label>
               <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">Due</span>

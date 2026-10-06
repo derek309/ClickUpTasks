@@ -2654,7 +2654,16 @@ export function dmConversationId(a: string, b: string): string {
 
 // --- Lookups (bound at runtime to live state via the helpers below) ---------
 
-export const userById = (id: string | null) => users.find((u) => u.id === id) ?? null;
+// Claude as someone a task can be on (Derek, 2026-10-06: "bring back Claude as
+// a user so we can assign work that needs to be completed by Claude"). Not on
+// the team roster, so it never gets direct messages, follows a client or is
+// emailed; it shows only where you pick who a task is on, and a Claude chat
+// picks those tasks up through the MCP (list_my_tasks for_claude).
+export const CLAUDE_ID = "u_claude";
+export const CLAUDE_USER: User = { id: CLAUDE_ID, name: "Claude", initials: "AI", color: "#d97757", role: "va", avatarUrl: "/claude-logo.svg" };
+/** Everyone a task can be on: the team, then Claude. */
+export const assignableUsers = (): User[] => [...users, CLAUDE_USER];
+export const userById = (id: string | null) => users.find((u) => u.id === id) ?? (id === CLAUDE_ID ? CLAUDE_USER : null);
 export const labelById = (id: string) => labels.find((l) => l.id === id) ?? null;
 
 // Guards the recurrence-clone step in update()/patchTask() against creating

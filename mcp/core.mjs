@@ -197,6 +197,8 @@ export function createServer(opts = {}) {
   async function members() {
     if (Object.keys(memberNames).length) return;
     for (const m of await sb("profiles?select=member_id,name&member_id=not.is.null")) memberNames[m.member_id] = m.name;
+    // Claude is someone a task can be on (Derek, 2026-10-06), with no account.
+    memberNames.u_claude = "Claude";
   }
 
   // Shared by create_task/update_task so a bad assignee_id fails loudly at the
@@ -208,6 +210,7 @@ export function createServer(opts = {}) {
     const trimmed = String(rawId).trim();
     if (!trimmed) return { id: null };
     if (trimmed.toLowerCase() === "me") return { id: ME };
+    if (trimmed.toLowerCase() === "claude") return { id: "u_claude" };
     await members();
     if (!memberNames[trimmed]) return { error: `Unknown member id "${trimmed}". Call list_members to see valid ids, or use "me" for yourself.` };
     return { id: trimmed };
@@ -217,15 +220,17 @@ export function createServer(opts = {}) {
   const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
 
   server.tool("list_my_tasks",
-    "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done.",
-    { client: z.string().optional().describe("filter by client name (substring, case-insensitive)"),
+    "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done. for_claude: true lists the tasks the team has put on Claude instead (work for you, the AI, to do: read each with get_task, do it, then comment and set its status).",
+    { for_claude: z.boolean().optional().describe("list the tasks assigned to Claude (u_claude) instead of to you"),
+      client: z.string().optional().describe("filter by client name (substring, case-insensitive)"),
       status: z.enum(STATUSES).optional(),
       priority: z.enum(["none","normal","urgent","conversation","client_request"]).optional(),
       include_done: z.boolean().optional(),
       limit: z.number().optional() },
-    async ({ client, status, priority, include_done, limit }) => {
+    async ({ for_claude, client, status, priority, include_done, limit }) => {
       await names();
-      let q = `tasks?select=*&or=(assignee_id.eq.${ME},delegated_to.cs.[\"${ME}\"])${LIVE}&order=due.asc.nullslast`;
+      const WHO = for_claude ? "u_claude" : ME;
+      let q = `tasks?select=*&or=(assignee_id.eq.${WHO},delegated_to.cs.[\"${WHO}\"])${LIVE}&order=due.asc.nullslast`;
       if (status) q += `&status=eq.${status}`;
       else if (!include_done) q += `&status=neq.done`;
       if (priority) q += `&priority=eq.${priority}`;
@@ -753,7 +758,8 @@ export function createServer(opts = {}) {
       const rows = await sb("profiles?select=member_id,name,email,role&member_id=not.is.null&order=name");
       if (!rows.length) return { content: [{ type: "text", text: "No team members found." }] };
       for (const m of rows) memberNames[m.member_id] = m.name;
-      return { content: [{ type: "text", text: rows.map((m) => `${m.name}  [${m.member_id}]  · ${m.role}${m.email ? ` · ${m.email}` : ""}`).join("\n") }] };
+      memberNames.u_claude = "Claude";
+      return { content: [{ type: "text", text: [...rows.map((m) => `${m.name}  [${m.member_id}]  · ${m.role}${m.email ? ` · ${m.email}` : ""}`), "Claude  [u_claude]  · tasks for you, the AI (list_my_tasks for_claude)"].join("\n") }] };
     });
 
   server.tool("list_clients",
