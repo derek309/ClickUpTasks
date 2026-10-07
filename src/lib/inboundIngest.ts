@@ -254,8 +254,8 @@ export async function sendInboundReplyEmail(opts: {
       `<p style="margin:0">${escapeHtml(who)} replied by ${opts.channel === "sms" ? "text" : "email"}.</p>`,
       trimmedSubject && opts.channel !== "sms" ? `<p style="margin:16px 0 0"><strong>${escapeHtml(trimmedSubject)}</strong></p>` : "",
       `<p style="margin:8px 0 0;padding:10px 12px;background:#f6f9fd;border-radius:8px;white-space:pre-wrap">${escapeHtml(opts.body.slice(0, 1500))}</p>`,
-      `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Open in ClickUpTasks</a></p>`,
-      `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. Do not reply to this email.</strong> Replying goes nowhere. Click the button above to answer ${escapeHtml(who)}.</p>`,
+      `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Reply now</a></p>`,
+      `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. To answer ${escapeHtml(who)}, click Reply now.</strong> Gmail's own Reply button goes nowhere.</p>`,
     ].join("");
 
     // Per-recipient try/catch — one bad mailbox must not cost everyone else

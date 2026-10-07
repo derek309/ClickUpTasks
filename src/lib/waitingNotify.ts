@@ -54,8 +54,8 @@ export async function notifyTeamOfClientActivity(opts: {
     const html = [
       `<p style="margin:0">${escapeHtml(opts.notifText)}</p>`,
       preview,
-      `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Open in ClickUpTasks</a></p>`,
-      `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. Do not reply to this email.</strong> Replying goes nowhere. Click the button above to respond to ${clientName}.</p>`,
+      `<p style="margin:18px 0"><a href="${link}" style="display:inline-block;background:#1b3a5c;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Reply now</a></p>`,
+      `<p style="margin:0;color:#6b7280;font-size:13px"><strong>This is a notification only. To answer ${clientName}, click Reply now.</strong> Gmail's own Reply button goes nowhere.</p>`,
     ].join("");
     await sendGmailAs(recipientEmail, {
       to: recipientEmail,
