@@ -146,7 +146,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
-  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack, team, doneCount, totalCount,
+  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack,
 }: {
   task: WaitingTask;
   /** Their other open tasks that need them: the next one is offered once they answer this. */
@@ -283,7 +283,6 @@ function TaskDetailBody({
   // right and ours on the left, the box to write in at its foot, and the
   // task's details in a side panel.
   const card = "rounded-xl border bg-surface";
-  const cap = "mb-2 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
   const shown = displayThread.slice(hiddenCount);
   return (
     <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
@@ -369,23 +368,6 @@ function TaskDetailBody({
             </button>
           )}
         </div>
-        {totalCount > 0 && (
-          <div className={`${card} p-4`}>
-            <div className={cap}>{projectName ?? "Your project"}</div>
-            <div className="h-2 overflow-hidden rounded-full bg-border"><i className="block h-full bg-success" style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }} /></div>
-            <div className="mt-1.5 text-[16px] text-muted"><b className="text-foreground">{doneCount} of {totalCount}</b> tasks done</div>
-          </div>
-        )}
-        {team.length > 0 && (
-          <div className={`${card} p-4`}>
-            <div className={cap}>Your team</div>
-            <div className="grid gap-3">
-              {team.map((p) => (
-                <div key={p.name} className="flex items-center gap-2.5 text-[16px]"><SenderAvatar sender={p} size={36} /><b>{p.name}</b></div>
-              ))}
-            </div>
-          </div>
-        )}
       </aside>
     </div>
   );
