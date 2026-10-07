@@ -214,10 +214,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that's the more useful default (VAs still land here first) and the
   // board already covers due-date urgency across everything relevant.
   const [myWork, setMyWork] = useState(me.role === "va");
-  // My Work always shows your own work now — the "Viewing work for
-  // [teammate]" selector was removed (Derek). Kept as a named constant
-  // rather than inlining me.id everywhere it's read below.
-  const myWorkUser = me.id;
+  // Whose clients the Clients page shows: you, unless an admin picks a
+  // teammate (Derek, 2026-10-06: "select Justin or Michaella to see who their
+  // clients are"). It was removed once; it is back as a dropdown that starts
+  // on you every time.
+  const [myWorkUserPicked, setMyWorkUser] = useState<string | null>(null);
+  const myWorkUser = myWorkUserPicked ?? me.id;
   const [personalView, setPersonalView] = useState(false);
   const [inboxView, setInboxView] = useState(false);
   // What "← back" says on a task slid over the Inbox: the conversation it came from.
@@ -1573,7 +1575,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // Excludes the Personal pseudo-project — its tasks appear individually
     // below instead of folded into one undifferentiated "Personal" tile.
     const projectKeys = assignedProjectsFor(myWorkUser).filter((p) => p.id !== PERSONAL_PROJECT_ID).map((p) => ({ kind: "project" as const, item: { kind: "project" as const, project: p, clientName: clientById(p.clientId)?.name ?? "—" } as WorkItem, name: p.name, k: projectUrgencyKey(p.id, myWorkUser) }));
-    const taskKeys = tasks.filter((t) => t.assigneeId === myWorkUser && t.private && t.status !== "done")
+    // Private to-dos are only ever yours, never shown when viewing a teammate.
+    const taskKeys = tasks.filter((t) => myWorkUser === me.id && t.assigneeId === myWorkUser && t.private && t.status !== "done")
       .map((t) => ({ kind: "task" as const, item: { kind: "task" as const, task: t } as WorkItem, name: t.title, k: taskUrgencyKey(t) }));
     const withKey = [...clientKeys, ...projectKeys, ...taskKeys];
     return defs
@@ -1588,7 +1591,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }))
       .filter((g) => g.items.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, scopedTasks, clients, projects, myWorkUser]);
+  }, [tasks, scopedTasks, clients, projects, myWorkUser, me.id]);
   // Resolves the GHL contact backing a client: an explicit link (set via
   // "Link to GHL" for clients whose id isn't itself a contact id) wins;
   // otherwise fall back to the id-derived contact ("cl_" + contact id).
@@ -2808,6 +2811,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
           {inboxView || settingsView || dirView ? null : myWork ? (
             <div className="flex flex-wrap items-center gap-2">
+              {canAdmin && dashboardView === "work" && (
+                <select value={myWorkUser} onChange={(e) => setMyWorkUser(e.target.value === me.id ? null : e.target.value)} aria-label="Whose clients"
+                  title="Whose clients to show" className="h-[30px] rounded-md border bg-background px-2 text-[13px] font-semibold">
+                  {[...users].sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name))).map((u) => <option key={u.id} value={u.id}>{u.id === me.id ? `${u.name.split(/\s+/)[0]} (you)` : u.name.split(/\s+/)[0]}</option>)}
+                </select>
+              )}
               <div className="inline-flex overflow-hidden rounded-md border">
                 <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
                 <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
