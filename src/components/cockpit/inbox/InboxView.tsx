@@ -1746,7 +1746,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               </div>
             </div>
           )}
-          {!newOpen && <p className="mb-1.5 text-muted">{theirs.length ? "Or link it to one of their open tasks:" : "Link it and every new message here lands on the task too."}</p>}
+          {!newOpen && <p className="mb-1.5 text-muted">{task ? "Their newest email is added to the task you pick." : theirs.length ? "Or link it to one of their open tasks:" : "Link it and every new message here lands on the task too."}</p>}
           {searchOpen || !whose ? <input ref={linkSearchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={client ? `Search ${client}'s tasks` : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
             : null}
           {/* Their open tasks, one click to link (Derek, 2026-10-02: "quick"):
