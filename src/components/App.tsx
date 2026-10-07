@@ -97,7 +97,8 @@ function Login() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-2xl border bg-surface p-7 shadow-sm">
         <div className="mb-5 flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-[15px] font-bold text-white">CT</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon.svg" alt="" width={36} height={36} className="h-9 w-9 rounded-lg" />
           <div className="leading-tight">
             <div className="font-semibold">ClickUpTasks</div>
             <div className="text-[13px] text-muted">GHL Task Cockpit</div>
