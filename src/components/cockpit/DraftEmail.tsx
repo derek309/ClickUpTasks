@@ -65,7 +65,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
           onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} ccContacts={ccContacts} onUpload={onUpload}
-          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} />
+          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp />
       )}
     </>
   );

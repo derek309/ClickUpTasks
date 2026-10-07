@@ -5,8 +5,8 @@ import { authorizeCron } from "@/lib/cronAuth";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveContact } from "@/lib/sendMessageServer";
 import { APP_URL } from "@/lib/appUrl";
-import { todayPacific } from "@/lib/data";
-import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
+import { addBusinessDaysIso, subtractBusinessDaysIso, todayPacific } from "@/lib/data";
+import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX, REMINDER_GAP_BUSINESS_DAYS, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,17 +34,22 @@ async function run(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   const force = req.nextUrl.searchParams.get("force") === "1";
   const nowMs = Date.now();
-  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a Monday in California" });
+  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a weekday in California" });
   const monday = new Date(nowMs).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short" }) === "Mon";
   const today = todayPacific();
 
   // Open, shared tasks waiting on a client: who gets an email at all.
-  const { data: waiting, error } = await supabaseAdmin.from("tasks").select("id, client_id, title, due")
+  const { data: waiting, error } = await supabaseAdmin.from("tasks").select("id, client_id, title, due, follow_up_at")
     .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).is("deleted_at", null).like("client_id", "cl_%").limit(2000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const byClient = new Map<string, { title: string; due: string | null }[]>();
-  // This week's only (thisWeek): a client with nothing due by Sunday gets no email.
-  for (const t of thisWeek(((waiting ?? []) as any[]).map((x) => ({ client_id: x.client_id as string, title: x.title as string, due: (x.due ?? null) as string | null })), today))
+  const rows = ((waiting ?? []) as any[]).map((x) => ({ id: x.id as string, client_id: x.client_id as string, title: x.title as string, due: (x.due ?? null) as string | null, followUpAt: (x.follow_up_at ?? null) as string | null }));
+  // Whose follow up date has come round: the reason to write on a weekday.
+  const followUpDue = rows.filter((t) => !!t.followUpAt && t.followUpAt <= today);
+  const dueClients = new Set(followUpDue.map((t) => t.client_id));
+  // Monday: everyone with something this week. Other days: only those with a
+  // follow up due, and then everything they owe this week goes in the one email.
+  for (const t of rows.filter((t) => monday || dueClients.has(t.client_id)).filter((t) => thisWeek([t], today).length || followUpDue.includes(t)))
     byClient.set(t.client_id, [...(byClient.get(t.client_id) ?? []), { title: t.title, due: t.due }]);
 
   const startOfDay = new Date(`${today}T00:00:00-08:00`).toISOString();
@@ -58,8 +63,9 @@ async function run(req: NextRequest) {
     if (!contact?.email) { tally.noEmail++; continue; }
     const owner = await resolveNotifyRecipient(client.assigned_to as string[] | null);
     if (!owner) { tally.noSender++; continue; }
-    // Once a day at most, whoever runs it.
-    const { data: sent } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).gte("scheduled_at", startOfDay).limit(1);
+    // One reminder in REMINDER_GAP_BUSINESS_DAYS at most, sent or waiting for review.
+    const gapStart = new Date(`${subtractBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS - 1)}T00:00:00-08:00`).toISOString();
+    const { data: sent } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).gte("scheduled_at", gapStart < startOfDay ? gapStart : startOfDay).limit(1);
     if (sent?.length) { tally.alreadyToday++; continue; }
 
     const { data: working } = client.portal_shows_all_tasks
@@ -85,7 +91,12 @@ async function run(req: NextRequest) {
       id: PORTAL_REMINDER_PREFIX + randomUUID(), client_id: clientId, task_id: null, channel: "email",
       subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: REVIEW_STATUS, created_by: owner,
     });
-    if (!qErr) tally.queued++;
+    if (!qErr) {
+      tally.queued++;
+      // Their follow ups move on by the same gap, so the next nudge waits too.
+      const ids = followUpDue.filter((t) => t.client_id === clientId).map((t) => t.id);
+      if (ids.length) await supabaseAdmin.from("tasks").update({ follow_up_at: addBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS), updated_by: null }).in("id", ids);
+    }
   }
   const out = { ok: true, dry, ...tally, ...(dry ? { previews } : {}) };
   console.log("[cron/portal-reminders]", JSON.stringify({ ...out, previews: undefined }));

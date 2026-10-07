@@ -29,7 +29,17 @@ import {
 import { newId } from "./ui";
 
 /** replyTo: messages.id this answers, so the send routes thread it as a reply. */
-export type OutgoingEmail = { subject: string; body: string; attachments: Attachment[]; cc: string[]; bcc: string[]; replyTo: string | null };
+export type OutgoingEmail = { subject: string; body: string; attachments: Attachment[]; cc: string[]; bcc: string[]; replyTo: string | null;
+  /** On a task: business days until the client is followed up, null for no follow up. */
+  followUpDays?: number | null };
+
+/** Follow up choices beside Send on a task's email (Derek, 2026-10-07: "send,
+ *  follow up in X days, default 3"). The last one picked is remembered. */
+const FOLLOW_UP_CHOICES = [1, 2, 3, 5, 7] as const;
+const FOLLOW_UP_KEY = "emailFollowUpDays";
+const readFollowUpDays = (): number | null => {
+  try { const v = localStorage.getItem(FOLLOW_UP_KEY); if (v === "none") return null; const n = Number(v); return (FOLLOW_UP_CHOICES as readonly number[]).includes(n) ? n : 3; } catch { return 3; }
+};
 
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
 
@@ -96,8 +106,10 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
 
 export function EmailWindow({
   draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, heading, subheading, subjectFallback,
-  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast,
+  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp,
 }: {
+  /** On a task: offer Follow up in X days beside Send. */
+  followUp?: boolean;
   draft: EmailDraft;
   /** Keeps the draft: a task's draft_email, or the client's saved draft. */
   save: (next: EmailDraft) => void;
@@ -283,6 +295,7 @@ export function EmailWindow({
   };
   // What goes out is kept as the draft first, so it retires itself once the sent
   // email shows up (sentEmailFor), and a failed send still has it.
+  const [followUpDays, setFollowUpDays] = useState<number | null>(readFollowUpDays);
   const send = () => {
     if (!onSend || !toEmail) return;
     const email = outgoing();
@@ -290,7 +303,7 @@ export function EmailWindow({
     finished.current = true;
     save({ ...draftRef.current, ...pending.current, subject: email.subject, body: currentBody(), attachments, cc, bcc, updatedAt: new Date().toISOString() });
     pending.current = {};
-    onSend(email);
+    onSend(followUp ? { ...email, followUpDays } : email);
     onClose();
   };
   // A scheduled email leaves no sent message to match until it goes out, so its draft clears now.
@@ -410,6 +423,16 @@ export function EmailWindow({
             <div className="mt-4 flex flex-wrap items-center gap-2.5 sm:gap-3">
               <button onClick={send} disabled={!!cannotSend} title={cannotSend}
                 className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">Send</button>
+              {followUp && onSend && (
+                <label className="inline-flex items-center gap-1.5 text-[16px] text-muted" title="The task waits on them, and comes back with a reminder to them on that day">
+                  Follow up in
+                  <select value={followUpDays ?? "none"} onChange={(e) => { const v = e.target.value === "none" ? null : Number(e.target.value); setFollowUpDays(v); try { localStorage.setItem(FOLLOW_UP_KEY, v === null ? "none" : String(v)); } catch { /* not kept */ } }}
+                    className="rounded-md border bg-surface px-2 py-1.5 text-[16px] font-semibold text-foreground outline-none focus:border-accent">
+                    {FOLLOW_UP_CHOICES.map((n) => <option key={n} value={n}>{n} {n === 1 ? "day" : "days"}</option>)}
+                    <option value="none">No follow up</option>
+                  </select>
+                </label>
+              )}
               {/* What a phone took off the top of the window, as two buttons. */}
               {onAiDraft && (
                 <button onClick={() => setShowAi((v) => !v)} aria-pressed={showAi} title="Write with AI" aria-label="Write with AI"

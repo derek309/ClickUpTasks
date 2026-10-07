@@ -271,7 +271,7 @@ export function ActionDock({
       const reached = CLIENT_FACING_ACTIONS.has(askNextStepFor.kind);
       const seed = reached ? `Check for ${firstName}'s reply` : "Pick this back up";
       seedRef.current = seed;
-      setBody(askNextStepFor.body); setNextStep(seed); setNextDue(addBusinessDaysIso(TODAY, 2)); setStage(null); setAiReason("");
+      setBody(askNextStepFor.body); setNextStep(seed); setNextDue(addBusinessDaysIso(TODAY, 3)); setStage(null); setAiReason("");
       setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
       setWantNext(true);
       onAskNextStepHandled?.();

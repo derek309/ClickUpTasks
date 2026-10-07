@@ -55,6 +55,17 @@ export function followUpWithDue(before: { due: string | null }, patch: { due?: s
 // which is not a day anyone checks anything, so the client gets an extra two
 // days of silence and the task sits in Sunday's bucket looking overdue by
 // Monday morning.
+/** The weekday that many business days before. */
+export function subtractBusinessDaysIso(iso: string, days: number): string {
+  let out = iso;
+  let left = days;
+  while (left > 0) {
+    out = addDaysIso(out, -1);
+    const dow = new Date(`${out}T12:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) left--;
+  }
+  return out;
+}
 export function addBusinessDaysIso(iso: string, days: number): string {
   let out = iso;
   let left = days;

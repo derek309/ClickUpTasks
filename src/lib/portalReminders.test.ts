@@ -2,12 +2,15 @@ import { describe, it, expect } from "vitest";
 import { isReminderHour, portalReminderEmail, endOfWeek, thisWeek } from "./portalReminders";
 
 describe("Monday client reminders", () => {
-  it("is 8 AM California on a Monday only, summer and winter", () => {
+  // Every weekday now: Monday sends the week's list, other days only follow
+  // ups that came due (Derek, 2026-10-07).
+  it("is 8 AM California on a weekday, summer and winter", () => {
     expect(isReminderHour(Date.parse("2026-10-05T15:00:00Z"))).toBe(true); // Mon 8 AM PDT
     expect(isReminderHour(Date.parse("2026-10-05T16:00:00Z"))).toBe(false); // Mon 9 AM PDT
     expect(isReminderHour(Date.parse("2026-11-30T16:00:00Z"))).toBe(true); // Mon 8 AM PST
-    expect(isReminderHour(Date.parse("2026-12-02T16:00:00Z"))).toBe(false); // Wed, not any more
-    expect(isReminderHour(Date.parse("2026-10-06T15:00:00Z"))).toBe(false); // Tuesday
+    expect(isReminderHour(Date.parse("2026-12-02T16:00:00Z"))).toBe(true); // Wed 8 AM PST
+    expect(isReminderHour(Date.parse("2026-10-06T15:00:00Z"))).toBe(true); // Tue 8 AM PDT
+    expect(isReminderHour(Date.parse("2026-10-10T15:00:00Z"))).toBe(false); // Saturday
   });
   it("lists what we need, with dates, and skips when nothing is waiting", () => {
     const e = portalReminderEmail({ firstName: "James", needs: [{ title: "Send plan counts", due: "2026-10-01" }, { title: "PlanEnroll link", due: null }], working: [{ title: "Homepage", due: null }], showWorking: true, portalUrl: "https://x/waiting/abc", monday: true, today: "2026-10-05" })!;

@@ -34,7 +34,7 @@
     },
     {
       "path": "/api/cron/portal-reminders",
-      "schedule": "0 15,16 * * 1"
+      "schedule": "0 15,16 * * 1-5"
     }
   ]
 }

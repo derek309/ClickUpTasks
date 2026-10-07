@@ -7,13 +7,18 @@ import { draftLinkAsButton, draftLinkHtml, escapeHtml } from "./draftLink";
 export const PORTAL_REMINDER_PREFIX = "smr_portal_";
 const TZ = "America/Los_Angeles";
 
-/** Monday, 8 AM in California (the cron runs at 15:00 and 16:00 UTC so one
- *  of them is 8 AM whether it's summer or winter). Monday only since
- *  2026-10-07 (Derek: "let's just keep it to Monday ... remove Wednesday"). */
+/** A weekday, 8 AM in California (the cron runs at 15:00 and 16:00 UTC so
+ *  one of them is 8 AM whether it's summer or winter). Monday brings the
+ *  week's list; other days only a follow up date that has come round
+ *  (Derek, 2026-10-07: "send and follow up in X days"). */
 export function isReminderHour(nowMs: number): boolean {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", hour12: false }).formatToParts(new Date(nowMs)).map((x) => [x.type, x.value]));
-  return p.weekday === "Mon" && Number(p.hour) % 24 === 8;
+  return !["Sat", "Sun"].includes(p.weekday) && Number(p.hour) % 24 === 8;
 }
+
+/** At most one reminder to a client in this many business days, however many
+ *  follow ups come due (Derek: "I don't want the client getting tons of emails"). */
+export const REMINDER_GAP_BUSINESS_DAYS = 3;
 
 const shortDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
