@@ -1040,7 +1040,11 @@ export default function WaitingView({ token }: { token: string }) {
                 const lists = [...projects.map((p) => ({ id: p.id as string | null, name: p.name })), ...(all.some((t) => !projects.some((p) => p.id === t.projectId)) ? [{ id: null, name: "Other" }] : [])];
                 const inList = (id: string | null) => (t: WaitingTask) => (id ? t.projectId === id : !projects.some((p) => p.id === t.projectId));
                 const shown = tab === "all" ? lists : lists.filter((l) => (l.id ?? "__other__") === tab);
+                // A colour per list, so the sections tell apart at a glance
+                // (Derek, 2026-10-07: "each section a different color").
+                const LIST_COLORS = ["#2563eb", "#e8772e", "#16a34a", "#7c3aed", "#0891b2", "#db2777"];
                 const box = (l: { id: string | null; name: string }, single: boolean) => {
+                  const color = LIST_COLORS[Math.max(0, lists.indexOf(l)) % LIST_COLORS.length];
                   const mine = all.filter(inList(l.id));
                   const need = mine.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
                   const prog = mine.filter((t) => t.status !== "done" && !t.needsResponse).sort(sortFn);
@@ -1049,10 +1053,10 @@ export default function WaitingView({ token }: { token: string }) {
                   const open = doneOpenIds.has(key);
                   const p2 = mine.length ? Math.round((done.length / mine.length) * 100) : 0;
                   return (
-                    <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-xl border bg-surface shadow-[var(--shadow-sm)]">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3">
+                    <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-xl border border-l-[6px] bg-surface shadow-[var(--shadow-sm)]" style={{ borderLeftColor: color }}>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3" style={{ background: `${color}14` }}>
                         <h2 className="text-[18px] font-bold">{single && lists.length === 1 ? "Your tasks" : l.name}</h2>
-                        <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full bg-success" style={{ width: `${p2}%` }} /></span>
+                        <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full" style={{ width: `${p2}%`, background: color }} /></span>
                         <span className="ml-auto text-[16px] text-muted">{need.length ? `${need.length} need${need.length === 1 ? "s" : ""} you · ` : ""}{done.length} of {mine.length} done</span>
                       </div>
                       <div>
