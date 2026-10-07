@@ -300,8 +300,10 @@ function TaskDetailBody({
         <div className="flex items-center gap-3 border-b px-5 py-3">
           {lastTeam ? <SenderAvatar sender={lastTeam} size={36} /> : null}
           <div className="min-w-0">
-            <b className="block truncate text-[17px]">{t.title}</b>
-            <span className="text-[16px] text-muted">{lastTeam ? `With ${lastTeam.name}` : "With our team"} · {displayThread.length} {displayThread.length === 1 ? "message" : "messages"}</span>
+            {/* Who they're talking with; the task's title is in the side panel
+                (Derek, 2026-10-07: "we have the task title twice"). */}
+            <b className="block truncate text-[17px]">{lastTeam?.name ?? "Our team"}</b>
+            <span className="text-[16px] text-muted">{displayThread.length} {displayThread.length === 1 ? "message" : "messages"}</span>
           </div>
         </div>
         {/* The doc to review, first thing in the conversation; it opens over
