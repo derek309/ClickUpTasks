@@ -93,6 +93,20 @@ describe("draft_message", () => {
     expect(w?.body.prefs.queuedDrafts[0]).toMatchObject({ kind: "email", to: "pam@example.com", contactId: "ct_1", subject: "Hi", body: "Hello Pam", by: "Claude" });
     expect(writes.every((x) => !x.url.includes("send"))).toBe(true);
   });
+  it("goes to Derek's Inbox when connected as Claude", async () => {
+    fake([
+      { table: "profiles", rows: [{ member_id: "u_derek", name: "Derek Fox" }] },
+      { table: "contacts", rows: [{ id: "ct_1", name: "Pam", email: "pam@example.com", phone: null }] },
+      { table: "inbox_prefs", rows: [] },
+    ]);
+    const server = createServer({ url: "https://db.invalid", key: "test", memberId: "u_claude" });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "1.0.0" });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const text = await call(client, "draft_message", { channel: "email", to: "pam@example.com", body: "Hi" });
+    expect(text).toContain("Derek Fox's Inbox");
+    expect(writes.find((x) => x.url.includes("inbox_prefs"))?.body.member_id).toBe("u_derek");
+  });
   it("needs a contact for a text", async () => {
     fake([{ table: "contacts", rows: [] }, { table: "inbox_prefs", rows: [] }]);
     const text = await call(await connect(), "draft_message", { channel: "text", to: "916 555 0100", body: "Hi" });

@@ -507,8 +507,19 @@ export function createServer(opts = {}) {
       client_id: z.string().optional().describe("instead of to: the client whose contact it goes to"),
       subject: z.string().optional().describe("email only"),
       body: z.string().min(1).describe("plain text, paragraphs separated by a blank line"),
+      for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members). Defaults to Derek when you are connected as Claude, else you."),
     },
-    async ({ channel, to, client_id, subject, body }) => {
+    async ({ channel, to, client_id, subject, body, for_member }) => {
+      // The hosted connector runs as Claude (u_claude), whose Inbox nobody
+      // opens, so its drafts go to Derek unless someone else is named.
+      await members();
+      let owner = ME === "u_claude" ? "u_derek" : ME;
+      if (for_member) {
+        const want = for_member.trim().toLowerCase();
+        const hit = Object.entries(memberNames).find(([id, n]) => id !== "u_claude" && (id.toLowerCase() === want || String(n).toLowerCase() === want || String(n).toLowerCase().split(/\s+/)[0] === want));
+        if (!hit) return { content: [{ type: "text", text: `No teammate "${for_member}". Call list_members.` }] };
+        owner = hit[0];
+      }
       if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
       let contact = null;
       if (client_id) {
@@ -529,12 +540,12 @@ export function createServer(opts = {}) {
       if (!address) return { content: [{ type: "text", text: `${contact?.name ?? "That contact"} has no ${channel === "email" ? "email address" : "phone number"}.` }] };
       if (channel === "text" && !contact) return { content: [{ type: "text", text: "A text goes through GoHighLevel, so it needs someone who is a contact there. No contact has that number." }] };
       const draft = { id: rid("qd_"), kind: channel, to: address, name: contact?.name || address, contactId: contact?.id ?? null, ...(channel === "email" && subject ? { subject } : {}), body, createdAt: nowIso(), by: "Claude" };
-      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(ME)}&limit=1`);
+      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
       const prefs = row?.prefs ?? {};
       const next = { ...prefs, queuedDrafts: [...(prefs.queuedDrafts ?? []), draft] };
-      if (row) await sb(`inbox_prefs?member_id=eq.${enc(ME)}`, "PATCH", { prefs: next, updated_at: nowIso() });
-      else await sb("inbox_prefs", "POST", { member_id: ME, prefs: next, updated_at: nowIso() });
-      return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in your Inbox, Drafts. Nothing was sent.` }] };
+      if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
+      else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
+      return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in ${memberNames[owner] ?? owner}'s Inbox, Drafts. Nothing was sent.` }] };
     });
 
   server.tool("draft_email",
