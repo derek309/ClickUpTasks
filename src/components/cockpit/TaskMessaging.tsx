@@ -8,7 +8,8 @@
 // — feedArea always scrolls with whatever's around it, composerFooter is a
 // pinned element that sits OUTSIDE that scroll area — so TaskDrawer places
 // the two pieces itself rather than this module dictating layout.
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { authedFetch } from "@/lib/supabase";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
@@ -984,7 +985,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                 )}
                 {m.attachments.filter((a) => a.kind === "image").length > 0 && (
                   <div className="grid grid-cols-4 gap-1.5">
-                    {m.attachments.filter((a) => a.kind === "image").map((a) => (
+                    {m.attachments.filter((a) => a.kind === "image").map((a) => (a as { gmailAttachmentId?: string }).gmailAttachmentId && !a.path ? (
+                      <GmailImageTile key={a.id} item={a} messageId={m.id} />
+                    ) : (
                       <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
                         actions={<>
                           {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
@@ -1221,4 +1224,20 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("task-description-post")?.scrollIntoView({ behavior: "smooth", block: "start" })));
   };
   return { feedArea, composerFooter, openCompose, showDescription };
+}
+
+// An image on an email that stays in Gmail (the Inbox fetches it the same way,
+// /api/inbox/attachment): the task's own file urls only know uploaded files,
+// so it showed as a broken tile (Derek, 2026-10-07, Amanda's email).
+function GmailImageTile({ item, messageId }: { item: Attachment; messageId: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true, made: string | null = null;
+    void authedFetch(`/api/inbox/attachment?message=${encodeURIComponent(messageId)}&att=${encodeURIComponent(item.id)}`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => { if (!live || !b) return; made = URL.createObjectURL(b); setSrc(made); })
+      .catch(() => {});
+    return () => { live = false; if (made) URL.revokeObjectURL(made); };
+  }, [item.id, messageId]);
+  return <AttachmentTile item={item} small url={src ?? undefined} onOpen={() => { if (src) window.open(src, "_blank", "noopener"); }} />;
 }

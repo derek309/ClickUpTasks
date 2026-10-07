@@ -2213,6 +2213,8 @@ export function tidyEmailText(text: string): string {
   return text
     .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD\u034F]/g, "")
     .replace(/\r\n?/g, "\n")
+    // Gmail's plain text marks where a picture sat; the picture shows as a file.
+    .replace(/\[image: [^\]\n]{1,200}\]/g, "")
     .split("\n").map((l) => (l.trim() ? l.replace(/\s+$/, "") : "")).join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
