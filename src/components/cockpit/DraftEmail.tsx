@@ -13,7 +13,7 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, pushToast, onAiDraft }: {
+export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
@@ -26,12 +26,14 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
   messages?: Message[] | null;
   /** Bumped to open it: the "+ Draft email" chip, Email or Reply on the task, a document sent for review. */
   openNonce: number;
+  /** Open as soon as the task opens: a draft picked from the client's page. */
+  startOpen?: boolean;
   pushToast: (text: string) => void;
   /** Writes the email with AI from an instruction and the draft's own context. */
   onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
 }) {
   const draft = task.draftEmail ?? null;
-  const [full, setFull] = useState(false);
+  const [full, setFull] = useState(!!startOpen);
   const [seenNonce, setSeenNonce] = useState(openNonce);
 
   const sentAlready = draft ? sentEmailFor(draft, messages) : null;

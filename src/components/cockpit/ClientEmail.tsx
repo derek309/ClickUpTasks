@@ -21,6 +21,8 @@ export type ClientEmailStart = {
   aiContext?: string;
   /** messages.id a Reply answers. */
   replyTo?: string | null;
+  /** A Claude draft from the Inbox's queue: dropped from it once sent. */
+  queuedId?: string;
 };
 
 export function ClientEmail({ start, clientName, meId, toEmail, messages, onClose, onSend, onSchedule, ccContacts, onUpload, onAiDraft, scheduled, onLoadScheduled, onCancelScheduled, pushToast }: {

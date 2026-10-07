@@ -456,8 +456,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // mode. nonce bumps each click so it re-fires even when already on the Journal.
   const [composeIntent, setComposeIntent] = useState<{ mode: "email" | "sms"; nonce: number; body?: string } | null>(null);
   // Texts open their own window over the page, like email (Derek, 2026-10-05).
-  const [clientText, setClientText] = useState<{ clientId: string; body?: string; nonce: number } | null>(null);
-  const openClientText = (clientId: string, body?: string) => setClientText((c) => ({ clientId, body, nonce: (c?.nonce ?? 0) + 1 }));
+  const [clientText, setClientText] = useState<{ clientId: string; body?: string; queuedId?: string; nonce: number } | null>(null);
+  // A task opened from a draft on the client's page: its email window opens too.
+  const [openTaskEmail, setOpenTaskEmail] = useState<string | null>(null);
+  const openClientText = (clientId: string, body?: string, queuedId?: string) => setClientText((c) => ({ clientId, body, queuedId, nonce: (c?.nonce ?? 0) + 1 }));
   const openCompose = (mode: "email" | "sms", body?: string) => {
     if (mode === "sms") { openClientText(activeClient, body); return; }
     setClientTab("chat"); setComposeIntent((c) => ({ mode, body, nonce: (c?.nonce ?? 0) + 1 }));
@@ -1828,6 +1830,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const contactNames = useMemo(() => new Map(contacts.map((c) => [c.id, c.name])), [contacts]);
   const inboxNameOf = useCallback((m: Message) => (m.contactId ? contactNames.get(m.contactId) ?? null : null) ?? (m.clientId && !m.peerName ? clientNames.get(m.clientId) ?? null : null), [clientNames, contactNames]);
   const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
+  // A Claude draft opened from the client's page leaves the Inbox's queue once it goes.
+  const afterQueuedSend = <T,>(queuedId: string | undefined, sent: T): T => {
+    if (queuedId) void Promise.resolve(sent).then(() => setInboxPrefs({ queuedDrafts: (inboxPrefs.queuedDrafts ?? []).filter((x) => x.id !== queuedId) }), () => {});
+    return sent;
+  };
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);
   // Task chats in the Inbox: your mentions, comments on your tasks and a
   // client's review notes, as messages on that task's chat conversation.
@@ -2394,6 +2401,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onReply={canMsg && inn ? () => { if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
                 onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
                 onText={canMsg && ct?.phone ? () => openClientText(activeClient) : null}
+                drafts={canMsg ? [
+                  ...(scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.draftEmail).map((t) => ({
+                    id: `task:${t.id}`, title: t.draftEmail!.subject.trim() || t.title, where: `On ${t.title}`, at: t.draftEmail!.updatedAt || t.draftEmail!.createdAt,
+                    open: () => { setOpenTaskEmail(t.id); setOpenTaskId(t.id); },
+                  })),
+                  ...(inboxPrefs.queuedDrafts ?? []).filter((d) => !!ct && (d.contactId === ct.id || d.to.toLowerCase() === ((d.kind === "email" ? ct.email : ct.phone) ?? "").toLowerCase())).map((d) => ({
+                    id: `queued:${d.id}`, title: d.kind === "email" ? (d.subject?.trim() || "No subject") : htmlToText(d.body).slice(0, 60), where: `${d.kind === "email" ? "Email" : "Text"} from ${d.by ?? "Claude"}`, at: d.createdAt,
+                    open: () => (d.kind === "email" ? openClientEmail(activeClient, { subject: d.subject ?? "", body: d.body, queuedId: d.id }) : openClientText(activeClient, htmlToText(d.body), d.id)),
+                  })),
+                ] : []}
+                onOpenClientDraft={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
+                composerOpen={clientEmail?.clientId === activeClient}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
                 onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
@@ -3191,7 +3210,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientEmail key={clientEmail.nonce} start={clientEmail} clientName={clientById(cid)?.name ?? "this client"} meId={me.id}
             toEmail={contact?.email || null} messages={contact ? messages.filter((m) => m.contactId === contact.id) : null}
             onClose={() => setClientEmail(null)}
-            onSend={allowed ? (email) => sendMessage(cid, "email", email.subject, email.body, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo) : undefined}
+            onSend={allowed ? (email) => afterQueuedSend(clientEmail.queuedId, sendMessage(cid, "email", email.subject, email.body, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo)) : undefined}
             onSchedule={allowed ? (email, whenIso) => scheduleMessage(cid, "email", email.subject, email.body, whenIso, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo) : undefined}
             ccContacts={contacts} onUpload={(file) => uploadOneImage(`messages/${cid}`, file)}
             onAiDraft={(instruction, context) => draftMessage(cid, "email", instruction || undefined, null, context)}
@@ -3208,7 +3227,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <TextWindow key={clientText.nonce} clientId={cid} clientName={clientById(cid)?.name ?? "this client"} toName={ct?.name || clientById(cid)?.name || "them"} toPhone={ct?.phone || null}
             start={clientText.body} meId={me.id} pushToast={pushToast} onClose={() => setClientText(null)}
             history={ct ? messages.filter((m) => m.contactId === ct.id && m.channel === "sms").sort((a, b) => a.at.localeCompare(b.at)) : []}
-            onSend={allowed ? (body) => sendMessage(cid, "sms", "", body) : undefined}
+            onSend={allowed ? (body) => afterQueuedSend(clientText.queuedId, sendMessage(cid, "sms", "", body)) : undefined}
             onSchedule={allowed ? (body, whenIso) => scheduleMessage(cid, "sms", "", body, whenIso) : undefined}
             onAiDraft={(instruction) => draftMessage(cid, "sms", instruction || undefined, null)}
             onPageLink={() => getClientShareUrl(cid)} />
@@ -3248,7 +3267,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <TaskDrawer key={openTask.id} task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           full={drawerFull} onToggleFull={toggleDrawerFull} slideOver={dirView === "inbox"} slideBackLabel={inboxBackLabel}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
-          onClose={() => setOpenTaskId(null)} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
+          openEmail={openTaskEmail === openTask.id}
+          onClose={() => { setOpenTaskId(null); setOpenTaskEmail(null); }} onPatch={(patch) => patchTask(openTask.id, patch)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid) => deleteSub(openTask.id, sid)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onUploadCommentImage={(file) => uploadOneImage("comments", file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={openTaskMessages} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => copyClientShareLink(openTask.clientId, openTask.projectId)} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}

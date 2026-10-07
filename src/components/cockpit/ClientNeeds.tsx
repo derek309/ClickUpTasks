@@ -8,7 +8,8 @@
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import type { CalendarEvent } from "./useCalendar";
-import { timeAgo } from "@/lib/data";
+import { htmlToText, timeAgo } from "@/lib/data";
+import { fetchClientEmailDraft } from "@/lib/db";
 
 const TZ = "America/Los_Angeles";
 
@@ -27,7 +28,10 @@ function loadEvents(): Promise<CalendarEvent[]> {
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
+/** An unsent email or text for this client, picked from the Drafts button. */
+export type ClientDraftItem = { id: string; title: string; where: string; at: string; open: () => void };
+
+export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, drafts, onOpenClientDraft, composerOpen, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -38,6 +42,12 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   onReply: (() => void) | null;
   onEmail: (() => void) | null;
   onText: (() => void) | null;
+  /** Drafts on their tasks and Claude's, already in memory. */
+  drafts: ClientDraftItem[];
+  /** Opens the client's own saved email; null when they can't be emailed. */
+  onOpenClientDraft: (() => void) | null;
+  /** The client's email window is open: its saved draft is read again when it closes. */
+  composerOpen: boolean;
   waiting: number;
   oldestWaiting: string | null;
   onRemind: (() => void) | null;
@@ -47,6 +57,25 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   onRequest: ((channel: "email" | "sms") => void) | null;
 }) {
   const [askOpen, setAskOpen] = useState(false);
+  // Their drafts, here on their page (Derek, 2026-10-07: "bring in the drafted
+  // emails and then open, review and send so we don't have to leave"). The
+  // client's own saved email is read here; the rest come in as drafts.
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [own, setOwn] = useState<{ clientId: string; item: ClientDraftItem | null } | null>(null);
+  useEffect(() => {
+    if (composerOpen || !onOpenClientDraft) return;
+    let live = true;
+    void fetchClientEmailDraft(clientId).then((d) => {
+      if (!live) return;
+      const has = !!d && (!!d.subject.trim() || !!htmlToText(d.body).trim());
+      setOwn({ clientId, item: has ? { id: `client:${clientId}`, title: d!.subject.trim() || "No subject", where: "Email to them", at: d!.updatedAt || d!.createdAt, open: onOpenClientDraft } : null });
+    }).catch(() => {});
+    return () => { live = false; };
+    // onOpenClientDraft is a new function each render; only the client and the window closing matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, composerOpen, !!onOpenClientDraft]);
+  const ownItem = own?.clientId === clientId && onOpenClientDraft ? own.item : null;
+  const allDrafts = [...(ownItem ? [{ ...ownItem, open: onOpenClientDraft! }] : []), ...drafts].sort((a, b) => b.at.localeCompare(a.at));
   // undefined while reading; null when nothing is booked.
   const [next, setNext] = useState<{ clientId: string; event: CalendarEvent | null } | null>(null);
   useEffect(() => {
@@ -74,6 +103,23 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
           <b className={`block ${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
           <span className="block truncate text-[14px] text-muted">{theirTurn ? lastIn!.preview : last ? (last === lastOut ? "You wrote last" : `${first} wrote last`) : `Say hello to ${first}`}</span>
         </div>
+        {allDrafts.length > 0 && (
+          <span className="relative shrink-0">
+            <button onClick={() => setDraftsOpen(!draftsOpen)} aria-expanded={draftsOpen} title={`Emails and texts to ${first} not sent yet`}
+              className={`${btn} ring-highlight/40`}>Drafts <span className="ml-1 rounded-full bg-highlight px-1.5 text-[14px] text-white">{allDrafts.length}</span></button>
+            {draftsOpen && <>
+              <div className="fixed inset-0 z-40" onClick={() => setDraftsOpen(false)} />
+              <div className="absolute left-0 top-11 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                {allDrafts.map((d) => (
+                  <button key={d.id} onClick={() => { setDraftsOpen(false); d.open(); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                    <b className="block truncate font-semibold">{d.title}</b>
+                    <span className="block truncate text-[14px] text-muted">{d.where} · {shortDay(d.at)}</span>
+                  </button>
+                ))}
+              </div>
+            </>}
+          </span>
+        )}
         {theirTurn && onReply ? <button onClick={onReply} title="Answer them" className="h-9 shrink-0 rounded-md bg-accent px-3 text-[15px] font-semibold text-white hover:opacity-90">Reply</button> : <>
           {onEmail && <button onClick={onEmail} className={`${btn} ring-[var(--border)]`}>Email</button>}
           {onText && <button onClick={onText} className={`${btn} ring-[var(--border)]`}>Text</button>}
