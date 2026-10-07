@@ -741,7 +741,8 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
   // Your own email says who it really went to when that wasn't the person
   // the conversation is with (an earlier reply to Wendy on Russell's thread).
   const sentTo = m.peerAddress && m.peerAddress.toLowerCase() !== (t.peerAddress ?? "").toLowerCase() ? m.peerAddress : t.peerName;
-  const to = mine ? `to ${sentTo}${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}` :`to you${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}`;
+  const sentCc = (m.cc ?? []).filter((a) => a && a.toLowerCase() !== (m.peerAddress ?? "").toLowerCase());
+  const to = mine ? `to ${sentTo}${sentCc.length > 0 ? `, ${sentCc.join(", ")}` : ""}` : `to you${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}`;
   // 📌 Add to task: the email onto the linked task, as a comment.
   const pin = () => {
     if (!t.taskId) { p.pushToast("Link a task first, on the right."); return; }
