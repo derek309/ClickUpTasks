@@ -7,12 +7,13 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CLAUDE_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
+import { CLAUDE_ID, PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
 import { InlineDate } from "../GroupedList";
+import { SearchableSelect } from "../ui";
 import { loadBookingLinks, type BookingLink } from "../useCalendar";
 import { BookingLinkMenu } from "../BookingLinkMenu";
 import { BookAppointment } from "../BookAppointment";
@@ -1663,6 +1664,13 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   // guess from the sender's name ("Pamela Macias (via Google Drive)" is Pamela
   // Macias), so her lists show without matching her email (Derek, 2026-10-06).
   const [pickedClient, setPickedClient] = useState("");
+  // Personal and the agency's own projects (ClickUpLocal) first, then every
+  // client (Derek, 2026-10-07: "how do I add something to personal or projects").
+  const clientOptions = useMemo(() => [
+    { value: PERSONAL_CLIENT_ID, label: "Personal", sub: "Only you see it" },
+    { value: WORKSPACE_CLIENT_ID, label: "ClickUpLocal", sub: "Our own projects" },
+    ...[...p.clients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ value: c.id, label: c.name })),
+  ], [p.clients]);
   const guessedClient = useMemo(() => {
     const name = t.peerName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim().toLowerCase();
     return name ? p.clients.find((c) => c.name.toLowerCase() === name)?.id ?? "" : "";
@@ -1731,12 +1739,12 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               "see what list she has, click on the list and then add here").
               Search waits behind a link. */}
           {!t.clientId && (
-            <label className="mb-2 flex items-center gap-2"><span className="shrink-0 text-muted">Whose</span>
-              <select value={whose} onChange={(e) => { setPickedClient(e.target.value); setNewOpen(false); }} aria-label="Whose is it"
-                className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
-                <option value="">Pick a client</option>
-                {p.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></label>
+            // Searchable (Derek, 2026-10-07): a plain select of every client
+            // was a long scroll to find one.
+            <div className="mb-2 flex items-center gap-2"><span className="shrink-0 text-muted">Whose</span>
+              <SearchableSelect value={whose} options={clientOptions} onChange={(v) => { setPickedClient(v); setNewOpen(false); }}
+                placeholder="Pick a client" searchPlaceholder="Search clients…" title="Whose is it"
+                className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 text-left ring-1 ring-[var(--border)]" /></div>
           )}
           {whoseLists.length > 0 && (
             <div className="mb-3">

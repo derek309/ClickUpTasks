@@ -1894,15 +1894,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const owner = t.clientId || opts?.clientId || null;
     const lists = owner ? projectsForClient(owner) : [];
     const project = (opts?.projectId ? lists.find((x) => x.id === opts.projectId) : null) ?? lists[0] ?? null;
-    const clientId = project ? owner! : PERSONAL_PROJECT_ID;
+    // Nothing picked, or Personal picked: it goes on your own Personal list,
+    // private like every Personal task.
+    const personal = !project || owner === PERSONAL_CLIENT_ID;
     const task: Task = {
-      id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? clientId : PERSONAL_PROJECT_ID,
+      id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? owner! : PERSONAL_CLIENT_ID,
       title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: "",
       status: "todo", priority: "normal", assigneeId: opts && "assigneeId" in opts ? opts.assigneeId ?? null : me.id, contactId: t.contactId,
       due: opts && "due" in opts ? opts.due ?? null : TODAY,
       // A due date picked here sets its follow up, as it does anywhere else.
       ...(opts?.due && opts.due !== TODAY ? { followUpAt: followUpWithDue({ due: null }, { due: opts.due }) ?? null } : {}),
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: !project, subtasks: [], attachments: [], comments: [],
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: personal, subtasks: [], attachments: [], comments: [],
       createdAt: new Date().toISOString(), createdBy: me.id,
     };
     setTasks((ts) => [...ts, task]);
