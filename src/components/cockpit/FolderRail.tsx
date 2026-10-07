@@ -8,6 +8,11 @@ import { useState } from "react";
 import { type Folder, type Project } from "@/lib/data";
 import { I } from "./ui";
 
+// Folders are off (Derek, 2026-10-06: "no one has used folders"; there were
+// none). Only the New folder button goes: folders that exist still show, so
+// turning this back on is this one line.
+const FOLDERS_ON = false;
+
 export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onSelectFolder, onSelectList,
@@ -123,7 +128,7 @@ export function FolderRail({
       ))}
       {canAdmin && (
         <span className="ml-1 inline-flex shrink-0 gap-1">
-          <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>
+          {FOLDERS_ON && <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>}
           <button onClick={() => onCreateList(activeFolder)} title={activeFolder ? "New list in this folder" : "New list"} className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.plus className="h-3.5 w-3.5" /> List</button>
         </span>
       )}
