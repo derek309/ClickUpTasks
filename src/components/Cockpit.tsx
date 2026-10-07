@@ -1797,7 +1797,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The drawer's own slices, kept as the same arrays until they really change:
   // filtering inline handed it new ones on every render anywhere in the app.
   const openTaskClientId = openTask?.clientId ?? null;
-  const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId) : []), [messages, openTaskId]);
+  // The app's own "X replied on ..." email is linked to its task for the
+  // Inbox, but the task already shows what X wrote: kept out of its feed
+  // (Derek, 2026-10-07, the seats task showed Pamela's message twice).
+  const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId && !(m.peerName === "ClickUpTasks" && !m.contactId)) : []), [messages, openTaskId]);
   const openTaskClientLinks = useMemo(() => (openTaskClientId ? clientLinks.filter((l) => l.clientId === openTaskClientId) : []), [clientLinks, openTaskClientId]);
   // Sending, editing and scheduling client messages, the GoHighLevel refresh,
   // and a conversation's older messages loading when it opens (cockpit/useMessaging).
