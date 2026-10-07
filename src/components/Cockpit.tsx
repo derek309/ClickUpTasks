@@ -2692,7 +2692,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
-              <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}{followingControl && <span className="ml-1 text-[15px] font-normal">{followingControl}</span>}</h1>
+              <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}{followingControl && <span className="ml-1 text-[15px] font-normal">{followingControl}</span>}
+                {/* The client's quick links on their lists too (Derek, 2026-10-06: header G
+                    left them only on the client's own page). */}
+                {clientView && (
+                  <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
+                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)} />
+                )}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
