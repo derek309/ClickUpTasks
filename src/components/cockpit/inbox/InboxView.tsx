@@ -262,6 +262,7 @@ export default function InboxView(p: InboxViewProps) {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {inbox.error && <div className="m-4 rounded-lg bg-danger-soft p-3 text-danger">{inbox.error}</div>}
+                {folder === "inbox" && !q && p.canAdmin && <RemindersGoingOut p={p} />}
                 {/* Drafts a Claude chat wrote for you (2026-10-06): open one to check and send it. */}
                 {folder === "drafts" && !q && queued.length > 0 && (
                   <div className="space-y-2 border-b bg-background/60 p-3">
@@ -357,6 +358,84 @@ export default function InboxView(p: InboxViewProps) {
 }
 
 const Kbd = ({ children }: { children: React.ReactNode }) => <kbd className="mr-1 inline-block min-w-6 rounded border border-b-2 bg-surface px-1.5 text-center font-sans text-[13px] text-foreground">{children}</kbd>;
+
+// Reminder emails going out (Derek, 2026-10-07): the Monday and Wednesday
+// client reminders and the document review nudges wait here until someone has
+// read them. Edit fixes the words; nothing goes until Send.
+type HeldReminder = { id: string; clientId: string; clientName: string; to: string | null; taskId: string | null; subject: string; body: string; from: string; at: string };
+function RemindersGoingOut({ p }: { p: InboxViewProps }) {
+  const [list, setList] = useState<HeldReminder[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+  const [edit, setEdit] = useState<{ id: string; subject: string; body: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const r = await authedFetch("/api/inbox/reminders").catch(() => null);
+    const j = r?.ok ? await r.json().catch(() => null) : null;
+    if (j?.reminders) setList(j.reminders);
+  }, []);
+  useEffect(() => { void load(); const i = setInterval(() => void load(), 5 * 60_000); return () => clearInterval(i); }, [load]);
+  const act = async (id: string, action: "send" | "drop" | "save", extra?: { subject: string; body: string }) => {
+    setBusy(id);
+    const r = await authedFetch("/api/inbox/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action, ...extra }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setBusy(null);
+    if (!r?.ok) { p.pushToast(j.error ?? "That didn't work. Try again."); return false; }
+    const who = list.find((x) => x.id === id)?.clientName ?? "them";
+    if (action === "save") { setList((l) => l.map((x) => (x.id === id ? { ...x, ...extra! } : x))); setEdit(null); p.pushToast("Saved. It still waits for Send."); }
+    else { setList((l) => l.filter((x) => x.id !== id)); if (open === id) setOpen(null); p.pushToast(action === "send" ? `Reminder sent to ${who}` : `Reminder to ${who} won't go out`); }
+    return true;
+  };
+  if (!list.length) return null;
+  const fromName = (id: string) => (id === p.me.id ? "you" : p.team.find((m) => m.id === id)?.name ?? "the team");
+  return (
+    <section aria-label="Reminder emails going out" className="border-b bg-highlight-soft/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+        <b className="text-[16px]">📬 Reminder emails going out ({list.length})</b>
+        <span className="text-muted">Nothing goes until you send it.</span>
+      </div>
+      <div className="space-y-2">
+        {list.map((r) => {
+          const isOpen = open === r.id;
+          const editing = edit?.id === r.id ? edit : null;
+          return (
+            <div key={r.id} className="rounded-lg bg-surface ring-1 ring-[var(--border)]">
+              <button onClick={() => { setOpen(isOpen ? null : r.id); setEdit(null); }} aria-expanded={isOpen} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
+                <span aria-hidden className="text-[20px]">✉️</span>
+                <span className="min-w-0 flex-1">
+                  <b className="block truncate">{r.clientName}: {r.subject}</b>
+                  <span className="block truncate text-[14px] text-muted">To {r.to ?? "nobody (no email on file)"} · from {fromName(r.from)} · {htmlToText(r.body).slice(0, 110)}</span>
+                </span>
+              </button>
+              {isOpen && (
+                <div className="border-t px-3 pb-3 pt-2">
+                  {editing ? (<>
+                    <input value={editing.subject} onChange={(e) => setEdit({ ...editing, subject: e.target.value })} aria-label="Subject"
+                      className="mb-2 h-10 w-full rounded-lg border bg-surface px-3 font-semibold outline-none focus:border-accent" />
+                    <div className="rounded-lg border bg-surface p-2"><RichTextEditor key={`rem-${r.id}`} variant="email" value={editing.body} onChange={(v) => setEdit((x) => (x ? { ...x, body: v } : x))} /></div>
+                  </>) : (
+                    <div className="rte-content max-h-[50vh] overflow-y-auto rounded-lg bg-background px-4 py-3 text-[16px]" dangerouslySetInnerHTML={{ __html: safeMessageHtml(r.body) }} />
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {editing ? (<>
+                      <button disabled={busy === r.id} onClick={() => void act(r.id, "save", { subject: editing.subject, body: editing.body })} className="h-10 rounded-lg bg-accent px-4 font-bold text-white disabled:opacity-50">Save</button>
+                      <button onClick={() => setEdit(null)} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background">Cancel</button>
+                    </>) : (<>
+                      <button disabled={busy === r.id || !r.to} onClick={() => void act(r.id, "send")} className="h-10 rounded-lg bg-accent px-4 font-bold text-white disabled:opacity-50">{busy === r.id ? "Sending…" : "Send"}</button>
+                      <button onClick={() => setEdit({ id: r.id, subject: r.subject, body: r.body })} className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Edit</button>
+                      <button onClick={() => p.onOpenClient(r.clientId)} className="h-10 rounded-lg px-3 font-semibold text-accent hover:bg-background">Open their tasks</button>
+                      <span className="flex-1" />
+                      <button disabled={busy === r.id} onClick={() => void act(r.id, "drop")} className="h-10 rounded-lg px-3 font-semibold text-muted hover:text-danger">Don&apos;t send</button>
+                    </>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function FolderButton({ f, active, count, onClick, slim = false }: { f: { id?: string; label: string; icon: string }; active: boolean; count: number; onClick: () => void; slim?: boolean }) {
   if (slim) return (

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { REVIEW_STATUS } from "@/lib/portalReminders";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
@@ -124,7 +125,8 @@ async function run(req: NextRequest) {
 
     const { error: queueError } = await supabaseAdmin.from("scheduled_messages").insert({
       id: REMINDER_MESSAGE_PREFIX + randomUUID(), client_id: task.client_id, task_id: task.id, channel: "email",
-      subject: `Checking in: ${name}`, body, scheduled_at: now, status: "pending", created_by: owner,
+      // Read first in the Inbox, "Reminder emails going out" (Derek, 2026-10-07).
+      subject: `Checking in: ${name}`, body, scheduled_at: now, status: REVIEW_STATUS, created_by: owner,
     });
     if (queueError) {
       // Nothing was queued, so hand the claim back; tomorrow tries again.

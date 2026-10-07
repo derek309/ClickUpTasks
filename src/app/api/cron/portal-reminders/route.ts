@@ -6,19 +6,21 @@ import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveContact } from "@/lib/sendMessageServer";
 import { APP_URL } from "@/lib/appUrl";
 import { todayPacific } from "@/lib/data";
-import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX } from "@/lib/portalReminders";
+import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Monday and Wednesday at 8 AM (Derek, 2026-10-05: "remind them what we need
+// Monday at 8 AM (Wednesday dropped 2026-10-07) (Derek, 2026-10-05: "remind them what we need
 // from them and what's outstanding"). Each client with something waiting on
 // them gets one email from the person who looks after them: what we need, with
 // the dates, what we're working on (when their portal shows it), and a button
 // to their tasks page. Queued through scheduled_messages like the review
 // reminders, so it retries, signs as the sender and lands in the conversation.
-// Clients with nothing waiting on them get nothing.
+// Clients with nothing waiting on them get nothing. Since 2026-10-07 each one
+// waits in the Inbox, "Reminder emails going out", until someone sends it, and
+// only this week's items go in.
 //
-// vercel.json runs it at 15:00 and 16:00 UTC on Mondays and Wednesdays; it only
+// vercel.json runs it at 15:00 and 16:00 UTC on Mondays; it only
 // sends in the one that is 8 AM in California. An admin can POST ?dry=1 to see
 // the emails without sending, and ?force=1 to send outside the hour.
 
@@ -32,7 +34,7 @@ async function run(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   const force = req.nextUrl.searchParams.get("force") === "1";
   const nowMs = Date.now();
-  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a Monday or Wednesday in California" });
+  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a Monday in California" });
   const monday = new Date(nowMs).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short" }) === "Mon";
   const today = todayPacific();
 
@@ -41,7 +43,9 @@ async function run(req: NextRequest) {
     .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).is("deleted_at", null).like("client_id", "cl_%").limit(2000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const byClient = new Map<string, { title: string; due: string | null }[]>();
-  for (const t of (waiting ?? []) as any[]) byClient.set(t.client_id, [...(byClient.get(t.client_id) ?? []), { title: t.title, due: t.due ?? null }]);
+  // This week's only (thisWeek): a client with nothing due by Sunday gets no email.
+  for (const t of thisWeek(((waiting ?? []) as any[]).map((x) => ({ client_id: x.client_id as string, title: x.title as string, due: (x.due ?? null) as string | null })), today))
+    byClient.set(t.client_id, [...(byClient.get(t.client_id) ?? []), { title: t.title, due: t.due }]);
 
   const startOfDay = new Date(`${today}T00:00:00-08:00`).toISOString();
   const tally = { clients: byClient.size, queued: 0, nothingSent: 0, noEmail: 0, noSender: 0, alreadyToday: 0 };
@@ -72,14 +76,14 @@ async function run(req: NextRequest) {
     const email = portalReminderEmail({
       firstName: firstName ? firstName[0].toUpperCase() + firstName.slice(1) : null,
       needs: [...needs].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
-      working: ((working ?? []) as any[]).map((t) => ({ title: t.title, due: t.due ?? null })),
+      working: thisWeek(((working ?? []) as any[]).map((t) => ({ title: t.title, due: t.due ?? null })), today),
       showWorking: client.portal_shows_all_tasks === true, portalUrl: `${APP_URL}/waiting/${token ?? "<made when sent>"}`, monday, today,
     });
     if (!email) { tally.nothingSent++; continue; }
     if (dry) { previews.push({ client: client.name as string, to: contact.email, subject: email.subject }); continue; }
     const { error: qErr } = await supabaseAdmin.from("scheduled_messages").insert({
       id: PORTAL_REMINDER_PREFIX + randomUUID(), client_id: clientId, task_id: null, channel: "email",
-      subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: "pending", created_by: owner,
+      subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: REVIEW_STATUS, created_by: owner,
     });
     if (!qErr) tally.queued++;
   }
