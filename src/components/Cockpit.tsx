@@ -82,6 +82,7 @@ import { useLiveSync } from "./cockpit/useLiveSync";
 import { I, Avatar, SideItem, newId, LIST_COLUMNS, SearchableSelect, type FilterState, type SortBy, type ViewPrefs, type Toast } from "./cockpit/ui";
 import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { verbatimTaskRow } from "@/lib/quickAddRow";
+import { sidebarWidthFor, canvasMeasure, SIDEBAR_MIN_PX } from "@/lib/sidebarWidth";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
@@ -1463,6 +1464,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return [...base.filter((c) => starred.has(c.id)), ...base.filter((c) => !starred.has(c.id))];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientListBase, clientSort, clientUsed, starred, manualOrder, scopedTasks, tasks, clients, projects, me.id]);
+  // The sidebar is as wide as its longest name, from 208px to 320px (Derek,
+  // 2026-10-07). Every name it can show counts, not just today's, so it
+  // doesn't jump as tasks get done. Measured from the text, never the layout:
+  // see lib/sidebarWidth for the Windows crash that rules the layout out.
+  const [fontsReady, setFontsReady] = useState(false);
+  useEffect(() => { document.fonts?.ready.then(() => setFontsReady(true)).catch(() => setFontsReady(true)); }, []);
+  const sidebarPx = useMemo(() => {
+    const measure = canvasMeasure();
+    if (!measure) return SIDEBAR_MIN_PX;
+    const names = [
+      ...myAssignedClients.map((c) => c.name),
+      ...myAssignedProjects.filter((pr) => pr.clientId === WORKSPACE_CLIENT_ID).map((pr) => pr.name),
+      "Personal",
+      ...[...starred].map((id) => clients.find((c) => c.id === id)?.name ?? ""),
+      ...[...starredLists].map((id) => projects.find((pr) => pr.id === id)?.name ?? ""),
+    ];
+    return sidebarWidthFor(names, measure);
+    // fontsReady: measure again once Inter has loaded, the fallback font is narrower.
+  }, [myAssignedClients, myAssignedProjects, starred, starredLists, clients, projects, fontsReady]); // eslint-disable-line react-hooks/exhaustive-deps
   function clientTaskCountRef(clientId: string) { return (scopedTasksByClientId.get(clientId) ?? []).length; }
   const unreadContactIds = useMemo(() => {
     const s = new Set<string>();
@@ -2437,20 +2457,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // edge, or the window's left edge when the sidebar is collapsed. Set here
     // (rather than read inside the drawer) so the one place that owns the
     // sidebar's width owns this too.
-    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : "13rem" } as React.CSSProperties}>
+    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* ---------- Sidebar ---------- */}
-      {/* Back to a fixed width, and the drawer's left edge back to a
-          constant, after the content-sized version crashed the tab on
+      {/* A width worked out from the names (sidebarPx), never a w-max column:
+          the content-sized version crashed the tab on
           Windows. A w-max column that scrolls is a feedback loop wherever
           scrollbars take layout width: the scrollbar appears, max-content
           shrinks, the scrollbar goes, it grows, and the ResizeObserver
           feeding the width into state re-rendered on every step until the
           renderer died. macOS overlay scrollbars take no width, which is why
           it only ever happened to Michaella. */}
-      <aside className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex w-52 shrink-0 flex-col overflow-y-auto border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside style={{ width: sidebarPx, maxWidth: "85vw" }} className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col overflow-y-auto [scrollbar-gutter:stable] border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
             block (Derek: put them together "so they use less space") — no
             divider/gap between them, just Pinned below stays its own
