@@ -46,6 +46,8 @@ export type InboxPrefs = {
    *  of Drafts until sent or deleted (2026-10-06). Kept here because Inbox
    *  drafts otherwise live only in the browser. */
   queuedDrafts?: QueuedDraft[];
+  /** Sidebar sections folded shut: "needs" (Overdue and due today) and "pinned" (2026-10-06). */
+  sideFolded?: string[];
   workFrom?: string;
   workTo?: string;
   /** Kinds kept out of this person's Inbox, its count and its pop ups ("email",

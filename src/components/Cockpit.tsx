@@ -2498,6 +2498,40 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           {/* Teammate chats moved into the Inbox's Team chats (Derek, 2026-10-02). */}
         </nav>
 
+        {/* Overdue and due today, your clients only (Derek, 2026-10-06: "see the
+            clients overdue and due today in the side bar to work and clear
+            them out instead of having to click on clients each time"). Each
+            section folds shut and stays that way, per person. */}
+        {(() => {
+          const folded = new Set(inboxPrefs.sideFolded ?? []);
+          const fold = (k: string) => setInboxPrefs({ sideFolded: folded.has(k) ? [...folded].filter((x) => x !== k) : [...folded, k] });
+          const rows = myAssignedClients.map((c) => {
+            const mine = (scopedTasksByClientId.get(c.id) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold" && isOnPlateOf(t, me.id));
+            let late = 0, today = 0;
+            for (const t of mine) { const d = urgencyDateOf(t); if (!d) continue; if (d < TODAY) late++; else if (d === TODAY) today++; }
+            return { c, late, today };
+          }).filter((r) => r.late + r.today > 0).sort((a, b) => b.late - a.late || b.today - a.today || a.c.name.localeCompare(b.c.name));
+          if (!rows.length) return null;
+          return (
+            <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
+              <button onClick={() => fold("needs")} aria-expanded={!folded.has("needs")} title={folded.has("needs") ? "Show" : "Hide"}
+                className="flex w-full items-center gap-1.5 px-2.5 pb-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+                <span aria-hidden className="text-[9px]">{folded.has("needs") ? "▸" : "▾"}</span><span className="flex-1">Overdue and today</span><span className="font-normal normal-case tracking-normal">{rows.length}</span>
+              </button>
+              {!folded.has("needs") && rows.map(({ c, late, today }) => {
+                const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
+                return (
+                  <SideItem key={c.id} href={`/?client=${encodeURIComponent(c.id)}`} active={active} title={[late ? `${late} overdue` : "", today ? `${today} due today` : ""].filter(Boolean).join(", ")} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: late ? "#ef4444" : "#f59e0b" }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
+                    {late > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#ef4444" }}>{late}</span>}
+                    {today > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#f59e0b" }}>{today}</span>}
+                  </SideItem>
+                );
+              })}
+            </nav>
+          );
+        })()}
+
         {/* Pinned — per-user quick access to starred clients + lists. Starring
             a client (from the Clients directory or its header) pins it here.
             Placed right after Clients/Projects since it's the highest-value,
@@ -2509,8 +2543,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           if (pinnedClients.length === 0 && pinned.length === 0) return null;
           return (
             <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
-              <div className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Pinned</div>
-              {pinnedClients.map((c) => {
+              <button onClick={() => setInboxPrefs({ sideFolded: (inboxPrefs.sideFolded ?? []).includes("pinned") ? (inboxPrefs.sideFolded ?? []).filter((x) => x !== "pinned") : [...(inboxPrefs.sideFolded ?? []), "pinned"] })}
+                aria-expanded={!(inboxPrefs.sideFolded ?? []).includes("pinned")} title={(inboxPrefs.sideFolded ?? []).includes("pinned") ? "Show" : "Hide"}
+                className="flex w-full items-center gap-1.5 px-2.5 pb-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
+                <span aria-hidden className="text-[9px]">{(inboxPrefs.sideFolded ?? []).includes("pinned") ? "▸" : "▾"}</span><span className="flex-1">Pinned</span>
+              </button>
+              {!(inboxPrefs.sideFolded ?? []).includes("pinned") && pinnedClients.map((c) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
                 return (
                   <SideItem key={c.id} href={`/?client=${encodeURIComponent(c.id)}`} active={active} drag={pinDrag("client", c.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
@@ -2519,7 +2557,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   </SideItem>
                 );
               })}
-              {pinned.map((p) => {
+              {!(inboxPrefs.sideFolded ?? []).includes("pinned") && pinned.map((p) => {
                 const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject === p.id;
                 // A list name alone ("Website") doesn't say whose — several
                 // clients can have a same-named list. Show the owning
