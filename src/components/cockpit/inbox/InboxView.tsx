@@ -390,7 +390,8 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
 }) {
   // Words first: links in the preview are just noise.
   const author = t.channel === "team" ? (t.latest.direction === "outbound" ? "You" : (t.latest.peerName ?? "").split(/\s+/)[0]) : "";
-  const preview = (author ? `${author}: ` : "") + bodyParts(splitQuotedEmail(t.latest.body || "").visible || t.latest.body || "")
+  const latestText = looksLikeHtml(t.latest.body || "") ? htmlToText(t.latest.body) : (t.latest.body || "");
+  const preview = (author ? `${author}: ` : "") + bodyParts(splitQuotedEmail(latestText).visible || latestText)
     .map((x) => ("text" in x ? x.text : "")).join(" ").replace(/\s+/g, " ").replace(/\[\s*\]/g, "").trim();
   const client = p.clientName(t.clientId);
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
@@ -737,7 +738,9 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
   const isHtmlEmail = m.channel === "email" && !!m.gmailMessageId && !!m.mailboxMemberId;
   const { name, org } = whoWrote(m, t, p);
   const mine = m.direction === "outbound";
-  const snippet = (m.body || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+  // A reply written in the app is saved as HTML: its one line shows the words.
+  const plainBody = looksLikeHtml(m.body || "") ? htmlToText(m.body) : (m.body || "");
+  const snippet = plainBody.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
   // Your own email says who it really went to when that wasn't the person
   // the conversation is with (an earlier reply to Wendy on Russell's thread).
   const sentTo = m.peerAddress && m.peerAddress.toLowerCase() !== (t.peerAddress ?? "").toLowerCase() ? m.peerAddress : t.peerName;
