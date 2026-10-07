@@ -534,8 +534,10 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
       </div>
 
       {/* The conversation with the reply box under it, and the side panel, as in the Inbox. */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <section aria-label="Conversation" className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface lg:border-r">
+      {/* Below a wide screen the page scrolls as one column, cards first and the
+          conversation (its own scroll, a screen tall) under them, as in the mockup. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+        <section aria-label="Conversation" className="order-2 flex h-[85vh] min-w-0 shrink-0 flex-col bg-surface lg:order-none lg:h-auto lg:min-h-0 lg:flex-1 lg:shrink lg:border-r">
           <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
             <div className="mx-auto flex max-w-3xl flex-col gap-1">
               {filteredItems.length === 0 && (
@@ -781,7 +783,7 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
         </section>
 
         {/* Side panel: who they are, what they owe us, what's next, their open work. */}
-        <aside aria-label="About them" className="flex shrink-0 flex-col gap-3.5 overflow-y-auto border-t p-4 lg:w-[360px] lg:border-t-0">
+        <aside aria-label="About them" className="order-1 flex shrink-0 flex-col gap-3.5 p-4 lg:order-none lg:w-[360px] lg:overflow-y-auto">
           {toContact && (
             <div className="rounded-2xl bg-surface p-3.5 ring-1 ring-[var(--border)]">
               <div className={cap}>{firstName}</div>
