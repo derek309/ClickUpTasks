@@ -1823,8 +1823,17 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             </form>
           )}
   </>;
+  // Straight to their task list, the first thing in the panel (Derek,
+  // 2026-10-07: "I need a way to get to their main task list quickly").
+  const whoseName = whose && whose !== PERSONAL_CLIENT_ID ? p.clientName(whose) : null;
   return (
     <aside className="min-w-0 space-y-3 p-4">
+      {whoseName && (
+        <button onClick={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`}
+          className="flex h-11 w-full items-center justify-between gap-2 rounded-xl bg-accent px-4 text-left text-[16px] font-bold text-white hover:opacity-90">
+          <span className="min-w-0 truncate">Open {whoseName}&apos;s tasks</span><span aria-hidden>→</span>
+        </button>
+      )}
       <div className={card}>
         <div className={label}>{task ? (others.length ? "LINKED TASKS" : "LINKED TASK") : "LINK TO A TASK"}</div>
         {task ? <>
