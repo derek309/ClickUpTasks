@@ -36,9 +36,12 @@ export async function POST(req: NextRequest) {
   // The same email in another teammate's mailbox (one row each) that is
   // already in GoHighLevel: reuse it rather than add it twice.
   const rfc = (m.rfc822_message_id as string | null) || null;
-  const markCopies = (ghlId: string, convId: string | null) => {
-    const q = supabaseAdmin.from("messages").update({ ghl_message_id: ghlId, ...(convId ? { ghl_conversation_id: convId } : {}) });
-    return (rfc ? q.or(`id.eq.${m.id},rfc822_message_id.eq."${rfc.replace(/"/g, "")}"`) : q.eq("id", m.id)).or("ghl_message_id.is.null,ghl_message_id.like.synthetic:*");
+  const markCopies = async (ghlId: string, convId: string | null) => {
+    const patch = { ghl_message_id: ghlId, ...(convId ? { ghl_conversation_id: convId } : {}) };
+    // One either/or filter per query: PostgREST does not combine two.
+    const notInGhl = "ghl_message_id.is.null,ghl_message_id.like.synthetic:*";
+    await supabaseAdmin.from("messages").update(patch).eq("id", m.id).or(notInGhl);
+    if (rfc) await supabaseAdmin.from("messages").update(patch).eq("rfc822_message_id", rfc).or(notInGhl);
   };
   if (rfc) {
     const { data: twin } = await supabaseAdmin.from("messages").select("ghl_message_id, ghl_conversation_id").eq("rfc822_message_id", rfc).not("ghl_message_id", "is", null).not("ghl_message_id", "like", "synthetic:%").limit(1).maybeSingle();
