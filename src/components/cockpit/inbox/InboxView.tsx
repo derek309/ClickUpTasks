@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CLAUDE_ID, PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
+import { safeMessageHtml } from "@/lib/safeHtml";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
@@ -1217,7 +1218,16 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   // holds HTML. Chats and texts stay plain.
   const rich = email && !compact;
   const asRich = (v: string) => (rich && v && !looksLikeHtml(v) ? plainTextToHtml(v) : v);
-  const [text, setText] = useState(() => asRich(readDraft(p.me.id, t.key) || (forward && answering ? `\n\nForwarded message from ${answering.direction === "outbound" ? p.me.name : t.peerName}, ${when(answering)}:\n${answering.body}` : "")));
+  // A forward quotes the email under a "Forwarded message" line. An email
+  // written in the app is stored as HTML, so it goes in as formatting, not as
+  // its tags spelled out (Derek, 2026-10-07: the forward showed <p> and <a>).
+  const forwardStart = (m: Message) => {
+    const head = `Forwarded message from ${m.direction === "outbound" ? p.me.name : t.peerName}, ${when(m)}:`;
+    if (!rich) return `\n\n${head}\n${m.body}`;
+    const body = looksLikeHtml(m.body) ? safeMessageHtml(m.body) : plainTextToHtml(m.body);
+    return `<p></p>${plainTextToHtml(head)}${body}`;
+  };
+  const [text, setText] = useState(() => asRich(readDraft(p.me.id, t.key) || (forward && answering ? forwardStart(answering) : "")));
   // The words alone, for "is there anything to send" and for the AI.
   const plain = rich ? htmlToText(text) : text;
   const hasText = !!plain.trim();
