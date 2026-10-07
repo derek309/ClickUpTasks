@@ -69,6 +69,10 @@ const localId = () => `a_${Date.now().toString(36)}${Math.random().toString(36).
 // cockpit component tree.
 const URL_RE = /(https?:\/\/[^\s<>"'[\]]+)/g;
 const URL_TRAILING_PUNCT_RE = /[).,;:!?\]}'"]+$/;
+function linkName(url: string): string {
+  try { const u = new URL(url); return u.hostname.replace(/^www\./, "") + (u.pathname.length > 1 && u.pathname.length <= 24 ? u.pathname : u.pathname.length > 1 ? "/…" : ""); } catch { return url; }
+}
+
 function linkify(text: string) {
   return text.split(URL_RE).map((part, i) => {
     if (i % 2 === 0) return part;
@@ -76,7 +80,9 @@ function linkify(text: string) {
     const url = trailing ? part.slice(0, -trailing.length) : part;
     return (
       <span key={i}>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="underline">{url}</a>
+        {/* The site's name, not the whole address (Derek, 2026-10-07: long
+            links made the page "really confusing for the client"). */}
+        <a href={url} target="_blank" rel="noopener noreferrer" className="font-semibold underline" title={url}>{linkName(url)}</a>
         {trailing}
       </span>
     );
@@ -145,8 +151,8 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 // a second one nested inside a card.
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
-  onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
-  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack, team, doneCount, totalCount,
+  onBody, onFiles, onRemoveAttachment, onLinkUrl, onLinkLabel, onAddLink, onSend,
+  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack,
 }: {
   task: WaitingTask;
   /** Their other open tasks that need them: the next one is offered once they answer this. */
@@ -210,7 +216,6 @@ function TaskDetailBody({
   // show it twice.
   const displayThread = displayThreadOf(t);
   const SHOWN_MESSAGES = 4;
-  const hiddenCount = earlierFor === t.id ? 0 : Math.max(0, displayThread.length - SHOWN_MESSAGES);
   const composer = (
     <>
       {/* text-[16px] isn't a style choice here — any input/textarea under
@@ -229,8 +234,8 @@ function TaskDetailBody({
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
-        placeholder={dragOver ? "Drop to attach…" : "Type a message, we'll email the team…"}
-        rows={2}
+        placeholder={dragOver ? "Drop to attach…" : "Write your answer, or one change at a time"}
+        rows={3}
         className={`w-full resize-none rounded-xl border px-3 py-2.5 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-surface"}`}
       />
       {draft.attachments.length > 0 && (
@@ -252,161 +257,137 @@ function TaskDetailBody({
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         <label className={`${toolBtn} cursor-pointer`}>
-          📎 Files
+          📎 Add a photo or file
           <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
         </label>
-        <button onClick={onToggleLink} className={toolBtn}>🔗 Link</button>
-        {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
-        {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Doc"}</button>}
+        {/* Only when there is one: a doc on the task opens from here. */}
+        {t.hasDoc && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : "📝 Open doc"}</button>}
         <span className="flex-1" />
         <button
           onClick={() => { onSend(); markAnswered(); }}
           disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
           className="h-10 rounded-lg bg-accent px-5 text-[16px] font-bold text-white disabled:opacity-40"
         >
-          {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
+          {sending ? "Sending…" : uploading ? "Uploading…" : `Send to ${lastTeam?.name.split(/\s+/)[0] ?? "us"}`}
         </button>
       </div>
       {sendError && <div className="mt-1.5 text-[16px] text-danger">{sendError}</div>}
-      <div className="mt-2 text-[16px] text-muted">You can drop photos and files right into the box. We get it by email too.</div>
+
     </>
   );
-  // The client portal's look (Derek, 2026-10-07): a header card, the team's
-  // message with its pages as cards, one clear "what do you think", the
-  // conversation, and a side panel with what else needs them and who's on it.
+  // The client portal's task, simplified (Derek, 2026-10-07: "it's really
+  // confusing for client"; mockup https://n4ubpt72so.wpdns.site/r/SNVjVNT7bYC1sOVkXBXJ,
+  // 1280 wide): what we need and the main link on the left with one reply
+  // box, and what's happened so far on the right, each message once.
   const card = "rounded-xl border bg-surface";
-  const cap = "mb-2.5 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
-  const choice = (on: boolean, tone: "ok" | "chg" | "q") => `grid gap-0.5 rounded-xl border px-4 py-3 text-left transition disabled:opacity-40 ${
-    on ? (tone === "chg" ? "border-danger bg-danger-soft" : tone === "q" ? "border-highlight bg-highlight-soft" : "border-success bg-success-soft")
-      : tone === "ok" ? "border-success/50 bg-surface hover:bg-success-soft" : tone === "chg" ? "bg-surface hover:border-danger" : "bg-surface hover:border-highlight"}`;
+  const cap = "mb-2 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
+  const norm = (x: string) => x.replace(/\s+/g, " ").trim().toLowerCase();
+  const desc = norm(t.description);
+  // The task's own words posted again, or the same message twice in a row
+  // (an email and its copy), show once.
+  const thread = displayThread.filter((m, i, all) => {
+    if (m.from !== "team" || !m.body) return true;
+    const head = norm(m.body).slice(0, 160);
+    if (head.length > 40 && desc.includes(head)) return false;
+    const nx = all[i + 1];
+    return !(nx && nx.from === "team" && nx.body && norm(nx.body).slice(0, 160) === head);
+  });
+  const hidden = earlierFor === t.id ? 0 : Math.max(0, thread.length - SHOWN_MESSAGES);
+  const [mainLink, ...moreLinks] = links;
   return (
-    <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
-      <div className="grid min-w-0 gap-4">
-        <section className={`${card} px-5 py-4`}>
-          <div className="mb-2.5 flex flex-wrap gap-2">
-            {showProjectName && projectName && <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">{projectName}</span>}
-            {isDone
-              ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Completed</span>
-              : t.needsResponse && <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-semibold text-highlight">● Waiting on you</span>}
-            {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
-          </div>
-          <h1 className="text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.title}</h1>
-          {/* What we need, in the same box as the title (Derek, 2026-10-07). */}
+    <div className="mx-auto w-full max-w-[1280px] px-4 pb-10 pt-5">
+      <div className="mb-4">
+        <div className="mb-2 flex flex-wrap gap-2">
+          {isDone
+            ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Done</span>
+            : t.needsResponse
+              ? <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-bold text-highlight">● We need this from you{t.due ? ` · due ${shortDate(t.due)}` : ""}</span>
+              : <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">We&apos;re working on this{t.due ? ` · due ${shortDate(t.due)}` : ""}</span>}
+          {showProjectName && projectName && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">{projectName}</span>}
+        </div>
+        <h1 className="text-[28px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.title}</h1>
+      </div>
+
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+        <div className="grid min-w-0 gap-4">
           {(t.description || t.attachments.length > 0) && (
-          <div className="mt-3 border-t pt-3 text-[16px]">
-            {before && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(before)}</p>}
-            {links.length > 0 && (
-              <div className={`my-3 grid gap-3 ${links.length > 1 ? "sm:grid-cols-2" : ""}`}>
-                {links.map((l) => (
-                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-3 rounded-xl border bg-surface p-3 hover:border-accent">
-                    <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-accent text-[24px] text-white" aria-hidden>🖥</span>
-                    <span className="min-w-0 flex-1"><b className="block truncate">{l.label}</b><span className="block truncate text-muted">Tap to open it</span></span>
-                    <span className="shrink-0 font-bold text-accent">Open ↗</span>
-                  </a>
-                ))}
-              </div>
-            )}
-            {after && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(after)}</p>}
-            <AttachmentGallery items={t.attachments} />
-          </div>
-          )}
-          {lastTeam && (
-            <div className="mt-3 flex items-center gap-2.5 text-[16px] text-muted">
-              <SenderAvatar sender={lastTeam} size={32} /> <span><b className="text-foreground">{lastTeam.name}</b> is working on this with you</span>
-            </div>
-          )}
-        </section>
-
-        {answered && (
-          <section ref={nextRef} className="rounded-xl border-2 border-success bg-success-soft px-5 py-4">
-            <h2 className="text-[20px] font-bold">Thank you, we have it. What would you like to do next?</h2>
-            <div className="mt-3 flex flex-wrap gap-2.5">
-              {next && (
-                <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
-                  <span className="min-w-0">Next: {next.title}</span><span aria-hidden>→</span>
-                </button>
+            <section className={`${card} px-5 py-4 text-[16px]`}>
+              {before && <p className="whitespace-pre-wrap break-words">{linkify(before)}</p>}
+              {mainLink && (
+                <a href={mainLink.url} target="_blank" rel="noopener noreferrer"
+                  className="my-4 flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-4 text-center text-[18px] font-extrabold text-white hover:opacity-90">
+                  {mainLink.label} <span aria-hidden>↗</span>
+                </a>
               )}
-              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">
-                {next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}
-              </button>
-              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay on this one</button>
-            </div>
-            {!next && <p className="mt-2 text-[16px] text-muted">That was the last thing we needed from you for now.</p>}
-          </section>
-        )}
+              {moreLinks.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {moreLinks.map((l) => (
+                    <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="rounded-lg border px-4 py-2 font-semibold text-accent hover:bg-background">{l.label} ↗</a>
+                  ))}
+                </div>
+              )}
+              {after && <p className="whitespace-pre-wrap break-words">{linkify(after)}</p>}
+              <AttachmentGallery items={t.attachments} />
+            </section>
+          )}
 
-        {!isDone && !answered && (
-          <section className="rounded-xl border-2 border-accent bg-surface px-5 py-4">
-            <h2 className="text-[20px] font-bold">What do you think?</h2>
-            <p className="mb-3 text-[16px] text-muted">Pick one. You can add a note below either way.</p>
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy} className={choice(false, "ok")}>
-                <b className="text-[17px] text-success">✓ Looks good</b><span className="text-[16px] text-muted">Approve it</span>
-              </button>
-              <button onClick={() => { onSetStatus("changes_requested"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "changes_requested", "chg")}>
-                <b className="text-[17px]">✎ Needs changes</b><span className="text-[16px] text-muted">Tell us what to change</span>
-              </button>
-              <button onClick={() => { onSetStatus("review"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "review", "q")}>
-                <b className="text-[17px]">? I have a question</b><span className="text-[16px] text-muted">Someone will get back to you</span>
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section className={`${card} overflow-hidden`}>
-          <div className="flex items-center gap-2 border-b px-5 py-3 text-[16px] font-bold">💬 Conversation</div>
-          {/* Part of the page, not a box that scrolls inside it (Derek,
-              2026-10-07: "not a huge fan of the scrolling chat box"). A long
-              thread shows its newest few, with the rest one click away. */}
-          <div ref={threadRef} className="px-5 py-4">
-            {displayThread.length === 0 ? (
-              <p className="py-2 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
-            ) : (
-              <div className="space-y-2.5">
-                {hiddenCount > 0 && (
-                  <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
-                    Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
+          {answered && (
+            <section ref={nextRef} className="rounded-xl border-2 border-success bg-success-soft px-5 py-4">
+              <h2 className="text-[20px] font-bold">Thank you, we have it. What would you like to do next?</h2>
+              <div className="mt-3 flex flex-wrap gap-2.5">
+                {next && (
+                  <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
+                    <span className="min-w-0">Next: {next.title}</span><span aria-hidden>→</span>
                   </button>
                 )}
-                {displayThread.slice(hiddenCount).map((m) => (
-                  <div key={m.id} className={`flex items-end gap-2 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                    {m.from === "team" && <SenderAvatar sender={m.sender} size={30} />}
-                    <div className={`max-w-[85%] lg:max-w-[560px] ${m.from === "client" ? "text-right" : ""}`}>
-                      <div className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-[16px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
-                        {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
-                        <AttachmentGallery items={m.attachments} />
-                      </div>
-                      <div className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}</div>
+                <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">
+                  {next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}
+                </button>
+                <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay on this one</button>
+              </div>
+              {!next && <p className="mt-2 text-[16px] text-muted">That was the last thing we needed from you for now.</p>}
+            </section>
+          )}
+
+          {!isDone && !answered && (
+            <section className={`${card} px-5 py-4`}>
+              <div className={cap}>Your answer</div>
+              {composer}
+              <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-success bg-success-soft px-4 py-3 text-[17px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
+                ✓ All done, this looks good
+              </button>
+            </section>
+          )}
+        </div>
+
+        <section className={`${card} min-w-0 px-5 py-4`}>
+          <div className={cap}>What&apos;s happened so far</div>
+          <div ref={threadRef}>
+            {thread.length === 0 ? (
+              <p className="py-2 text-[16px] text-muted">Nothing yet. Your answer will show here.</p>
+            ) : (
+              <div className="divide-y">
+                {hidden > 0 && (
+                  <button onClick={() => setEarlierFor(t.id)} className="mb-2 block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
+                    Show {hidden} earlier {hidden === 1 ? "message" : "messages"}
+                  </button>
+                )}
+                {thread.slice(hidden).map((m) => (
+                  <div key={m.id} className="flex gap-3 py-3">
+                    {m.from === "team" ? <SenderAvatar sender={m.sender} size={34} /> : <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-accent text-[14px] font-bold text-white">You</span>}
+                    <div className="min-w-0 flex-1 text-[16px]">
+                      <div><b>{m.from === "client" ? "You" : m.sender?.name ?? "Our team"}</b> <span className="text-muted">· {timeAgo(m.at)}</span></div>
+                      {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
+                      <AttachmentGallery items={m.attachments} />
                     </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
-          <div className="border-t px-5 py-4">{composer}</div>
         </section>
       </div>
-
-      <aside className="grid gap-4">
-        {totalCount > 0 && (
-          <div className={`${card} p-4`}>
-            <div className={cap}>{projectName ?? "Your project"}</div>
-            <div className="h-2 overflow-hidden rounded-full bg-border"><i className="block h-full bg-success" style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }} /></div>
-            <div className="mt-1.5 text-[16px] text-muted"><b className="text-foreground">{doneCount} of {totalCount}</b> tasks done</div>
-          </div>
-        )}
-        {team.length > 0 && (
-          <div className={`${card} p-4`}>
-            <div className={cap}>Your team</div>
-            <div className="grid gap-3">
-              {team.map((p) => (
-                <div key={p.name} className="flex items-center gap-2.5 text-[16px]"><SenderAvatar sender={p} size={36} /><b>{p.name}</b></div>
-              ))}
-            </div>
-          </div>
-        )}
-      </aside>
     </div>
   );
 }
