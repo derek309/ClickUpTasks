@@ -16,7 +16,12 @@ import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
 // a grammar clean-up, not a read (Derek, 2026-09-09: "sometimes we have to
 // just add a task quickly, other times we want to add a list of tasks").
 
-const GEMINI_TIMEOUT_MS = 20000;
+// Thinking is off (below): with it on, the model thought for 18 to 20 seconds
+// on an ordinary set of notes and the 20 second limit cut it off ("aborted
+// due to timeout", Justin, 2026-10-07). Off, the same notes split the same
+// way in about 7 seconds. The limit leaves room for a long paste.
+const GEMINI_TIMEOUT_MS = 45000;
+export const maxDuration = 60;
 const MAX_INPUT_CHARS = 12000;
 const MAX_TASKS = 40;
 
@@ -98,7 +103,7 @@ export async function POST(req: NextRequest) {
       headers: geminiHeaders(apiKey),
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
+        generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
       }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
@@ -140,6 +145,7 @@ export async function POST(req: NextRequest) {
     if (tasks.length === 0) return NextResponse.json({ error: "Couldn't find any action items in that text." }, { status: 422 });
     return NextResponse.json({ tasks });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "Gemini request failed." }, { status: 502 });
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    return NextResponse.json({ error: timedOut ? "The AI took too long to read that. Try again, or split a very long paste into two." : e instanceof Error ? e.message : "Gemini request failed." }, { status: 502 });
   }
 }
