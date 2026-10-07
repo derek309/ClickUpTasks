@@ -542,6 +542,10 @@ export default function WaitingView({ token }: { token: string }) {
   const [newWithDoc, setNewWithDoc] = useState(false);
   const [docBusyId, setDocBusyId] = useState<string | null>(null);
   const [tab, setTab] = useState<string>("all");
+  // What we need from them, or every task (Derek, 2026-10-07: "when they go it
+  // only shows what we need from them and if they want they click a toggle to
+  // see all tasks"). Unset until they pick: it opens on theirs when there is any.
+  const [view, setView] = useState<"theirs" | "all" | null>(null);
   const [doneOpenIds, setDoneOpenIds] = useState<Set<string>>(new Set());
   // "What we're working on" starts open (Derek, 2026-09-16: "default it open",
   // reversing 2026-08-26). A client can still fold it away.
@@ -934,7 +938,7 @@ export default function WaitingView({ token }: { token: string }) {
           totalCount={totalCount}
         />
       ) : (
-      <div className="px-6 pb-10 pt-6 md:px-10">
+      <div className="mx-auto w-full max-w-[1280px] px-4 pb-10 pt-5">
         {error ? (
           <div className="rounded-lg bg-danger-soft px-3 py-2 text-[16px] text-danger">{error}</div>
         ) : !tasks ? (
@@ -1085,8 +1089,33 @@ export default function WaitingView({ token }: { token: string }) {
                     </div>
                   );
                 };
+                const showing = view ?? (needCount ? "theirs" : "all");
+                const theirs = all.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
+                const toggle = all.length > 0 && (
+                  <div role="tablist" aria-label="Which tasks" className="grid grid-cols-2 gap-1 rounded-xl bg-border/60 p-1">
+                    {([["theirs", "What we need from you", needCount], ["all", "All tasks", all.length]] as const).map(([k, label, n]) => (
+                      <button key={k} role="tab" aria-selected={showing === k} onClick={() => setView(k)}
+                        className={`flex h-11 items-center justify-center gap-2 rounded-lg px-3 text-[16px] font-bold ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
+                        {label}<span className={`rounded-full px-2 text-[15px] ${k === "theirs" && n ? "bg-highlight text-white" : "bg-background text-muted"}`}>{n}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+                if (showing === "theirs") return (
+                  <div className="space-y-4">
+                    {toggle}
+                    <div className="overflow-hidden rounded-xl border bg-surface shadow-[var(--shadow-sm)]">
+                      <div className="border-b px-4 py-3">
+                        <h2 className="text-[18px] font-bold">{theirs.length ? `We need ${theirs.length === 1 ? "one thing" : `${theirs.length} things`} from you` : "Nothing needed from you right now"}</h2>
+                        <p className="text-[16px] text-muted">{theirs.length ? "Open one to answer it or send what it asks for. The soonest is at the top." : "We'll let you know when we need something. Everything we're working on is under All tasks."}</p>
+                      </div>
+                      {theirs.length > 0 && <div className="space-y-2 p-3">{theirs.map((t) => renderTaskRow(t))}</div>}
+                    </div>
+                  </div>
+                );
                 return (
                   <div className="space-y-4">
+                    {toggle}
                     <div className="grid gap-3 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
                       <div className="flex items-baseline justify-between gap-2"><b className="text-[18px]">{doneAll} of {all.length} done</b><span className="text-[16px] text-muted">{pct}%</span></div>
                       <div className="h-2 overflow-hidden rounded-full bg-border"><div className="h-full bg-success" style={{ width: `${pct}%` }} /></div>
