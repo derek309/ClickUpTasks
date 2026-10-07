@@ -2234,6 +2234,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   );
+  // Just mine: one click shows only your tasks, another shows everyone's
+  // (Derek, 2026-10-06). The same Assignee filter the View panel sets.
+  const mineOn = filters.assignee === me.id;
+  const mineToggle = (
+    <button onClick={() => setFilters((f) => ({ ...f, assignee: mineOn ? "all" : me.id }))} aria-pressed={mineOn}
+      title={mineOn ? "Showing just your tasks. Click to show everyone's." : "Show just your tasks"}
+      className={`${barButton} ${mineOn ? "border-accent bg-accent-soft font-semibold text-accent" : ""}`}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        {mineOn ? <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+          : <path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22" />}
+      </svg>
+      <span>Just mine</span>
+    </button>
+  );
   const groupSortControl = (
     <div className="relative">
       <button onClick={() => setGroupSortOpen((o) => !o)} title="Group & sort" className={barButton}>
@@ -2777,6 +2791,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
                   / Review instead of a cluster of equal-weight buttons. Same
                   menu as the compact header — see overflowControl above. */}
+              {/* Just mine, top right before the ⋯ (Derek, 2026-10-06). */}
+              {mineToggle}
               {overflowControl}
               {/* New last, on the far right (mockup C): a task, or an email or
                   text to them (Derek, 2026-10-06). */}
