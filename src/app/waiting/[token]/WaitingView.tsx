@@ -821,12 +821,6 @@ export default function WaitingView({ token }: { token: string }) {
       <span>Name</span><span>Status</span><span>Due</span><span />
     </div>
   );
-  const band = (label: string, n: number, tone: "need" | "prog") => (
-    <div className={`flex items-center gap-2 border-t px-4 py-2 text-[16px] font-bold ${tone === "need" ? "bg-highlight-soft" : "bg-accent-soft/50"}`}>
-      <span className="h-2.5 w-2.5 rounded-full" style={{ background: tone === "need" ? "var(--highlight)" : "var(--accent)" }} />{label}
-      <span className={`rounded px-1.5 text-[14px] text-white ${tone === "need" ? "bg-highlight" : "bg-accent"}`}>{n}</span>
-    </div>
-  );
   const renderTaskRow = (t: WaitingTask, opts?: { showProject?: boolean }) => {
     const showProject = opts?.showProject ?? false;
     const isDone = t.status === "done";
@@ -1063,9 +1057,7 @@ export default function WaitingView({ token }: { token: string }) {
                       </div>
                       <div>
                         {tableHead}
-                        {need.length > 0 && band("Needs you", need.length, "need")}
                         {need.map((t) => renderTaskRow(t))}
-                        {prog.length > 0 && band("In progress", prog.length, "prog")}
                         {prog.map((t) => renderTaskRow(t))}
                         {!need.length && !prog.length && <div className="border-t px-4 py-3 text-[16px] text-muted">Nothing open here right now.</div>}
                         {done.length > 0 && (
