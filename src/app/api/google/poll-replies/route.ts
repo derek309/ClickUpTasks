@@ -37,10 +37,14 @@ export async function POST(req: NextRequest) {
   const only = typeof body?.member === "string" && body.member ? body.member as string : null;
   // all: the ↻ button, one person's whole mailbox now; otherwise the
   // Always to Inbox catch-up, just the senders let in.
-  return run(req, days, only, !!body?.all);
+  // quick: the Inbox's every-minute pull. New mail only; the mirror, Gmail's
+  // read and archive state and the Sent folder are left to the 5 minute run,
+  // and nothing more is read when nothing is new (Derek, 2026-10-07: the
+  // database ran short of disk reads).
+  return run(req, days, only, !!body?.all, !!body?.quick);
 }
 
-async function run(req: NextRequest, days: number, only: string | null, all = false) {
+async function run(req: NextRequest, days: number, only: string | null, all = false, quick = false) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -60,11 +64,13 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
 
   // Sender-email → contact map. A client email in a teammate's inbox is only
   // ingested when its From address matches a known contact.
-  const byEmail = await contactsByEmail<any>("id, name, client_id, email, ghl_contact_id");
+  // Read once, and only when a run has an email to match: every contact is
+  // 4,200 rows, and most runs find nothing new.
   // Teammates are never the client in a conversation, even though GoHighLevel
   // keeps them as contacts (Derek, 2026-10-02).
   const teamEmails = new Set(memberIdByMailbox.keys());
-  for (const e of teamEmails) byEmail.delete(e);
+  let byEmailOnce: Promise<Map<string, any>> | null = null;
+  const contactsFor = () => (byEmailOnce ??= contactsByEmail<any>("id, name, client_id, email, ghl_contact_id").then((m) => { for (const e of teamEmails) m.delete(e); return m; }));
   let teammateCopies = 0;
 
   // Admins triage unknown senders. Deterministic notification ids
@@ -105,7 +111,14 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
     // however old (snoozed mail coming back included). Up to 25 a run, so a
     // first catch-up finishes over a few runs. Then Gmail's inbox and read
     // state are copied onto the app's (syncInboxState).
-    if (memberId && !(only && !all)) {
+    if (quick && emails.length) {
+      // Only what isn't stored yet.
+      const { data: had } = await supabaseAdmin.from("messages").select("gmail_message_id").in("gmail_message_id", emails.map((em) => em.gmailId));
+      const stored = new Set((had ?? []).map((r: any) => r.gmail_message_id as string));
+      emails = emails.filter((em) => !stored.has(em.gmailId));
+    }
+    if (quick && !emails.length) continue;
+    if (memberId && !(only && !all) && !quick) {
       try {
         const inInbox = await gmailThreadIds(mailbox, "in:inbox newer_than:90d", 2);
         const seen = new Set(emails.map((em) => em.threadId));
@@ -129,7 +142,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
       try { readInGmail += await markReadFromGmail(memberId, emails); }
       catch (e) { errors.push(`${mailbox} read state: ${e instanceof Error ? e.message : "failed"}`); }
       // Archived or deleted in Gmail: Done or Trash in their Inbox too.
-      try { const r = await clearFromGmail(memberId, mailbox); archivedInGmail += r.archived; trashedInGmail += r.trashed; }
+      if (!quick) try { const r = await clearFromGmail(memberId, mailbox); archivedInGmail += r.archived; trashedInGmail += r.trashed; }
       catch (e) { errors.push(`${mailbox} archive state: ${e instanceof Error ? e.message : "failed"}`); }
     }
     for (const em of emails) {
@@ -187,7 +200,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
           continue;
         }
       }
-      const contact = byEmail.get(em.fromEmail);
+      const contact = (await contactsFor()).get(em.fromEmail);
       if (contact) {
         // In the system → log it on the client's Journal (+ bump task, ring bell).
         matched++;
@@ -235,7 +248,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
     // triage — just the teammate emailing someone outside the CRM.
     const createdBy = memberIdByMailbox.get(mailbox);
     // The let-in catch-up reads only inbound mail from the people let in.
-    if (createdBy && (!only || all)) {
+    if (createdBy && (!only || all) && !quick) {
       let sent: SentEmail[];
       try {
         sent = await readSentGmail(mailbox, sentQuery, max);
@@ -246,6 +259,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
       const strangerThreads = await strangerThreadsIn(createdBy, sent.map((em) => em.threadId));
       for (const em of sent) {
         sentScanned++;
+        const byEmail = await contactsFor();
         const contact = em.toEmails.map((e) => byEmail.get(e)).find(Boolean);
         if (!contact) {
           // The teammate answering a stranger's email from Gmail: it joins

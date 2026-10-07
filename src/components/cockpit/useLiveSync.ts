@@ -174,7 +174,10 @@ export function useLiveSync({
       // from it) is fixed when the page loads. A window left open overnight
       // kept treating yesterday as today, so coming back on a new day reloads.
       if (todayIso() !== TODAY) { window.location.reload(); return; }
-      if (Date.now() - lastRefetch < 20000) return;
+      // Two minutes, not twenty seconds: live updates keep the tab current in
+      // between, and every return re-read all 4,200 contacts, which ran the
+      // database out of disk reads (Derek, 2026-10-07, Supabase Disk IO warning).
+      if (Date.now() - lastRefetch < 120_000) return;
       lastRefetch = Date.now();
       const askedAt = new Date().toISOString();
       // A task this tab saved from just before the fetch onward keeps its

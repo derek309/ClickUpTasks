@@ -264,8 +264,9 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   }, [meMemberId, load]);
   // Every minute while the Inbox is open (InboxView): your own Gmail only,
   // so it keeps pace with Gmail itself (Derek, 2026-10-07).
+  // quick: new mail only, the heavier syncing is the 5 minute run's.
   const pullGmail = useCallback(async () => {
-    await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 1, member: meMemberId, all: true }) }).catch(() => null);
+    await authedFetch("/api/google/poll-replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ days: 1, member: meMemberId, all: true, quick: true }) }).catch(() => null);
     await load();
   }, [meMemberId, load]);
   const improve = useCallback(async (text: string, channel: string, mode: "fix" | "shorter" = "fix") => (await post("/api/ai/improve", { text, channel, mode })) as { text: string; changed: boolean }, [post]);
