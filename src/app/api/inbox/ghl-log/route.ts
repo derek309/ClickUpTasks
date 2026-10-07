@@ -73,7 +73,12 @@ export async function POST(req: NextRequest) {
       ...(provider ? { conversationProviderId: provider } : {}),
       direction: outbound ? "outbound" : "inbound", date: m.created_at,
       subject: m.subject ?? undefined, html, message: looksLikeHtml(body) ? htmlToText(body) : body,
-      ...(outbound ? { emailTo: m.peer_address ?? contact.email ?? undefined, ...(prof?.email ? { emailFrom: prof.email } : {}) } : { emailFrom: m.peer_address ?? contact.email ?? undefined }),
+      // An email they sent needs who it went to as well: the teammate whose
+      // mailbox it came into (GoHighLevel 400 "emailTo field is required",
+      // Derek, 2026-10-07, Amanda Standley's email).
+      ...(outbound
+        ? { emailTo: m.peer_address ?? contact.email ?? undefined, ...(prof?.email ? { emailFrom: prof.email } : {}) }
+        : { emailFrom: m.peer_address ?? contact.email ?? undefined, ...(prof?.email ? { emailTo: prof.email } : {}) }),
       ...(Array.isArray(m.cc) && m.cc.length ? { emailCc: m.cc } : {}),
       altId: (m.rfc822_message_id as string | null) ?? (m.gmail_message_id as string | null) ?? m.id,
     }),
