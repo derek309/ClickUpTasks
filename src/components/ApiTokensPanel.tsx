@@ -18,6 +18,20 @@ type TokenRow = { id: string; name: string; created_at: string; last_used_at: st
 // source, so the two cannot drift apart again.
 const EXTENSION_VERSION = "1.14.0";
 
+/** Copy text that is still being fetched. The copy starts inside the click
+ *  (Safari and some Chrome setups refuse a copy made after a fetch: "Write
+ *  permission denied", Justin, 2026-10-07) and is filled in when the text
+ *  arrives. False when the browser still won't, so the caller can show it. */
+async function copyLater(text: Promise<string>): Promise<boolean> {
+  try {
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })]);
+      return true;
+    }
+  } catch { /* the older way below */ }
+  try { await navigator.clipboard.writeText(await text); return true; } catch { return false; }
+}
+
 export default function ApiTokensPanel() {
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,21 +89,19 @@ export default function ApiTokensPanel() {
   // Straight to the clipboard, never onto the screen. A token sitting visible
   // in a panel is one screenshot away from being somewhere it should not be,
   // and this has already happened twice in a fortnight.
+  // No await before the copy starts (copyLater); a refused copy shows the token to copy by hand.
   async function copyExisting(t: TokenRow) {
     setCopyingId(t.id);
     setError(null);
-    try {
-      const res = await authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id }) });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error ?? "Couldn't read that token.");
-      await navigator.clipboard.writeText(j.token);
-      setCopiedId(t.id);
-      setTimeout(() => setCopiedId((c) => (c === t.id ? null : c)), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read that token.");
-    } finally {
-      setCopyingId(null);
+    const token = authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id }) })
+      .then(async (res) => { const j = await res.json(); if (!res.ok || !j.token) throw new Error(j.error ?? "Couldn't read that token."); return j.token as string; });
+    const ok = await copyLater(token);
+    if (ok) { setCopiedId(t.id); setTimeout(() => setCopiedId((c) => (c === t.id ? null : c)), 2000); }
+    else {
+      try { setRevealedToken(await token); setRevealedFor({ name: t.name, rotated: false }); }
+      catch (e) { setError(e instanceof Error ? e.message : "Couldn't read that token."); }
     }
+    setCopyingId(null);
   }
 
   // Same secret-shaped warning as a revoke, because that is what it is: the
@@ -148,15 +160,16 @@ export default function ApiTokensPanel() {
   const claudeToken = tokens.find((t) => t.name === "Claude Code") ?? null;
   const [claudeCopied, setClaudeCopied] = useState(false);
   const [claudeError, setClaudeError] = useState<string | null>(null);
+  const [claudeShown, setClaudeShown] = useState<string | null>(null);
   const copyClaudeCommand = async () => {
     if (!claudeToken) return;
     setClaudeError(null);
-    const r = await authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeToken.id }) }).catch(() => null);
-    const j = r?.ok ? await r.json().catch(() => null) : null;
-    if (!j?.token) { setClaudeError(j?.error ?? "Couldn't get your command. Ask an admin to switch Claude Code off and on again."); return; }
-    const cmd = `claude mcp remove clickuptasks -s user 2>/dev/null; claude mcp add --transport http --scope user clickuptasks ${window.location.origin}/api/mcp --header "Authorization: Bearer ${j.token}"`;
-    try { await navigator.clipboard.writeText(cmd); setClaudeCopied(true); setTimeout(() => setClaudeCopied(false), 4000); }
-    catch { setClaudeError("Your browser blocked copying. Try again."); }
+    const cmd = authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeToken.id }) })
+      .then(async (r) => { const j = await r.json().catch(() => null); if (!r.ok || !j?.token) throw new Error(j?.error ?? "Couldn't get your command. Ask an admin to switch Claude Code off and on again."); return j.token as string; })
+      .then((token) => `claude mcp remove clickuptasks -s user 2>/dev/null; claude mcp add --transport http --scope user clickuptasks ${window.location.origin}/api/mcp --header "Authorization: Bearer ${token}"`);
+    if (await copyLater(cmd)) { setClaudeShown(null); setClaudeCopied(true); setTimeout(() => setClaudeCopied(false), 4000); return; }
+    // The browser won't copy: show it, selected, to copy with ⌘C.
+    try { setClaudeShown(await cmd); } catch (e) { setClaudeError(e instanceof Error ? e.message : "Couldn't get your command."); }
   };
 
   return (
@@ -167,6 +180,13 @@ export default function ApiTokensPanel() {
             <p className="mt-1 text-[16px] text-muted">Copy the command, paste it into Terminal and press Return. Claude Code then works on ClickUpTasks as you, in every folder.</p>
             <button onClick={() => void copyClaudeCommand()} className="mt-3 h-10 rounded-lg bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied ? "Copied. Paste it into Terminal" : "Copy the command"}</button>
             {claudeError && <p className="mt-2 text-[16px] text-danger">{claudeError}</p>}
+            {claudeShown && (
+              <div className="mt-3">
+                <p className="text-[16px] text-muted">Your browser wouldn&apos;t copy it. It&apos;s selected below: press ⌘C (Ctrl+C on Windows), then paste it into Terminal.</p>
+                <textarea readOnly value={claudeShown} rows={3} autoFocus onFocus={(e) => e.currentTarget.select()} aria-label="Your Claude Code command"
+                  className="mt-2 w-full resize-none rounded-lg border bg-background px-3 py-2 font-mono text-[16px]" />
+              </div>
+            )}
           </>) : (
             <p className="mt-1 text-[16px] text-muted">Claude Code isn&apos;t on for you yet. Ask an admin to turn it on in Settings, Team.</p>
           )}
