@@ -2505,12 +2505,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {(() => {
           const folded = new Set(inboxPrefs.sideFolded ?? []);
           const fold = (k: string) => setInboxPrefs({ sideFolded: folded.has(k) ? [...folded].filter((x) => x !== k) : [...folded, k] });
-          const rows = myAssignedClients.map((c) => {
-            const mine = (scopedTasksByClientId.get(c.id) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold" && isOnPlateOf(t, me.id));
+          // Clients, the workspace's own projects (Lincoln, Tracy, Administration…)
+          // and Personal, all counted the same way: your open work, late or due today.
+          const tally = (list: Task[]) => {
             let late = 0, today = 0;
-            for (const t of mine) { const d = urgencyDateOf(t); if (!d) continue; if (d < TODAY) late++; else if (d === TODAY) today++; }
-            return { c, late, today };
-          }).filter((r) => r.late + r.today > 0).sort((a, b) => b.late - a.late || b.today - a.today || a.c.name.localeCompare(b.c.name));
+            for (const t of list) {
+              if (t.status === "done" || t.status === "on_hold") continue;
+              const d = urgencyDateOf(t); if (!d) continue;
+              if (d < TODAY) late++; else if (d === TODAY) today++;
+            }
+            return { late, today };
+          };
+          const openClient = (clientId: string, projectId: string | null) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); };
+          const rows: { key: string; name: string; sub?: string; href: string; active: boolean; open: () => void; late: number; today: number }[] = [
+            ...myAssignedClients.map((c) => ({ key: c.id, name: c.name, href: `/?client=${encodeURIComponent(c.id)}`,
+              active: !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id, open: () => openClient(c.id, null),
+              ...tally((scopedTasksByClientId.get(c.id) ?? []).filter((t) => isOnPlateOf(t, me.id))) })),
+            ...myAssignedProjects.filter((pr) => pr.clientId === WORKSPACE_CLIENT_ID).map((pr) => ({ key: pr.id, name: pr.name, sub: clientById(pr.clientId)?.name, href: `/?client=${encodeURIComponent(pr.clientId)}&project=${encodeURIComponent(pr.id)}`,
+              active: !myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject === pr.id, open: () => openClient(pr.clientId, pr.id),
+              ...tally((scopedTasksByProjectId.get(pr.id) ?? []).filter((t) => isOnPlateOf(t, me.id))) })),
+            { key: "personal", name: "Personal", href: "/?view=personal", active: personalView, open: () => { setSidebarOpen(false); goToView("personal"); }, ...tally(myPersonalTasks) },
+          ].filter((r) => r.late + r.today > 0).sort((a, b) => b.late - a.late || b.today - a.today || a.name.localeCompare(b.name));
           if (!rows.length) return null;
           return (
             <nav className="mt-[10px] shrink-0 space-y-0.5 border-t px-2 pt-[10px]">
@@ -2518,16 +2533,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="flex w-full items-center gap-1.5 px-2.5 pb-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:text-foreground">
                 <span aria-hidden className="text-[9px]">{folded.has("needs") ? "▸" : "▾"}</span><span className="flex-1">Overdue and today</span><span className="font-normal normal-case tracking-normal">{rows.length}</span>
               </button>
-              {!folded.has("needs") && rows.map(({ c, late, today }) => {
-                const active = !myWork && !personalView && !inboxView && !settingsView && !dirView && !activeProject && activeClient === c.id;
-                return (
-                  <SideItem key={c.id} href={`/?client=${encodeURIComponent(c.id)}`} active={active} title={[late ? `${late} overdue` : "", today ? `${today} due today` : ""].filter(Boolean).join(", ")} onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: late ? "#ef4444" : "#f59e0b" }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
-                    {late > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#ef4444" }}>{late}</span>}
-                    {today > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#f59e0b" }}>{today}</span>}
-                  </SideItem>
-                );
-              })}
+              {!folded.has("needs") && rows.map((r) => (
+                <SideItem key={r.key} href={r.href} active={r.active} title={[r.late ? `${r.late} overdue` : "", r.today ? `${r.today} due today` : ""].filter(Boolean).join(", ")} onClick={r.open}>
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: r.late ? "#ef4444" : "#f59e0b" }} />
+                  <span className="min-w-0 flex-1 truncate text-left">{r.sub ? <><span className="block truncate text-[11px] leading-tight text-muted">{r.sub}</span>{r.name}</> : r.name}</span>
+                  {r.late > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#ef4444" }}>{r.late}</span>}
+                  {r.today > 0 && <span className="shrink-0 rounded px-1.5 text-[12px] font-bold text-white" style={{ background: "#f59e0b" }}>{r.today}</span>}
+                </SideItem>
+              ))}
             </nav>
           );
         })()}
