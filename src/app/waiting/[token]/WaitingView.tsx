@@ -337,14 +337,11 @@ function TaskDetailBody({
 
       <aside className="grid gap-4">
         <div className={`${card} p-4`}>
-          <div className="mb-2 flex flex-wrap gap-2">
-            {isDone
-              ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Done</span>
-              : t.needsResponse
-                ? <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-bold text-highlight">● We need you</span>
-                : <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">We&apos;re on it</span>}
-            {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
-            {showProjectName && projectName && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">{projectName}</span>}
+          {/* One plain line, no pills (Derek, 2026-10-07). */}
+          <div className="mb-1.5 text-[16px] text-muted">
+            <b className={isDone ? "text-success" : t.needsResponse ? "text-highlight" : "text-accent"}>{isDone ? "Done" : t.needsResponse ? "We need you" : "We're on it"}</b>
+            {t.due && !isDone && <> · Due {shortDate(t.due)}</>}
+            {showProjectName && projectName && <> · {projectName}</>}
           </div>
           <h1 className="text-[20px] font-extrabold leading-tight">{t.title}</h1>
           {(t.description || t.attachments.length > 0) && (
