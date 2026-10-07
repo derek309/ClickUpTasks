@@ -14,7 +14,7 @@ export function useBoards({ tasks, tasksRef, showingBoard, meId }: {
   /** The live task list, read when a board loads. */
   tasksRef: RefObject<Task[]>;
   /** The My Work board on screen, or null when My Work is not. */
-  showingBoard: "work" | "reviews" | "drafts" | null;
+  showingBoard: "work" | "reviews" | "drafts" | "inbox" | null;
   meId: string;
 }) {
   // What is out with a client, for the Reviews tab. Loaded when that tab is
@@ -76,8 +76,13 @@ export function useBoards({ tasks, tasksRef, showingBoard, meId }: {
   // the loading flag, and writing state straight from an effect body is what
   // stops the compiler optimising the component around it.
   useEffect(() => {
-    if (showingBoard !== "drafts" && showingBoard !== "reviews") return;
-    const r = requestAnimationFrame(() => { void (showingBoard === "drafts" ? loadPendingSends() : loadOpenReviews()); });
+    if (showingBoard !== "drafts" && showingBoard !== "reviews" && showingBoard !== "inbox") return;
+    // The Inbox shows both (Derek, 2026-10-06): task drafts in Drafts, and
+    // reviews the client sent back at the top of the Inbox.
+    const r = requestAnimationFrame(() => {
+      if (showingBoard !== "reviews") void loadPendingSends();
+      if (showingBoard !== "drafts") void loadOpenReviews();
+    });
     return () => cancelAnimationFrame(r);
     // The loaders read the live task list through the ref, so they are not
     // dependencies: only opening the tab reloads.

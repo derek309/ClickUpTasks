@@ -94,8 +94,6 @@ import { ClientJournal } from "./cockpit/ClientJournal";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
 import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
-import { ReviewsBoard } from "./cockpit/ReviewsBoard";
-import { DraftsBoard } from "./cockpit/DraftsBoard";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
@@ -244,13 +242,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Plan and Next steps were removed (Derek, 2026-09-28: "we are not using it
   // at all"). Anyone whose remembered tab or deep link still says one of them
   // lands on Work rather than a blank screen.
-  const [dashboardView, setDashboardView] = usePersisted<"work" | "reviews" | "drafts">("dashboardView", "work", (v) => ["work", "reviews", "drafts"].includes(v as string));
-  // The Reviews and Drafts boards and the Finished marker (cockpit/useBoards).
+  // Reviews and Drafts now live in the Inbox (Derek, 2026-10-06: "we don't need
+  // review and drafts now because we have the inbox"); a remembered tab or old
+  // ?sub= link lands on Work.
+  const [dashboardViewStored, setDashboardView] = usePersisted<"work" | "reviews" | "drafts">("dashboardView", "work", (v) => v === "work");
+  void dashboardViewStored;
+  const dashboardView = "work" as "work" | "reviews" | "drafts";
+  void setDashboardView;
+  // Reviews sent back and unsent drafts, for the Inbox (cockpit/useBoards),
+  // and the Finished marker.
   const {
-    openReviews, reviewsLoading, videoStorage, loadOpenReviews,
-    pendingSends, draftsLoading, loadPendingSends,
+    openReviews, pendingSends,
     finishedMarkerAt, openFinished, newFinishedCount,
-  } = useBoards({ tasks, tasksRef, showingBoard: myWork ? dashboardView : null, meId: me.id });
+  } = useBoards({ tasks, tasksRef, showingBoard: dirView === "inbox" ? "inbox" : null, meId: me.id });
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
   // this is inert either way since scopedTasks already fully restricts them.
   // All Tasks can show the completed log instead of the open list. It moved
@@ -2639,11 +2643,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </div>
           ) : myWork ? (
             <div className="flex flex-col gap-2">
-              <div className="flex rounded-lg bg-background p-0.5">
-                <button onClick={() => setDashboardView("work")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "work" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Work</button>
-                <button onClick={() => setDashboardView("reviews")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "reviews" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Reviews</button>
-                <button onClick={() => setDashboardView("drafts")} className={`flex-1 rounded-md px-2 py-1.5 text-center text-[14px] font-medium ${dashboardView === "drafts" ? "bg-surface text-foreground shadow-soft" : "text-muted"}`}>Drafts</button>
-              </div>
+              {/* Reviews and Drafts moved into the Inbox (Derek, 2026-10-06). */}
               {/* The desktop header's Add client, which a phone would otherwise
                   have no way to reach now that the directory is off the nav. */}
               {dashboardView === "work" && canAdmin && (
@@ -2817,11 +2817,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   {[...users].sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : a.name.localeCompare(b.name))).map((u) => <option key={u.id} value={u.id}>{u.id === me.id ? `${u.name.split(/\s+/)[0]} (you)` : u.name.split(/\s+/)[0]}</option>)}
                 </select>
               )}
-              <div className="inline-flex overflow-hidden rounded-md border">
-                <button onClick={() => setDashboardView("work")} className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "work" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Work</button>
-                <button onClick={() => setDashboardView("reviews")} title="Everything out with a client right now" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "reviews" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Reviews</button>
-                <button onClick={() => setDashboardView("drafts")} title="Everything written and not sent yet" className={`px-2.5 py-1.5 text-[13px] font-medium ${dashboardView === "drafts" ? "bg-accent-soft text-accent" : "bg-background text-muted hover:text-foreground"}`}>Drafts</button>
-              </div>
               {/* De-emphasized on purpose — the Dashboard is meant to be the
                   one place everyone works from; this is just an escape
                   hatch to the flat list, not a peer to it. */}
@@ -2931,6 +2926,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onSendTeam={sendTeam}
               onPatchTask={(id, patch) => patchTask(id, patch)}
               listsFor={(cid) => projectsForClient(cid).map((x) => ({ id: x.id, name: x.name }))}
+              // Task drafts and reviews sent back, in the Inbox (Derek, 2026-10-06).
+              workDrafts={pendingSends.drafts.map((d) => ({ id: d.id, taskId: d.taskId, clientId: d.clientId, subject: d.subject, preview: d.preview, at: d.at,
+                where: d.taskId ? tasks.find((t) => t.id === d.taskId)?.title ?? null : null, clientName: clientById(d.clientId)?.name ?? null }))}
+              reviewsBack={openReviews.yourMove.map((r) => ({ id: r.id, taskId: r.taskId, name: r.name, days: r.days,
+                taskTitle: tasks.find((t) => t.id === r.taskId)?.title ?? null, clientName: (() => { const t = tasks.find((x) => x.id === r.taskId); return t ? clientById(t.clientId)?.name ?? null : null; })() }))}
+              onOpenClientDraft={(cid) => { openClientList(cid, null); setClientTab("chat"); }}
               onAddComment={(id, body) => addComment(id, body)}
               onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
               ghlUrlFor={(contactId) => { const ct = contactById(contactId); const sub = ct ? clientById(ct.clientId) : null; return ct?.ghlContactId && sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null; }}
@@ -2950,29 +2951,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
           <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
-        ) : myWork && dashboardView === "drafts" ? (
-          <DraftsBoard groups={pendingSends} loading={draftsLoading} onRefresh={loadPendingSends}
-            rowContext={(row) => {
-              const client = clientById(row.clientId);
-              if (!client) return null;
-              const task = row.taskId ? tasks.find((t) => t.id === row.taskId) : null;
-              return { clientName: client.name, taskTitle: task?.title ?? null };
-            }}
-            // A draft on a task opens that task. One on the client itself was
-            // written in the Journal's composer, so that is where it opens, not
-            // on the client's task list where there is no sign of it.
-            onOpen={(row) => {
-              if (row.taskId) { setOpenTaskId(row.taskId); return; }
-              openClientList(row.clientId, null);
-              setClientTab("chat");
-            }} />
-        ) : myWork && dashboardView === "reviews" ? (
-          <ReviewsBoard groups={openReviews} loading={reviewsLoading} onRefresh={loadOpenReviews} videoStorage={videoStorage}
-            taskContext={(taskId) => {
-              const t = tasks.find((x) => x.id === taskId);
-              return t ? { taskTitle: t.title, clientName: clientById(t.clientId)?.name ?? "Unknown client" } : null;
-            }}
-            onOpenTask={setOpenTaskId} />
         ) : showCompletedLog ? (
           // Now an All Tasks mode rather than a My Work tab — day-grouped feed
           // of what finished and when. The header's scope answers WHOSE work,

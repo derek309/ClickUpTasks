@@ -57,6 +57,12 @@ export type InboxViewProps = {
   contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; ghlContactId?: string | null }[];
   /** The side panel's live task card: status, Mark done. */
   onPatchTask: (taskId: string, patch: Partial<Task>) => void;
+  /** Emails written on a task or a client and not sent, shown in Drafts (2026-10-06). */
+  workDrafts?: { id: string; taskId: string | null; clientId: string; subject: string; preview: string; at: string; where: string | null; clientName: string | null }[];
+  /** Reviews the client sent changes back on: ours to act on, top of the Inbox. */
+  reviewsBack?: { id: string; taskId: string; name: string; days: number | null; taskTitle: string | null; clientName: string | null }[];
+  /** A draft written on a client (in its Journal), opened there. */
+  onOpenClientDraft?: (clientId: string) => void;
   /** A client's lists, for the task card's List box. */
   listsFor: (clientId: string) => { id: string; name: string }[];
   /** Team chat: a task's chat (as a comment), a direct message, or the team group. */
@@ -130,7 +136,9 @@ export default function InboxView(p: InboxViewProps) {
   const setCursor = (key: string | null) => setCursorAt({ key, i: Math.max(0, visible.findIndex((t) => t.key === key)) });
 
   const queued = p.prefs.queuedDrafts ?? [];
-  const count = (f: Folder) => f === "drafts" ? drafts.size + queued.length : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
+  const workDrafts = p.workDrafts ?? [];
+  const reviewsBack = p.reviewsBack ?? [];
+  const count = (f: Folder) => f === "drafts" ? drafts.size + queued.length + workDrafts.length : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
 
   const undoToast = (text: string, undo: () => Promise<void> | void) => p.pushToast(text, { label: "Undo", run: () => { undo(); } });
   const done = async (keys: string[]) => {
@@ -264,7 +272,43 @@ export default function InboxView(p: InboxViewProps) {
                     ))}
                   </div>
                 )}
-                {!inbox.loading && !visible.length && !(folder === "drafts" && queued.length) && (
+                {/* Emails written on a task or a client and not sent (Derek, 2026-10-06:
+                    the Clients page's Drafts tab moved here). Opening one opens the
+                    task, where its email window is. */}
+                {folder === "drafts" && !q && workDrafts.length > 0 && (
+                  <div className="border-b">
+                    <div className="px-4 pb-1 pt-3 text-[13px] font-bold uppercase tracking-wide text-muted">On a task or client</div>
+                    {[...workDrafts].sort((a, b) => a.at.localeCompare(b.at)).map((d) => (
+                      <button key={d.id} onClick={() => (d.taskId ? p.onOpenTask(d.taskId, "Drafts") : p.onOpenClientDraft?.(d.clientId))}
+                        className="flex w-full items-start gap-3 border-t px-4 py-2.5 text-left hover:bg-background">
+                        <span aria-hidden className="mt-0.5 text-[18px]">📝</span>
+                        <span className="min-w-0 flex-1">
+                          <b className="block truncate">{d.subject || "(no subject)"}</b>
+                          <span className="block truncate text-[14px] text-muted">{[d.clientName, d.where ? `on ${d.where}` : "on the client"].filter(Boolean).join(" · ")}</span>
+                          {d.preview && <span className="block truncate text-[14px] text-muted">{d.preview}</span>}
+                        </span>
+                        <span className="shrink-0 text-[14px] text-muted">{new Date(d.at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* Reviews a client sent changes back on: yours to act on (2026-10-06). */}
+                {folder === "inbox" && !q && reviewsBack.length > 0 && (
+                  <div className="border-b bg-highlight-soft/40">
+                    <div className="px-4 pb-1 pt-3 text-[13px] font-bold uppercase tracking-wide text-highlight">Changes sent back · {reviewsBack.length}</div>
+                    {reviewsBack.map((r) => (
+                      <button key={r.id} onClick={() => p.onOpenTask(r.taskId, "Inbox")} className="flex w-full items-start gap-3 border-t px-4 py-2.5 text-left hover:bg-background">
+                        <span aria-hidden className="mt-0.5 text-[18px]">↩️</span>
+                        <span className="min-w-0 flex-1">
+                          <b className="block truncate">{r.clientName ? `${r.clientName.split(/\s+/)[0]} sent changes back: ` : "Changes sent back: "}{r.name}</b>
+                          <span className="block truncate text-[14px] text-muted">{r.taskTitle ?? "Open the task"}</span>
+                        </span>
+                        {r.days !== null && <span className="shrink-0 text-[14px] text-muted">{r.days === 0 ? "Today" : `${r.days} ${r.days === 1 ? "day" : "days"}`}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!inbox.loading && !visible.length && !(folder === "drafts" && (queued.length || workDrafts.length)) && !(folder === "inbox" && !q && reviewsBack.length) && (
                   <div className="px-6 py-16 text-center text-muted">
                     <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : folder === "trash" ? "Trash is empty" : "Nothing here"}</div>
                     {folder === "inbox" && !q && <div className="mt-1">{p.prefs.unreadOnly ? "Nothing unread." : "Every message is answered, snoozed or archived."}</div>}
