@@ -655,13 +655,13 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} />
+          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} onArchive={done} />
           <SideResizer p={p} />
           <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
         </div>
       ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} />
+        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} onArchive={done} />
         <SideResizer p={p} />
         <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
       </div>
@@ -672,8 +672,8 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
 }
 
 // ── A text conversation as a chat ─────────────────────────────────────────
-function ChatView({ p, t, typing, onDraft, emailInstead }: {
-  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; emailInstead: (to: string, body: string) => void;
+function ChatView({ p, t, typing, onDraft, emailInstead, onArchive }: {
+  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; emailInstead: (to: string, body: string) => void; onArchive?: () => void;
 }) {
   const [shown, setShown] = useState(CHAT_PAGE);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -716,7 +716,7 @@ function ChatView({ p, t, typing, onDraft, emailInstead }: {
         {typing && <div className="mt-3 italic text-muted">{typing} is writing a reply…</div>}
       </div>
       <div className="border-t px-3 py-3 sm:px-4">
-        <Composer key={t.key} p={p} t={t} compact onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} />
+        <Composer key={t.key} p={p} t={t} compact onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} onArchive={onArchive} />
       </div>
     </div>
   );
@@ -792,8 +792,8 @@ const fullTime = (iso: string) => new Date(iso).toLocaleString([], { month: "sho
 // ── An email conversation (Derek, 2026-10-01, mockup
 // https://claude.ai/artifact/Tei4W4znGdehdTpFJAxBP1): oldest first, older
 // emails folded to one line, the newest open at the bottom with Reply under it.
-function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
-  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void;
+function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: {
+  p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; onArchive?: () => void;
   compose: { mode: ComposeMode; m: Message } | null; setCompose: (c: { mode: ComposeMode; m: Message } | null) => void;
 }) {
   const oldestFirst = useMemo(() => [...t.messages].reverse(), [t.messages]);
@@ -810,7 +810,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
   const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const others = [...new Set(oldestFirst.filter((m) => m.direction === "inbound").map((m) => whoWrote(m, t, p).name))];
   const composer = (m: Message) => compose?.m.id === m.id
-    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} /></div>
+    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} onArchive={onArchive} /></div>
     : null;
   return (
     <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1000px]:overflow-y-auto">
@@ -1309,13 +1309,15 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, hidden =
 let signatureCache: Promise<string> | null = null;
 const loadSignature = () => (signatureCache ??= authedFetch("/api/signature").then((r) => (r.ok ? r.json() : null)).then((j) => (typeof j?.signature === "string" ? j.signature : "")).catch(() => ""));
 
-function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false, onUndone }: {
+function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false, onUndone, onArchive }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
   mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
   /** Under a chat: two lines to start, Enter sends, Shift+Enter is a new line. */
   compact?: boolean;
   /** Undo on a reply still in its undo window: open the reply box again. */
   onUndone?: () => void;
+  /** Archive the conversation and go back to the list (Send and archive). */
+  onArchive?: () => void;
 }) {
   // Facebook and Instagram only let a business reply within 24 hours of the
   // person's last message (Meta's rule). Said before you type, not after.
@@ -1488,13 +1490,14 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
 
   // Send sends: no typo check in the way (Derek, 2026-10-02: "it's already
   // been read and approved"). Improve with AI is the button for that.
-  const send = async () => {
+  // archive: Send and archive (the ▾'s choice, remembered as the default).
+  const send = async (archive = !!p.prefs.sendAndArchive && !!onArchive) => {
     const body = rich ? text : text.trim();
     if (!hasText) return;
     const clear = () => { put(""); saver.now(""); setFiles([]); setNote(null); onDraft(); };
     const go = async () => {
       setBusy("send");
-      try { await deliver(body); p.pushToast("Sent"); onSent(); }
+      try { await deliver(body); p.pushToast("Sent"); onSent(); if (archive) onArchive?.(); }
       catch (e) { put(body); saver.now(body); onDraft(); p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
       finally { setBusy(null); }
     };
@@ -1516,6 +1519,8 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         if (mounted.current) put(body); else onUndone?.();
       } });
       onSent();
+      // Back to the list at once; it still sends when the undo window ends.
+      if (archive) onArchive?.();
     } else go();
   };
 
@@ -1685,16 +1690,27 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
         <span className="flex-1" />
         {(t.channel === "sms" || t.channel === "call") && <span className="tabular-nums text-muted">{text.length} / 160</span>}
         <div className="relative flex">
-          <button onClick={() => send()} disabled={busy !== null || !hasText || metaClosed} className={`h-10 bg-accent px-5 font-bold text-white disabled:opacity-50 ${p.onSchedule && t.clientId ? "rounded-l-lg" : "rounded-lg"}`}>{busy === "send" ? "Checking…" : "Send"}</button>
-          {p.onSchedule && t.clientId && <>
-            <button onClick={() => setLaterOpen(!laterOpen)} aria-label="Send later" className="h-10 rounded-r-lg border-l border-white/30 bg-accent px-2.5 text-white">▾</button>
-            {laterOpen && (
-              <div className="absolute bottom-12 right-0 z-50 w-64 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-                <button onClick={() => later(tomorrow8())} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Send tomorrow, 8 AM</button>
-                <button onClick={() => later(monday8())} className="block w-full rounded-md px-3 py-2.5 text-left hover:bg-background">Send Monday, 8 AM</button>
-              </div>
-            )}
-          </>}
+          {/* Send, or Send and archive: the ▾ picks one, sends, and keeps it as
+              the button's default (Derek, 2026-10-07). Send later lives there too. */}
+          <button onClick={() => send()} disabled={busy !== null || !hasText || metaClosed} className="h-10 rounded-l-lg bg-accent px-5 font-bold text-white disabled:opacity-50">{busy === "send" ? "Checking…" : p.prefs.sendAndArchive && onArchive ? "Send & archive" : "Send"}</button>
+          <button onClick={() => setLaterOpen(!laterOpen)} aria-label="More ways to send" aria-expanded={laterOpen} className="h-10 rounded-r-lg border-l border-white/30 bg-accent px-2.5 text-white">▾</button>
+          {laterOpen && (<>
+            <div className="fixed inset-0 z-40" onClick={() => setLaterOpen(false)} />
+            <div className="absolute bottom-12 right-0 z-50 w-64 rounded-xl bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              {([[false, "Send"], [true, "Send and archive"]] as const).filter(([a]) => !a || onArchive).map(([a, label]) => (
+                <button key={label} disabled={busy !== null || !hasText || metaClosed}
+                  onClick={() => { setLaterOpen(false); p.setPrefs({ sendAndArchive: a }); void send(a); }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left hover:bg-background disabled:opacity-50">
+                  <span className="w-4 text-accent">{!!p.prefs.sendAndArchive === a ? "✓" : ""}</span>{label}
+                </button>
+              ))}
+              {p.onSchedule && t.clientId && <>
+                <div className="my-1 border-t" />
+                <button onClick={() => later(tomorrow8())} className="block w-full rounded-md px-3 py-2.5 pl-9 text-left hover:bg-background">Send tomorrow, 8 AM</button>
+                <button onClick={() => later(monday8())} className="block w-full rounded-md px-3 py-2.5 pl-9 text-left hover:bg-background">Send Monday, 8 AM</button>
+              </>}
+            </div>
+          </>)}
         </div>
       </div>
     </div>

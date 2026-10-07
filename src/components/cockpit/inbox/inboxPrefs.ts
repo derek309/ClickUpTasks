@@ -14,6 +14,8 @@ export type InboxPrefs = {
   showClientAndTask: boolean;
   replies: { name: string; text: string }[];
   undoSeconds: 0 | 5 | 10 | 30;
+  /** The Send button sends and archives the conversation (picked from its ▾, Derek 2026-10-07). */
+  sendAndArchive?: boolean;
   aiNudge: boolean;
   badge: boolean;
   popup: boolean;
