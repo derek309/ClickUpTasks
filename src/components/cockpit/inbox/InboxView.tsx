@@ -24,7 +24,8 @@ import {
   type ChatItem, type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
-import { draftKeys, draftSaver, readDraft, type InboxPrefs } from "./inboxPrefs";
+import { draftKeys, draftSaver, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
+import { addPendingSend, removePendingSend, usePendingSends } from "./pendingSends";
 import { allowEntry } from "@/lib/inbox";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
@@ -368,12 +369,14 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ id: string; subject: string; body: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    const r = await authedFetch("/api/inbox/reminders").catch(() => null);
-    const j = r?.ok ? await r.json().catch(() => null) : null;
-    if (j?.reminders) setList(j.reminders);
+  // Read on open and every five minutes, for a reminder queued while it's open.
+  useEffect(() => {
+    let live = true;
+    const load = () => authedFetch("/api/inbox/reminders").then((r) => (r.ok ? r.json() : null)).then((j) => { if (live && j?.reminders) setList(j.reminders); }, () => {});
+    load();
+    const i = setInterval(load, 5 * 60_000);
+    return () => { live = false; clearInterval(i); };
   }, []);
-  useEffect(() => { void load(); const i = setInterval(() => void load(), 5 * 60_000); return () => clearInterval(i); }, [load]);
   const act = async (id: string, action: "send" | "drop" | "save", extra?: { subject: string; body: string }) => {
     setBusy(id);
     const r = await authedFetch("/api/inbox/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action, ...extra }) }).catch(() => null);
@@ -434,6 +437,31 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
         })}
       </div>
     </section>
+  );
+}
+
+let pendingSeq = 0;
+const newPendingId = () => `ps_${Date.now()}_${++pendingSeq}`;
+
+/** Replies inside their undo window, at the bottom of the conversation: the
+ *  message, faded, and a small Undo tab under it until it goes. */
+function PendingSends({ t }: { t: InboxThread }) {
+  const list = usePendingSends(t.key);
+  if (!list.length) return null;
+  const chat = !isEmailThread(t);
+  return (
+    <div className="mt-2 space-y-3">
+      {list.map((x) => (
+        <div key={x.id} className={chat ? "flex flex-col items-end" : ""}>
+          {chat
+            ? <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-accent px-3.5 py-2 text-white opacity-70">{x.rich ? htmlToText(x.body) : x.body}</div>
+            : <div className="rounded-xl border px-4 py-3 opacity-70"><b className="block">You</b>{x.rich ? <div className="rte-content mt-1 text-[16px]" dangerouslySetInnerHTML={{ __html: safeMessageHtml(x.body) }} /> : <div className="mt-1 whitespace-pre-wrap">{x.body}</div>}</div>}
+          <button onClick={x.undo} className={`-mt-px rounded-b-lg bg-surface px-3 py-1 text-[14px] font-semibold text-accent ring-1 ring-[var(--border)] hover:bg-background ${chat ? "mr-3" : "ml-4"}`}>
+            Undo
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -684,6 +712,7 @@ function ChatView({ p, t, typing, onDraft, emailInstead }: {
         {items.map((it) => it.kind === "day"
           ? <div key={it.key} className="flex items-center gap-3 pb-1 pt-4 font-semibold text-muted" role="separator"><span className="h-px flex-1 bg-[var(--border)]" />{it.label}<span className="h-px flex-1 bg-[var(--border)]" /></div>
           : <ChatGroup key={it.key} g={it} t={t} p={p} />)}
+        <PendingSends t={t} />
         {typing && <div className="mt-3 italic text-muted">{typing} is writing a reply…</div>}
       </div>
       <div className="border-t px-3 py-3 sm:px-4">
@@ -781,7 +810,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
   const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const others = [...new Set(oldestFirst.filter((m) => m.direction === "inbound").map((m) => whoWrote(m, t, p).name))];
   const composer = (m: Message) => compose?.m.id === m.id
-    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} /></div>
+    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} /></div>
     : null;
   return (
     <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1000px]:overflow-y-auto">
@@ -802,6 +831,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
           );
         })}
       </div>
+      <PendingSends t={t} />
       {compose?.m.id === last.id ? composer(last) : (
         <div className="flex flex-wrap gap-2 pt-4">
           <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
@@ -1279,11 +1309,13 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, hidden =
 let signatureCache: Promise<string> | null = null;
 const loadSignature = () => (signatureCache ??= authedFetch("/api/signature").then((r) => (r.ok ? r.json() : null)).then((j) => (typeof j?.signature === "string" ? j.signature : "")).catch(() => ""));
 
-function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false }: {
+function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false, onUndone }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
   mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
   /** Under a chat: two lines to start, Enter sends, Shift+Enter is a new line. */
   compact?: boolean;
+  /** Undo on a reply still in its undo window: open the reply box again. */
+  onUndone?: () => void;
 }) {
   // Facebook and Instagram only let a business reply within 24 hours of the
   // person's last message (Meta's rule). Said before you type, not after.
@@ -1330,6 +1362,9 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [note, setNote] = useState<{ kind: "ai" | "error"; text: string; before?: string } | null>(null);
   const [busy, setBusy] = useState<"improve" | "shorter" | "draft" | "times" | "send" | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  // Whether this box is still open, for an Undo after it closed.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // Insert from task (Derek, 2026-10-02): the linked task's review links,
   // other links and files, one click into the email.
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) ?? null : null;
@@ -1465,9 +1500,22 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
     };
     clear();
     if (p.prefs.undoSeconds > 0) {
+      // The reply goes up into the conversation with Undo under it, no pop up
+      // (Derek, 2026-10-07); it sends when the undo window ends.
+      const id = newPendingId();
       let cancelled = false;
-      const timer = setTimeout(() => { if (!cancelled) go(); }, p.prefs.undoSeconds * 1000);
-      p.pushToast(`Sending in ${p.prefs.undoSeconds} seconds`, { label: "Undo", run: () => { cancelled = true; clearTimeout(timer); put(body); saver.now(body); onDraft(); p.pushToast("Not sent. It's back in your reply."); } });
+      const timer = setTimeout(async () => {
+        if (cancelled) return;
+        removePendingSend(id);
+        try { await deliver(body); }
+        catch (e) { writeDraft(p.me.id, t.key, body); onDraft(); onUndone?.(); if (mounted.current) put(body); p.pushToast(e instanceof Error ? `Not sent: ${e.message}` : "Couldn't send it. It's back in your reply."); }
+      }, p.prefs.undoSeconds * 1000);
+      addPendingSend({ id, threadKey: t.key, body, rich, undo: () => {
+        cancelled = true; clearTimeout(timer); removePendingSend(id);
+        writeDraft(p.me.id, t.key, body); onDraft();
+        if (mounted.current) put(body); else onUndone?.();
+      } });
+      onSent();
     } else go();
   };
 
@@ -2316,6 +2364,8 @@ function ContactForm({ p, contact, onClose }: { p: InboxViewProps; contact: Cont
       if (j.details) { setD(j.details); setGhlUrl(j.ghlUrl ?? null); if (j.contact) p.onContactUpdated?.(j.contact); } else setError(j.error ?? "Couldn't load this contact.");
     }, () => live && setError("Couldn't load this contact."));
     return () => { live = false; };
+    // Once per contact; p is a new object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contact.id]);
   const set = (k: keyof Omit<Details, "extras">, v: string) => setD((x) => (x ? { ...x, [k]: v } : x));
   const save = async () => {
