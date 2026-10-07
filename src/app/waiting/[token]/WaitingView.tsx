@@ -17,7 +17,7 @@ type WaitingProject = { id: string; name: string };
 // One message in a task's running chat — see ./messages/route.ts (client
 // sends) and the team's existing task drawer (reads/sends the same
 // underlying `messages` row, just via the internal app instead of here).
-type WaitingSender = { name: string; avatarUrl: string | null; color: string; initials: string };
+type WaitingSender = { name: string; avatarUrl: string | null; color: string; initials: string; phone?: string | null };
 type WaitingMessage = { id: string; from: "team" | "client"; body: string; at: string; attachments: WaitingAttachment[]; sender?: WaitingSender | null };
 type WaitingTask = {
   id: string; projectId: string | null; title: string; due: string | null; description: string; status: string; needsResponse: boolean;
@@ -28,6 +28,8 @@ type WaitingTask = {
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
   thread: WaitingMessage[];
+  /** Changes they sent, ticked off by the team. */
+  changes?: { id: string; title: string; done: boolean }[];
 };
 // "Here's where you are, what's done, what's next" — see
 // A draft attachment is either a stored file (has `path`, uploaded via
@@ -145,7 +147,7 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 // a second one nested inside a card.
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
-  onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
+  onBody, onFiles, onRemoveAttachment, onLinkUrl, onLinkLabel, onAddLink, onSend,
   onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack,
 }: {
   task: WaitingTask;
@@ -270,8 +272,8 @@ function TaskDetailBody({
           <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
         </label>
         {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
-        {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Write a doc"}</button>}
-        <button onClick={onToggleLink} className="px-2 text-[16px] font-semibold text-accent hover:underline">🔗 Add a link</button>
+        {!isDone && !t.hasDoc && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : "📝 Write a doc"}</button>}
+
         <span className="flex-1" />
         <button
           onClick={() => { onSend(); markAnswered(); }}
@@ -291,6 +293,7 @@ function TaskDetailBody({
   // task's details in a side panel.
   const card = "rounded-[5px] border bg-surface";
   const shown = displayThread.slice(hiddenCount);
+  const sentFiles = displayThread.filter((m) => m.from === "client").flatMap((m) => m.attachments);
   return (
     <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
       <section className={`${card} flex min-w-0 flex-col overflow-hidden lg:min-h-[70vh]`}>
@@ -301,6 +304,18 @@ function TaskDetailBody({
             <span className="text-[16px] text-muted">{lastTeam ? `With ${lastTeam.name}` : "With our team"} · {displayThread.length} {displayThread.length === 1 ? "message" : "messages"}</span>
           </div>
         </div>
+        {/* The doc to review, first thing in the conversation; it opens over
+            this page and they come straight back (Derek, 2026-10-07). */}
+        {t.hasDoc && (
+          <div className="mx-5 mt-4 flex flex-wrap items-center gap-3 rounded-[5px] border-2 border-accent bg-accent-soft/40 px-4 py-3">
+            <span aria-hidden className="text-[26px]">📝</span>
+            <div className="min-w-0 flex-1">
+              <b className="block text-[17px]">{isDone ? "The document" : "Your document is ready to review"}</b>
+              <span className="text-[16px] text-muted">{isDone ? "Open it any time." : "Read it, change anything right on the page, then press Approve."}</span>
+            </div>
+            <button onClick={onDoc} disabled={docBusy} className="h-11 rounded-[5px] bg-accent px-5 text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-50">{docBusy ? "Opening…" : isDone ? "Open it" : "Review and approve"}</button>
+          </div>
+        )}
         <div ref={threadRef} className="flex-1 px-5 py-4">
           {displayThread.length === 0 ? (
             <p className="py-6 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
@@ -375,6 +390,49 @@ function TaskDetailBody({
             </button>
           )}
         </div>
+        {/* Their changes, ticked off as we do them (Derek, 2026-10-07). */}
+        {(t.changes?.length ?? 0) > 0 && (
+          <div className={`${card} p-4`}>
+            <b className="block text-[17px]">Your changes · {t.changes!.filter((c) => c.done).length} of {t.changes!.length} done</b>
+            <ul className="mt-2 grid gap-2">
+              {t.changes!.map((c) => (
+                <li key={c.id} className="flex items-start gap-2 text-[16px]">
+                  <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${c.done ? "bg-success text-white" : "border-2 border-border"}`}>{c.done ? "✓" : ""}</span>
+                  <span className={c.done ? "text-muted line-through decoration-muted/50" : ""}>{c.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {/* What they've sent here, so nothing goes twice. */}
+        {sentFiles.length > 0 && (
+          <div className={`${card} p-4`}>
+            <b className="block text-[17px]">What you&apos;ve sent · {sentFiles.length}</b>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {sentFiles.slice(0, 12).map((f) => (
+                f.kind === "image" && f.url
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" title={f.name}><img src={f.url} alt={f.name} className="aspect-square w-full rounded-[5px] border object-cover" /></a>
+                  : <a key={f.id} href={f.url ?? undefined} target="_blank" rel="noopener noreferrer" title={f.name} className="flex aspect-square w-full items-center justify-center rounded-[5px] border bg-background p-1 text-center text-[13px] font-semibold text-muted">{(f.name.split(".").pop() ?? "file").toUpperCase()}</a>
+              ))}
+            </div>
+            {sentFiles.length > 12 && <span className="mt-1 block text-[16px] text-muted">and {sentFiles.length - 12} more in the conversation</span>}
+          </div>
+        )}
+        {/* Someone to talk to, for those who'd rather not type. */}
+        {lastTeam && (
+          <div className={`${card} p-4`}>
+            <b className="block text-[17px]">Rather talk it through?</b>
+            <span className="text-[16px] text-muted">{lastTeam.name} is working on this with you.</span>
+            {lastTeam.phone ? (
+              <div className="mt-3 flex gap-2">
+                <a href={`tel:${lastTeam.phone.replace(/[^\d+]/g, "")}`} className="flex h-11 flex-1 items-center justify-center rounded-[5px] border-2 font-bold text-accent hover:bg-background">📞 Call</a>
+                <a href={`sms:${lastTeam.phone.replace(/[^\d+]/g, "")}`} className="flex h-11 flex-1 items-center justify-center rounded-[5px] border-2 font-bold text-accent hover:bg-background">💬 Text</a>
+              </div>
+            ) : <span className="mt-2 block text-[16px] text-muted">Write here any time; we answer the same day.</span>}
+            {lastTeam.phone && <span className="mt-2 block text-center text-[16px] text-muted">{lastTeam.phone}</span>}
+          </div>
+        )}
       </aside>
     </div>
   );
@@ -769,6 +827,21 @@ export default function WaitingView({ token }: { token: string }) {
     } finally { setDocBusyId(null); }
   };
 
+  // The doc over the chat, not a new tab (Derek, 2026-10-07: "we want them to
+  // open the doc to review and approve it ... but we can't take them to
+  // another page"). Closing it reloads, so an approval shows at once.
+  const [docView, setDocView] = useState<{ taskId: string; url: string } | null>(null);
+  const viewDoc = async (taskId: string) => {
+    setDocBusyId(taskId);
+    try {
+      const res = await fetch(`/api/waiting/${token}/doc`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) { alert(j.error || "Couldn't open the doc. Try again."); return; }
+      setDocView({ taskId, url: j.url as string });
+      setTasks((list) => list?.map((t) => (t.id === taskId ? { ...t, hasDoc: true } : t)) ?? list);
+    } finally { setDocBusyId(null); }
+  };
+
   const submitNewRequest = async () => {
     setNewSaving(true);
     const docWin = newWithDoc ? window.open("about:blank", "_blank") : null;
@@ -857,6 +930,17 @@ export default function WaitingView({ token }: { token: string }) {
     // short hero, then content that scrolls with the page like any other
     // site (see below).
     <div className="min-h-screen bg-background">
+      {docView && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-label="Your document">
+          <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
+            <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
+              <button onClick={() => { setDocView(null); void load(); }} className="inline-flex h-10 items-center gap-2 rounded-[5px] border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← Back to the chat</button>
+              <span className="ml-auto truncate text-[16px] font-bold text-white">Your document</span>
+            </div>
+          </div>
+          <iframe src={docView.url} title="Your document" className="min-h-0 w-full flex-1 border-0 bg-surface" />
+        </div>
+      )}
       {selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
           <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
@@ -901,7 +985,7 @@ export default function WaitingView({ token }: { token: string }) {
           onSend={() => sendChatMessage(selectedTask.id)}
           onSetStatus={(status) => setTaskStatus(selectedTask.id, status)}
           statusBusy={statusBusyIds.has(selectedTask.id)}
-          onDoc={() => openDoc(selectedTask.id)}
+          onDoc={() => void viewDoc(selectedTask.id)}
           docBusy={docBusyId === selectedTask.id}
           otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).sort(sortFn).map((o) => ({ id: o.id, title: o.title }))}
           onOpenTask={openTask}

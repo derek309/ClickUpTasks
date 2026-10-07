@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!taskId) return NextResponse.json({ error: "Missing taskId." }, { status: 400 });
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a message or attachment first." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, contact_id, title, status, waiting_on_client, assignee_id").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, contact_id, title, status, waiting_on_client, assignee_id, subtasks").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 
@@ -55,7 +55,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // Their message answers a task that was waiting on them: it comes back to
   // us in Review, the same rule as answering with a choice (Derek,
   // 2026-10-07: Pam replied and the task still said Waiting).
-  const patch = clientAnswerPatch(task, notifyRecipient);
+  const patch: Record<string, unknown> = clientAnswerPatch(task, notifyRecipient);
+  // What they wrote goes on the task's checklist as one of their changes, so
+  // it can be ticked off here and they see it done on their page (Derek,
+  // 2026-10-07). A few words of thanks are not a change.
+  const firstLine = text.split(/\n/).map((x) => x.trim()).find(Boolean) ?? "";
+  if (firstLine.split(/\s+/).length >= 4) {
+    const list = Array.isArray(task.subtasks) ? task.subtasks : [];
+    patch.subtasks = [...list, { id: "s_" + randomUUID().replace(/-/g, "").slice(0, 12), title: firstLine.slice(0, 200), done: false, fromClient: true }];
+  }
   if (Object.keys(patch).length) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({

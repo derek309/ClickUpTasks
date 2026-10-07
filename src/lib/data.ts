@@ -794,6 +794,9 @@ export interface Subtask {
   id: string;
   title: string;
   done: boolean;
+  /** A change the client sent from their portal: shown to them, ticked off
+   *  here (Derek, 2026-10-07: "see each one get checked off"). */
+  fromClient?: boolean;
   assigneeId?: string | null;
   due?: string | null; // ISO yyyy-mm-dd
   /** Delegation instructions — what the assignee is being asked to do. Only

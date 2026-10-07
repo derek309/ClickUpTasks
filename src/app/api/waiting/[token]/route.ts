@@ -54,7 +54,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     waiting_on_client: boolean | null; client_response: { body: string; attachments: Attachment[]; submittedAt: string } | null;
     attachments: Attachment[] | null; updated_at: string | null;
   };
-  const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments, updated_at";
+  const cols = "id, project_id, title, due, description, status, waiting_on_client, client_response, attachments, updated_at, subtasks";
   // is_private tasks never reach a public page, whatever client they're filed
   // under — RLS protects them from other teammates, but this route reads with
   // the service role, so the filter has to be explicit here. A project-scoped
@@ -133,11 +133,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // this public route.
   const senderIds = Array.from(new Set((messageRows ?? []).map((m) => m.created_by).filter((id): id is string => !!id)));
   const { data: senderRows } = senderIds.length
-    ? await supabaseAdmin.from("profiles").select("member_id, name, color, avatar_url").in("member_id", senderIds)
-    : { data: [] as { member_id: string; name: string; color: string; avatar_url: string | null }[] };
+    ? await supabaseAdmin.from("profiles").select("member_id, name, color, avatar_url, email_signature").in("member_id", senderIds)
+    : { data: [] as { member_id: string; name: string; color: string; avatar_url: string | null; email_signature: string | null }[] };
+  // Their phone, read from their email signature (the one place it is kept),
+  // so the client can call or text the person on it.
+  const phoneOf = (sig: unknown) => (typeof sig === "string" ? htmlToText(sig).match(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0] ?? null : null);
   const senderById = new Map((senderRows ?? []).map((p) => [p.member_id as string, {
     name: (p.name as string) || "Team", avatarUrl: (p.avatar_url as string | null) ?? null,
     color: (p.color as string) || "#1b3a5c", initials: initialsOf((p.name as string) || "Team"),
+    phone: phoneOf(p.email_signature),
   }]));
 
   // Which tasks have a client document (Derek, 2026-10-05: a doc lives on a
@@ -181,6 +185,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       attachments,
       response: cr ? { body: cr.body, submittedAt: cr.submittedAt, attachments: responseAttachments } : null,
       thread,
+      // Their changes and whether each is done; never the team's own checklist.
+      changes: (((t as Record<string, unknown>).subtasks as { id: string; title: string; done: boolean; fromClient?: boolean }[] | null) ?? [])
+        .filter((s) => s.fromClient).map((s) => ({ id: s.id, title: s.title, done: !!s.done })),
     };
   }));
 
