@@ -2115,10 +2115,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // stack — "Following" isn't a filter, it's who's watching this client.
   const followingControl = !personalView && activeClient !== "all" && clientById(activeClient) ? (
     <div className="relative">
-      <button onClick={() => setFollowingOpen((o) => !o)} title="Following" className="flex items-center -space-x-1.5 rounded-md border bg-background px-1.5 py-1 hover:bg-accent-soft">
-        {(clientById(activeClient)!.assignedTo ?? []).length === 0
-          ? <I.user className="text-muted" />
-          : (clientById(activeClient)!.assignedTo ?? []).slice(0, 3).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
+      {/* A bell says what the faces are (Derek, 2026-10-06: "we need an icon"). */}
+      <button onClick={() => setFollowingOpen((o) => !o)} title="Following: who gets this client's updates" aria-label="Following"
+        className="flex items-center gap-1.5 rounded-md border bg-background px-1.5 py-1 hover:bg-accent-soft">
+        <I.bell className="text-muted" />
+        <span className="flex items-center -space-x-1.5">
+          {(clientById(activeClient)!.assignedTo ?? []).length === 0
+            ? <I.user className="text-muted" />
+            : (clientById(activeClient)!.assignedTo ?? []).slice(0, 3).map((uid) => (<Avatar key={uid} id={uid} size={20} />))}
+        </span>
       </button>
       {followingOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setFollowingOpen(false)} />
