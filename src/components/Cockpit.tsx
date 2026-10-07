@@ -2982,7 +2982,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               // Task drafts and reviews sent back, in the Inbox (Derek, 2026-10-06).
               workDrafts={pendingSends.drafts.map((d) => ({ id: d.id, taskId: d.taskId, clientId: d.clientId, subject: d.subject, preview: d.preview, at: d.at,
                 where: d.taskId ? tasks.find((t) => t.id === d.taskId)?.title ?? null : null, clientName: clientById(d.clientId)?.name ?? null }))}
-              reviewsBack={openReviews.yourMove.map((r) => ({ id: r.id, taskId: r.taskId, name: r.name, days: r.days,
+              // Only reviews on your own tasks, or on tasks nobody has (Derek,
+              // 2026-10-07: Justin saw Brian's changes on Derek's tasks).
+              reviewsBack={openReviews.yourMove.filter((r) => { const t = tasks.find((x) => x.id === r.taskId); return !!t && (!t.assigneeId || t.assigneeId === me.id || isOnPlateOf(t, me.id)); }).map((r) => ({ id: r.id, taskId: r.taskId, name: r.name, days: r.days,
                 taskTitle: tasks.find((t) => t.id === r.taskId)?.title ?? null, clientName: (() => { const t = tasks.find((x) => x.id === r.taskId); return t ? clientById(t.clientId)?.name ?? null : null; })() }))}
               onOpenClientDraft={(cid) => { openClientList(cid, null); setClientTab("chat"); }}
               // Delete a draft from the Drafts list (Derek, 2026-10-06), with Undo.
