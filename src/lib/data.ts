@@ -2045,6 +2045,10 @@ export function nextOccurrence(prev: Task, nextDue: string | null, newId: (prefi
     attachments: [...prev.attachments],
     ghlTaskId: null,
     draftEmail: null,
+    // A new cycle is ours to start, not waiting on the client: last cycle's
+    // wait came along with it, so the next Newsletter showed "Waiting on
+    // Brandon" while it was To do (Derek, 2026-10-07).
+    waitingOnClient: false,
   };
 }
 

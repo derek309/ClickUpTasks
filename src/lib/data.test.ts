@@ -704,6 +704,10 @@ describe("a new occurrence of a recurring task", () => {
     it("keeps the files the job needs every time", () => {
       expect(fresh.attachments).toHaveLength(1);
     });
+    it("is not waiting on the client, even when last cycle ended waiting", () => {
+      const waited = nextOccurrence({ ...finished, waitingOnClient: true } as typeof finished, "2026-10-16", ids);
+      expect(waited.waitingOnClient).toBe(false);
+    });
     it("is a new, open task on the next date", () => {
       expect(fresh.id).not.toBe("t_old");
       expect(fresh.status).toBe("todo");
