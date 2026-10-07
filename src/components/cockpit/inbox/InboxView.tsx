@@ -2569,6 +2569,16 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
               </label>
             )}
             <span className="flex-1" />
+            {/* Throw it away from here, not only from the Drafts list (Derek, 2026-10-06:
+                "how do I cancel this draft?"). A Claude draft leaves Drafts; Undo puts it back. */}
+            <button onClick={() => {
+              const was = p.prefs.queuedDrafts ?? [];
+              if (start.queuedId) {
+                p.setPrefs({ queuedDrafts: was.filter((d) => d.id !== start.queuedId) });
+                p.pushToast("Draft deleted", { label: "Undo", run: () => p.setPrefs({ queuedDrafts: was }) });
+              }
+              onClose();
+            }} title={start.queuedId ? "Delete this draft" : "Throw this message away"} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-danger">🗑 {start.queuedId ? "Delete draft" : "Discard"}</button>
             {kind === "text" && <span className="tabular-nums text-muted">{body.length} / 160</span>}
             <button disabled={busy !== null || !to || !hasText} onClick={send} title={`Send (${shortcut("Enter")})`} className="h-10 rounded-lg bg-accent px-6 font-bold text-white disabled:opacity-50">{busy === "send" ? "Sending…" : "Send"}</button>
           </div>
