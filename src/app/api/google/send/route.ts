@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { appendSignatureHtml, appendSignatureText } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
-import { replyHeadersFor, sentRfc822 } from "@/lib/sendMessageServer";
+import { replyHeadersFor, replyRecipientFor, sentRfc822 } from "@/lib/sendMessageServer";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -135,8 +135,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const replyTo = await replyHeadersFor(sender, clientId, replyToMessageId);
+    // A reply goes to whoever wrote that email, not the client's main contact.
+    const to = (await replyRecipientFor(clientId, replyToMessageId))?.email ?? toEmail.trim();
     const { id, threadId } = await sendGmailAs(sender, {
-      to: toEmail.trim(),
+      to,
       cc: ccList?.length ? ccList : undefined,
       bcc: bccList?.length ? bccList : undefined,
       subject: (subject || "").slice(0, 200),
@@ -147,7 +149,7 @@ export async function POST(req: NextRequest) {
       replyTo,
     });
     const rfc822MessageId = await sentRfc822(sender, id);
-    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, rfc822MessageId, from: sender, skippedAttachments: skipped.length ? skipped : undefined });
+    return NextResponse.json({ ok: true, gmailMessageId: id, gmailThreadId: threadId, rfc822MessageId, from: sender, to, skippedAttachments: skipped.length ? skipped : undefined });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gmail send failed." }, { status: 502 });
   }

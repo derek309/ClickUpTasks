@@ -132,6 +132,9 @@ const messageToRow = (m: Message) => ({
   id: m.id, contact_id: m.contactId, client_id: m.clientId, task_id: m.taskId ?? null, channel: m.channel, direction: m.direction,
   subject: m.subject, body: m.body, ghl_message_id: m.ghlMessageId, ghl_conversation_id: m.ghlConversationId ?? null, gmail_message_id: m.gmailMessageId ?? null, gmail_thread_id: m.gmailThreadId ?? null, rfc822_message_id: m.rfc822MessageId ?? null, created_by: m.createdBy, read: m.read,
   attachments: m.attachments, cc: m.cc, bcc: m.bcc,
+  // Who an email went to, when it wasn't the client's main contact (a reply
+  // to someone else on the thread). Left out otherwise, as before.
+  ...(m.peerAddress ? { peer_address: m.peerAddress } : {}),
 });
 const taskActionToRow = (a: TaskAction) => ({
   id: a.id, task_id: a.taskId, kind: a.kind, author_id: a.authorId, body: a.body, at: a.at,

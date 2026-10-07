@@ -118,6 +118,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   ];
   const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
   const messageDest = linkedContactInfo ?? linkedContact;
+  // A reply goes to whoever wrote the email it answers, not the client's main
+  // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
+  // Same rule as the server's replyRecipientFor.
+  const replyPeerOf = (id?: string | null): { email: string; name: string | null } | null => {
+    const m = id ? (messages ?? []).find((x) => x.id === id) : null;
+    const e = (m?.peerAddress ?? "").trim().toLowerCase();
+    return m && m.channel === "email" && m.clientId === task.clientId && e.includes("@") && !e.endsWith("@clickuplocal.com") ? { email: e, name: m.peerName ?? null } : null;
+  };
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
   const [subDraft, setSubDraft] = useState("");
@@ -1106,7 +1114,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
     if (!keepCurrent) {
       const now = new Date().toISOString();
-      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
+      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
     }
     setEmailOpenNonce((n) => n + 1);
   };
@@ -1487,7 +1495,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
-    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} toEmail={messageDest?.email || null} messages={messages}
+    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
       onSend={hasMessaging ? (email) => {
         onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
         setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });

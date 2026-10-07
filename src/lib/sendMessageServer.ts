@@ -52,6 +52,20 @@ export async function replyHeadersFor(sender: string, clientId: string, replyToM
   return readReplyHeaders(sender, { gmailMessageId: row.gmail_message_id as string | null, rfc822: row.rfc822_message_id as string | null }).catch(() => null);
 }
 
+/** Who a reply goes to: the person who wrote the email being answered (or
+ *  whom it went to, when it was ours), not the client's main contact. On
+ *  Matthew Whitman's task, answering Russell's email went to Matthew (Justin,
+ *  2026-10-07). Same rule as replyHeadersFor: only this client's own email.
+ *  Null means use the client's contact, as before. */
+export async function replyRecipientFor(clientId: string, replyToMessageId: string | null | undefined): Promise<{ email: string; name: string | null } | null> {
+  if (!replyToMessageId) return null;
+  const { data: row } = await supabaseAdmin.from("messages")
+    .select("client_id, channel, peer_address, peer_name").eq("id", replyToMessageId).maybeSingle();
+  const email = ((row?.peer_address as string | null) ?? "").trim().toLowerCase();
+  if (!row || row.client_id !== clientId || row.channel !== "email" || !email.includes("@") || email.endsWith(`@${SEND_DOMAIN}`)) return null;
+  return { email, name: (row.peer_name as string | null) ?? null };
+}
+
 /** The Message-ID Gmail gave an email just sent, kept so a later reply to it threads. */
 export async function sentRfc822(sender: string, gmailMessageId: string): Promise<string | null> {
   if (!gmailMessageId) return null;
@@ -100,7 +114,9 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   const authorEmail = (authorProfile?.email as string | null) ?? null;
   const sender = (input.fromEmail?.trim() || authorEmail || "").trim();
 
-  if (input.channel === "email" && contact.email && googleConfigured && sender.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) {
+  const replyPeer = input.channel === "email" ? await replyRecipientFor(input.clientId, input.replyToMessageId) : null;
+  const toEmail = replyPeer?.email ?? contact.email;
+  if (input.channel === "email" && toEmail && googleConfigured && sender.toLowerCase().endsWith(`@${SEND_DOMAIN}`)) {
     const attParts: { filename: string; mimeType: string; contentBase64: string }[] = [];
     let totalBytes = 0;
     let attachmentFailed = false;
@@ -118,13 +134,13 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
       try {
         const replyTo = await replyHeadersFor(sender, input.clientId, input.replyToMessageId);
         const { id: gmailMessageId, threadId: gmailThreadId } = await sendGmailAs(sender, {
-          to: contact.email, cc: input.cc.length ? input.cc : undefined, bcc: input.bcc.length ? input.bcc : undefined,
+          to: toEmail, cc: input.cc.length ? input.cc : undefined, bcc: input.bcc.length ? input.bcc : undefined,
           subject: (input.subject || "").slice(0, 200), body: appendSignatureHtml(input.body, signature), isHtml: true,
           fromName: (authorProfile?.name as string | null)?.trim() || undefined,
           attachments: attParts.length ? attParts : undefined,
           replyTo,
         });
-        return insertSentMessage(input, contact.id, null, gmailMessageId, gmailThreadId, await sentRfc822(sender, gmailMessageId));
+        return insertSentMessage(input, contact.id, null, gmailMessageId, gmailThreadId, await sentRfc822(sender, gmailMessageId), toEmail);
       } catch (e) {
         // Fall through to GHL below rather than failing the whole send.
         console.warn("[sendScheduledMessageNow] Gmail send failed, falling back to GHL:", e instanceof Error ? e.message : e);
@@ -132,6 +148,10 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     }
   }
 
+  // GoHighLevel only knows the client's own contact, so a reply to someone
+  // else on the thread must not quietly go to them instead.
+  if (replyPeer && replyPeer.email !== (contact.email ?? "").trim().toLowerCase())
+    return { ok: false, error: `This reply is to ${replyPeer.email}, and only an email from your own ClickUpLocal address can reach them.` };
   // GHL fallback (or SMS, always GHL) — needs the sub-account's location.
   const { data: subClient } = await supabaseAdmin.from("clients").select("ghl_location_id").eq("id", contact.subAccountClientId).maybeSingle();
   const locationId = (subClient?.ghl_location_id as string | null) ?? null;
@@ -174,12 +194,13 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   }
 }
 
-async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null, rfc822: string | null = null): Promise<{ ok: true; messageId: string }> {
+async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null, rfc822: string | null = null, peerAddress: string | null = null): Promise<{ ok: true; messageId: string }> {
   const messageId = "msg_" + randomUUID();
   await supabaseAdmin.from("messages").insert({
     id: messageId, contact_id: contactId, client_id: input.clientId, task_id: input.taskId, channel: input.channel, direction: "outbound",
     subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId, rfc822_message_id: rfc822,
     created_by: input.createdBy, read: true, attachments: input.attachments, cc: input.cc, bcc: input.bcc,
+    ...(peerAddress ? { peer_address: peerAddress } : {}),
   });
   await closeAnsweredReplyTask(input.taskId, new Date().toISOString(), input.createdBy, input.channel === "sms" ? "text" : "email");
   return { ok: true, messageId };

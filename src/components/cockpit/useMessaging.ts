@@ -78,6 +78,13 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       }
       return;
     }
+    // A reply goes to whoever wrote the email being answered, not the client's
+    // main contact (answering Russell on Matthew's task went to Matthew,
+    // Justin, 2026-10-07). The server checks the same thing.
+    const answering = channel === "email" && replyToMessageId ? messages.find((m) => m.id === replyToMessageId) : null;
+    const peerEmail = (answering?.peerAddress ?? "").trim().toLowerCase();
+    const replyPeer = answering && answering.channel === "email" && answering.clientId === clientId && peerEmail.includes("@") && !peerEmail.endsWith("@clickuplocal.com") ? peerEmail : null;
+    const toEmail = replyPeer ?? contact.email;
     const target = ghlTargetForContact(contact);
     if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
     // Cc/Bcc are an email-only concept — never carry them onto an SMS send.
@@ -91,10 +98,10 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       // attachments yet) stay on GHL. A 501 from the Google route (not
       // configured, or the caller isn't a domain sender) falls through to GHL,
       // so nothing breaks before setup.
-      if (channel === "email" && !!contact.email) {
+      if (channel === "email" && !!toEmail) {
         const gres = await authedFetch("/api/google/send", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId, toEmail: contact.email, subject, body, isHtml: channel === "email", cc: emailCc, bcc: emailBcc, fromEmail, replyToMessageId, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
+          body: JSON.stringify({ clientId, toEmail, subject, body, isHtml: channel === "email", cc: emailCc, bcc: emailBcc, fromEmail, replyToMessageId, attachments: attachments.filter((a) => a.path).map((a) => ({ path: a.path, name: a.name })) }),
         });
         if (gres.status !== 501) {
           const gj = await gres.json().catch(() => ({}));
@@ -109,7 +116,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
             id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
             subject: subject.trim() ? subject.trim() : null, body,
             ghlMessageId: null, gmailMessageId: gj.gmailMessageId ?? null, gmailThreadId: gj.gmailThreadId ?? null, rfc822MessageId: gj.rfc822MessageId ?? null, createdBy: meId, at: new Date().toISOString(), read: true,
-            attachments, cc: emailCc, bcc: emailBcc,
+            attachments, cc: emailCc, bcc: emailBcc, peerAddress: (gj.to as string | undefined) ?? toEmail ?? null,
           };
           setMessages((ms) => [...ms, gm]);
           insertMessage(gm);
@@ -117,6 +124,12 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
           return;
         }
         // 501 → fall through to the GHL path below.
+      }
+      // GoHighLevel only reaches the client's own contact: never send them a
+      // reply that was meant for someone else on the thread.
+      if (replyPeer && replyPeer !== (contact.email ?? "").trim().toLowerCase()) {
+        pushToast(`This reply is to ${replyPeer}, and only an email from your own ClickUpLocal address can reach them.`);
+        return;
       }
       // GHL fetches attachments itself from a URL rather than accepting an
       // upload — an hour is ample time for that fetch, without leaving the
