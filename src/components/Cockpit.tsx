@@ -56,7 +56,7 @@ import {
   unansweredPreviewByTask,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
-import { upsertTask, seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
+import { deleteClientEmailDraft, fetchClientEmailDraft, saveClientEmailDraft, upsertTask, seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
 import { WRITE_SETTLE_MS, mergeFetched, tasksWrittenSince } from "@/lib/localTaskWrites";
 import SettingsHub, { type TabKey } from "./SettingsHub";
 import DmChat from "./DmChat";
@@ -252,7 +252,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Reviews sent back and unsent drafts, for the Inbox (cockpit/useBoards),
   // and the Finished marker.
   const {
-    openReviews, pendingSends,
+    openReviews, pendingSends, loadPendingSends,
     finishedMarkerAt, openFinished, newFinishedCount,
   } = useBoards({ tasks, tasksRef, showingBoard: dirView === "inbox" ? "inbox" : null, meId: me.id });
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
@@ -2958,6 +2958,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               reviewsBack={openReviews.yourMove.map((r) => ({ id: r.id, taskId: r.taskId, name: r.name, days: r.days,
                 taskTitle: tasks.find((t) => t.id === r.taskId)?.title ?? null, clientName: (() => { const t = tasks.find((x) => x.id === r.taskId); return t ? clientById(t.clientId)?.name ?? null : null; })() }))}
               onOpenClientDraft={(cid) => { openClientList(cid, null); setClientTab("chat"); }}
+              // Delete a draft from the Drafts list (Derek, 2026-10-06), with Undo.
+              onDeleteWorkDraft={async (d) => {
+                if (d.taskId) {
+                  const was = tasks.find((t) => t.id === d.taskId)?.draftEmail ?? null;
+                  patchTask(d.taskId, { draftEmail: null });
+                  setTimeout(() => void loadPendingSends(), 800);
+                  pushToast("Draft deleted", { label: "Undo", run: () => { patchTask(d.taskId!, { draftEmail: was }); setTimeout(() => void loadPendingSends(), 800); } });
+                } else {
+                  const was = await fetchClientEmailDraft(d.clientId);
+                  await deleteClientEmailDraft(d.clientId);
+                  void loadPendingSends();
+                  pushToast("Draft deleted", was ? { label: "Undo", run: () => { void saveClientEmailDraft(d.clientId, was, me.id).then(() => loadPendingSends()); } } : undefined);
+                }
+              }}
               onAddComment={(id, body) => addComment(id, body)}
               onOpenClient={(id) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(id); setActiveProject(null); setOpenTaskId(null); setClientTab("tasks"); }}
               ghlUrlFor={(contactId) => { const ct = contactById(contactId); const sub = ct ? clientById(ct.clientId) : null; return ct?.ghlContactId && sub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${sub.ghlLocationId}/contacts/detail/${ct.ghlContactId}` : null; }}
