@@ -199,7 +199,7 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -1179,8 +1179,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
       {filterBar}
       <div id="task-feed">
         {description && view !== "changes" && (description.has || descOpen) && (
-          <article id="task-description-post" className="mb-4 scroll-mt-4 rounded-xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]">
-            <div className="mb-1 text-[14px] font-bold uppercase tracking-wide text-muted">Description</div>
+          <article id="task-description-post" className="mb-3 scroll-mt-4 rounded-xl bg-surface px-4 py-2.5 ring-1 ring-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <span className="text-[14px] font-bold uppercase tracking-wide text-muted">Description</span>
+              {description.onEdit && <button onClick={description.onEdit} className="ml-auto rounded-md px-2 py-0.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>}
+            </div>
             {description.node}
           </article>
         )}

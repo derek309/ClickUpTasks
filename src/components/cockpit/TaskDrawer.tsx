@@ -1143,11 +1143,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
   const descriptionBlock = (
     <div>
-      {!descEditing && hasDescription && (
-        <div className="mb-1 flex justify-end">
-          <button onClick={() => setDescEditing(true)} className="rounded-lg px-3 py-1.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>
-        </div>
-      )}
       {/* Reads as text until you click it. A permanently-live editor put a
           formatting toolbar and an AI prompt box in the rail on every task,
           which is most of why this column looked twice the weight of the
@@ -1156,9 +1151,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       ) : (
         <button onClick={() => setDescEditing(true)} title="Click to edit"
-          className="-mx-2 block w-full max-w-[72ch] rounded-lg px-2 py-1 text-left text-[16px] leading-relaxed hover:bg-surface">
-          {/* Its own tab now, so it has the room: folded only when it is long. */}
-          <CollapsibleText text={htmlToText(task.description)} maxLines={30} maxChars={4000} />
+          className="-mx-2 block w-full rounded-lg px-2 py-0.5 text-left text-[16px] leading-normal hover:bg-background">
+          {/* Its own tab now, so it has the room: folded only when it is long.
+              Full width and single blank lines, so it reads in less space
+              (Derek, 2026-10-07: "clean up the lost space"). */}
+          <CollapsibleText text={htmlToText(task.description).replace(/\n{3,}/g, "\n\n")} maxLines={30} maxChars={4000} />
         </button>
       )}
       {descEditing && (
@@ -1203,7 +1200,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Reply on a client's chat or text: the dock's box switches to it (Derek, 2026-09-16).
   const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null>(null);
   const { feedArea, composerFooter, openCompose, showDescription } = useTaskMessaging({
-    description: { node: descriptionBlock, has: hasDescription },
+    description: { node: descriptionBlock, has: hasDescription, onEdit: !descEditing && hasDescription ? () => setDescEditing(true) : undefined },
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
