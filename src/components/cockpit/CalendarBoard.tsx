@@ -3,7 +3,7 @@
 // Calendar (Derek, 2026-10-05): the next two weeks for Derek and Justin, read
 // live from GoHighLevel, as an agenda by day. GoHighLevel stays the calendar:
 // this shows it, and hands out booking links. Nothing is booked from here.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { useCalendar, type BookingLink, type CalendarEvent, type CalendarPerson } from "./useCalendar";
 import { BookAppointment, pacificToIso, type BookTarget } from "./BookAppointment";
@@ -65,9 +65,15 @@ export type CalendarBoardProps = {
   workFrom?: string;
   workTo?: string;
   onSetHours?: (from: string, to: string) => void;
+  /** How many days ahead are read so far, and a way to ask for more (the week arrows). */
+  daysLoaded?: number;
+  onNeedDays?: (days: number) => void;
 };
 
-export function CalendarBoard({ people, events, links, loading, error, meId, clientName, clientNote, workFrom = "09:00", workTo = "17:00", onSetHours, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
+/** How far the arrows go: twelve weeks on, about three months. */
+const MAX_WEEK = 12;
+
+export function CalendarBoard({ people, events, links, loading, error, meId, clientName, clientNote, workFrom = "09:00", workTo = "17:00", onSetHours, daysLoaded = 16, onNeedDays, onOpenClient, onRefresh, pushToast, contacts, defaultCalendarId, onSetDefault, hiddenLinks = [], onSetHidden, starredLinks = [], onSetStarred }: CalendarBoardProps) {
   const starred = new Set([...starredLinks, ...(defaultCalendarId ? [defaultCalendarId] : [])]);
   // One click stars, one click unstars, the default calendar included.
   const toggleStar = (id: string) => {
@@ -120,14 +126,15 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
   // Busy time folds into one grey line a day; this lists it in full (Derek, 2026-10-05, mockup
   // https://claude.ai/artifact/Ct4k8xUMqn97ghoUxRU1Xq). In full by default (Derek, 2026-10-06).
   const [busyFull, setBusyFull] = useState(true);
-  const [week, setWeek] = useState<0 | 1>(0);
+  // 0 is this week, 1 next week; the arrows go on a week at a time (Derek, 2026-10-06).
+  const [week, setWeek] = useState(0);
   const [linkQ, setLinkQ] = useState("");
   const [now] = useState(() => Date.now());
   const nameOf = (id: string) => people.find((p) => p.memberId === id)?.name ?? "";
   const first = (id: string) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0]);
 
   const shown = events.filter((e) => !gone.has(e.id) && (who === "all" || e.people.includes(who)));
-  // This week runs from today to Sunday; next week is Monday to Sunday.
+  // This week runs from today to Sunday; every later week is Monday to Sunday.
   const range7 = useMemo(() => {
     const today = dayKey(new Date(now).toISOString());
     const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
@@ -135,9 +142,15 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     const sunday = add(today, (7 - dow) % 7);
     const keys: string[] = [];
     if (week === 0) for (let k = today; k <= sunday; k = add(k, 1)) keys.push(k);
-    else for (let i = 1; i <= 7; i++) keys.push(add(sunday, i));
-    return { today, keys };
+    else for (let i = 1; i <= 7; i++) keys.push(add(sunday, 7 * (week - 1) + i));
+    // Days from the start of today to the end of this week: what has to be read.
+    const need = Math.round((Date.parse(`${keys[keys.length - 1]}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000) + 2;
+    return { today, keys, need };
   }, [week, now]);
+  useEffect(() => { if (range7.need > daysLoaded) onNeedDays?.(range7.need); }, [range7.need, daysLoaded, onNeedDays]);
+  const notRead = range7.need > daysLoaded;
+  const weekName = week === 0 ? "This week" : week === 1 ? "Next week"
+    : `Week of ${new Date(`${range7.keys[0]}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
   const days = useMemo(() => range7.keys.map((key) => {
     const list: CalendarEvent[] = [], busy: CalendarEvent[] = [], allDay: CalendarEvent[] = [];
     for (const e of shown) {
@@ -230,8 +243,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     <div className="mx-auto w-full max-w-[1280px] px-4 py-5 text-[16px] sm:px-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
+          <button onClick={() => setWeek(Math.max(0, week - 1))} disabled={week === 0} title="The week before" aria-label="The week before" className={`${tab(false)} disabled:opacity-40`}>‹</button>
           <button onClick={() => setWeek(0)} className={tab(week === 0)}>This week</button>
           <button onClick={() => setWeek(1)} className={tab(week === 1)}>Next week</button>
+          {week > 1 && <span className={tab(true) + " inline-flex items-center"}>{weekName}</span>}
+          <button onClick={() => setWeek(Math.min(MAX_WEEK, week + 1))} disabled={week === MAX_WEEK} title="The week after" aria-label="The week after" className={`${tab(false)} disabled:opacity-40`}>›</button>
         </span>
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
           <button onClick={() => setWho("all")} className={tab(who === "all")}>Both</button>
@@ -261,7 +277,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,max-content)]">
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
-      {loading && !events.length ? <div className="py-10 text-center text-muted">Reading GoHighLevel…</div> : (
+      {(loading && !events.length) || notRead ? <div className="py-10 text-center text-muted">{error && notRead ? "" : "Reading GoHighLevel…"}</div> : (
         <div className="grid gap-1">
           {/* Next up (mockup): the next real meeting, with Join and the client. */}
           {nextUp && (
@@ -439,7 +455,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           </>;
         })()}
         <div className="mt-2 grid gap-1.5 border-t pt-3">
-          <h2 className="text-[16px] font-extrabold uppercase tracking-wider text-muted">{week ? "Next week" : "This week"}</h2>
+          <h2 className="text-[16px] font-extrabold uppercase tracking-wider text-muted">{weekName}</h2>
           <div className="flex justify-between"><span>Client meetings</span><b>{meetings}</b></div>
           <div className="flex justify-between"><span>Open hours to book</span><b>{openHours}</b></div>
           {onSetHours && (
@@ -464,5 +480,6 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
 /** The view as Cockpit shows it: reads GoHighLevel only while it is open. */
 export function CalendarView(props: Omit<CalendarBoardProps, "people" | "events" | "links" | "loading" | "error" | "onRefresh">) {
   const cal = useCalendar();
-  return <CalendarBoard {...props} people={cal.people} events={cal.events} links={cal.links} loading={cal.loading} error={cal.error} onRefresh={cal.reload} />;
+  return <CalendarBoard {...props} people={cal.people} events={cal.events} links={cal.links} loading={cal.loading} error={cal.error} onRefresh={cal.reload}
+    daysLoaded={cal.daysLoaded} onNeedDays={cal.needDays} />;
 }

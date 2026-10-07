@@ -22,19 +22,22 @@ export function useCalendar() {
   const [links, setLinks] = useState<BookingLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Two weeks and a bit to start; the week arrows ask for more (Derek, 2026-10-06).
+  const [days, setDays] = useState(16);
+  const [daysLoaded, setDaysLoaded] = useState(0);
 
   // fresh skips the server's one minute cache: after a change, and on ↻.
   const load = useCallback(async (fresh = false) => {
     setLoading(true);
     try {
-      const r = await authedFetch(`/api/calendar?days=16${fresh ? "&fresh=1" : ""}`);
+      const r = await authedFetch(`/api/calendar?days=${days}${fresh ? "&fresh=1" : ""}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "Couldn't read the calendars.");
-      setPeople(j.people ?? []); setEvents(j.events ?? []); setLinks(j.links ?? []);
+      setPeople(j.people ?? []); setEvents(j.events ?? []); setLinks(j.links ?? []); setDaysLoaded(days);
       setError(j.errors?.length ? "Part of GoHighLevel didn't answer. What's here may be missing something." : null);
     } catch (e) { setError(e instanceof Error ? e.message : "Couldn't read the calendars."); }
     finally { setLoading(false); }
-  }, []);
+  }, [days]);
 
   useEffect(() => {
     // The first read, then every two minutes while the tab is visible.
@@ -43,7 +46,8 @@ export function useCalendar() {
     return () => { clearTimeout(first); clearInterval(id); };
   }, [load]);
 
-  return { people, events, links, loading, error, reload: () => load(true) };
+  const needDays = useCallback((n: number) => setDays((d) => Math.max(d, n)), []);
+  return { people, events, links, loading, error, reload: () => load(true), daysLoaded, needDays };
 }
 
 // Booking links for the composers, read once per session.

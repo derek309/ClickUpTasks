@@ -145,7 +145,8 @@ let eventCache: { at: number; days: number; events: CalendarEvent[]; errors: str
 
 /** The next `days` days for everyone with a calendar, read live (60 second cache). */
 export async function listEvents(_actor: CalendarActor, opts: { days?: number; fresh?: boolean } = {}): Promise<{ people: CalendarPerson[]; events: CalendarEvent[]; errors: string[] }> {
-  const days = Math.min(Math.max(opts.days ?? 14, 1), 31);
+  // Up to about three months: the calendar's week arrows go twelve weeks on.
+  const days = Math.min(Math.max(opts.days ?? 14, 1), 100);
   const people = await calendarPeople();
   // fresh: right after a booking, move or cancel. Each route runs on its own
   // in production, so the one that wrote can't empty this cache itself.
