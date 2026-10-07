@@ -160,16 +160,24 @@ export default function ApiTokensPanel() {
   const claudeToken = tokens.find((t) => t.name === "Claude Code") ?? null;
   const [claudeCopied, setClaudeCopied] = useState(false);
   const [claudeError, setClaudeError] = useState<string | null>(null);
-  const [claudeShown, setClaudeShown] = useState<string | null>(null);
-  const copyClaudeCommand = async () => {
+  // Their link (Derek, 2026-10-07: "why is this so difficult"): pasted into
+  // the Claude app's Connectors, no Terminal. The token rides in the path,
+  // which is what connectors keep (api/mcp/[token]). The Terminal command
+  // stays as the other way, for Claude Code without the Claude app.
+  const [claudeShown, setClaudeShown] = useState<{ kind: "link" | "command"; text: string } | null>(null);
+  const [claudeCopiedKind, setClaudeCopiedKind] = useState<"link" | "command" | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const copyClaude = async (kind: "link" | "command") => {
     if (!claudeToken) return;
     setClaudeError(null);
-    const cmd = authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeToken.id }) })
-      .then(async (r) => { const j = await r.json().catch(() => null); if (!r.ok || !j?.token) throw new Error(j?.error ?? "Couldn't get your command. Ask an admin to switch Claude Code off and on again."); return j.token as string; })
-      .then((token) => `claude mcp remove clickuptasks -s user 2>/dev/null; claude mcp add --transport http --scope user clickuptasks ${window.location.origin}/api/mcp --header "Authorization: Bearer ${token}"`);
-    if (await copyLater(cmd)) { setClaudeShown(null); setClaudeCopied(true); setTimeout(() => setClaudeCopied(false), 4000); return; }
+    const text = authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeToken.id }) })
+      .then(async (r) => { const j = await r.json().catch(() => null); if (!r.ok || !j?.token) throw new Error(j?.error ?? "Couldn't get it. Ask an admin to switch Claude Code off and on again."); return j.token as string; })
+      .then((token) => kind === "link"
+        ? `${window.location.origin}/api/mcp/${token}`
+        : `claude mcp remove clickuptasks -s user 2>/dev/null; claude mcp add --transport http --scope user clickuptasks ${window.location.origin}/api/mcp --header "Authorization: Bearer ${token}"`);
+    if (await copyLater(text)) { setClaudeShown(null); setClaudeCopied(true); setClaudeCopiedKind(kind); setTimeout(() => { setClaudeCopied(false); setClaudeCopiedKind(null); }, 4000); return; }
     // The browser won't copy: show it, selected, to copy with ⌘C.
-    try { setClaudeShown(await cmd); } catch (e) { setClaudeError(e instanceof Error ? e.message : "Couldn't get your command."); }
+    try { setClaudeShown({ kind, text: await text }); } catch (e) { setClaudeError(e instanceof Error ? e.message : "Couldn't get it."); }
   };
 
   return (
@@ -177,14 +185,25 @@ export default function ApiTokensPanel() {
         <div className="border-b px-5 py-4">
           <h3 className="text-[16px] font-bold">Connect Claude Code</h3>
           {claudeToken ? (<>
-            <p className="mt-1 text-[16px] text-muted">Copy the command, paste it into Terminal and press Return. Claude Code then works on ClickUpTasks as you, in every folder.</p>
-            <button onClick={() => void copyClaudeCommand()} className="mt-3 h-10 rounded-lg bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied ? "Copied. Paste it into Terminal" : "Copy the command"}</button>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[16px] text-muted">
+              <li>Copy your Claude link.</li>
+              <li>In the Claude app: Settings, Connectors, Add custom connector. Paste it and click Add.</li>
+              <li>That&apos;s it. ClickUpTasks works in Claude and in Claude Code, as you. Keep the link to yourself.</li>
+            </ol>
+            <button onClick={() => void copyClaude("link")} className="mt-3 h-10 rounded-lg bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied && claudeCopiedKind === "link" ? "Copied. Paste it in Claude's Connectors" : "Copy my Claude link"}</button>
             {claudeError && <p className="mt-2 text-[16px] text-danger">{claudeError}</p>}
             {claudeShown && (
               <div className="mt-3">
-                <p className="text-[16px] text-muted">Your browser wouldn&apos;t copy it. It&apos;s selected below: press ⌘C (Ctrl+C on Windows), then paste it into Terminal.</p>
-                <textarea readOnly value={claudeShown} rows={3} autoFocus onFocus={(e) => e.currentTarget.select()} aria-label="Your Claude Code command"
+                <p className="text-[16px] text-muted">Your browser wouldn&apos;t copy it. It&apos;s selected below: press ⌘C (Ctrl+C on Windows).</p>
+                <textarea readOnly value={claudeShown.text} rows={3} autoFocus onFocus={(e) => e.currentTarget.select()} aria-label={claudeShown.kind === "link" ? "Your Claude link" : "Your Terminal command"}
                   className="mt-2 w-full resize-none rounded-lg border bg-background px-3 py-2 font-mono text-[16px]" />
+              </div>
+            )}
+            <button onClick={() => setShowTerminal((v) => !v)} className="mt-3 block text-[16px] font-semibold text-accent hover:underline">{showTerminal ? "Hide the Terminal way" : "Use Terminal instead (Claude Code without the Claude app)"}</button>
+            {showTerminal && (
+              <div className="mt-2">
+                <p className="text-[16px] text-muted">Copy the command, paste it into Terminal and press Return, then restart Claude Code.</p>
+                <button onClick={() => void copyClaude("command")} className="mt-2 h-10 rounded-lg px-4 text-[16px] font-semibold ring-1 ring-[var(--border)] hover:bg-background">{claudeCopied && claudeCopiedKind === "command" ? "Copied. Paste it into Terminal" : "Copy the Terminal command"}</button>
               </div>
             )}
           </>) : (
@@ -230,7 +249,7 @@ export default function ApiTokensPanel() {
                   {!t.copyable && " · rotate to make it copyable"}
                 </div>
               </div>
-              {t.copyable && (
+              {t.copyable && t.name !== "Claude Code" && (
                 <button onClick={() => copyExisting(t)} disabled={copyingId === t.id || rotating === t.id || revoking === t.id}
                   title="Copy this token to the clipboard" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
                   {copiedId === t.id ? "Copied" : copyingId === t.id ? "…" : "Copy"}

@@ -42,7 +42,8 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
   const queryToken = req.nextUrl.searchParams.get("token") ?? "";
   const ok = sameSecret(authHeader, `Bearer ${secret}`) || sameSecret(queryToken, secret) || sameSecret(pathToken ?? "", secret);
   // A teammate's own Claude Code token (Settings, Team switch): acts as them.
-  const personal = ok ? null : await memberForClaudeToken(authHeader.replace(/^Bearer\s+/i, "").trim());
+  // In the header (Claude Code's command) or in the link (a Claude connector).
+  const personal = ok ? null : (await memberForClaudeToken(authHeader.replace(/^Bearer\s+/i, "").trim())) ?? (pathToken ? await memberForClaudeToken(pathToken) : null);
   if (!ok && !personal) return json({ error: "Unauthorized" }, 401);
 
   // GET is where a client asks to be pushed messages over a long-lived SSE
