@@ -846,49 +846,51 @@ export default function WaitingView({ token }: { token: string }) {
   // showProject only makes sense outside a grouped section (the Completed
   // list is flat, not grouped) — a section header already says which list
   // it is for everything above.
+  const tableHead = (
+    <div className="hidden grid-cols-[minmax(0,1fr)_150px_110px_16px] gap-x-4 bg-background/60 px-4 py-2 text-[14px] font-semibold text-muted sm:grid">
+      <span>Name</span><span>Status</span><span>Due</span><span />
+    </div>
+  );
+  const band = (label: string, n: number, tone: "need" | "prog") => (
+    <div className={`flex items-center gap-2 border-t px-4 py-2 text-[16px] font-bold ${tone === "need" ? "bg-highlight-soft" : "bg-accent-soft/50"}`}>
+      <span className="h-2.5 w-2.5 rounded-full" style={{ background: tone === "need" ? "var(--highlight)" : "var(--accent)" }} />{label}
+      <span className={`rounded px-1.5 text-[14px] text-white ${tone === "need" ? "bg-highlight" : "bg-accent"}`}>{n}</span>
+    </div>
+  );
   const renderTaskRow = (t: WaitingTask, opts?: { showProject?: boolean }) => {
     const showProject = opts?.showProject ?? false;
     const isDone = t.status === "done";
-    // Newest message (either side) as a one-line preview — gives the list
-    // some content beyond a bare title/status without pulling the whole
-    // thread onto the landing page.
-    const lastMsg = t.thread.length > 0 ? t.thread[t.thread.length - 1] : null;
-    const preview = lastMsg
-      ? `${lastMsg.from === "client" ? "You" : lastMsg.sender?.name ?? "Team"}: ${lastMsg.body || (lastMsg.attachments.length > 0 ? "Sent an attachment" : "")}`
-      : t.description;
+    // Laid out like the team's own task table (Derek, 2026-10-07: "keep the
+    // look and feel the same"): one row per task, the title first and alone,
+    // then status and due date in their own columns.
     const note = dateNote(t);
     const status = isDone ? (
-      <span className="text-[16px] text-muted">{note?.text ?? "Completed"}</span>
+      <span className="text-[16px] text-muted">Done</span>
     ) : (
-      <span className={`rounded-full px-2 py-0.5 text-[16px] font-semibold ${t.needsResponse ? "bg-highlight-soft text-highlight" : t.status === "on_hold" ? "bg-background text-muted" : "bg-accent-soft text-accent"}`}>
-        {t.needsResponse ? "Needs your input" : t.status === "on_hold" ? "On hold" : "In progress"}
+      <span className={`inline-flex items-center gap-1.5 text-[16px] font-semibold ${t.needsResponse ? "text-highlight" : t.status === "on_hold" ? "text-muted" : "text-accent"}`}>
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: t.needsResponse ? "var(--highlight)" : t.status === "on_hold" ? "var(--border)" : "var(--accent)" }} />
+        {t.needsResponse ? "Needs you" : t.status === "on_hold" ? "On hold" : "In progress"}
       </span>
     );
     return (
       <button
         key={t.id}
         onClick={() => openTask(t.id)}
-        className="flex w-full items-center gap-3 rounded-xl border bg-surface px-4 py-3 text-left shadow-[var(--shadow-sm)] transition hover:bg-background"
+        className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-t px-4 py-3 text-left transition hover:bg-background sm:grid-cols-[minmax(0,1fr)_150px_110px_16px]"
       >
-        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: isDone ? "var(--success)" : t.needsResponse ? "var(--highlight)" : "var(--border)" }} />
-        <div className="min-w-0 flex-1">
-          {/* On a phone the status sits under the title and the text wraps: at
-              16px, a status beside it cut the title down to "Approve ...". */}
-          <div className={`break-words text-[17px] font-semibold sm:truncate ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
-          {preview && <div className="line-clamp-2 text-[16px] text-muted sm:line-clamp-none sm:truncate">{preview}</div>}
-          {(t.hasDoc || (!isDone && note)) && (
-            <div className="flex flex-wrap gap-x-3 text-[16px]">
-              {!isDone && note && <span className={`font-semibold ${note.late ? "text-danger" : "text-highlight"}`}>{note.text}{note.late ? " · late" : ""}</span>}
+        <div className="min-w-0">
+          <div className={`break-words text-[17px] font-semibold ${isDone ? "text-muted line-through decoration-muted/40" : ""}`}>{t.title}</div>
+          {(t.hasDoc || (showProject && projects.length > 1 && projectName(t.projectId))) && (
+            <div className="flex flex-wrap gap-x-3 text-[16px] text-muted">
+              {showProject && projects.length > 1 && projectName(t.projectId) && <span>{projectName(t.projectId)}</span>}
               {t.hasDoc && <span className="font-semibold text-accent">📝 Has a doc</span>}
             </div>
           )}
-          {showProject && projects.length > 1 && projectName(t.projectId) && (
-            <div className="text-[16px] text-muted">{projectName(t.projectId)}</div>
-          )}
-          <div className="mt-1 sm:hidden">{status}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 sm:hidden">{status}{!isDone && t.due && <span className={`text-[16px] ${note?.late ? "text-danger" : "text-muted"}`}>{shortDate(t.due)}</span>}</div>
         </div>
-        <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">{status}</div>
-        <span className="shrink-0 text-muted" aria-hidden>›</span>
+        <div className="hidden sm:block">{status}</div>
+        <div className={`hidden text-[16px] sm:block ${!isDone && note?.late ? "font-semibold text-danger" : "text-muted"}`}>{isDone ? (t.doneAt ? shortDate(t.doneAt) : "") : t.due ? shortDate(t.due) : "\u2014"}</div>
+        <span className="text-muted" aria-hidden>›</span>
       </button>
     );
   };
@@ -1089,15 +1091,16 @@ export default function WaitingView({ token }: { token: string }) {
                         <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full bg-success" style={{ width: `${p2}%` }} /></span>
                         <span className="ml-auto text-[16px] text-muted">{need.length ? `${need.length} need${need.length === 1 ? "s" : ""} you · ` : ""}{done.length} of {mine.length} done</span>
                       </div>
-                      <div className="space-y-2 p-3">
-                        {need.length > 0 && <div className="px-1 pt-1 text-[14px] font-extrabold uppercase tracking-wider text-highlight">Needs you</div>}
+                      <div>
+                        {tableHead}
+                        {need.length > 0 && band("Needs you", need.length, "need")}
                         {need.map((t) => renderTaskRow(t))}
-                        {prog.length > 0 && <div className="px-1 pt-2 text-[14px] font-extrabold uppercase tracking-wider text-accent">In progress</div>}
+                        {prog.length > 0 && band("In progress", prog.length, "prog")}
                         {prog.map((t) => renderTaskRow(t))}
-                        {!need.length && !prog.length && <div className="px-1 py-2 text-[16px] text-muted">Nothing open here right now.</div>}
+                        {!need.length && !prog.length && <div className="border-t px-4 py-3 text-[16px] text-muted">Nothing open here right now.</div>}
                         {done.length > 0 && (
                           <button onClick={() => setDoneOpenIds((m) => { const n = new Set(m); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
-                            className="flex items-center gap-1.5 px-1 pt-1 text-[16px] font-semibold text-success hover:underline">
+                            className="flex w-full items-center gap-1.5 border-t px-4 py-2.5 text-[16px] font-semibold text-success hover:underline">
                             <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>›</span>{open ? "Hide" : "Show"} {done.length} done
                           </button>
                         )}
@@ -1126,7 +1129,7 @@ export default function WaitingView({ token }: { token: string }) {
                         <h2 className="text-[18px] font-bold">{theirs.length ? `We need ${theirs.length === 1 ? "one thing" : `${theirs.length} things`} from you` : "Nothing needed from you right now"}</h2>
                         <p className="text-[16px] text-muted">{theirs.length ? "Open one to answer it or send what it asks for. The soonest is at the top." : "We'll let you know when we need something. Everything we're working on is under All tasks."}</p>
                       </div>
-                      {theirs.length > 0 && <div className="space-y-2 p-3">{theirs.map((t) => renderTaskRow(t))}</div>}
+                      {theirs.length > 0 && <div>{tableHead}{theirs.map((t) => renderTaskRow(t))}</div>}
                     </div>
                   </div>
                 );
