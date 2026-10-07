@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/serverAuth";
+import { claudeCodeOwners, setClaudeCodeAccess } from "@/lib/claudeCodeAccess";
 
 export async function GET(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Service role key not configured." }, { status: 501 });
@@ -16,7 +17,9 @@ export async function GET(req: NextRequest) {
     pendingIds = new Set((users?.users ?? []).filter((u) => !u.last_sign_in_at).map((u) => u.id));
   } catch { /* pending flag is best-effort */ }
 
-  return NextResponse.json({ profiles: (data ?? []).map((p) => ({ ...p, pending: pendingIds.has(p.id) })) });
+  // Claude Code access is on for whoever has a "Claude Code" token (claudeCodeAccess.ts).
+  const claude = await claudeCodeOwners().catch(() => new Set<string>());
+  return NextResponse.json({ profiles: (data ?? []).map((p) => ({ ...p, pending: pendingIds.has(p.id), claude_code: claude.has(p.id) })) });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -32,8 +35,15 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.send_from_email === "string") patch.send_from_email = body.send_from_email.trim() || null;
   // The teammate's GoHighLevel user id — used to send email as them.
   if (typeof body.ghl_user_id === "string") patch.ghl_user_id = body.ghl_user_id.trim() || null;
-  const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  // The Claude Code switch (claudeCodeAccess.ts): a token made or deleted, not a profile field.
+  if (typeof body.claude_code === "boolean") {
+    const r = await setClaudeCodeAccess(body.id, body.claude_code);
+    if (r.error) return NextResponse.json({ error: r.error }, { status: 400 });
+  }
+  if (Object.keys(patch).length) {
+    const { error } = await supabaseAdmin.from("profiles").update(patch).eq("id", body.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   return NextResponse.json({ ok: true });
 }
 

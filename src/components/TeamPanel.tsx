@@ -6,7 +6,7 @@ import { type Me } from "@/lib/data";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
 import { I, Toggle } from "./cockpit/ui";
 
-type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null; ghl_user_id?: string | null };
+type Profile = { id: string; email: string; name: string; role: "admin" | "va"; color: string; pending?: boolean; avatar_url?: string | null; can_send_messages?: boolean; send_from_email?: string | null; ghl_user_id?: string | null; claude_code?: boolean };
 
 export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; dmEnabled: boolean; onSetDmEnabled: (v: boolean) => void }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -61,7 +61,7 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
 
   async function patch(id: string, body: Record<string, unknown>) {
     setSaving(id);
-    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}), ...(typeof body.send_from_email === "string" ? { send_from_email: body.send_from_email.trim() || null } : {}), ...(typeof body.ghl_user_id === "string" ? { ghl_user_id: body.ghl_user_id.trim() || null } : {}) } : p)));
+    setProfiles((ps) => ps.map((p) => (p.id === id ? { ...p, ...(body.role ? { role: body.role as Profile["role"] } : {}), ...(typeof body.can_send_messages === "boolean" ? { can_send_messages: body.can_send_messages } : {}), ...(typeof body.claude_code === "boolean" ? { claude_code: body.claude_code } : {}), ...(typeof body.send_from_email === "string" ? { send_from_email: body.send_from_email.trim() || null } : {}), ...(typeof body.ghl_user_id === "string" ? { ghl_user_id: body.ghl_user_id.trim() || null } : {}) } : p)));
     try {
       const res = await authedFetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...body }) });
       if (!res.ok) { const j = await res.json(); throw new Error(j.error); }
@@ -234,6 +234,16 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
                   </button>
                 );
               })()}
+              {/* Claude Code access (Derek, 2026-10-07): on makes their own
+                  connection token; off cuts them off. They copy the command
+                  from their own Settings, Tokens. */}
+              <button
+                disabled={saving === p.id || !!p.pending}
+                onClick={() => patch(p.id, { claude_code: !p.claude_code })}
+                title={p.claude_code ? "Claude Code can work on ClickUpTasks as them. Click to turn off" : "Let their Claude Code work on ClickUpTasks as them"}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium disabled:opacity-60 ${p.claude_code ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
+                <span aria-hidden>✳</span> {p.claude_code ? "Claude Code on" : "Claude Code off"}
+              </button>
               <div className="inline-flex overflow-hidden rounded-md border">
                 {(["admin", "va"] as const).map((r) => (
                   <button key={r} disabled={saving === p.id || (p.id === me.id && r === "va")} onClick={() => patch(p.id, { role: r })}

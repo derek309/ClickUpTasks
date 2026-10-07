@@ -27,6 +27,7 @@ import { createServer } from "../../../../mcp/core.mjs";
 import { createReviewServices } from "@/lib/mcpReviewServices";
 import { createCalendarServices } from "@/lib/mcpCalendarServices";
 import { sameSecret } from "@/lib/sameSecret";
+import { memberForClaudeToken } from "@/lib/claudeCodeAccess";
 
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -40,7 +41,9 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
   const authHeader = req.headers.get("authorization") ?? "";
   const queryToken = req.nextUrl.searchParams.get("token") ?? "";
   const ok = sameSecret(authHeader, `Bearer ${secret}`) || sameSecret(queryToken, secret) || sameSecret(pathToken ?? "", secret);
-  if (!ok) return json({ error: "Unauthorized" }, 401);
+  // A teammate's own Claude Code token (Settings, Team switch): acts as them.
+  const personal = ok ? null : await memberForClaudeToken(authHeader.replace(/^Bearer\s+/i, "").trim());
+  if (!ok && !personal) return json({ error: "Unauthorized" }, 401);
 
   // GET is where a client asks to be pushed messages over a long-lived SSE
   // stream. A stateless server has no session to push anything to, so the
@@ -52,7 +55,7 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
   // request and its reply.
   if (req.method === "GET") return new Response(null, { status: 405, headers: { Allow: "POST, DELETE" } });
 
-  const memberId = process.env.CLICKUPTASKS_MEMBER_ID || "u_claude";
+  const memberId = personal || process.env.CLICKUPTASKS_MEMBER_ID || "u_claude";
   const server = createServer({
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
     key: process.env.SUPABASE_SERVICE_ROLE_KEY,

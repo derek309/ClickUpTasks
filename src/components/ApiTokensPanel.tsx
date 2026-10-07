@@ -142,8 +142,35 @@ export default function ApiTokensPanel() {
     });
   }
 
+  // Connect Claude Code (Derek, 2026-10-07): an admin turns it on in Settings,
+  // Team, which makes the "Claude Code" token; this copies the whole command
+  // with it filled in, so there is nothing to fill in by hand.
+  const claudeToken = tokens.find((t) => t.name === "Claude Code") ?? null;
+  const [claudeCopied, setClaudeCopied] = useState(false);
+  const [claudeError, setClaudeError] = useState<string | null>(null);
+  const copyClaudeCommand = async () => {
+    if (!claudeToken) return;
+    setClaudeError(null);
+    const r = await authedFetch("/api/tokens/reveal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeToken.id }) }).catch(() => null);
+    const j = r?.ok ? await r.json().catch(() => null) : null;
+    if (!j?.token) { setClaudeError(j?.error ?? "Couldn't get your command. Ask an admin to switch Claude Code off and on again."); return; }
+    const cmd = `claude mcp remove clickuptasks -s user 2>/dev/null; claude mcp add --transport http --scope user clickuptasks ${window.location.origin}/api/mcp --header "Authorization: Bearer ${j.token}"`;
+    try { await navigator.clipboard.writeText(cmd); setClaudeCopied(true); setTimeout(() => setClaudeCopied(false), 4000); }
+    catch { setClaudeError("Your browser blocked copying. Try again."); }
+  };
+
   return (
     <>
+        <div className="border-b px-5 py-4">
+          <h3 className="text-[16px] font-bold">Connect Claude Code</h3>
+          {claudeToken ? (<>
+            <p className="mt-1 text-[16px] text-muted">Copy the command, paste it into Terminal and press Return. Claude Code then works on ClickUpTasks as you, in every folder.</p>
+            <button onClick={() => void copyClaudeCommand()} className="mt-3 h-10 rounded-lg bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied ? "Copied. Paste it into Terminal" : "Copy the command"}</button>
+            {claudeError && <p className="mt-2 text-[16px] text-danger">{claudeError}</p>}
+          </>) : (
+            <p className="mt-1 text-[16px] text-muted">Claude Code isn&apos;t on for you yet. Ask an admin to turn it on in Settings, Team.</p>
+          )}
+        </div>
         {revealedToken ? (
           <div className="px-5 py-4">
             <p className="text-[15px] font-medium text-amber-700">
