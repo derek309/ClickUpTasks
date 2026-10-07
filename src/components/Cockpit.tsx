@@ -110,7 +110,7 @@ import InboxView from "./cockpit/inbox/InboxView";
 import { CalendarView } from "./cockpit/CalendarBoard";
 import { useInbox } from "./cockpit/inbox/useInbox";
 import { useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
-import type { InboxThread } from "./cockpit/inbox/inboxModel";
+import { isAppNotice, type InboxThread } from "./cockpit/inbox/inboxModel";
 import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
 
@@ -1802,7 +1802,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The app's own "X replied on ..." email is linked to its task for the
   // Inbox, but the task already shows what X wrote: kept out of its feed
   // (Derek, 2026-10-07, the seats task showed Pamela's message twice).
-  const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId && !(m.peerName === "ClickUpTasks" && !m.contactId)) : []), [messages, openTaskId]);
+  const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId && !isAppNotice(m)) : []), [messages, openTaskId]);
   const openTaskClientLinks = useMemo(() => (openTaskClientId ? clientLinks.filter((l) => l.clientId === openTaskClientId) : []), [clientLinks, openTaskClientId]);
   // Sending, editing and scheduling client messages, the GoHighLevel refresh,
   // and a conversation's older messages loading when it opens (cockpit/useMessaging).

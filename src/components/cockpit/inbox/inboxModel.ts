@@ -53,6 +53,11 @@ export const SOCIAL: MessageChannel[] = ["fb", "ig", "web", "gbp"];
 
 const time = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
 
+/** The app's own "X replied on ..." email, mirrored from Gmail. Its task chat
+ *  is already in the Inbox, so it is left out (Derek, 2026-10-07: "we don't
+ *  get the email notifications, we get the opened chat box. Love this"). */
+export const isAppNotice = (m: Pick<Message, "peerName" | "contactId">) => m.peerName === "ClickUpTasks" && !m.contactId;
+
 /** Group into conversations, newest conversation first. `nameOf` turns a
  *  contact or client id into a name for messages that carry no peer name. */
 export function buildThreads(messages: Message[], states: Map<string, InboxState>, opts: {
@@ -65,6 +70,7 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
   const now = opts.now ?? Date.now();
   const groups = new Map<string, Message[]>();
   for (const m of messages) {
+    if (isAppNotice(m)) continue;
     const k = threadKeyOf(m);
     const g = groups.get(k);
     if (g) g.push(m); else groups.set(k, [m]);
