@@ -1499,7 +1499,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
-        if (email.followUpDays && task.status !== "done") onPatch({ status: "waiting", followUpAt: addBusinessDaysIso(TODAY, email.followUpDays) });
+        // A due date inside that window already brings it back: no follow up then.
+        if (email.followUpDays && task.status !== "done") {
+          const checkBack = addBusinessDaysIso(TODAY, email.followUpDays);
+          onPatch({ status: "waiting", followUpAt: task.due && task.due <= checkBack ? null : checkBack });
+        }
         setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
       } : undefined}
       onSchedule={hasMessaging && onScheduleTaskMessage ? (email, whenIso) =>

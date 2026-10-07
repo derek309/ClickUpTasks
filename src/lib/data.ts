@@ -1060,14 +1060,19 @@ export const REVIEW_FOLLOW_UP_DAYS = 4;
  *  or a date further out is already there. `synced` is the edit after
  *  applyWaitingStatusSync. */
 export function waitingFollowUp(
-  before: { status: TaskStatus; waitingOnClient?: boolean; followUpAt?: string | null },
+  before: { status: TaskStatus; waitingOnClient?: boolean; followUpAt?: string | null; due?: string | null },
   synced: Partial<Task>,
   today: string = TODAY,
 ): string | null {
   const startsWaiting = synced.waitingOnClient === true && !before.waitingOnClient && before.status !== "waiting";
   if (!startsWaiting || synced.followUpAt !== undefined) return null;
   if (before.followUpAt && before.followUpAt > today) return null;
-  return addBusinessDaysIso(today, WAITING_FOLLOW_UP_DAYS);
+  const checkBack = addBusinessDaysIso(today, WAITING_FOLLOW_UP_DAYS);
+  // A due date that soon already brings it back; a follow up on top is noise
+  // (Derek, 2026-10-07: "if we set a due date tomorrow we don't need a follow up").
+  const due = synced.due !== undefined ? synced.due : before.due;
+  if (due && due <= checkBack) return null;
+  return checkBack;
 }
 
 /** What a client's answer does to a task, as the snake_case columns to write.
