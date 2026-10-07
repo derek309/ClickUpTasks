@@ -137,6 +137,21 @@ export function createServer(opts = {}) {
   }
   const enc = encodeURIComponent;
 
+  // A task's stored files (Derek, 2026-10-07: "Claude Code can't see the
+  // images in a task"). get_task lists them; view_task_file hands an image
+  // over as an image, and anything else as a link that works for an hour.
+  const TASK_FILES = "task-files";
+  const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+  const storedFiles = (t) => [
+    ...(t.attachments || []).filter((a) => a.path).map((a) => ({ ...a, where: "task" })),
+    ...(t.comments || []).flatMap((c) => (c.attachments || []).filter((a) => a.path).map((a) => ({ ...a, where: "comment" }))),
+  ];
+  async function signedFileUrl(path, seconds = 3600) {
+    const res = await fetch(`${URL}/storage/v1/object/sign/${TASK_FILES}/${path.split("/").map(enc).join("/")}`, { method: "POST", headers: H, body: JSON.stringify({ expiresIn: seconds }) });
+    const j = res.ok ? await res.json() : null;
+    return j?.signedURL ? `${URL}/storage/v1${j.signedURL}` : null;
+  }
+
   // These queries run on the service role key, which bypasses row level
   // security, so the app's own two visibility rules are applied by hand here —
   // the same pair src/lib/taskAccess.ts applies on every web route. A trashed
@@ -274,6 +289,7 @@ export function createServer(opts = {}) {
       if (!t) return noTask(id);
       const checklist = (t.subtasks || []).map((s) => ({ id: s.id, title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
+      const files = storedFiles(t).map((a) => `  - ${a.name}${a.size ? ` (${a.size})` : ""}${a.where === "comment" ? " [on a comment]" : ""}  file: ${a.id}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
       // Project instructions for an outside person (supabase/task-briefs.sql), if
       // any. Before that SQL is run the table is missing, which is simply none.
@@ -287,9 +303,33 @@ export function createServer(opts = {}) {
         `\nProject instructions:\n${instructions || "(none)"}`,
         checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
         links ? `\nLinks:\n${links}` : "",
+        files ? `\nFiles (see one with view_task_file):\n${files}` : "",
         comments ? `\nRecent comments:\n${comments}` : "",
       ].filter(Boolean).join("\n");
       return { content: [{ type: "text", text }] };
+    });
+
+  server.tool("view_task_file",
+    "Look at one of a task's files, listed by get_task under Files. An image comes back as the image itself, so you can see it; any other file comes back as a download link that works for an hour.",
+    { task_id: z.string(), file: z.string().describe("the file id from get_task, or its name") },
+    async ({ task_id, file }) => {
+      const t = await loadTask(task_id);
+      if (!t) return noTask(task_id);
+      const all = storedFiles(t);
+      const f = all.find((a) => a.id === file) || all.find((a) => (a.name || "").toLowerCase() === file.toLowerCase());
+      if (!f) return { content: [{ type: "text", text: `No file "${file}" on ${task_id}. Files: ${all.map((a) => `${a.name} (${a.id})`).join(", ") || "none"}.` }] };
+      const ext = (f.name || f.path).split(".").pop().toLowerCase();
+      const mimeType = IMAGE_TYPES[ext];
+      if (mimeType) {
+        const res = await fetch(`${URL}/storage/v1/object/${TASK_FILES}/${f.path.split("/").map(enc).join("/")}`, { headers: H });
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          // Over about 4 MB an image is too big to hand over; a link instead.
+          if (buf.length <= 4 * 1024 * 1024) return { content: [{ type: "text", text: `${f.name} on ${task_id}:` }, { type: "image", data: buf.toString("base64"), mimeType }] };
+        }
+      }
+      const url = await signedFileUrl(f.path);
+      return { content: [{ type: "text", text: url ? `${f.name}: ${url}` : `Could not open ${f.name}.` }] };
     });
 
   // The task's Project instructions: the brief for a designer, contractor or
