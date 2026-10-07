@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-07 16:32:33",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.1.7.zip",
+  "last_updated": "2026-10-07 21:18:58",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.1.8.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* Updates itself: from this version on, new versions show on the Plugins screen and install with one click, like a plugin from the WordPress directory.\n* Works beside the ClickUpLocal Brain Box, which now carries this same receiver: on a Brain Box site this plugin takes over when active, and deleting it keeps the connection code, history and backups the Brain Box's copy shares.\n* Every text size on the settings page is 16px or larger, and messages use a colon where they had a dash."
+  "changelog": "* The menu icon shows in its own blue, green and white again. WordPress was repainting it in one colour, which left a blank square."
 }
