@@ -102,6 +102,10 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // Which button is waiting on its request — busy alone can't tell the two
   // apart since both routes through the same in-flight flag one level up.
   const [pending, setPending] = useState<"quick" | "split" | null>(null);
+  // The split failed (the AI was slow or down): say so beside the buttons,
+  // with a way to keep the text as one task, so nothing typed is stuck
+  // (Derek, 2026-10-07).
+  const [splitFailed, setSplitFailed] = useState(false);
 
   useEscapeToClose(onCancel);
 
@@ -148,9 +152,10 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
   const read = async () => {
     setPending("split");
+    setSplitFailed(false);
     const parsed = await onParse(text);
     setPending(null);
-    if (!parsed) return;
+    if (!parsed) { setSplitFailed(true); return; }
     // The AI answers what is in the text. Everything it was not asked to
     // guess at (follow-up, size) and everything the defaults already answer
     // is filled in here, so no row arrives half made.
@@ -339,6 +344,15 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 multi"). The left of each pair is the one that touches
                 nothing, and it is the one styled as the answer. */}
             <div className="shrink-0 space-y-2 border-t px-4 py-3 sm:space-y-2.5 sm:px-6 sm:py-3.5">
+              {splitFailed && (
+                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg bg-highlight-soft px-3.5 py-2.5 text-[16px]">
+                  <span className="min-w-0 flex-1 font-semibold text-highlight">The AI couldn&apos;t split that just now. Your text is still here.</span>
+                  <button onClick={() => { setSplitFailed(false); addAsTyped(); }} disabled={blocked}
+                    className="rounded-lg bg-accent px-3.5 py-2 font-semibold text-white disabled:opacity-40">Add as one task</button>
+                  <button onClick={read} disabled={blocked}
+                    className="rounded-lg border bg-surface px-3.5 py-2 font-medium hover:bg-background disabled:opacity-40">Try again</button>
+                </div>
+              )}
               {/* On a phone the label goes above its pair: 48px of padding, a
                   76px label and the gaps left each button about 117px, and
                   "Ask AI to split" needs half as much again, so it wrapped
