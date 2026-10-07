@@ -23,7 +23,7 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
@@ -36,6 +36,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
    *  the date they were given, rather than the owner's. */
   lensId?: string;
   showClient: boolean; clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => { name: string } | null;
+  /** A client's lists, for the List column. */
+  listsFor?: (clientId: string) => Project[];
   visibleCols: string[]; sortKey: string; sortDir: "asc" | "desc"; onSort: (key: string) => void;
   groupKind?: string;
   /** Start Next week / This month / Later / No date closed. All Tasks only. */
@@ -238,7 +240,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
+                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} listsFor={listsFor} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -260,9 +262,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, listsFor, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; preview?: string; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; listsFor?: (clientId: string) => Project[]; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -358,6 +360,16 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
     if (key === "created") return (
       <span className="truncate text-[16px] text-muted sm:text-[13px]" title={`Created ${task.createdAt.slice(0, 10)}`}>{formatDue(task.createdAt.slice(0, 10))}</span>
     );
+    if (key === "list") {
+      const lists = listsFor?.(task.clientId) ?? [];
+      if (lists.length < 2) return <span className="truncate text-[16px] text-muted sm:text-[13px]">{projectById(task.projectId)?.name ?? "—"}</span>;
+      return (
+        <select value={task.projectId} onClick={(e) => e.stopPropagation()} onChange={(e) => onPatch(task.id, { projectId: e.target.value })} aria-label="List"
+          className="max-w-full truncate rounded bg-transparent py-0.5 text-[16px] hover:bg-background sm:text-[13px]">
+          {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      );
+    }
     if (key === "contact") { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className="truncate text-[16px] text-muted sm:text-[13px]">{ct?.name ?? "—"}</span>; }
     if (key === "labels") return <LabelChips ids={task.labelIds} />;
     return null;

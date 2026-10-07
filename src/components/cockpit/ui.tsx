@@ -567,6 +567,8 @@ export const LIST_COLUMNS: { key: string; label: string; sortable: boolean }[] =
   // sitting, not just when it's owed ("the creation date is the start date, I
   // just want to know when it's created and when it's due").
   { key: "created", label: "Created", sortable: true },
+  // Which of the client's lists it is in, changeable from the row (Derek, 2026-10-06).
+  { key: "list", label: "List", sortable: false },
   { key: "contact", label: "Contact", sortable: false },
   { key: "labels", label: "Labels", sortable: false },
 ];
