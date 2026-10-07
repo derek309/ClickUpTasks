@@ -385,7 +385,9 @@ function TaskDetailBody({
               <AttachmentGallery items={t.attachments} />
             </div>
           )}
-          {!isDone && (
+          {/* A task with a doc is approved inside the doc, one way to say yes
+              (Derek, 2026-10-07). */}
+          {!isDone && !t.hasDoc && (
             <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-[5px] border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
               ✓ All done, this looks good
