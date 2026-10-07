@@ -335,7 +335,8 @@ function TaskDetailBody({
         <div className="border-t bg-background/40 px-5 py-4">{composer}</div>
       </section>
 
-      <aside className="grid gap-4">
+      {/* Stays in view beside a long conversation (Derek, 2026-10-07). */}
+      <aside className="grid gap-4 lg:sticky lg:top-4">
         <div className={`${card} p-4`}>
           {/* One plain line, no pills (Derek, 2026-10-07). */}
           <div className="mb-1.5 text-[16px] text-muted">
