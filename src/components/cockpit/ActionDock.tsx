@@ -763,13 +763,25 @@ export function ActionDock({
                   action on its own beside it (Derek, 2026-09-16, option B). */}
               <div className={`${barOpen ? "flex" : "hidden sm:flex"} items-end gap-2.5`}>
                 <div className={`min-w-0 flex-1 rounded-2xl p-1 transition sm:p-1.5 ${tone.surface}`}>
-                  {(canChat || canText || canEmail) && (
-                    <div role="group" aria-label="Send as" className="flex flex-wrap gap-4 px-2 pb-1 pt-0 sm:pb-1.5 sm:pt-0.5">
+                  {/* Every action is a tab in this one row, the client ones then
+                      the team ones, instead of a second Log action menu that
+                      repeated the first four (Derek, 2026-10-07, option A: "more
+                      on it to take up the open space"). The extra tabs are for
+                      wider screens; a phone keeps ＋ for them. */}
+                  {(
+                    <div role="group" aria-label="What are you doing" className="flex flex-wrap items-center gap-x-4 gap-y-1 px-2 pb-1 pt-0 sm:pb-1.5 sm:pt-0.5">
                       <button onClick={() => { if (noting) setBarOpen(false); else { setChannel("note"); setReplyTo(null); } }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
                       {canChat && <button onClick={() => { if (channel === "chat") setBarOpen(false); else setChannel("chat"); }} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
                       {canText && <button onClick={() => { if (channel === "sms") setBarOpen(false); else setChannel("sms"); }} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
                       {/* Email is a letter, so it opens the full email window. */}
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
+                      {canMessageClient && <button onClick={() => openPanel("call")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Call</button>}
+                      {canMessageClient && <button onClick={() => openPanel("meeting")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Book a meeting</button>}
+                      <span aria-hidden className="hidden h-4 w-px bg-border sm:inline-block" />
+                      <button onClick={() => openPanel("met")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Log a meeting</button>
+                      <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message a teammate</button>
+                      {users.some((u) => u.id !== me?.id) && <button onClick={() => openPanel("delegate")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Delegate</button>}
+                      <button onClick={() => openPanel("askTask")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>✦ Ask AI</button>
                     </div>
                   )}
                   <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">
@@ -792,10 +804,6 @@ export function ActionDock({
                     </div>
                   </div>
                 </div>
-                <button onClick={() => openPanel("menu")}
-                  className="hidden h-11 shrink-0 rounded-xl bg-background px-4 text-[16px] font-semibold text-foreground hover:bg-accent-soft sm:block">
-                  ＋ Log action
-                </button>
               </div>
             </div>
           );
