@@ -34,7 +34,7 @@ async function run(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   const force = req.nextUrl.searchParams.get("force") === "1";
   const nowMs = Date.now();
-  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a weekday in California" });
+  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a Monday in California" });
   const monday = new Date(nowMs).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short" }) === "Mon";
   const today = todayPacific();
 

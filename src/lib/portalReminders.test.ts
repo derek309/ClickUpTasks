@@ -2,14 +2,12 @@ import { describe, it, expect } from "vitest";
 import { isReminderHour, portalReminderEmail, endOfWeek, thisWeek } from "./portalReminders";
 
 describe("Monday client reminders", () => {
-  // Every weekday now: Monday sends the week's list, other days only follow
-  // ups that came due (Derek, 2026-10-07).
-  it("is 8 AM California on a weekday, summer and winter", () => {
+  it("is 8 AM California on a Monday only, summer and winter", () => {
     expect(isReminderHour(Date.parse("2026-10-05T15:00:00Z"))).toBe(true); // Mon 8 AM PDT
     expect(isReminderHour(Date.parse("2026-10-05T16:00:00Z"))).toBe(false); // Mon 9 AM PDT
     expect(isReminderHour(Date.parse("2026-11-30T16:00:00Z"))).toBe(true); // Mon 8 AM PST
-    expect(isReminderHour(Date.parse("2026-12-02T16:00:00Z"))).toBe(true); // Wed 8 AM PST
-    expect(isReminderHour(Date.parse("2026-10-06T15:00:00Z"))).toBe(true); // Tue 8 AM PDT
+    expect(isReminderHour(Date.parse("2026-12-02T16:00:00Z"))).toBe(false); // Wednesday
+    expect(isReminderHour(Date.parse("2026-10-06T15:00:00Z"))).toBe(false); // Tuesday
     expect(isReminderHour(Date.parse("2026-10-10T15:00:00Z"))).toBe(false); // Saturday
   });
   it("lists what we need, with dates, and skips when nothing is waiting", () => {
