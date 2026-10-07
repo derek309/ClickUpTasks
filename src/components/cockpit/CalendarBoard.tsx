@@ -112,7 +112,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     if (r?.ok) { pushToast(`${e.title}: ${STATUS_LABEL[status] ?? status}`); refreshSoon(); }
     else { setStatusOf((m) => ({ ...m, [e.id]: before })); pushToast(j.error ?? "Couldn't change the status."); }
   };
-  const [who, setWho] = useState<string>("all");
+  // Opens on your own calendar (Derek, 2026-10-06: "default to user"); Both
+  // and the other person are one click away. Until people load, or if you
+  // have no calendar, it's Both.
+  const [whoPicked, setWho] = useState<string | null>(null);
+  const who = whoPicked ?? (people.some((p) => p.memberId === meId) ? meId : "all");
   // Busy time folds into one grey line a day; this lists it in full (Derek, 2026-10-05, mockup
   // https://claude.ai/artifact/Ct4k8xUMqn97ghoUxRU1Xq).
   const [busyFull, setBusyFull] = useState(false);
