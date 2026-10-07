@@ -196,7 +196,7 @@ function TaskDetailBody({
   const nextRef = useRef<HTMLElement | null>(null);
   const markAnswered = () => { setAnsweredId(t.id); setTimeout(() => nextRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); };
   const next = otherWaiting[0] ?? null;
-  const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
+  const toolBtn = "inline-flex h-11 items-center gap-2 rounded-[5px] border-2 bg-surface px-4 text-[16px] font-bold text-foreground hover:border-accent hover:bg-accent-soft/40";
   // The pages we're asking about ("Homepage: https://…") become cards to tap,
   // not long addresses inside the paragraph (Derek, 2026-10-07).
   const split = splitLabeledLinks(t.description);
@@ -258,13 +258,20 @@ function TaskDetailBody({
         </div>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        {/* Photos, files and a doc as clear buttons (Derek, 2026-10-07: "make it
+            easier to add files, photos, create a doc"). Photos opens the
+            camera or the photo library on a phone. */}
         <label className={`${toolBtn} cursor-pointer`}>
-          📎 Files
+          📷 Add photos
+          <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+        </label>
+        <label className={`${toolBtn} cursor-pointer`}>
+          📎 Add files
           <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
         </label>
-        <button onClick={onToggleLink} className={toolBtn}>🔗 Link</button>
         {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
-        {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Doc"}</button>}
+        {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Write a doc"}</button>}
+        <button onClick={onToggleLink} className="px-2 text-[16px] font-semibold text-accent hover:underline">🔗 Add a link</button>
         <span className="flex-1" />
         <button
           onClick={() => { onSend(); markAnswered(); }}
