@@ -1634,6 +1634,14 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     finally { setBusy(false); }
   };
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
+  // The conversation's other tasks (Derek, 2026-10-07: a client replies on the
+  // same email with more to do). The main one above is where new replies land.
+  const { loadMoreTasks } = p.inbox;
+  useEffect(() => { loadMoreTasks(t.key); }, [t.key, loadMoreTasks]);
+  const others = (p.inbox.moreTasks.get(t.key) ?? []).map((id) => p.tasks.find((x) => x.id === id)).filter((x): x is Task => !!x);
+  const linkedKey = [t.taskId, ...others.map((x) => x.id)].filter(Boolean).join(",");
+  const linked = useMemo(() => new Set(linkedKey.split(",").filter(Boolean)), [linkedKey]);
+  const [addOpen, setAddOpen] = useState(false);
   const client = p.clientName(t.clientId);
   const contact = t.contactId ? p.contacts.find((x) => x.id === t.contactId) ?? null : null;
   const person = contact?.name || t.peerName;
@@ -1644,10 +1652,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const matches = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     return p.tasks
-      .filter((x) => x.status !== "done" && (!t.clientId || x.clientId === t.clientId || words.length > 0))
+      .filter((x) => x.status !== "done" && !linked.has(x.id) && (!t.clientId || x.clientId === t.clientId || words.length > 0))
       .filter((x) => words.every((w) => x.title.toLowerCase().includes(w) || (p.clientName(x.clientId) ?? "").toLowerCase().includes(w)))
       .slice(0, 6);
-  }, [q, p, t.clientId]);
+  }, [q, p, t.clientId, linked]);
   // Whose it is: the conversation's client, else the one picked here, else a
   // guess from the sender's name ("Pamela Macias (via Google Drive)" is Pamela
   // Macias), so her lists show without matching her email (Derek, 2026-10-06).
@@ -1660,13 +1668,31 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const whoseLists = whose ? p.listsFor(whose) : [];
   // Their open tasks (this contact's, else this client's), soonest due first.
   const theirs = useMemo(() => p.tasks
-    .filter((x) => x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (whose && x.clientId === whose)))
-    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")), [p.tasks, t.contactId, whose]);
+    .filter((x) => x.status !== "done" && !x.private && !linked.has(x.id) && ((t.contactId && x.contactId === t.contactId) || (whose && x.clientId === whose)))
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")), [p.tasks, t.contactId, whose, linked]);
   const [searchOpen, setSearchOpen] = useState(false);
   const link = async (taskId: string | null) => {
     setBusy(true);
-    try { await p.inbox.linkTask(t.key, taskId); p.pushToast(taskId ? "Linked. New messages here land on the task too." : "Unlinked"); setQ(""); }
+    const add = !!taskId && !!t.taskId && taskId !== t.taskId;
+    try {
+      await p.inbox.linkTask(t.key, taskId, add);
+      // Another task gets their newest email as a comment, so whoever does it
+      // can read the request there (Derek, 2026-10-07).
+      const last = add ? t.messages.find((m) => m.direction === "inbound") : null;
+      if (last && taskId) {
+        const from = whoWrote(last, t, p).name;
+        p.onAddComment(taskId, `📌 Email from ${from}, ${fullTime(last.at)}${last.subject ? `\n${last.subject}` : ""}\n\n${(last.body || "").trim().slice(0, 4000)}`);
+      }
+      p.pushToast(add ? "Linked, with their email added to the task" : taskId ? "Linked. New messages here land on the task too." : "Unlinked");
+      setQ(""); setAddOpen(false);
+    }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't link it."); }
+    finally { setBusy(false); }
+  };
+  const unlink = async (taskId: string) => {
+    setBusy(true);
+    try { await p.inbox.unlinkTask(t.key, taskId); p.pushToast("Unlinked"); }
+    catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't unlink it."); }
     finally { setBusy(false); }
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
@@ -1697,95 +1723,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const card = "rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]";
   const label = "mb-1.5 text-[14px] font-bold tracking-wide text-muted";
   const linkBtn = "font-semibold text-accent hover:underline";
-  return (
-    <aside className="min-w-0 space-y-3 p-4">
-      <div className={card}>
-        <div className={label}>{task ? "LINKED TASK" : "LINK TO A TASK"}</div>
-        {task ? <>
-          {/* Four boxes, one column (Derek, 2026-10-05, mockup
-              https://claude.ai/artifact/7dKMyY11n8qXpwfpVM7Nhj, B): status, who
-              it's on, due and follow up, each a click to change. */}
-          <b className="block text-[18px] leading-snug">{task.title}</b>
-          {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
-          <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
-            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-              <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
-                <span className="text-muted">Status</span>
-                <span className="flex min-w-0 items-center gap-2 truncate font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
-              </button>
-              {statusOpen && (
-                <Menu onClose={() => setStatusOpen(false)}>
-                  {STATUS_ORDER.filter((st) => !HIDDEN_STATUSES.has(st)).map((st) => (
-                    <button key={st} onClick={() => { setStatusOpen(false); p.onPatchTask(task.id, { status: st }); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
-                      <span className="h-2 w-2 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}{st === task.status ? " ✓" : ""}
-                    </button>
-                  ))}
-                </Menu>
-              )}
-            </div>
-            {/* Which list it's in (Derek, 2026-10-05: "select the list as
-                well"). A new task from an email starts in the client's first. */}
-            {lists.length > 0 && (
-              <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-                <button onClick={() => setListOpen(!listOpen)} className={fieldBox}>
-                  <span className="text-muted">List</span>
-                  <span className="truncate font-semibold">{lists.find((l) => l.id === task.projectId)?.name ?? "Pick a list"}</span>
-                </button>
-                {listOpen && (
-                  <Menu onClose={() => setListOpen(false)}>
-                    {lists.map((l) => (
-                      <button key={l.id} onClick={() => { setListOpen(false); if (l.id !== task.projectId) { p.onPatchTask(task.id, { projectId: l.id }); p.pushToast(`Moved to ${l.name}`); } }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
-                        {l.name}{l.id === task.projectId ? " ✓" : ""}
-                      </button>
-                    ))}
-                  </Menu>
-                )}
-              </div>
-            )}
-            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-              <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
-                <span className="text-muted">On</span>
-                <span className="flex min-w-0 items-center gap-2 font-semibold">
-                  {ownerMember && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(ownerMember.name) }}>{initials(ownerMember.name)}</span>}
-                  <span className="truncate">{owner ?? "Nobody yet"}</span>
-                </span>
-              </button>
-              {ownerOpen && (
-                <Menu onClose={() => setOwnerOpen(false)}>
-                  {[...[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))), { id: CLAUDE_ID, name: "Claude" }].map((m) => (
-                    <button key={m.id} onClick={() => { setOwnerOpen(false); if (m.id !== task.assigneeId) { p.onPatchTask(task.id, { assigneeId: m.id }); p.pushToast(`On ${m.id === p.me.id ? "you" : m.name} now`); } }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>
-                      {m.id === p.me.id ? "You" : m.name}{m.id === task.assigneeId ? " ✓" : ""}
-                    </button>
-                  ))}
-                </Menu>
-              )}
-            </div>
-            <div className={`${fieldBox} cursor-default`}>
-              <span className="text-muted">Due</span>
-              <InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
-                className={`-mx-1 font-semibold ${!task.due ? "text-accent" : task.status !== "done" && isOverdue(task.due) ? "text-danger" : ""}`} />
-            </div>
-            <div className={`${fieldBox} cursor-default`}>
-              <span className="text-muted">Follow up</span>
-              <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
-                className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
-            </div>
-          </div>
-          <div className="mt-3 flex items-center gap-3 border-t pt-3">
-            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</button>
-            <span className="flex-1" />
-            <span className="relative">
-              <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
-              {moreOpen && (
-                <Menu right onClose={() => setMoreOpen(false)}>
-                  <button onClick={() => { setMoreOpen(false); p.onOpenTask(task.id, t.subject || t.peerName); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Open task</button>
-                  <button disabled={busy} onClick={() => { setMoreOpen(false); link(null); }} className="block w-full rounded-md px-3 py-2 text-left text-danger hover:bg-background">Unlink from this conversation</button>
-                </Menu>
-              )}
-            </span>
-          </div>
-        </> : <>
+  const picker = <>
           {/* Her lists first, one click to add a task there (Derek, 2026-10-06:
               "see what list she has, click on the list and then add here").
               Search waits behind a link. */}
@@ -1865,7 +1803,120 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               </div>
             </form>
           )}
-        </>}
+  </>;
+  return (
+    <aside className="min-w-0 space-y-3 p-4">
+      <div className={card}>
+        <div className={label}>{task ? (others.length ? "LINKED TASKS" : "LINKED TASK") : "LINK TO A TASK"}</div>
+        {task ? <>
+          {/* Four boxes, one column (Derek, 2026-10-05, mockup
+              https://claude.ai/artifact/7dKMyY11n8qXpwfpVM7Nhj, B): status, who
+              it's on, due and follow up, each a click to change. */}
+          <b className="block text-[18px] leading-snug">{task.title}</b>
+          {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
+          <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
+              <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
+                <span className="text-muted">Status</span>
+                <span className="flex min-w-0 items-center gap-2 truncate font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
+              </button>
+              {statusOpen && (
+                <Menu onClose={() => setStatusOpen(false)}>
+                  {STATUS_ORDER.filter((st) => !HIDDEN_STATUSES.has(st)).map((st) => (
+                    <button key={st} onClick={() => { setStatusOpen(false); p.onPatchTask(task.id, { status: st }); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
+                      <span className="h-2 w-2 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}{st === task.status ? " ✓" : ""}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </div>
+            {/* Which list it's in (Derek, 2026-10-05: "select the list as
+                well"). A new task from an email starts in the client's first. */}
+            {lists.length > 0 && (
+              <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
+                <button onClick={() => setListOpen(!listOpen)} className={fieldBox}>
+                  <span className="text-muted">List</span>
+                  <span className="truncate font-semibold">{lists.find((l) => l.id === task.projectId)?.name ?? "Pick a list"}</span>
+                </button>
+                {listOpen && (
+                  <Menu onClose={() => setListOpen(false)}>
+                    {lists.map((l) => (
+                      <button key={l.id} onClick={() => { setListOpen(false); if (l.id !== task.projectId) { p.onPatchTask(task.id, { projectId: l.id }); p.pushToast(`Moved to ${l.name}`); } }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                        {l.name}{l.id === task.projectId ? " ✓" : ""}
+                      </button>
+                    ))}
+                  </Menu>
+                )}
+              </div>
+            )}
+            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
+              <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
+                <span className="text-muted">On</span>
+                <span className="flex min-w-0 items-center gap-2 font-semibold">
+                  {ownerMember && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(ownerMember.name) }}>{initials(ownerMember.name)}</span>}
+                  <span className="truncate">{owner ?? "Nobody yet"}</span>
+                </span>
+              </button>
+              {ownerOpen && (
+                <Menu onClose={() => setOwnerOpen(false)}>
+                  {[...[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))), { id: CLAUDE_ID, name: "Claude" }].map((m) => (
+                    <button key={m.id} onClick={() => { setOwnerOpen(false); if (m.id !== task.assigneeId) { p.onPatchTask(task.id, { assigneeId: m.id }); p.pushToast(`On ${m.id === p.me.id ? "you" : m.name} now`); } }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>
+                      {m.id === p.me.id ? "You" : m.name}{m.id === task.assigneeId ? " ✓" : ""}
+                    </button>
+                  ))}
+                </Menu>
+              )}
+            </div>
+            <div className={`${fieldBox} cursor-default`}>
+              <span className="text-muted">Due</span>
+              <InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
+                className={`-mx-1 font-semibold ${!task.due ? "text-accent" : task.status !== "done" && isOverdue(task.due) ? "text-danger" : ""}`} />
+            </div>
+            <div className={`${fieldBox} cursor-default`}>
+              <span className="text-muted">Follow up</span>
+              <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
+                className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3 border-t pt-3">
+            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</button>
+            <span className="flex-1" />
+            <span className="relative">
+              <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
+              {moreOpen && (
+                <Menu right onClose={() => setMoreOpen(false)}>
+                  <button onClick={() => { setMoreOpen(false); p.onOpenTask(task.id, t.subject || t.peerName); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Open task</button>
+                  <button disabled={busy} onClick={() => { setMoreOpen(false); unlink(task.id); }} className="block w-full rounded-md px-3 py-2 text-left text-danger hover:bg-background">Unlink from this conversation</button>
+                </Menu>
+              )}
+            </span>
+          </div>
+          {/* The other tasks on this conversation, then add one more. */}
+          {others.length > 0 && (
+            <div className="mt-3 space-y-1.5 border-t pt-3">
+              {others.map((x) => (
+                <div key={x.id} className="flex items-center gap-2 rounded-lg bg-background py-1.5 pl-3 pr-1.5">
+                  <button onClick={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 flex-1 text-left" title="Open task">
+                    <span className="block truncate font-semibold">{x.title}</span>
+                    <span className="flex items-center gap-1.5 truncate text-[14px] text-muted"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[x.status].dot }} />{STATUS_META[x.status].label}{x.due ? ` · due ${dueLabel(x.due)}` : ""}</span>
+                  </button>
+                  <button disabled={busy} onClick={() => unlink(x.id)} title="Unlink from this conversation" aria-label={`Unlink ${x.title}`}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger disabled:opacity-50">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {addOpen ? (
+            <div className="mt-3 border-t pt-3">
+              <div className="mb-2 flex items-center"><span className={`${label} mb-0 flex-1`}>ANOTHER TASK</span>
+                <button onClick={() => { setAddOpen(false); setNewOpen(false); setQ(""); }} className="font-semibold text-muted hover:text-foreground">Cancel</button></div>
+              {picker}
+            </div>
+          ) : (
+            <button onClick={() => setAddOpen(true)} className={`${linkBtn} mt-3 block`}>＋ Link another task</button>
+          )}
+        </> : picker}
       </div>
 
       {/* Just the task and the people (Derek, 2026-10-02): the person's other

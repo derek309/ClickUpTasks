@@ -205,10 +205,23 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     if (!res.ok) throw new Error(j.error ?? "That didn't work.");
     return j;
   }, []);
-  const linkTask = useCallback(async (threadKey: string, taskId: string | null) => {
-    await post("/api/inbox/link", { threadKey, taskId });
-    setLoaded((ms) => ms.map((m) => (thKey(m) === threadKey ? { ...m, taskId } : m)));
-  }, [post]);
+  // The conversation's other tasks, beside the main one on its messages
+  // (Derek, 2026-10-07), by conversation, newest first.
+  const [moreTasks, setMoreTasks] = useState<Map<string, string[]>>(new Map());
+  const keepLinks = useCallback((threadKey: string, j: { taskId?: string | null; taskIds?: string[] }) => {
+    if ("taskId" in j) setLoaded((ms) => ms.map((m) => (thKey(m) === threadKey ? { ...m, taskId: j.taskId ?? null } : m)));
+    if (j.taskIds) setMoreTasks((s) => new Map(s).set(threadKey, j.taskIds!));
+  }, []);
+  const loadMoreTasks = useCallback(async (threadKey: string) => {
+    const res = await authedFetch(`/api/inbox/link?threadKey=${encodeURIComponent(threadKey)}`).catch(() => null);
+    if (res?.ok) keepLinks(threadKey, { taskIds: ((await res.json())?.taskIds ?? []) as string[] });
+  }, [keepLinks]);
+  const linkTask = useCallback(async (threadKey: string, taskId: string | null, add = false) => {
+    keepLinks(threadKey, await post("/api/inbox/link", { threadKey, taskId, add }));
+  }, [post, keepLinks]);
+  const unlinkTask = useCallback(async (threadKey: string, taskId: string) => {
+    keepLinks(threadKey, await post("/api/inbox/link", { threadKey, removeTaskId: taskId }));
+  }, [post, keepLinks]);
   const assign = useCallback(async (threadKey: string, memberId: string | null) => {
     await post("/api/inbox/assign", { threadKey, memberId });
     if (memberId !== meMemberId && memberId) {
@@ -259,7 +272,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     return (j.reviews ?? []) as { id: string; kind: string; name: string; url: string; opened: boolean; status: string }[];
   }, []);
 
-  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, assign, send, improve, draftReply, proposeTimes, taskReviews };
+  return { threads, loading, error, reload: load, pullNow, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, unlinkTask, moreTasks, loadMoreTasks, assign, send, improve, draftReply, proposeTimes, taskReviews };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {
