@@ -33,6 +33,16 @@ function query(table: string) {
     // Only ever called as not(col, "is", null) by the code under test.
     not: (k: string, _op: string, v: unknown) => { preds.push((r) => (r[k] ?? null) !== v); return b; },
     in: (k: string, vs: unknown[]) => { preds.push((r) => vs.includes(r[k])); return b; },
+    // Only "col.is.null,col.neq.value" pairs: either one holding keeps the row.
+    or: (expr: string) => {
+      const tests = expr.split(",").map((part) => {
+        const [k, op, ...rest] = part.split(".");
+        const v = rest.join(".");
+        return (r: Row) => (op === "is" && v === "null" ? (r[k] ?? null) === null : op === "neq" ? r[k] !== v : op === "eq" ? r[k] === v : false);
+      });
+      preds.push((r) => tests.some((t) => t(r)));
+      return b;
+    },
     order: () => b,
     limit: (n: number) => { max = n; return b; },
     maybeSingle: () => { single = true; return b; },

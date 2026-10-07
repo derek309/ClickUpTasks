@@ -112,7 +112,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const taskIds = rows.map((t) => t.id);
   const { data: messageRows } = taskIds.length
     ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments, created_by")
-        .eq("client_id", scope.clientId).in("task_id", taskIds).order("created_at", { ascending: true })
+        .eq("client_id", scope.clientId).in("task_id", taskIds)
+        // The app's own "X replied on ..." email, brought in from Gmail and
+        // linked to the task for the team's Inbox, is not part of their
+        // conversation (it showed as the client writing it).
+        .or("peer_name.is.null,peer_name.neq.ClickUpTasks")
+        .order("created_at", { ascending: true })
     : { data: [] as MessageRow[] };
   const threadByTask = new Map<string, MessageRow[]>();
   for (const m of (messageRows ?? []) as MessageRow[]) {
