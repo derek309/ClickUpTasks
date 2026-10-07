@@ -42,6 +42,10 @@ export type InboxPrefs = {
   /** Booking links starred to the top of the Calendar's list (calendar ids). */
   starredBookingLinks?: string[];
   /** Free time on the Calendar is looked for between these, Pacific ("09:00", "17:00"). */
+  /** Drafts a Claude chat wrote for you (MCP draft_message), shown at the top
+   *  of Drafts until sent or deleted (2026-10-06). Kept here because Inbox
+   *  drafts otherwise live only in the browser. */
+  queuedDrafts?: QueuedDraft[];
   workFrom?: string;
   workTo?: string;
   /** Kinds kept out of this person's Inbox, its count and its pop ups ("email",
@@ -61,6 +65,8 @@ export const DEFAULT_PREFS: InboxPrefs = {
   gmailRead: true, gmailArchive: true, imageSenders: [], allowSenders: [], railCollapsed: false, sideWidth: 320,
 };
 
+export type QueuedDraft = { id: string; kind: "email" | "text"; to: string; name: string; contactId?: string | null; subject?: string; body: string; createdAt: string; by?: string };
+
 const key = (member: string) => `inboxPrefs:${member}`;
 
 export function useInboxPrefs(member: string) {
@@ -79,6 +85,20 @@ export function useInboxPrefs(member: string) {
       });
     });
     return () => { live = false; };
+  }, [member]);
+  // Drafts a Claude chat writes arrive while the app is open: picked up each
+  // time you come back to the tab.
+  useEffect(() => {
+    const pick = () => {
+      if (document.visibilityState !== "visible") return;
+      supabase.from("inbox_prefs").select("prefs").eq("member_id", member).maybeSingle().then(({ data }) => {
+        const q = (data?.prefs as Partial<InboxPrefs> | undefined)?.queuedDrafts;
+        if (q) setPrefsState((p) => (JSON.stringify(p.queuedDrafts ?? []) === JSON.stringify(q) ? p : { ...p, queuedDrafts: q }));
+      });
+    };
+    document.addEventListener("visibilitychange", pick);
+    window.addEventListener("focus", pick);
+    return () => { document.removeEventListener("visibilitychange", pick); window.removeEventListener("focus", pick); };
   }, [member]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Only what changed is saved, on top of the latest saved copy. Saving this

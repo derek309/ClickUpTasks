@@ -129,7 +129,8 @@ export default function InboxView(p: InboxViewProps) {
     : cursorAt.key ? visible[Math.min(cursorAt.i, visible.length - 1)]?.key ?? null : null;
   const setCursor = (key: string | null) => setCursorAt({ key, i: Math.max(0, visible.findIndex((t) => t.key === key)) });
 
-  const count = (f: Folder) => f === "drafts" ? drafts.size : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
+  const queued = p.prefs.queuedDrafts ?? [];
+  const count = (f: Folder) => f === "drafts" ? drafts.size + queued.length : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
 
   const undoToast = (text: string, undo: () => Promise<void> | void) => p.pushToast(text, { label: "Undo", run: () => { undo(); } });
   const done = async (keys: string[]) => {
@@ -248,7 +249,22 @@ export default function InboxView(p: InboxViewProps) {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {inbox.error && <div className="m-4 rounded-lg bg-danger-soft p-3 text-danger">{inbox.error}</div>}
-                {!inbox.loading && !visible.length && (
+                {/* Drafts a Claude chat wrote for you (2026-10-06): open one to check and send it. */}
+                {folder === "drafts" && !q && queued.length > 0 && (
+                  <div className="space-y-2 border-b bg-background/60 p-3">
+                    {[...queued].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((d) => (
+                      <div key={d.id} className="flex items-center gap-3 rounded-lg bg-surface px-3 py-2.5 ring-1 ring-[var(--border)]">
+                        <span aria-hidden className="text-[20px]">{d.kind === "email" ? "✉️" : "💬"}</span>
+                        <button onClick={() => { setOpenKey(null); setComposeNew({ kind: d.kind, to: d.to, name: d.name, contactId: d.contactId ?? undefined, subject: d.subject, body: d.body, queuedId: d.id }); }} className="min-w-0 flex-1 text-left">
+                          <b className="block truncate">{d.kind === "email" ? "Email" : "Text"} to {d.name}{d.subject ? `: ${d.subject}` : ""}</b>
+                          <span className="block truncate text-[14px] text-muted">From {d.by ?? "Claude"} · {htmlToText(d.body).slice(0, 120)}</span>
+                        </button>
+                        <button onClick={() => p.setPrefs({ queuedDrafts: queued.filter((x) => x.id !== d.id) })} title="Delete this draft" className="shrink-0 rounded-md px-2 py-1 text-[14px] font-semibold text-muted hover:text-danger">Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!inbox.loading && !visible.length && !(folder === "drafts" && queued.length) && (
                   <div className="px-6 py-16 text-center text-muted">
                     <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : folder === "trash" ? "Trash is empty" : "Nothing here"}</div>
                     {folder === "inbox" && !q && <div className="mt-1">{p.prefs.unreadOnly ? "Nothing unread." : "Every message is answered, snoozed or archived."}</div>}
@@ -2275,17 +2291,17 @@ function TeamNew({ p, onClose }: { p: InboxViewProps; onClose: () => void }) {
 // it belongs to, so the conversation lands there from the first message.
 type Pick = { contactId?: string; name: string; address: string };
 /** How New message opens: blank, an email to someone, or a text to a contact. */
-type NewStart = { to?: string; body?: string; kind?: "email" | "text" | "team"; contactId?: string; name?: string };
+type NewStart = { to?: string; body?: string; kind?: "email" | "text" | "team"; contactId?: string; name?: string; subject?: string; queuedId?: string };
 function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart; onClose: () => void }) {
   const [kind, setKind] = useState<"email" | "text" | "team">(start.kind ?? "email");
   const [to, setTo] = useState<Pick | null>(start.to ? { contactId: start.contactId, name: start.name || start.to, address: start.to } : null);
   const [q, setQ] = useState("");
   const [ccOpen, setCcOpen] = useState(false);
   const [cc, setCc] = useState(""); const [bcc, setBcc] = useState("");
-  const [subject, setSubject] = useState("");
+  const [subject, setSubject] = useState(start.subject ?? "");
   // An email is written with formatting, like a reply (Derek, 2026-10-05); a
-  // text stays plain.
-  const [body, setBody] = useState(() => ((start.kind ?? "email") === "email" && start.body ? plainTextToHtml(start.body) : start.body ?? ""));
+  // text stays plain. A Claude draft may already be formatted.
+  const [body, setBody] = useState(() => ((start.kind ?? "email") === "email" && start.body ? (looksLikeHtml(start.body) ? start.body : plainTextToHtml(start.body)) : start.body ?? ""));
   const [nonce, setNonce] = useState(0);
   const put = (v: string) => { setBody(v); setNonce((n) => n + 1); };
   const newEditor = useRef<Editor | null>(null);
@@ -2346,6 +2362,8 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
         : await p.inbox.send({ channel: "sms", contactId: to.contactId, body: body.trim() });
       if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
       p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
+      // A Claude draft leaves Drafts once it has gone.
+      if (start.queuedId) p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((d) => d.id !== start.queuedId) });
       onClose();
     } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
     finally { setBusy(null); }

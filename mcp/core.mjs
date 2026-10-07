@@ -265,13 +265,13 @@ export function createServer(opts = {}) {
     });
 
   server.tool("get_task",
-    "Get one task's full detail: description, checklist (title + done state), links, client/list context.",
+    "Get one task's full detail: description, checklist (id, title, done state, in order), links, client/list context.",
     { id: z.string() },
     async ({ id }) => {
       await names();
       const t = await loadTask(id);
       if (!t) return noTask(id);
-      const checklist = (t.subtasks || []).map((s) => ({ title: s.title, done: !!s.done }));
+      const checklist = (t.subtasks || []).map((s) => ({ id: s.id, title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
       // Project instructions for an outside person (supabase/task-briefs.sql), if
@@ -384,7 +384,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("update_task",
-    "Edit an existing task's title, description, priority, due date, or assignee. Only the fields you pass are changed. Get the id from get_task/list_my_tasks.",
+    "Edit an existing task's title, description, priority, due date, assignee, or list. Only the fields you pass are changed. Get the id from get_task/list_my_tasks.",
     {
       id: z.string(),
       title: z.string().min(1).optional(),
@@ -393,8 +393,9 @@ export function createServer(opts = {}) {
       due: z.string().nullable().optional().describe("yyyy-mm-dd, or null to clear the due date"),
       assignee_id: z.string().nullable().optional().describe("roster member id (get one from list_members), \"me\" for yourself, or null to unassign"),
       waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned). Passing assignee_id instead clears this back to false."),
+      project_id: z.string().optional().describe("move the task to another list of the same client (list ids from list_projects)"),
     },
-    async ({ id, title, description, priority, due, assignee_id, waiting_on_client }) => {
+    async ({ id, title, description, priority, due, assignee_id, waiting_on_client, project_id }) => {
       const patch = {};
       if (title !== undefined) patch.title = title.trim();
       if (description !== undefined) patch.description = description;
@@ -404,8 +405,16 @@ export function createServer(opts = {}) {
       // waiting boundary: the read is what enforces trash and privacy, and
       // "waiting" status and waiting_on_client always move together after it
       // (see data.ts's applyWaitingStatusSync).
-      const before = await loadTask(id, "status,follow_up_at");
+      const before = await loadTask(id, "status,follow_up_at,client_id,project_id");
       if (!before) return noTask(id);
+      // Move to another list (2026-10-06): only within the task's own client,
+      // like the List box in the app; moving clients stays an app action.
+      if (project_id !== undefined && project_id !== before.project_id) {
+        const [list] = await sb(`projects?select=id,name,client_id&id=eq.${enc(project_id)}&limit=1`);
+        if (!list) return { content: [{ type: "text", text: `No list "${project_id}". Call list_projects to see the client's lists.` }] };
+        if (list.client_id !== before.client_id) return { content: [{ type: "text", text: `"${list.name}" belongs to another client. Moving a task to a different client is done in the app.` }] };
+        patch.project_id = project_id;
+      }
       if (assignee_id !== undefined) {
         const resolved = await resolveAssignee(assignee_id);
         if (resolved.error) return { content: [{ type: "text", text: resolved.error }] };
@@ -483,6 +492,49 @@ export function createServer(opts = {}) {
       await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body: text, at: nowIso() } });
       await patchTask(id, { updated_by: null });
       return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
+    });
+
+  // Inbox drafts (2026-10-06, asked for by a Claude chat: "draft_email only
+  // attaches to a task's review panel"). Lands in the caller's Inbox, Drafts,
+  // as "From Claude", ready to open, check and send. Never sends anything. Kept
+  // on inbox_prefs.prefs.queuedDrafts, because the Inbox's own drafts live
+  // only in the browser.
+  server.tool("draft_message",
+    "Write an email or a text for a teammate to check and send from their Inbox (it appears in Inbox, Drafts, at the top, marked From Claude). Never sends anything. Give either `to` (an email address or phone number) or `client_id` (from list_clients) and the client's contact is used. A text needs someone in GoHighLevel with a phone number. Prefer this over draft_email for messages to clients.",
+    {
+      channel: z.enum(["email", "text"]),
+      to: z.string().optional().describe("email address, or phone number for a text"),
+      client_id: z.string().optional().describe("instead of to: the client whose contact it goes to"),
+      subject: z.string().optional().describe("email only"),
+      body: z.string().min(1).describe("plain text, paragraphs separated by a blank line"),
+    },
+    async ({ channel, to, client_id, subject, body }) => {
+      if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
+      let contact = null;
+      if (client_id) {
+        const [c] = await sb(`clients?select=id,name,linked_contact_id&id=eq.${enc(client_id)}&limit=1`);
+        if (!c) return { content: [{ type: "text", text: `No client "${client_id}". Call list_clients.` }] };
+        const ghl = c.id.startsWith("cl_ct_ghl_") ? c.id.slice("cl_ct_ghl_".length) : null;
+        const found = ghl ? await sb(`contacts?select=id,name,email,phone&ghl_contact_id=eq.${enc(ghl)}&limit=1`)
+          : c.linked_contact_id ? await sb(`contacts?select=id,name,email,phone&id=eq.${enc(c.linked_contact_id)}&limit=1`) : [];
+        contact = found[0] ?? null;
+        if (!contact) return { content: [{ type: "text", text: `${c.name} has no linked contact, so there's no address to use. Pass \`to\` instead.` }] };
+      } else if (to.includes("@")) {
+        contact = (await sb(`contacts?select=id,name,email,phone&email=ilike.${enc(to.trim())}&limit=1`))[0] ?? null;
+      } else {
+        const digits = to.replace(/\D/g, "").slice(-10);
+        contact = digits.length === 10 ? (await sb(`contacts?select=id,name,email,phone&phone=like.*${digits}&limit=1`))[0] ?? null : null;
+      }
+      const address = channel === "email" ? (client_id ? contact?.email : to.trim()) : (client_id ? contact?.phone : to.trim());
+      if (!address) return { content: [{ type: "text", text: `${contact?.name ?? "That contact"} has no ${channel === "email" ? "email address" : "phone number"}.` }] };
+      if (channel === "text" && !contact) return { content: [{ type: "text", text: "A text goes through GoHighLevel, so it needs someone who is a contact there. No contact has that number." }] };
+      const draft = { id: rid("qd_"), kind: channel, to: address, name: contact?.name || address, contactId: contact?.id ?? null, ...(channel === "email" && subject ? { subject } : {}), body, createdAt: nowIso(), by: "Claude" };
+      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(ME)}&limit=1`);
+      const prefs = row?.prefs ?? {};
+      const next = { ...prefs, queuedDrafts: [...(prefs.queuedDrafts ?? []), draft] };
+      if (row) await sb(`inbox_prefs?member_id=eq.${enc(ME)}`, "PATCH", { prefs: next, updated_at: nowIso() });
+      else await sb("inbox_prefs", "POST", { member_id: ME, prefs: next, updated_at: nowIso() });
+      return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in your Inbox, Drafts. Nothing was sent.` }] };
     });
 
   server.tool("draft_email",
@@ -749,6 +801,54 @@ export function createServer(opts = {}) {
       await sb("rpc/append_subtasks", "POST", { task_id: id, items: added, author: null });
       const summary = added.map((s) => ({ id: s.id, title: s.title }));
       return { content: [{ type: "text", text: `Added ${added.length} checklist item(s) to ${id}: ${JSON.stringify(summary)}` }] };
+    });
+
+  // Matches checklist items by s_ id or by title text (2026-10-06): an id is
+  // exact; text must match one item only, so two similar titles never pick
+  // the wrong one silently.
+  const matchItems = (subs, refs) => {
+    const out = [], missing = [], unclear = [];
+    for (const raw of refs) {
+      const ref = String(raw).trim();
+      if (!ref) continue;
+      const byId = subs.find((s) => s.id === ref);
+      if (byId) { out.push(byId); continue; }
+      const hits = subs.filter((s) => s.title.toLowerCase().includes(ref.toLowerCase()));
+      if (hits.length === 1) out.push(hits[0]);
+      else if (!hits.length) missing.push(ref);
+      else unclear.push(`"${ref}" matches ${hits.length}: ${hits.map((h) => `${h.title} [${h.id}]`).join("; ")}`);
+    }
+    return { out, missing, unclear };
+  };
+  const matchProblem = (missing, unclear, none) => [missing.length ? `No item matching: ${missing.join(", ")}.` : "", unclear.length ? `Too many matches, use the id: ${unclear.join(" | ")}.` : "", none].filter(Boolean).join(" ");
+
+  server.tool("remove_checklist_items",
+    "Remove checklist items from a task. Each item is a checklist id (s_..., shown by get_task) or a piece of its title that matches exactly one item. Nothing is removed if any item can't be matched exactly.",
+    { id: z.string(), items: z.array(z.string()).min(1).describe("checklist ids, or title text matching one item each") },
+    async ({ id, items }) => {
+      const t = await loadTask(id, "subtasks");
+      if (!t) return noTask(id);
+      const { out, missing, unclear } = matchItems(t.subtasks || [], items);
+      if (missing.length || unclear.length) return { content: [{ type: "text", text: matchProblem(missing, unclear, "Nothing was removed.") }] };
+      // One at a time, each in a locked row (remove_subtask), so a teammate's
+      // tick at the same moment is kept.
+      for (const s of out) await sb("rpc/remove_subtask", "POST", { task_id: id, subtask_id: s.id, author: null });
+      return { content: [{ type: "text", text: `Removed ${out.length} checklist item(s) from ${id}: ${out.map((s) => s.title).join("; ")}.` }] };
+    });
+
+  server.tool("reorder_checklist",
+    "Put a task's checklist items in a new order. Pass the items (ids or title text matching one item each) in the order you want them; any you leave out keep their order after them.",
+    { id: z.string(), order: z.array(z.string()).min(1).describe("checklist ids or title text, first to last") },
+    async ({ id, order }) => {
+      const t = await loadTask(id, "subtasks");
+      if (!t) return noTask(id);
+      const subs = t.subtasks || [];
+      const { out, missing, unclear } = matchItems(subs, order);
+      if (missing.length || unclear.length) return { content: [{ type: "text", text: matchProblem(missing, unclear, "The order was not changed.") }] };
+      const picked = new Set(out.map((s) => s.id));
+      const next = [...out, ...subs.filter((s) => !picked.has(s.id))];
+      await patchTask(id, { subtasks: next });
+      return { content: [{ type: "text", text: `New order on ${id}:\n${next.map((s, i) => `${i + 1}. ${s.title} [${s.id}]${s.done ? " (done)" : ""}`).join("\n")}` }] };
     });
 
   server.tool("list_members",
