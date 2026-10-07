@@ -6,7 +6,7 @@
 // model: a folder list on the left, two line rows, and an open conversation
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
@@ -1983,10 +1983,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   return (
     <aside className="min-w-0 space-y-3 p-4">
       {whoseName && (
-        <button onClick={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`}
+        <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`}
           className="flex h-11 w-full items-center justify-between gap-2 rounded-xl bg-accent px-4 text-left text-[16px] font-bold text-white hover:opacity-90">
           <span className="min-w-0 truncate">Open {whoseName}&apos;s tasks</span><span aria-hidden>→</span>
-        </button>
+        </AppLink>
       )}
       <div className={card}>
         <div className={label}>{task ? (others.length ? "LINKED TASKS" : "LINKED TASK") : "LINK TO A TASK"}</div>
@@ -2062,7 +2062,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             </div>
           </div>
           <div className="mt-3 flex items-center gap-3 border-t pt-3">
-            <button onClick={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</button>
+            <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</AppLink>
             <span className="flex-1" />
             <span className="relative">
               <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
@@ -2079,10 +2079,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             <div className="mt-3 space-y-1.5 border-t pt-3">
               {others.map((x) => (
                 <div key={x.id} className="flex items-center gap-2 rounded-lg bg-background py-1.5 pl-3 pr-1.5">
-                  <button onClick={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 flex-1 text-left" title="Open task">
+                  <AppLink href={taskHref(x.id)} onOpen={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 flex-1 text-left" title="Open task">
                     <span className="block truncate font-semibold">{x.title}</span>
                     <span className="flex items-center gap-1.5 truncate text-[14px] text-muted"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[x.status].dot }} />{STATUS_META[x.status].label}{x.due ? ` · due ${dueLabel(x.due)}` : ""}</span>
-                  </button>
+                  </AppLink>
                   <button disabled={busy} onClick={() => unlink(x.id)} title="Unlink from this conversation" aria-label={`Unlink ${x.title}`}
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger disabled:opacity-50">✕</button>
                 </div>
@@ -2147,7 +2147,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         )}
         {client ? (
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            {t.clientId && <button onClick={() => p.onOpenClient(t.clientId!)} className={linkBtn}>Open client</button>}
+            {t.clientId && <AppLink href={clientHref(t.clientId)} onOpen={() => p.onOpenClient(t.clientId!)} className={linkBtn}>Open client</AppLink>}
             {ghlUrl && <a href={ghlUrl} target="_blank" rel="noopener noreferrer" className={linkBtn}>Open in GoHighLevel</a>}
           </div>
         ) : !adding && <AddToClient p={p} t={t} />}
@@ -2208,7 +2208,7 @@ function TeamPanel({ p, t }: { p: InboxViewProps; t: InboxThread }) {
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
             {task.status !== "done" && <button onClick={() => { p.onPatchTask(task.id, { status: "done" }); p.pushToast("Marked done"); }} className="h-9 rounded-lg bg-success px-3 font-bold text-white">✓ Mark done</button>}
-            <button onClick={() => p.onOpenTask(task.id, t.peerName)} className={linkBtn}>Open task →</button>
+            <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.peerName)} className={linkBtn}>Open task →</AppLink>
           </div>
         </div>
       ) : (
@@ -2248,6 +2248,22 @@ const ICO: Record<string, string> = {
   text: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   calendar: "M3 5h18v16H3zM16 3v4M8 3v4M3 10h18",
 };
+// A real link for the ways into a task or a client, so right click offers
+// Open Link in Split View and New Tab, and ⌘ click opens a tab (Derek,
+// 2026-10-07: "set it up so I can right click to open in split view"). A
+// plain click still opens it in place.
+const taskHref = (id: string) => `/?task=${encodeURIComponent(id)}`;
+const clientHref = (id: string) => `/?client=${encodeURIComponent(id)}`;
+function AppLink({ href, onOpen, children, ...rest }: { href: string; onOpen: () => void; children: ReactNode; className?: string; title?: string; "aria-label"?: string }) {
+  return (
+    <a href={href} {...rest} onClick={(e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      onOpen();
+    }}>{children}</a>
+  );
+}
+
 function Ico({ n, className = "" }: { n: keyof typeof ICO; className?: string }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" className={`h-[18px] w-[18px] shrink-0 fill-none stroke-current ${className}`} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d={ICO[n]} /></svg>;
 }
@@ -2305,7 +2321,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
       <div className="mt-2 flex items-center gap-0.5">
         <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /></button>
         {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /></button>}
-        {main && clientId && <button onClick={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></button>}
+        {main && clientId && <AppLink href={clientHref(clientId)} onOpen={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></AppLink>}
         {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /></button>}
         {contact?.ghlContactId && <button onClick={() => setBooking(true)} title={`Book ${name.split(/\s+/)[0]} in GoHighLevel`} aria-label="Book a time" className={ib}><Ico n="calendar" /></button>}
         {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
