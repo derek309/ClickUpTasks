@@ -118,8 +118,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
   const [whoPicked, setWho] = useState<string | null>(null);
   const who = whoPicked ?? (people.some((p) => p.memberId === meId) ? meId : "all");
   // Busy time folds into one grey line a day; this lists it in full (Derek, 2026-10-05, mockup
-  // https://claude.ai/artifact/Ct4k8xUMqn97ghoUxRU1Xq).
-  const [busyFull, setBusyFull] = useState(false);
+  // https://claude.ai/artifact/Ct4k8xUMqn97ghoUxRU1Xq). In full by default (Derek, 2026-10-06).
+  const [busyFull, setBusyFull] = useState(true);
   const [week, setWeek] = useState<0 | 1>(0);
   const [linkQ, setLinkQ] = useState("");
   const [now] = useState(() => Date.now());
