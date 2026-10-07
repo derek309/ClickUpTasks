@@ -146,12 +146,14 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
-  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, team, doneCount, totalCount,
+  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, onBack, team, doneCount, totalCount,
 }: {
   task: WaitingTask;
-  /** Their other open tasks that need them, for the side panel. */
+  /** Their other open tasks that need them: the next one is offered once they answer this. */
   otherWaiting: { id: string; title: string }[];
   onOpenTask: (id: string) => void;
+  /** Back to the list of their tasks. */
+  onBack: () => void;
   /** Everyone on our side who has written to them, for "Your team". */
   team: WaitingSender[];
   doneCount: number;
@@ -186,6 +188,14 @@ function TaskDetailBody({
 }) {
   const isDone = t.status === "done";
   const [dragOver, setDragOver] = useState(false);
+  // Once they answer (a choice, or a message sent), the next thing we need
+  // from them is offered, so they can work straight through (Derek,
+  // 2026-10-07: "give them the option... or just go to the next task").
+  const [answeredId, setAnsweredId] = useState<string | null>(null);
+  const answered = answeredId === t.id;
+  const nextRef = useRef<HTMLElement | null>(null);
+  const markAnswered = () => { setAnsweredId(t.id); setTimeout(() => nextRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); };
+  const next = otherWaiting[0] ?? null;
   const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
   // The pages we're asking about ("Homepage: https://…") become cards to tap,
   // not long addresses inside the paragraph (Derek, 2026-10-07).
@@ -221,7 +231,7 @@ function TaskDetailBody({
       <textarea
         value={draft.body}
         onChange={(e) => onBody(e.target.value)}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSend(); }}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && (draft.body.trim() || draft.attachments.length)) { onSend(); markAnswered(); } }}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
@@ -256,7 +266,7 @@ function TaskDetailBody({
         {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Doc"}</button>}
         <span className="flex-1" />
         <button
-          onClick={onSend}
+          onClick={() => { onSend(); markAnswered(); }}
           disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
           className="h-10 rounded-lg bg-accent px-5 text-[16px] font-bold text-white disabled:opacity-40"
         >
@@ -289,15 +299,9 @@ function TaskDetailBody({
             {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
           </div>
           <h1 className="text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.title}</h1>
-          {lastTeam && (
-            <div className="mt-3 flex items-center gap-2.5 text-[16px] text-muted">
-              <SenderAvatar sender={lastTeam} size={32} /> <span><b className="text-foreground">{lastTeam.name}</b> is working on this with you</span>
-            </div>
-          )}
-        </section>
-
-        {(t.description || t.attachments.length > 0) && (
-          <section className={`${card} px-5 py-4 text-[16px]`}>
+          {/* What we need, in the same box as the title (Derek, 2026-10-07). */}
+          {(t.description || t.attachments.length > 0) && (
+          <div className="mt-3 border-t pt-3 text-[16px]">
             {before && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(before)}</p>}
             {links.length > 0 && (
               <div className={`my-3 grid gap-3 ${links.length > 1 ? "sm:grid-cols-2" : ""}`}>
@@ -313,21 +317,45 @@ function TaskDetailBody({
             )}
             {after && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(after)}</p>}
             <AttachmentGallery items={t.attachments} />
+          </div>
+          )}
+          {lastTeam && (
+            <div className="mt-3 flex items-center gap-2.5 text-[16px] text-muted">
+              <SenderAvatar sender={lastTeam} size={32} /> <span><b className="text-foreground">{lastTeam.name}</b> is working on this with you</span>
+            </div>
+          )}
+        </section>
+
+        {answered && (
+          <section ref={nextRef} className="rounded-xl border-2 border-success bg-success-soft px-5 py-4">
+            <h2 className="text-[20px] font-bold">Thank you, we have it. What would you like to do next?</h2>
+            <div className="mt-3 flex flex-wrap gap-2.5">
+              {next && (
+                <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
+                  <span className="min-w-0">Next: {next.title}</span><span aria-hidden>→</span>
+                </button>
+              )}
+              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">
+                {next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}
+              </button>
+              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay on this one</button>
+            </div>
+            {!next && <p className="mt-2 text-[16px] text-muted">That was the last thing we needed from you for now.</p>}
           </section>
         )}
 
-        {!isDone && (
+        {!isDone && !answered && (
           <section className="rounded-xl border-2 border-accent bg-surface px-5 py-4">
             <h2 className="text-[20px] font-bold">What do you think?</h2>
             <p className="mb-3 text-[16px] text-muted">Pick one. You can add a note below either way.</p>
             <div className="grid gap-2.5 sm:grid-cols-3">
-              <button onClick={() => onSetStatus("done")} disabled={statusBusy} className={choice(false, "ok")}>
+              <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy} className={choice(false, "ok")}>
                 <b className="text-[17px] text-success">✓ Looks good</b><span className="text-[16px] text-muted">Approve it</span>
               </button>
-              <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy} className={choice(t.status === "changes_requested", "chg")}>
+              <button onClick={() => { onSetStatus("changes_requested"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "changes_requested", "chg")}>
                 <b className="text-[17px]">✎ Needs changes</b><span className="text-[16px] text-muted">Tell us what to change</span>
               </button>
-              <button onClick={() => onSetStatus("review")} disabled={statusBusy} className={choice(t.status === "review", "q")}>
+              <button onClick={() => { onSetStatus("review"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "review", "q")}>
                 <b className="text-[17px]">? I have a question</b><span className="text-[16px] text-muted">Someone will get back to you</span>
               </button>
             </div>
@@ -375,18 +403,6 @@ function TaskDetailBody({
             <div className={cap}>{projectName ?? "Your project"}</div>
             <div className="h-2 overflow-hidden rounded-full bg-border"><i className="block h-full bg-success" style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }} /></div>
             <div className="mt-1.5 text-[16px] text-muted"><b className="text-foreground">{doneCount} of {totalCount}</b> tasks done</div>
-          </div>
-        )}
-        {otherWaiting.length > 0 && (
-          <div className={`${card} p-4`}>
-            <div className={`${cap} flex items-center`}>Also waiting on you <span className="ml-auto rounded-full bg-highlight-soft px-2.5 text-[14px] tracking-normal text-highlight">{otherWaiting.length}</span></div>
-            {otherWaiting.slice(0, 5).map((o, i) => (
-              <button key={o.id} onClick={() => onOpenTask(o.id)} className={`flex w-full items-center gap-2.5 py-2.5 text-left text-[16px] ${i ? "border-t" : "pt-0"}`}>
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-highlight" />
-                <span className="min-w-0 flex-1">{o.title}</span>
-                <span className="shrink-0 font-semibold text-accent">Open</span>
-              </button>
-            ))}
           </div>
         )}
         {team.length > 0 && (
@@ -931,8 +947,9 @@ export default function WaitingView({ token }: { token: string }) {
           statusBusy={statusBusyIds.has(selectedTask.id)}
           onDoc={() => openDoc(selectedTask.id)}
           docBusy={docBusyId === selectedTask.id}
-          otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).map((o) => ({ id: o.id, title: o.title }))}
+          otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).sort(sortFn).map((o) => ({ id: o.id, title: o.title }))}
           onOpenTask={openTask}
+          onBack={closeTask}
           team={teamSenders}
           doneCount={doneCount}
           totalCount={totalCount}
