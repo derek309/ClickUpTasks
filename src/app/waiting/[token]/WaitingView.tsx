@@ -87,15 +87,14 @@ function linkify(text: string) {
 // one, else a colored initials circle, same fallback the internal app's own
 // Avatar component uses (mirrored here rather than imported, since this
 // page deliberately doesn't pull in the cockpit component tree).
-function SenderAvatar({ sender }: { sender?: WaitingSender | null }) {
-  const size = 22;
-  if (!sender) return <span className="flex shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white" style={{ width: size, height: size }}>CT</span>;
+function SenderAvatar({ sender, size = 22 }: { sender?: WaitingSender | null; size?: number }) {
+  if (!sender) return <span className="flex shrink-0 items-center justify-center rounded-full bg-accent font-bold text-white" style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}>CT</span>;
   if (sender.avatarUrl) return (
     // eslint-disable-next-line @next/next/no-img-element -- small inline avatar, not a next/image-friendly static asset.
     <img src={sender.avatarUrl} alt={sender.name} title={sender.name} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />
   );
   return (
-    <span className="flex shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" title={sender.name} style={{ width: size, height: size, background: sender.color }}>
+    <span className="flex shrink-0 items-center justify-center rounded-full font-bold text-white" title={sender.name} style={{ width: size, height: size, background: sender.color, fontSize: Math.round(size * 0.42) }}>
       {sender.initials}
     </span>
   );
@@ -147,9 +146,16 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 function TaskDetailBody({
   task: t, showProjectName, projectName, draft, sending, uploading, sendError, linkOpen, linkUrl, linkLabel, threadRef,
   onBody, onFiles, onRemoveAttachment, onToggleLink, onLinkUrl, onLinkLabel, onAddLink, onSend,
-  onSetStatus, statusBusy, onDoc, docBusy,
+  onSetStatus, statusBusy, onDoc, docBusy, otherWaiting, onOpenTask, team, doneCount, totalCount,
 }: {
   task: WaitingTask;
+  /** Their other open tasks that need them, for the side panel. */
+  otherWaiting: { id: string; title: string }[];
+  onOpenTask: (id: string) => void;
+  /** Everyone on our side who has written to them, for "Your team". */
+  team: WaitingSender[];
+  doneCount: number;
+  totalCount: number;
   showProjectName: boolean;
   projectName: string | null;
   draft: Draft;
@@ -180,6 +186,11 @@ function TaskDetailBody({
 }) {
   const isDone = t.status === "done";
   const [dragOver, setDragOver] = useState(false);
+  const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
+  // The pages we're asking about ("Homepage: https://…") become cards to tap,
+  // not long addresses inside the paragraph (Derek, 2026-10-07).
+  const { before, links, after } = splitLabeledLinks(t.description);
+  const lastTeam = [...displayThreadOf(t)].reverse().find((m) => m.from === "team")?.sender ?? null;
   // Shows the jump-to-latest button only while scrolled away from the
   // bottom — starts true since the thread opens already scrolled down
   // (see the auto-scroll effect in WaitingView), and native scroll events
@@ -195,9 +206,7 @@ function TaskDetailBody({
   // thread's opening message only when there's no real thread yet, so
   // history isn't lost but a task that's since moved to real chat doesn't
   // show it twice.
-  const displayThread: WaitingMessage[] = t.thread.length > 0 || !t.response
-    ? t.thread
-    : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
+  const displayThread = displayThreadOf(t);
   const composer = (
     <>
       {/* text-[16px] isn't a style choice here — any input/textarea under
@@ -218,7 +227,7 @@ function TaskDetailBody({
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
         placeholder={dragOver ? "Drop to attach…" : "Type a message, we'll email the team…"}
         rows={2}
-        className={`w-full resize-none rounded-lg border px-2.5 py-2 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-background"}`}
+        className={`w-full resize-none rounded-xl border px-3 py-2.5 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-surface"}`}
       />
       {draft.attachments.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -237,109 +246,190 @@ function TaskDetailBody({
           <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
         </div>
       )}
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <label className="inline-flex cursor-pointer items-center gap-1 text-[16px] font-medium text-accent">
-            + Attach files
-            <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
-          </label>
-          <button onClick={onToggleLink} className="text-[16px] font-medium text-accent">+ Add link</button>
-          {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
-          {!isDone && <button onClick={onDoc} disabled={docBusy} className="text-[16px] font-medium text-accent disabled:opacity-50">{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Add a doc"}</button>}
-        </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <label className={`${toolBtn} cursor-pointer`}>
+          📎 Files
+          <input type="file" multiple className="hidden" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
+        </label>
+        <button onClick={onToggleLink} className={toolBtn}>🔗 Link</button>
+        {/* A doc lives on the task, beside files and links (Derek, 2026-10-05). */}
+        {!isDone && <button onClick={onDoc} disabled={docBusy} className={`${toolBtn} disabled:opacity-50`}>{docBusy ? "Opening…" : t.hasDoc ? "📝 Open doc" : "📝 Doc"}</button>}
+        <span className="flex-1" />
         <button
           onClick={onSend}
           disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-          className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"
+          className="h-10 rounded-lg bg-accent px-5 text-[16px] font-bold text-white disabled:opacity-40"
         >
           {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
         </button>
       </div>
       {sendError && <div className="mt-1.5 text-[16px] text-danger">{sendError}</div>}
+      <div className="mt-2 text-[16px] text-muted">You can drop photos and files right into the box. We get it by email too.</div>
     </>
   );
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  // The client portal's look (Derek, 2026-10-07): a header card, the team's
+  // message with its pages as cards, one clear "what do you think", the
+  // conversation, and a side panel with what else needs them and who's on it.
+  const card = "rounded-xl border bg-surface";
+  const cap = "mb-2.5 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
+  const choice = (on: boolean, tone: "ok" | "chg" | "q") => `grid gap-0.5 rounded-xl border px-4 py-3 text-left transition disabled:opacity-40 ${
+    on ? (tone === "chg" ? "border-danger bg-danger-soft" : tone === "q" ? "border-highlight bg-highlight-soft" : "border-success bg-success-soft")
+      : tone === "ok" ? "border-success/50 bg-surface hover:bg-success-soft" : tone === "chg" ? "bg-surface hover:border-danger" : "bg-surface hover:border-highlight"}`;
   return (
-    <>
-      {/* threadRef used to sit on the message list itself, which no longer
-          scrolls on its own now that the conversation is full width (it's
-          the OUTER div below that scrolls) — auto-scroll-to-newest silently
-          stopped working when that changed, since scrollTop/scrollHeight on
-          a non-overflowing element does nothing. Fixed by moving the ref
-          here, onto the actual scrolling container. */}
-      <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-4 md:px-10">
-        {(showProjectName && projectName) || isDone ? (
-          <div className="mb-2 flex flex-wrap items-center justify-center gap-1.5 text-center">
-            {showProjectName && projectName && <span className="text-[16px] text-muted">{projectName}</span>}
-            {isDone && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 text-[16px] font-medium text-success">✓ Completed</span>
+    <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid min-w-0 gap-4">
+        <section className={`${card} px-5 py-4`}>
+          <div className="mb-2.5 flex flex-wrap gap-2">
+            {showProjectName && projectName && <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">{projectName}</span>}
+            {isDone
+              ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Completed</span>
+              : t.needsResponse && <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-semibold text-highlight">● Waiting on you</span>}
+            {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
+          </div>
+          <h1 className="text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.title}</h1>
+          {lastTeam && (
+            <div className="mt-3 flex items-center gap-2.5 text-[16px] text-muted">
+              <SenderAvatar sender={lastTeam} size={32} /> <span><b className="text-foreground">{lastTeam.name}</b> is working on this with you</span>
+            </div>
+          )}
+        </section>
+
+        {(t.description || t.attachments.length > 0) && (
+          <section className={`${card} px-5 py-4 text-[16px]`}>
+            {before && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(before)}</p>}
+            {links.length > 0 && (
+              <div className={`my-3 grid gap-3 ${links.length > 1 ? "sm:grid-cols-2" : ""}`}>
+                {links.map((l) => (
+                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-3 rounded-xl border bg-surface p-3 hover:border-accent">
+                    <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-accent text-[24px] text-white" aria-hidden>🖥</span>
+                    <span className="min-w-0 flex-1"><b className="block truncate">{l.label}</b><span className="block truncate text-muted">Tap to open it</span></span>
+                    <span className="shrink-0 font-bold text-accent">Open ↗</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {after && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(after)}</p>}
+            <AttachmentGallery items={t.attachments} />
+          </section>
+        )}
+
+        {!isDone && (
+          <section className="rounded-xl border-2 border-accent bg-surface px-5 py-4">
+            <h2 className="text-[20px] font-bold">What do you think?</h2>
+            <p className="mb-3 text-[16px] text-muted">Pick one. You can add a note below either way.</p>
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <button onClick={() => onSetStatus("done")} disabled={statusBusy} className={choice(false, "ok")}>
+                <b className="text-[17px] text-success">✓ Looks good</b><span className="text-[16px] text-muted">Approve it</span>
+              </button>
+              <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy} className={choice(t.status === "changes_requested", "chg")}>
+                <b className="text-[17px]">✎ Needs changes</b><span className="text-[16px] text-muted">Tell us what to change</span>
+              </button>
+              <button onClick={() => onSetStatus("review")} disabled={statusBusy} className={choice(t.status === "review", "q")}>
+                <b className="text-[17px]">? I have a question</b><span className="text-[16px] text-muted">Someone will get back to you</span>
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section className={`${card} overflow-hidden`}>
+          <div className="flex items-center gap-2 border-b px-5 py-3 text-[16px] font-bold">💬 Conversation</div>
+          {/* The thread scrolls on its own and opens at its newest message
+              (threadRef, see the effect in WaitingView), while the page itself
+              opens at the top. */}
+          <div className="relative">
+            <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="max-h-[480px] overflow-y-auto px-5 py-4">
+              {displayThread.length === 0 ? (
+                <p className="py-2 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {displayThread.map((m) => (
+                    <div key={m.id} className={`flex items-end gap-2 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                      {m.from === "team" && <SenderAvatar sender={m.sender} size={30} />}
+                      <div className={`max-w-[85%] lg:max-w-[560px] ${m.from === "client" ? "text-right" : ""}`}>
+                        <div className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-[16px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
+                          {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
+                          <AttachmentGallery items={m.attachments} />
+                        </div>
+                        <div className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {displayThread.length > 0 && !atBottom && (
+              <button onClick={scrollToBottom} title="Jump to the latest message"
+                className="absolute bottom-3 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90">↓</button>
             )}
           </div>
-        ) : null}
-        {t.description && <p className="max-w-[62ch] whitespace-pre-wrap break-words text-[16px] text-muted">{linkify(t.description)}</p>}
-        <AttachmentGallery items={t.attachments} />
+          <div className="border-t px-5 py-4">{composer}</div>
+        </section>
+      </div>
 
-        {displayThread.length > 0 && (
-          <div className="mt-3 space-y-2">
-            {displayThread.map((m) => (
-              <div key={m.id} className={`flex items-end gap-1.5 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                {m.from === "team" && <SenderAvatar sender={m.sender} />}
-                {/* Bubbles still cap below their full-width container (like
-                    the Fox Coach reference) — otherwise a one-line message
-                    would stretch edge to edge and be unreadable — but the
-                    container itself is the full page width now, not a
-                    narrow centered column. */}
-                <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-sm bg-accent text-white" : "rounded-bl-sm border bg-surface"}`}>
-                  {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
-                  <AttachmentGallery items={m.attachments} />
-                  <div className={`mt-1 text-[16px] ${m.from === "client" ? "text-white/70" : "text-muted"}`}>
-                    {m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}
-                  </div>
-                </div>
-              </div>
+      <aside className="grid gap-4">
+        {totalCount > 0 && (
+          <div className={`${card} p-4`}>
+            <div className={cap}>{projectName ?? "Your project"}</div>
+            <div className="h-2 overflow-hidden rounded-full bg-border"><i className="block h-full bg-success" style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }} /></div>
+            <div className="mt-1.5 text-[16px] text-muted"><b className="text-foreground">{doneCount} of {totalCount}</b> tasks done</div>
+          </div>
+        )}
+        {otherWaiting.length > 0 && (
+          <div className={`${card} p-4`}>
+            <div className={`${cap} flex items-center`}>Also waiting on you <span className="ml-auto rounded-full bg-highlight-soft px-2.5 text-[14px] tracking-normal text-highlight">{otherWaiting.length}</span></div>
+            {otherWaiting.slice(0, 5).map((o, i) => (
+              <button key={o.id} onClick={() => onOpenTask(o.id)} className={`flex w-full items-center gap-2.5 py-2.5 text-left text-[16px] ${i ? "border-t" : "pt-0"}`}>
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-highlight" />
+                <span className="min-w-0 flex-1">{o.title}</span>
+                <span className="shrink-0 font-semibold text-accent">Open</span>
+              </button>
             ))}
           </div>
         )}
-
-        {/* Pinned to this scroll viewport's own corner (absolute against
-            the `relative` container it's in) rather than placed in the
-            document flow — sticky-in-flow put it wherever the thread's
-            content happened to end, which could land in the middle of the
-            screen on a short thread. Only shown once actually scrolled
-            away from the bottom. */}
-        {displayThread.length > 0 && !atBottom && (
-          <button onClick={scrollToBottom} title="Jump to the latest message"
-            className="absolute bottom-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90 md:right-10">↓</button>
+        {team.length > 0 && (
+          <div className={`${card} p-4`}>
+            <div className={cap}>Your team</div>
+            <div className="grid gap-3">
+              {team.map((p) => (
+                <div key={p.name} className="flex items-center gap-2.5 text-[16px]"><SenderAvatar sender={p} size={36} /><b>{p.name}</b></div>
+              ))}
+            </div>
+          </div>
         )}
-      </div>
-
-      {!isDone && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-t bg-background/40 px-6 py-2.5 md:px-10">
-          <span className="text-[16px] font-medium text-muted">What do you think?</span>
-          {/* Softest of the three: no specific edit asked for, just "put
-              this back in front of someone." Maps to the internal Review
-              status, whose amber sits between Changes and Done on the board
-              too, so the pressed state borrows the same warm token the
-              "Needs your input" chip above already uses. */}
-          <button onClick={() => onSetStatus("review")} disabled={statusBusy}
-            className={`rounded-full border px-3 py-1 text-[16px] font-semibold transition disabled:opacity-40 ${t.status === "review" ? "border-highlight bg-highlight-soft text-highlight" : "border-border bg-surface text-muted hover:text-foreground"}`}>
-            Needs attention
-          </button>
-          <button onClick={() => onSetStatus("changes_requested")} disabled={statusBusy}
-            className={`rounded-full border px-3 py-1 text-[16px] font-semibold transition disabled:opacity-40 ${t.status === "changes_requested" ? "border-danger bg-danger-soft text-danger" : "border-border bg-surface text-muted hover:text-foreground"}`}>
-            Needs changes
-          </button>
-          <button onClick={() => onSetStatus("done")} disabled={statusBusy}
-            className="rounded-full border border-success bg-success-soft px-3 py-1 text-[16px] font-semibold text-success transition hover:opacity-90 disabled:opacity-40">
-            ✓ Approved
-          </button>
-        </div>
-      )}
-
-      <div className="shrink-0 border-t bg-surface px-6 py-4 md:px-10">{composer}</div>
-    </>
+      </aside>
+    </div>
   );
+}
+
+// "Homepage: https://…" in a task's description: the label and the link, so
+// the page can show it as a card. Only labelled links (a few words, then a
+// colon); a bare link stays in the text. `before` is the text up to the first
+// one, `after` the rest once they're taken out.
+function splitLabeledLinks(text: string): { before: string; links: { label: string; url: string }[]; after: string } {
+  const re = /(?:^|[\s.])([A-Za-z][^:\n.]{0,40}?):\s*(https?:\/\/[^\s<>"']+)/g;
+  const links: { label: string; url: string }[] = [];
+  let first = -1, last = 0;
+  for (const m of text.matchAll(re)) {
+    const label = m[1].trim();
+    if (label.split(/\s+/).length > 5) continue;
+    const url = m[2].replace(URL_TRAILING_PUNCT_RE, "");
+    const at = (m.index ?? 0) + m[0].indexOf(m[1]);
+    if (first < 0) first = at;
+    last = at + m[0].length - m[0].indexOf(m[1]) - (m[2].length - url.length);
+    links.push({ label, url });
+  }
+  if (!links.length) return { before: text, links, after: "" };
+  return { before: text.slice(0, first).trim(), links, after: text.slice(last).replace(/^[\s.,;:!?]+/, "").trim() };
+}
+
+// The thread as shown: an old reply from before chat counts as its first message.
+function displayThreadOf(t: WaitingTask): WaitingMessage[] {
+  return t.thread.length > 0 || !t.response
+    ? t.thread
+    : [{ id: "legacy_response", from: "client", body: t.response.body, at: t.response.submittedAt, attachments: t.response.attachments }];
 }
 
 // "Here's where you are, what's done, and what happens next" — the one
@@ -571,6 +661,13 @@ export default function WaitingView({ token }: { token: string }) {
   const selectedTask = selectedTaskId ? (tasks ?? []).find((t) => t.id === selectedTaskId) ?? null : null;
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
   const doneCount = completedTasks.length;
+  // Everyone on our side who has written to them, newest first, once each.
+  const teamSenders = useMemo(() => {
+    const seen = new Map<string, WaitingSender>();
+    const all = (tasks ?? []).flatMap((x) => x.thread).filter((m) => m.from === "team" && m.sender).sort((a, b) => b.at.localeCompare(a.at));
+    for (const m of all) if (!seen.has(m.sender!.name)) seen.set(m.sender!.name, m.sender!);
+    return [...seen.values()].slice(0, 5);
+  }, [tasks]);
   const totalCount = (tasks ?? []).length;
   // Which list a new request will actually go to: the client's own pick
   // once they've touched the dropdown, else the first one — never asked at
@@ -783,11 +880,13 @@ export default function WaitingView({ token }: { token: string }) {
     // card/border/shadow wrapping it. List mode is the normal page: a
     // short hero, then content that scrolls with the page like any other
     // site (see below).
-    <div className={selectedTask ? "flex h-[100dvh] flex-col overflow-hidden bg-background" : "min-h-screen bg-background"}>
+    <div className="min-h-screen bg-background">
       {selectedTask ? (
-        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }} className="relative flex shrink-0 items-center justify-center px-14 py-3 md:px-20">
-          <button onClick={closeTask} title="Back to your tasks" className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full text-[22px] text-white hover:bg-white/10">←</button>
-          <div className="max-w-[75%] truncate text-center text-[16px] font-bold text-white">{selectedTask.title}</div>
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
+          <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
+            <button onClick={closeTask} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← All my tasks</button>
+            {clientName && <span className="ml-auto truncate text-[16px] font-bold text-white">{clientName}</span>}
+          </div>
         </div>
       ) : (
         // Everything that used to be the sidebar, compressed into one thin
@@ -828,6 +927,11 @@ export default function WaitingView({ token }: { token: string }) {
           statusBusy={statusBusyIds.has(selectedTask.id)}
           onDoc={() => openDoc(selectedTask.id)}
           docBusy={docBusyId === selectedTask.id}
+          otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).map((o) => ({ id: o.id, title: o.title }))}
+          onOpenTask={openTask}
+          team={teamSenders}
+          doneCount={doneCount}
+          totalCount={totalCount}
         />
       ) : (
       <div className="px-6 pb-10 pt-6 md:px-10">
