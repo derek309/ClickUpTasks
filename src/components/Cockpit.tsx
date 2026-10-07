@@ -2298,13 +2298,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Names each active filter as a dismissible chip above the list instead of
   // an unexplained "3 of 18" count in the header — clicking a chip's × clears
   // just that filter, Clear resets all three at once.
-  const activeFilterBar = filtersActive ? (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5 px-4 sm:px-0">
+  // Just mine shows itself on its own button, so its chip is left out here
+  // (Derek, 2026-10-06: "it's in a bad place").
+  const activeFilterBar = (filters.status !== "all" || filters.priority !== "all" || (filters.assignee !== "all" && filters.assignee !== me.id)) ? (
+    <div className="mb-2 mt-2 flex flex-wrap items-center gap-1.5 px-4 sm:px-5">
       {filters.status !== "all" && (
         <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Status: {STATUS_META[filters.status].label}
           <button onClick={() => setFilters((f) => ({ ...f, status: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
-      {filters.assignee !== "all" && (
+      {filters.assignee !== "all" && filters.assignee !== me.id && (
         <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee}
           <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
