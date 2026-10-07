@@ -5,11 +5,12 @@
 // selection and bulk edits, duplicating and deleting. Lifted out of
 // Cockpit.tsx unchanged (audit 2026-09-29, 3.4).
 
+import { clientMoveLine } from "../../../mcp/taskMove.mjs";
 import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -26,11 +27,13 @@ export type UseTaskEditsDeps = {
   openTaskId: string | null;
   setOpenTaskId: React.Dispatch<React.SetStateAction<string | null>>;
   projectById: (id: string) => Project | null;
+  /** For the Changes line when a task moves to another client. */
+  clientById?: (id: string) => Client | null;
   tasks: Task[];
   sendMentionEmail: (recipientMemberId: string, taskId: string, commentBody: string) => void;
 };
 
-export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, tasks, sendMentionEmail }: UseTaskEditsDeps) {
+export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, clientById, tasks, sendMentionEmail }: UseTaskEditsDeps) {
   // --- mutations ------------------------------------------------------------
 
   const saveChecklistChange = (taskId: string, item: ChecklistChange, author: string) => {
@@ -102,6 +105,10 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
 
   const describeFieldChange = (before: Task, patch: Partial<Task>): string[] => {
     const lines: string[] = [];
+    // A move to another client (the Client box, or bulk Move to). Same line
+    // the MCP's update_task writes (mcp/taskMove.mjs).
+    if (patch.clientId !== undefined && patch.clientId !== before.clientId)
+      lines.push(clientMoveLine(clientById?.(before.clientId)?.name ?? "another client", clientById?.(patch.clientId)?.name ?? "another client", patch.projectId ? projectById(patch.projectId)?.name : null));
     if (patch.status && patch.status !== before.status) lines.push(`changed status from ${STATUS_META[before.status].label} to ${STATUS_META[patch.status].label}`);
     if (patch.assigneeId !== undefined && patch.assigneeId !== before.assigneeId) {
       if (!before.assigneeId && patch.assigneeId) lines.push(`assigned to ${userById(patch.assigneeId)?.name ?? "someone"}`);

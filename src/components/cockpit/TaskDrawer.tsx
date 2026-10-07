@@ -405,7 +405,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   // Packages the task as a ready-to-paste brief for a Claude Code session.
   const copyForClaude = async () => {
-    const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+    const ct = contactById(task.contactId) || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
     const descText = htmlToText(task.description);
     // The link opens this task, not the app's front page (Derek: "can we have
     // the direct link please not just the link to task manager"). taskLink is
@@ -1015,7 +1015,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </select>
       </Row>
       <Row label="Contact" icon={<I.user />}>
-        {(() => { const ct = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className={`block truncate px-2 py-1 text-[16px] ${ct ? "" : "text-muted"}`}>{ct ? ct.name : "None"}</span>; })()}
+        {(() => { const ct = contactById(task.contactId) || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className={`block truncate px-2 py-1 text-[16px] ${ct ? "" : "text-muted"}`}>{ct ? ct.name : "None"}</span>; })()}
       </Row>
     </dl>
   );

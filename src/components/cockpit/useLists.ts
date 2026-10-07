@@ -4,11 +4,12 @@
 // moving tasks between clients and lists, or merging one task into another.
 // Lifted out of Cockpit.tsx unchanged (audit 2026-09-29, 3.4).
 
+import { contactForMovedTask, listForMovedTask } from "../../../mcp/taskMove.mjs";
 import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec, type PromptSpec } from "./modals";
 import { newId } from "./ui";
-import { WORKSPACE_CLIENT_ID, type Client, type ClientNote, type Folder, type Me, type Message, type Project, type Stage, type Task, type TaskStatus } from "@/lib/data";
+import { type Client, type ClientNote, type Folder, type Me, type Message, type Project, type Stage, type Task, type TaskStatus } from "@/lib/data";
 import { deleteFolderDb, deleteProjectDb, deleteStageDb, deleteTaskDb, reassignMessagesTaskDb, upsertFolder, upsertProject, upsertStage, upsertTask } from "@/lib/db";
 
 export type UseListsDeps = {
@@ -240,8 +241,8 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     // failing that make one. Without the named target, "move to Tracy, CA"
     // could only ever mean "move to ClickUpLocal", dumping the task into
     // whichever of its projects happened to sort first.
-    let projectId = (targetProjectId && projects.find((p) => p.id === targetProjectId && p.clientId === newClientId)?.id)
-      ?? projects.find((p) => p.clientId === newClientId)?.id;
+    // The rules live in mcp/taskMove.mjs, shared with the MCP's update_task.
+    let projectId = listForMovedTask(projects, newClientId, targetProjectId) ?? undefined;
     if (!projectId) {
       const p: Project = { id: newId("p_"), clientId: newClientId, name: "Tasks", description: "" };
       setProjects((ps) => [...ps, p]);
@@ -252,7 +253,7 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     patchTask(taskId, {
       clientId: newClientId,
       projectId,
-      contactId: newClientId.startsWith("cl_") && newClientId !== WORKSPACE_CLIENT_ID ? newClientId.slice(3) : null,
+      contactId: contactForMovedTask(newClientId),
       ghlTaskId: null,
     });
     if (!silent) pushToast(`Moved to ${projectById(projectId)?.name ?? clientById(newClientId)?.name ?? "client"}${wasLinked ? " — unlinked from GoHighLevel" : ""}`);

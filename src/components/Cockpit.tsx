@@ -2051,7 +2051,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ref set once useChecklist has run.
   const toggleSubRef = useRef<(taskId: string, subId: string) => void>(() => {});
   const toggleSubLate = (taskId: string, subId: string) => toggleSubRef.current(taskId, subId);
-  const { patchTask, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment } = useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, tasks, sendMentionEmail });
+  const { patchTask, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment } = useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, clientById, tasks, sendMentionEmail });
   const { addFiles, uploadOneImage, downloadFile, downloadFileAs, downloadAllAsZip, zippingIds, removeFile, copyAttachmentLink } = useTaskFiles({ tasks, pushToast, setUploadProgress, update, setConfirmDialog });
   // --- GoHighLevel task sync -----------------------------------------------
   // A client is a GHL contact (cl_<localContactId>). To act on its GHL tasks we

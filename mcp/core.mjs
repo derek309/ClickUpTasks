@@ -6,6 +6,7 @@
 // its own isolated name/member caches — no cross-request leakage.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -384,7 +385,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("update_task",
-    "Edit an existing task's title, description, priority, due date, assignee, or list. Only the fields you pass are changed. Get the id from get_task/list_my_tasks.",
+    "Edit an existing task's title, description, priority, due date, assignee, list, client, or contact. Only the fields you pass are changed. Get the id from get_task/list_my_tasks. client_id moves it to another client: it lands on that client's Tasks list (or project_id, a list of the new client), its contact becomes the new client's own, any GoHighLevel task link is dropped, and the move is logged in its Changes.",
     {
       id: z.string(),
       title: z.string().min(1).optional(),
@@ -393,9 +394,11 @@ export function createServer(opts = {}) {
       due: z.string().nullable().optional().describe("yyyy-mm-dd, or null to clear the due date"),
       assignee_id: z.string().nullable().optional().describe("roster member id (get one from list_members), \"me\" for yourself, or null to unassign"),
       waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned). Passing assignee_id instead clears this back to false."),
-      project_id: z.string().optional().describe("move the task to another list of the same client (list ids from list_projects)"),
+      project_id: z.string().optional().describe("move the task to another list of the same client (list ids from list_projects); with client_id, a list of the new client"),
+      client_id: z.string().optional().describe("move the task to another client (an id from list_clients that starts with cl_; cl_workspace is ClickUpLocal's own projects). Ids without cl_ are GoHighLevel sub accounts, not clients."),
+      contact_id: z.string().nullable().optional().describe("the person at the client this task is for (ct_…): the client's own contact or one linked to it, e.g. one person in a company's group email. null clears it. Applied after any client_id move"),
     },
-    async ({ id, title, description, priority, due, assignee_id, waiting_on_client, project_id }) => {
+    async ({ id, title, description, priority, due, assignee_id, waiting_on_client, project_id, client_id, contact_id }) => {
       const patch = {};
       if (title !== undefined) patch.title = title.trim();
       if (description !== undefined) patch.description = description;
@@ -405,15 +408,48 @@ export function createServer(opts = {}) {
       // waiting boundary: the read is what enforces trash and privacy, and
       // "waiting" status and waiting_on_client always move together after it
       // (see data.ts's applyWaitingStatusSync).
-      const before = await loadTask(id, "status,follow_up_at,client_id,project_id");
+      const before = await loadTask(id, "status,follow_up_at,client_id,project_id,ghl_task_id");
       if (!before) return noTask(id);
-      // Move to another list (2026-10-06): only within the task's own client,
-      // like the List box in the app; moving clients stays an app action.
-      if (project_id !== undefined && project_id !== before.project_id) {
+      // Move to another client (Derek, 2026-10-07): the Client box's rules,
+      // shared through taskMove.mjs, and the same Changes line it writes.
+      let moveLine = null;
+      if (client_id !== undefined && client_id !== before.client_id) {
+        if (!client_id.startsWith("cl_")) return { content: [{ type: "text", text: `"${client_id}" is a GoHighLevel sub account (or Personal), not a client. Pick a client id that starts with cl_ from list_clients.` }] };
+        const [to] = await sb(`clients?select=id,name&id=eq.${enc(client_id)}${LIVE}&limit=1`);
+        if (!to) return { content: [{ type: "text", text: `No client "${client_id}". Call list_clients for the ids.` }] };
+        const [from] = await sb(`clients?select=name&id=eq.${enc(before.client_id)}&limit=1`);
+        const lists = (await sb(`projects?select=id,name,client_id&client_id=eq.${enc(client_id)}${LIVE}&order=position.asc.nullslast`))
+          .map((l) => ({ id: l.id, name: l.name, clientId: l.client_id }));
+        if (project_id !== undefined && !lists.some((l) => l.id === project_id)) return { content: [{ type: "text", text: `List "${project_id}" isn't one of ${to.name}'s lists. Call list_projects with client "${to.name}".` }] };
+        let listId = listForMovedTask(lists, client_id, project_id);
+        let listName = lists.find((l) => l.id === listId)?.name ?? null;
+        if (!listId) {
+          listId = rid("p_"); listName = "Tasks";
+          await sb("projects", "POST", { id: listId, client_id, name: "Tasks", description: "" });
+        }
+        patch.client_id = client_id;
+        patch.project_id = listId;
+        patch.contact_id = contactForMovedTask(client_id);
+        patch.ghl_task_id = null;
+        moveLine = clientMoveLine(from?.name ?? "another client", to.name, listName);
+      } else if (project_id !== undefined && project_id !== before.project_id) {
+        // Move to another list of the task's own client, like the List box.
         const [list] = await sb(`projects?select=id,name,client_id&id=eq.${enc(project_id)}&limit=1`);
         if (!list) return { content: [{ type: "text", text: `No list "${project_id}". Call list_projects to see the client's lists.` }] };
-        if (list.client_id !== before.client_id) return { content: [{ type: "text", text: `"${list.name}" belongs to another client. Moving a task to a different client is done in the app.` }] };
+        if (list.client_id !== before.client_id) return { content: [{ type: "text", text: `"${list.name}" belongs to another client. Pass that client's client_id too to move the task there.` }] };
         patch.project_id = project_id;
+      }
+      // Which person at the client (Derek, 2026-10-07: a group email's task can
+      // belong to one of them). Only someone who is that client's: its own
+      // contact (cl_<contactId>) or one linked to it.
+      if (contact_id !== undefined) {
+        const onClient = patch.client_id ?? before.client_id;
+        if (contact_id !== null && onClient !== `cl_${contact_id}`) {
+          const [c] = await sb(`clients?select=name,linked_contact_id,linked_contact_ids&id=eq.${enc(onClient)}&limit=1`);
+          if (!c || (c.linked_contact_id !== contact_id && !(c.linked_contact_ids || []).includes(contact_id)))
+            return { content: [{ type: "text", text: `${contact_id} isn't one of ${c?.name ?? "this client"}'s people. Give them their own client with add_client, then pass client_id "cl_${contact_id}".` }] };
+        }
+        patch.contact_id = contact_id;
       }
       if (assignee_id !== undefined) {
         const resolved = await resolveAssignee(assignee_id);
@@ -434,8 +470,14 @@ export function createServer(opts = {}) {
       if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
       const [t] = await patchTask(id, patch);
       if (!t) return noTask(id);
-      let ghl = "";
-      if (t.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
+      // The Changes line, appended atomically like add_comment; updated_by
+      // cleared after so it shows live for everyone.
+      if (moveLine) {
+        await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body: moveLine, at: nowIso(), kind: "event" } });
+        await patchTask(id, { updated_by: null });
+      }
+      let ghl = moveLine && before.ghl_task_id ? " (unlinked from its GoHighLevel task, as the app does)" : "";
+      if (t.ghl_task_id && !moveLine) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
       await members();
       const changed = Object.keys(patch)
         .filter((k) => k !== "waiting_on_client" || patch.assignee_id === undefined)
@@ -880,6 +922,95 @@ export function createServer(opts = {}) {
       await names();
       const rows = await sb("clients?select=id,name&deleted_at=is.null&order=name");
       return { content: [{ type: "text", text: rows.map((c) => `${c.name}  [${c.id}]`).join("\n") }] };
+    });
+
+  // A person gets their own client (Derek, 2026-10-07: "the task belongs to
+  // Russell, so if he doesn't have a contact, create the contact, move it
+  // over"). Same records the Inbox's "Add as client" makes
+  // (src/app/api/inbox/contact/route.ts): the contact lives in GoHighLevel and
+  // ClickUpTasks as ct_ghl_<id>, and their client is cl_<contactId>.
+  server.tool("add_client",
+    "Give a person their own client: finds the contact by email or contact_id (creating it in GoHighLevel when nobody has that email yet), then creates their client, or brings it back if it was deleted. By default their emails move onto it too, and they are taken off any other client they were linked to, so new mail files under them. Then move a task there with update_task client_id.",
+    {
+      email: z.string().optional().describe("their email address; used to find the contact, or to create one"),
+      contact_id: z.string().optional().describe("an existing contact id (ct_…), instead of email"),
+      name: z.string().optional().describe("their full name; needed only when the contact has to be created"),
+      sub: z.enum(["agency", "directory"]).optional().describe("GoHighLevel sub account a new contact goes in; defaults to agency"),
+      move_emails: z.boolean().optional().describe("default true: file their emails under this client and unlink them from other clients. false leaves their emails where they are"),
+    },
+    async ({ email, contact_id, name, sub, move_emails }) => {
+      const addr = email?.trim().toLowerCase() || null;
+      if (!contact_id && !addr) return { content: [{ type: "text", text: "Give an email or a contact_id." }] };
+      let contact = null;
+      if (contact_id) {
+        [contact] = await sb(`contacts?select=id,name,email,client_id&id=eq.${enc(contact_id)}&limit=1`);
+        if (!contact) return { content: [{ type: "text", text: `No contact ${contact_id}.` }] };
+      } else {
+        // ilike with the wildcards escaped: an exact, case-blind match.
+        [contact] = await sb(`contacts?select=id,name,email,client_id&email=ilike.${enc(addr.replace(/[\\%_]/g, (c) => "\\" + c))}&limit=1`);
+      }
+      // Ids go into PostgREST or=() filters below, which are parsed, so only
+      // plain id characters (same guard as inboundIngest's SAFE_CONTACT_ID).
+      if (contact && !/^[\w.@-]+$/.test(contact.id)) return { content: [{ type: "text", text: `Contact id ${contact.id} has characters this tool won't put in a filter.` }] };
+      const done = [];
+      if (!contact) {
+        if (!name?.trim()) return { content: [{ type: "text", text: `Nobody has ${addr} yet. Pass name to create them.` }] };
+        const subId = sub === "directory" ? "c_directory" : "c_agency";
+        const loc = SUB2LOC[subId];
+        const [tok] = await sb(`ghl_tokens?select=token&location_id=eq.${enc(loc)}`);
+        if (!tok?.token) return { content: [{ type: "text", text: `No GoHighLevel token for ${sub === "directory" ? "Directory" : "Agency"}, so the contact can't be created.` }] };
+        const [firstName, ...rest] = name.trim().split(/\s+/);
+        const res = await fetch(`${GHL}/contacts/`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${tok.token}`, Version: "2021-07-28", Accept: "application/json", "Content-Type": "application/json", "User-Agent": UA },
+          body: JSON.stringify({ locationId: loc, email: addr, firstName, lastName: rest.join(" ") || undefined, source: "ClickUpTasks" }),
+        });
+        const j = await res.json().catch(() => null);
+        const ghlId = j?.contact?.id ?? j?.meta?.contactId ?? null; // meta.contactId: GoHighLevel already had them
+        if (!ghlId) return { content: [{ type: "text", text: `GoHighLevel didn't add them (${res.status}). ${String(j?.message ?? "").slice(0, 160)}` }] };
+        contact = { id: `ct_ghl_${ghlId}`, name: name.trim(), email: addr, client_id: subId };
+        const up = await fetch(`${URL}/rest/v1/contacts?on_conflict=id`, {
+          method: "POST", headers: { ...H, Prefer: "resolution=merge-duplicates" },
+          body: JSON.stringify({ id: contact.id, client_id: subId, name: contact.name, email: addr, ghl_contact_id: ghlId }),
+        });
+        if (!up.ok) return { content: [{ type: "text", text: `Made them in GoHighLevel (${ghlId}) but couldn't save the contact here: ${(await up.text()).slice(0, 200)}` }] };
+        done.push(`created contact ${contact.name} in GoHighLevel ${sub === "directory" ? "Directory" : "Agency"}`);
+      }
+
+      const clientId = `cl_${contact.id}`;
+      const [had] = await sb(`clients?select=id,name,deleted_at&id=eq.${enc(clientId)}&limit=1`);
+      let clientName = had?.name ?? contact.name;
+      if (had?.deleted_at) {
+        await sb(`clients?id=eq.${enc(clientId)}`, "PATCH", { deleted_at: null, deleted_by: null, updated_by: null });
+        done.push("brought back their deleted client");
+      } else if (!had) {
+        clientName = (contact.name || addr || "New client").replace(/\b\w/g, (c) => c.toUpperCase());
+        await sb("clients", "POST", {
+          id: clientId, name: clientName, color: "#a855f7", ghl_location_id: "", status: "claimed", type: "client",
+          assigned_to: ME === "u_claude" ? [] : [ME],
+        });
+        done.push("created their client");
+      } else done.push("they already had a client");
+
+      if (move_emails !== false) {
+        // Off every other client they were linked to, or the ingest would keep
+        // filing their mail there (inboundIngest.resolveTrackedClientId).
+        const linkedArr = await sb(`clients?select=id,name,linked_contact_ids&linked_contact_ids=cs.${enc(JSON.stringify([contact.id]))}&id=neq.${enc(clientId)}`);
+        for (const c of linkedArr) {
+          await sb(`clients?id=eq.${enc(c.id)}`, "PATCH", { linked_contact_ids: (c.linked_contact_ids || []).filter((x) => x !== contact.id), updated_by: null });
+          done.push(`unlinked from ${c.name}`);
+        }
+        const linkedOne = await sb(`clients?select=id,name&linked_contact_id=eq.${enc(contact.id)}&id=neq.${enc(clientId)}`);
+        for (const c of linkedOne) {
+          await sb(`clients?id=eq.${enc(c.id)}`, "PATCH", { linked_contact_id: null, updated_by: null });
+          done.push(`unlinked from ${c.name}`);
+        }
+        await sb(`contacts?id=eq.${enc(contact.id)}`, "PATCH", { client_id: clientId });
+        const moved = await sb(`messages?contact_id=eq.${enc(contact.id)}&or=(client_id.neq.${enc(clientId)},client_id.is.null)&select=id`, "PATCH", { client_id: clientId });
+        done.push(`${moved?.length ?? 0} email${moved?.length === 1 ? "" : "s"} moved onto it`);
+      }
+      await names(true);
+      return { content: [{ type: "text", text: `${clientName} [${clientId}], contact ${contact.id}: ${done.join(", ")}. Move a task there with update_task client_id "${clientId}".` }] };
     });
 
   server.tool("list_projects",
