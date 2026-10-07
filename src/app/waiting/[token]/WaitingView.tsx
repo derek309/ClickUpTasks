@@ -201,22 +201,16 @@ function TaskDetailBody({
   // not long addresses inside the paragraph (Derek, 2026-10-07).
   const { before, links, after } = splitLabeledLinks(t.description);
   const lastTeam = [...displayThreadOf(t)].reverse().find((m) => m.from === "team")?.sender ?? null;
-  // Shows the jump-to-latest button only while scrolled away from the
-  // bottom — starts true since the thread opens already scrolled down
-  // (see the auto-scroll effect in WaitingView), and native scroll events
-  // fire even for that effect's own programmatic scrollTop assignment, so
-  // this stays in sync without any extra wiring.
-  const [atBottom, setAtBottom] = useState(true);
-  const checkAtBottom = (el: HTMLDivElement | null) => {
-    if (!el) return;
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
-  };
+  // A long thread shows its newest few until they ask for the rest.
+  const [earlierFor, setEarlierFor] = useState<string | null>(null);
   // Backward compat: a response submitted before per-task chat existed
   // lives on the task itself, not in the messages table — shown as the
   // thread's opening message only when there's no real thread yet, so
   // history isn't lost but a task that's since moved to real chat doesn't
   // show it twice.
   const displayThread = displayThreadOf(t);
+  const SHOWN_MESSAGES = 4;
+  const hiddenCount = earlierFor === t.id ? 0 : Math.max(0, displayThread.length - SHOWN_MESSAGES);
   const composer = (
     <>
       {/* text-[16px] isn't a style choice here — any input/textarea under
@@ -277,8 +271,6 @@ function TaskDetailBody({
       <div className="mt-2 text-[16px] text-muted">You can drop photos and files right into the box. We get it by email too.</div>
     </>
   );
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const scrollToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   // The client portal's look (Derek, 2026-10-07): a header card, the team's
   // message with its pages as cards, one clear "what do you think", the
   // conversation, and a side panel with what else needs them and who's on it.
@@ -364,33 +356,32 @@ function TaskDetailBody({
 
         <section className={`${card} overflow-hidden`}>
           <div className="flex items-center gap-2 border-b px-5 py-3 text-[16px] font-bold">💬 Conversation</div>
-          {/* The thread scrolls on its own and opens at its newest message
-              (threadRef, see the effect in WaitingView), while the page itself
-              opens at the top. */}
-          <div className="relative">
-            <div ref={(el) => { scrollRef.current = el; threadRef(el); }} onScroll={(e) => checkAtBottom(e.currentTarget)} className="max-h-[480px] overflow-y-auto px-5 py-4">
-              {displayThread.length === 0 ? (
-                <p className="py-2 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
-              ) : (
-                <div className="space-y-2.5">
-                  {displayThread.map((m) => (
-                    <div key={m.id} className={`flex items-end gap-2 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                      {m.from === "team" && <SenderAvatar sender={m.sender} size={30} />}
-                      <div className={`max-w-[85%] lg:max-w-[560px] ${m.from === "client" ? "text-right" : ""}`}>
-                        <div className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-[16px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
-                          {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
-                          <AttachmentGallery items={m.attachments} />
-                        </div>
-                        <div className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}</div>
+          {/* Part of the page, not a box that scrolls inside it (Derek,
+              2026-10-07: "not a huge fan of the scrolling chat box"). A long
+              thread shows its newest few, with the rest one click away. */}
+          <div ref={threadRef} className="px-5 py-4">
+            {displayThread.length === 0 ? (
+              <p className="py-2 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {hiddenCount > 0 && (
+                  <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
+                    Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
+                  </button>
+                )}
+                {displayThread.slice(hiddenCount).map((m) => (
+                  <div key={m.id} className={`flex items-end gap-2 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
+                    {m.from === "team" && <SenderAvatar sender={m.sender} size={30} />}
+                    <div className={`max-w-[85%] lg:max-w-[560px] ${m.from === "client" ? "text-right" : ""}`}>
+                      <div className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-[16px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
+                        {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
+                        <AttachmentGallery items={m.attachments} />
                       </div>
+                      <div className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}</div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {displayThread.length > 0 && !atBottom && (
-              <button onClick={scrollToBottom} title="Jump to the latest message"
-                className="absolute bottom-3 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow-[var(--shadow-md)] hover:opacity-90">↓</button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
           <div className="border-t px-5 py-4">{composer}</div>
