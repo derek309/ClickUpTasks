@@ -3038,6 +3038,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : activeClient !== "all" && clientTab === "chat" ? (
           <ClientJournal
             key={activeProject ?? activeClient}
+            onOpenClientTasks={() => openClientList(activeClient, activeProject ?? null)}
+            onBook={activeProject || !contactForClient(activeClient)?.ghlContactId ? undefined : () => setBookClient(activeClient)}
+            ghlUrl={activeProject ? null : ghlContactUrlFor(activeClient)}
             notes={clientNotes.filter((n) => (activeProject ? n.projectId === activeProject : n.clientId === activeClient && !n.projectId))}
             tasks={baseTasks}
             messages={activeProject ? null : (() => { const ct = contactForClient(activeClient); return ct ? messages.filter((m) => m.contactId === ct.id) : null; })()}
