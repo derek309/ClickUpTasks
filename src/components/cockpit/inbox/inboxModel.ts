@@ -5,6 +5,14 @@
 import type { Message, MessageChannel } from "@/lib/data";
 import { threadKeyOf, isBlocked } from "@/lib/inbox";
 
+/** A field from the person's own messages (same address as the one being
+ *  answered) when one has it, otherwise from any message on the thread. */
+function peerOf(msgs: Message[], peer: Message | undefined, f: (m: Message) => string | null | undefined): string | null {
+  const addr = peer?.channel === "email" ? (peer.peerAddress ?? "").trim().toLowerCase() : "";
+  const own = addr ? msgs.find((m) => (m.peerAddress ?? "").trim().toLowerCase() === addr && f(m)) : undefined;
+  return (own ? f(own) : msgs.map(f).find(Boolean)) ?? null;
+}
+
 export type InboxState = { threadKey: string; readAt: string | null; snoozedUntil: string | null; doneAt: string | null; trashedAt?: string | null; starredAt?: string | null; updatedAt: string | null };
 export type GhlConv = { id: string; assignedMemberId: string | null; contactName: string | null; phone: string | null; email: string | null; locationId: string };
 
@@ -87,8 +95,11 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
       // The contact's own name first (nameOf), then what the message said.
       peerName: latest.threadTitle || named || peerMsg?.peerName || conv?.contactName || peerMsg?.peerAddress || conv?.phone || conv?.email || "Unknown",
       peerAddress: peerMsg?.peerAddress ?? conv?.phone ?? conv?.email ?? null,
-      clientId: msgs.find((m) => m.clientId)?.clientId || null,
-      contactId: msgs.find((m) => m.contactId)?.contactId || null,
+      // The person being answered decides whose it is, then any message on
+      // it: on a group email the newest message can be someone else's, and a
+      // task made from it went to the wrong client (Derek, 2026-10-07).
+      clientId: peerOf(msgs, peerMsg, (m) => m.clientId) || null,
+      contactId: peerOf(msgs, peerMsg, (m) => m.contactId) || null,
       taskId: msgs.find((m) => m.taskId)?.taskId ?? null,
       ghlConversationId: latest.ghlConversationId ?? null,
       unread: !!lastInbound && inboundAt > time(st?.readAt),

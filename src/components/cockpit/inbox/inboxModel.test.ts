@@ -41,6 +41,18 @@ describe("Inbox conversations", () => {
     expect(t.peerAddress).toBe("russell@whitman.com");
   });
 
+  it("files a group email under the person being answered, not the newest message's client", () => {
+    const thread = [
+      msg({ id: "w", gmailThreadId: "t8", peerName: "Wendy", peerAddress: "wendy@co.com", contactId: "ct_w", clientId: "cl_w", at: "2026-10-01T01:00:00Z" }),
+      msg({ id: "r", gmailThreadId: "t8", peerName: "Russell", peerAddress: "russell@co.com", contactId: "ct_r", clientId: "cl_r", at: "2026-10-01T15:00:00Z" }),
+      msg({ id: "o", gmailThreadId: "t8", direction: "outbound", peerAddress: "wendy@co.com", contactId: "ct_w", clientId: "cl_w", at: "2026-10-01T17:00:00Z" }),
+    ];
+    const [t] = buildThreads(thread, new Map(), { now: NOW });
+    expect(t.peerAddress).toBe("russell@co.com");
+    expect(t.clientId).toBe("cl_r");
+    expect(t.contactId).toBe("ct_r");
+  });
+
   it("is read once opened, until they write again", () => {
     const s = new Map([["gm:t1", st({ threadKey: "gm:t1", readAt: "2026-10-01T17:30:00Z" })]]);
     expect(buildThreads(pam, s, { now: NOW })[0].unread).toBe(false);
