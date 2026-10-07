@@ -236,7 +236,7 @@ function TaskDetailBody({
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
-        placeholder={dragOver ? "Drop to attach…" : "Type a message, we'll email the team…"}
+        placeholder={dragOver ? "Drop to attach…" : `Write to ${lastTeam?.name.split(/\s+/)[0] ?? "us"}`}
         rows={2}
         className={`w-full resize-none rounded-xl border px-3 py-2.5 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-surface"}`}
       />
@@ -278,124 +278,99 @@ function TaskDetailBody({
       <div className="mt-2 text-[16px] text-muted">You can drop photos and files right into the box. We get it by email too.</div>
     </>
   );
-  // The client portal's look (Derek, 2026-10-07): a header card, the team's
-  // message with its pages as cards, one clear "what do you think", the
-  // conversation, and a side panel with what else needs them and who's on it.
+  // Laid out like the team's Inbox chat (Derek, 2026-10-07: "why not make it
+  // look like this"): the conversation is the page, bubbles theirs on the
+  // right and ours on the left, the box to write in at its foot, and the
+  // task's details in a side panel.
   const card = "rounded-xl border bg-surface";
-  const cap = "mb-2.5 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
-  const choice = (on: boolean, tone: "ok" | "chg" | "q") => `grid gap-0.5 rounded-xl border px-4 py-3 text-left transition disabled:opacity-40 ${
-    on ? (tone === "chg" ? "border-danger bg-danger-soft" : tone === "q" ? "border-highlight bg-highlight-soft" : "border-success bg-success-soft")
-      : tone === "ok" ? "border-success/50 bg-surface hover:bg-success-soft" : tone === "chg" ? "bg-surface hover:border-danger" : "bg-surface hover:border-highlight"}`;
+  const cap = "mb-2 text-[14px] font-extrabold uppercase tracking-[0.06em] text-muted";
+  const shown = displayThread.slice(hiddenCount);
   return (
-    <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
-      <div className="grid min-w-0 gap-4">
-        <section className={`${card} px-5 py-4`}>
-          <div className="mb-2.5 flex flex-wrap gap-2">
-            {showProjectName && projectName && <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">{projectName}</span>}
-            {isDone
-              ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Completed</span>
-              : t.needsResponse && <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-semibold text-highlight">● Waiting on you</span>}
-            {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
+    <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+      <section className={`${card} flex min-w-0 flex-col overflow-hidden lg:min-h-[70vh]`}>
+        <div className="flex items-center gap-3 border-b px-5 py-3">
+          {lastTeam ? <SenderAvatar sender={lastTeam} size={36} /> : null}
+          <div className="min-w-0">
+            <b className="block truncate text-[17px]">{t.title}</b>
+            <span className="text-[16px] text-muted">{lastTeam ? `With ${lastTeam.name}` : "With our team"} · {displayThread.length} {displayThread.length === 1 ? "message" : "messages"}</span>
           </div>
-          <h1 className="text-[26px] font-extrabold leading-tight" style={{ textWrap: "balance" }}>{t.title}</h1>
-          {/* What we need, in the same box as the title (Derek, 2026-10-07). */}
-          {(t.description || t.attachments.length > 0) && (
-          <div className="mt-3 border-t pt-3 text-[16px]">
-            {before && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(before)}</p>}
-            {links.length > 0 && (
-              <div className={`my-3 grid gap-3 ${links.length > 1 ? "sm:grid-cols-2" : ""}`}>
-                {links.map((l) => (
-                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-3 rounded-xl border bg-surface p-3 hover:border-accent">
-                    <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-accent text-[24px] text-white" aria-hidden>🖥</span>
-                    <span className="min-w-0 flex-1"><b className="block truncate">{l.label}</b><span className="block truncate text-muted">Tap to open it</span></span>
-                    <span className="shrink-0 font-bold text-accent">Open ↗</span>
-                  </a>
-                ))}
-              </div>
-            )}
-            {after && <p className="max-w-[68ch] whitespace-pre-wrap break-words">{linkify(after)}</p>}
-            <AttachmentGallery items={t.attachments} />
-          </div>
-          )}
-          {lastTeam && (
-            <div className="mt-3 flex items-center gap-2.5 text-[16px] text-muted">
-              <SenderAvatar sender={lastTeam} size={32} /> <span><b className="text-foreground">{lastTeam.name}</b> is working on this with you</span>
+        </div>
+        <div ref={threadRef} className="flex-1 px-5 py-4">
+          {displayThread.length === 0 ? (
+            <p className="py-6 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
+          ) : (
+            <div className="space-y-4">
+              {hiddenCount > 0 && (
+                <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
+                  Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
+                </button>
+              )}
+              {shown.map((m) => (
+                <div key={m.id} className={`flex flex-col ${m.from === "client" ? "items-end" : "items-start"}`}>
+                  {m.from === "team" && <span className="mb-1 text-[16px] text-muted">{m.sender?.name ?? "Our team"}</span>}
+                  <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
+                    {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
+                    <AttachmentGallery items={m.attachments} />
+                  </div>
+                  <span className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You · " : ""}{timeAgo(m.at)}</span>
+                </div>
+              ))}
             </div>
           )}
-        </section>
-
+        </div>
         {answered && (
-          <section ref={nextRef} className="rounded-xl border-2 border-success bg-success-soft px-5 py-4">
-            <h2 className="text-[20px] font-bold">Thank you, we have it. What would you like to do next?</h2>
-            <div className="mt-3 flex flex-wrap gap-2.5">
+          <div ref={nextRef as React.RefObject<HTMLDivElement>} className="mx-5 mb-3 rounded-xl border-2 border-success bg-success-soft px-4 py-3">
+            <b className="block text-[18px]">Thank you, we have it. What would you like to do next?</b>
+            <div className="mt-2 flex flex-wrap gap-2">
               {next && (
                 <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
                   <span className="min-w-0">Next: {next.title}</span><span aria-hidden>→</span>
                 </button>
               )}
-              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">
-                {next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}
-              </button>
-              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay on this one</button>
+              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">{next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}</button>
+              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay here</button>
             </div>
-            {!next && <p className="mt-2 text-[16px] text-muted">That was the last thing we needed from you for now.</p>}
-          </section>
-        )}
-
-        {!isDone && !answered && (
-          <section className="rounded-xl border-2 border-accent bg-surface px-5 py-4">
-            <h2 className="text-[20px] font-bold">What do you think?</h2>
-            <p className="mb-3 text-[16px] text-muted">Pick one. You can add a note below either way.</p>
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy} className={choice(false, "ok")}>
-                <b className="text-[17px] text-success">✓ Looks good</b><span className="text-[16px] text-muted">Approve it</span>
-              </button>
-              <button onClick={() => { onSetStatus("changes_requested"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "changes_requested", "chg")}>
-                <b className="text-[17px]">✎ Needs changes</b><span className="text-[16px] text-muted">Tell us what to change</span>
-              </button>
-              <button onClick={() => { onSetStatus("review"); markAnswered(); }} disabled={statusBusy} className={choice(t.status === "review", "q")}>
-                <b className="text-[17px]">? I have a question</b><span className="text-[16px] text-muted">Someone will get back to you</span>
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section className={`${card} overflow-hidden`}>
-          <div className="flex items-center gap-2 border-b px-5 py-3 text-[16px] font-bold">💬 Conversation</div>
-          {/* Part of the page, not a box that scrolls inside it (Derek,
-              2026-10-07: "not a huge fan of the scrolling chat box"). A long
-              thread shows its newest few, with the rest one click away. */}
-          <div ref={threadRef} className="px-5 py-4">
-            {displayThread.length === 0 ? (
-              <p className="py-2 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
-            ) : (
-              <div className="space-y-2.5">
-                {hiddenCount > 0 && (
-                  <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
-                    Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
-                  </button>
-                )}
-                {displayThread.slice(hiddenCount).map((m) => (
-                  <div key={m.id} className={`flex items-end gap-2 ${m.from === "client" ? "justify-end" : "justify-start"}`}>
-                    {m.from === "team" && <SenderAvatar sender={m.sender} size={30} />}
-                    <div className={`max-w-[85%] lg:max-w-[560px] ${m.from === "client" ? "text-right" : ""}`}>
-                      <div className={`inline-block rounded-2xl px-3.5 py-2.5 text-left text-[16px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
-                        {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
-                        <AttachmentGallery items={m.attachments} />
-                      </div>
-                      <div className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You" : m.sender?.name ?? "Team"} · {timeAgo(m.at)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-          <div className="border-t px-5 py-4">{composer}</div>
-        </section>
-      </div>
+        )}
+        <div className="border-t bg-background/40 px-5 py-4">{composer}</div>
+      </section>
 
       <aside className="grid gap-4">
+        <div className={`${card} p-4`}>
+          <div className="mb-2 flex flex-wrap gap-2">
+            {isDone
+              ? <span className="rounded-full bg-success-soft px-3 py-0.5 text-[16px] font-semibold text-success">✓ Done</span>
+              : t.needsResponse
+                ? <span className="rounded-full bg-highlight-soft px-3 py-0.5 text-[16px] font-bold text-highlight">● We need you</span>
+                : <span className="rounded-full bg-accent-soft px-3 py-0.5 text-[16px] font-semibold text-accent">We&apos;re on it</span>}
+            {t.due && !isDone && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">Due {shortDate(t.due)}</span>}
+            {showProjectName && projectName && <span className="rounded-full bg-background px-3 py-0.5 text-[16px] font-semibold text-muted">{projectName}</span>}
+          </div>
+          <h1 className="text-[20px] font-extrabold leading-tight">{t.title}</h1>
+          {(t.description || t.attachments.length > 0) && (
+            <div className="mt-3 border-t pt-3 text-[16px]">
+              {before && <p className="whitespace-pre-wrap break-words">{linkify(before)}</p>}
+              {links.length > 0 && (
+                <div className="my-3 grid gap-2">
+                  {links.map((l, i) => (
+                    <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
+                      className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-center font-bold ${i === 0 ? "bg-accent text-white hover:opacity-90" : "border text-accent hover:bg-background"}`}>
+                      {l.label} <span aria-hidden>↗</span>
+                    </a>
+                  ))}
+                </div>
+              )}
+              {after && <p className="whitespace-pre-wrap break-words">{linkify(after)}</p>}
+              <AttachmentGallery items={t.attachments} />
+            </div>
+          )}
+          {!isDone && (
+            <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
+              ✓ All done, this looks good
+            </button>
+          )}
+        </div>
         {totalCount > 0 && (
           <div className={`${card} p-4`}>
             <div className={cap}>{projectName ?? "Your project"}</div>
