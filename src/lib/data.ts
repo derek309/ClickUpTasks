@@ -516,6 +516,9 @@ export interface Contact {
    *  (fieldKey contact.saas). Cached so a list can show it without a GHL
    *  round trip per row; GoHighLevel stays the source of truth. */
   saasUrl?: string;
+  /** Their other email addresses (GoHighLevel's additional emails, and any
+   *  main address they used to have), so mail from those matches them too. */
+  additionalEmails?: string[];
 }
 
 // A reusable checklist, applied either to quick-populate a new task (title

@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CLAUDE_ID, PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
+import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
 import { createPortal } from "react-dom";
@@ -56,7 +56,9 @@ export type InboxViewProps = {
   clients: { id: string; name: string }[];
   canAdmin: boolean;
   /** Everyone in GoHighLevel, for New message. */
-  contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; ghlContactId?: string | null }[];
+  contacts: { id: string; name: string; email?: string | null; phone?: string | null; company?: string | null; ghlContactId?: string | null; additionalEmails?: string[] | null }[];
+  /** A contact re-read from GoHighLevel (the card's refresh, or opening their details). */
+  onContactUpdated?: (c: Contact) => void;
   /** The side panel's live task card: status, Mark done. */
   onPatchTask: (taskId: string, patch: Partial<Task>) => void;
   /** Emails written on a task or a client and not sent, shown in Drafts (2026-10-06). */
@@ -1632,7 +1634,9 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     for (const m of t.messages) { add(m.peerAddress, m.direction === "inbound" ? m.peerName : null); (m.cc ?? []).forEach((c) => add(c)); }
     return [...seen].map(([address, name]) => ({ address, name }));
   }, [t.messages]);
-  const contactFor = (address: string) => p.contacts.find((c) => (c.email ?? "").toLowerCase() === address) ?? null;
+  // Any of their addresses, the main one first (contactEmails.ts).
+  const contactFor = (address: string) => p.contacts.find((c) => (c.email ?? "").toLowerCase() === address)
+    ?? p.contacts.find((c) => (c.additionalEmails ?? []).includes(address)) ?? null;
   // The person the conversation is filed on: its contact, or for someone new
   // the one it came from.
   const isMain = (x: { address: string }) => (t.contactId ? contactFor(x.address)?.id === t.contactId || (!!contact?.email && contact.email.toLowerCase() === x.address) : (t.peerAddress ?? "").toLowerCase() === x.address);
@@ -2122,6 +2126,19 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
     else { tab?.close(); p.pushToast("Couldn't find them in GoHighLevel."); }
   };
   const val = show === "email" ? (contact?.email || x.address) : show === "phone" ? contact?.phone ?? null : null;
+  // Their other addresses, under the main one (Derek, 2026-10-07).
+  const otherEmails = show === "email" ? (contact?.additionalEmails ?? []).filter((e) => e !== (val ?? "").toLowerCase()) : [];
+  // Re-read them from GoHighLevel, for a change made there.
+  const [syncing, setSyncing] = useState(false);
+  const resync = async () => {
+    if (!contact) return;
+    setSyncing(true);
+    const res = await authedFetch(`/api/inbox/person?contactId=${encodeURIComponent(contact.id)}`).catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) : null;
+    setSyncing(false);
+    if (j?.contact) { p.onContactUpdated?.(j.contact); p.pushToast(`Updated ${j.contact.name} from GoHighLevel`); }
+    else p.pushToast(j?.error ?? "Couldn't reach GoHighLevel. Try again in a moment.");
+  };
   const mini = "grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-foreground hover:ring-1 hover:ring-[var(--border)]";
   return (
     <div className="rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
@@ -2142,6 +2159,7 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
         {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /></button>}
         {contact?.ghlContactId && <button onClick={() => setBooking(true)} title={`Book ${name.split(/\s+/)[0]} in GoHighLevel`} aria-label="Book a time" className={ib}><Ico n="calendar" /></button>}
         {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
+        {contact?.ghlContactId && <button disabled={syncing} onClick={resync} title="Refresh from GoHighLevel" aria-label="Refresh from GoHighLevel" className={`${ib} ml-auto text-[18px] leading-none disabled:opacity-50 ${syncing ? "animate-spin" : ""}`}>↻</button>}
       </div>
       {show && (
         // One line: the address or number, then small buttons (names on hover).
@@ -2153,6 +2171,12 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
           {contact && <button onClick={() => { setForm(true); setShow(null); }} title={val ? "Change" : "Add one"} aria-label={val ? "Change" : "Add one"} className={mini}><Ico n="user" /></button>}
         </div>
       )}
+      {otherEmails.map((e) => (
+        <div key={e} className="mt-1 flex items-center gap-1 rounded-lg bg-background py-1 pl-3 pr-1" title="Another address of theirs">
+          <span className="min-w-0 flex-1 truncate text-muted">{e}</span>
+          <button onClick={() => copyText(e, p)} title="Copy" aria-label="Copy" className={mini}><Ico n="copy" /></button>
+        </div>
+      ))}
       {!contact && main && !form && <ConnectContact p={p} t={t} x={x} />}
       {form && (contact
         ? <ContactForm p={p} contact={contact} onClose={() => setForm(false)} />
@@ -2210,7 +2234,7 @@ function ContactForm({ p, contact, onClose }: { p: InboxViewProps; contact: Cont
     let live = true;
     authedFetch(`/api/inbox/person?contactId=${encodeURIComponent(contact.id)}`).then((r) => r.json()).then((j) => {
       if (!live) return;
-      if (j.details) { setD(j.details); setGhlUrl(j.ghlUrl ?? null); } else setError(j.error ?? "Couldn't load this contact.");
+      if (j.details) { setD(j.details); setGhlUrl(j.ghlUrl ?? null); if (j.contact) p.onContactUpdated?.(j.contact); } else setError(j.error ?? "Couldn't load this contact.");
     }, () => live && setError("Couldn't load this contact."));
     return () => { live = false; };
   }, [contact.id]);
@@ -2222,6 +2246,7 @@ function ContactForm({ p, contact, onClose }: { p: InboxViewProps; contact: Cont
     const j = res ? await res.json().catch(() => ({})) : {};
     setSaving(false);
     if (!res?.ok) { setError(j.error ?? "Couldn't save it."); return; }
+    if (j.contact) p.onContactUpdated?.(j.contact);
     p.pushToast("Saved here and in GoHighLevel");
     onClose();
   };
@@ -2240,6 +2265,9 @@ function ContactForm({ p, contact, onClose }: { p: InboxViewProps; contact: Cont
         </div>
         <input value={d.companyName} onChange={(e) => set("companyName", e.target.value)} placeholder="Company" aria-label="Company" className={fieldCls} />
         <input value={d.email} onChange={(e) => set("email", e.target.value)} placeholder="Email" aria-label="Email" className={fieldCls} />
+        {(contact.additionalEmails ?? []).length > 0 && (
+          <div className="text-muted">Also: {(contact.additionalEmails ?? []).join(", ")}<span className="block">Add or remove those in GoHighLevel, then ↻.</span></div>
+        )}
         <input value={d.phone} onChange={(e) => set("phone", e.target.value)} placeholder="Phone" aria-label="Phone" className={fieldCls} />
         <input value={d.website} onChange={(e) => set("website", e.target.value)} placeholder="Website" aria-label="Website" className={fieldCls} />
         {d.extras.map((x) => (
@@ -2548,7 +2576,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   // Their open tasks, most recently touched first, ready to click (Derek,
   // 2026-10-06: "always list their most recent"): by the contact, or the
   // client made from them.
-  const toContact = to?.contactId ? p.contacts.find((c) => c.id === to.contactId) ?? null : (to ? p.contacts.find((c) => (c.email ?? "").toLowerCase() === to.address.toLowerCase()) ?? null : null);
+  const toContact = to?.contactId ? p.contacts.find((c) => c.id === to.contactId) ?? null : (to ? p.contacts.find((c) => (c.email ?? "").toLowerCase() === to.address.toLowerCase() || (c.additionalEmails ?? []).includes(to.address.toLowerCase())) ?? null : null);
   const toClient = toContact?.ghlContactId ? `cl_ct_ghl_${toContact.ghlContactId}` : null;
   const theirTasks = toContact ? p.tasks
     .filter((t) => t.status !== "done" && !t.private && (t.contactId === toContact.id || (!!toClient && t.clientId === toClient)))

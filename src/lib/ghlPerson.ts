@@ -4,6 +4,7 @@
 // contact fields; job title and socials are custom fields in each
 // sub-account, found by their names, so only the ones a sub-account has are
 // offered.
+import { ghlExtraEmails } from "./contactEmails";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 
@@ -23,6 +24,8 @@ export type PersonDetails = {
   firstName: string; lastName: string; companyName: string; email: string; phone: string; website: string;
   /** The custom fields this sub-account has, with their values. */
   extras: { key: PersonExtraKey; id: string; label: string; value: string }[];
+  /** GoHighLevel's additional emails for them (read only here). */
+  additionalEmails?: string[];
 };
 
 // Re-read every 10 minutes, so a field added in GoHighLevel shows up soon.
@@ -75,6 +78,7 @@ export async function readPerson(ghlContactId: string): Promise<{ details: Perso
       firstName: c.firstName ?? "", lastName: c.lastName ?? "", companyName: c.companyName ?? "",
       email: c.email ?? "", phone: c.phone ?? "", website: c.website ?? "",
       extras: fields.map((f) => ({ ...f, value: valueOf(f.id) })),
+      additionalEmails: ghlExtraEmails(c),
     },
   };
 }

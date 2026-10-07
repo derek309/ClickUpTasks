@@ -2975,7 +2975,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 if (t.clientId) await sendMessage(t.clientId, "chat", "", body, [], [], [], t.taskId);
               }}
               clients={workableClients.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name))} canAdmin={canAdmin}
-              contacts={contacts}
+              contacts={contacts} onContactUpdated={(c) => setContacts((cs) => cs.map((x) => (x.id === c.id ? c : x)))}
               onSendTeam={sendTeam}
               onPatchTask={(id, patch) => patchTask(id, patch)}
               listsFor={(cid) => projectsForClient(cid).map((x) => ({ id: x.id, name: x.name }))}

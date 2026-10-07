@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ghlExtraEmails, mergeExtraEmails, missingExtraColumn } from "@/lib/contactEmails";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { tokenForLocation, configuredLocations } from "@/lib/ghlTokens";
 import { requireAdmin } from "@/lib/serverAuth";
@@ -102,7 +103,12 @@ export async function POST(req: NextRequest) {
     city: c.city ?? null,
     state: c.state ?? null,
   };
-  const { data, error } = await supabaseAdmin.from("contacts").update(row).eq("id", contactId).select().maybeSingle();
+  // Their other addresses: GoHighLevel's, plus the main one they had before
+  // if it changed (contactEmails.ts), so their older mail still matches them.
+  const { data: had } = await supabaseAdmin.from("contacts").select("*").eq("id", contactId).maybeSingle();
+  const extra = { additional_emails: mergeExtraEmails(row.email, had?.email, had?.additional_emails, ghlExtraEmails(c)) };
+  let { data, error } = await supabaseAdmin.from("contacts").update({ ...row, ...extra }).eq("id", contactId).select().maybeSingle();
+  if (missingExtraColumn(error)) ({ data, error } = await supabaseAdmin.from("contacts").update(row).eq("id", contactId).select().maybeSingle());
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   if (!data) return NextResponse.json({ error: "Contact not found locally." }, { status: 404 });
   return NextResponse.json({ contact: rowToContact(data) });

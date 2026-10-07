@@ -3,7 +3,9 @@ import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isGhlContactVisible } from "@/lib/extensionApi";
 import { escapeLike } from "@/lib/inboxServer";
-import { readPerson, savePerson, phoneKey, type PersonExtraKey } from "@/lib/ghlPerson";
+import { readPerson, savePerson, phoneKey, type PersonExtraKey, type PersonDetails } from "@/lib/ghlPerson";
+import { mergeExtraEmails, missingExtraColumn } from "@/lib/contactEmails";
+import { rowToContact } from "@/lib/db";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -26,7 +28,10 @@ export async function GET(req: NextRequest) {
     if (!(await isGhlContactVisible(caller, c.ghl_contact_id as string))) return NextResponse.json({ error: "Not found." }, { status: 404 });
     const got = await readPerson(c.ghl_contact_id as string);
     if (!got) return NextResponse.json({ error: "GoHighLevel didn't send this contact." }, { status: 502 });
-    return NextResponse.json({ details: got.details, ghlUrl: `https://app.gohighlevel.com/v2/location/${got.locationId}/contacts/detail/${c.ghl_contact_id}` });
+    // Opening them is a resync (Derek, 2026-10-07: an email changed in
+    // GoHighLevel kept showing the old one here), so our copy follows.
+    const contact = await syncFromGhl(contactId, got.details);
+    return NextResponse.json({ details: got.details, contact, ghlUrl: `https://app.gohighlevel.com/v2/location/${got.locationId}/contacts/detail/${c.ghl_contact_id}` });
   }
 
   // Duplicates: the same email, or the same phone however it is written.
@@ -71,5 +76,21 @@ export async function POST(req: NextRequest) {
     email, phone: str(d.phone), website: str(d.website), extras,
   });
   if ("error" in saved) return NextResponse.json({ error: saved.error }, { status: 502 });
-  return NextResponse.json({ ok: true });
+  const again = await readPerson(c.ghl_contact_id as string).catch(() => null);
+  return NextResponse.json({ ok: true, contact: again ? await syncFromGhl(c.id as string, again.details) : null });
+}
+
+/** Our copy of the contact, brought up to what GoHighLevel holds: name, main
+ *  email, phone, company and their other addresses (contactEmails.ts). */
+async function syncFromGhl(contactId: string, d: PersonDetails) {
+  const { data: had } = await supabaseAdmin.from("contacts").select("*").eq("id", contactId).maybeSingle();
+  if (!had) return null;
+  const name = [d.firstName, d.lastName].filter(Boolean).join(" ").trim();
+  const row = {
+    ...(name ? { name } : {}), ...(d.email ? { email: d.email } : {}), phone: d.phone || null, company_name: d.companyName || null,
+  };
+  const extra = { additional_emails: mergeExtraEmails(d.email || had.email, had.email, had.additional_emails, d.additionalEmails ?? []) };
+  let { data, error } = await supabaseAdmin.from("contacts").update({ ...row, ...extra }).eq("id", contactId).select().maybeSingle();
+  if (missingExtraColumn(error)) ({ data, error } = await supabaseAdmin.from("contacts").update(row).eq("id", contactId).select().maybeSingle());
+  return !error && data ? rowToContact(data) : rowToContact(had);
 }
