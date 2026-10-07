@@ -422,7 +422,7 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
     : folderFilter !== "all" ? (folderFilter === "unfiled" ? "Unfiled" : (folders ?? []).find((f) => f.id === folderFilter)?.name ?? "Filter") : "Filter";
   const menuItem = (on: boolean) => `flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[16px] ${on ? "bg-accent-soft font-semibold text-accent" : "hover:bg-background"}`;
   const cap = "mb-2.5 flex items-center gap-2 text-[14px] font-bold uppercase tracking-wide text-muted";
-  const reachBtn = "flex h-11 items-center justify-center rounded-lg ring-1 ring-[var(--border)] text-accent hover:bg-background disabled:opacity-40";
+  const reachBtn = "flex h-12 items-center justify-center rounded-lg ring-1 ring-[var(--border)] text-accent hover:bg-background disabled:opacity-40";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -485,22 +485,24 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
             </div>
           </>)}
         </div>
-        <span className="flex-1" />
-        <div className="relative min-w-0 flex-1 sm:max-w-[280px] sm:flex-none">
+        <span className="hidden flex-1 lg:block" />
+        {/* Search, month and More stay on one line together. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2 lg:flex-none">
+        <div className="relative min-w-0 flex-1 lg:w-[280px] lg:flex-none">
           <I.search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} type="search" placeholder={toContact?.name ? `Search ${firstName}'s history` : "Search"} aria-label="Search"
-            className="h-10 w-full rounded-lg bg-surface pl-9 pr-3 text-[16px] outline-none ring-1 ring-[var(--border)] placeholder:text-muted focus:ring-accent sm:w-[280px]" />
+            className="h-10 w-full rounded-lg bg-surface pl-9 pr-3 text-[16px] outline-none ring-1 ring-[var(--border)] placeholder:text-muted focus:ring-accent" />
         </div>
         {monthGroups.length > 1 && (
           <select aria-label="Jump to a month" value="" onChange={(e) => { if (e.target.value) jumpToMonth(e.target.value); }}
-            className="h-10 rounded-lg bg-surface px-3 text-[16px] font-semibold ring-1 ring-[var(--border)]">
-            <option value="">Jump to a month</option>
+            className="h-10 w-[148px] shrink-0 rounded-lg bg-surface px-2 text-[16px] font-semibold ring-1 ring-[var(--border)]">
+            <option value="">Month</option>
             {monthGroups.map((g) => <option key={g.key} value={g.anchorDayKey}>{g.label} ({g.count}){g.key === nowKey ? ", now" : ""}</option>)}
           </select>
         )}
         {(onRefreshMessages && messages != null) || (canAdmin && (onRefreshContact || (messages != null && onToggleCanMessage))) ? (
           <div className="relative">
-            <button onClick={() => setMoreOpen((o) => !o)} aria-label="More" title="More" className="grid h-10 w-10 place-items-center rounded-lg bg-surface text-muted ring-1 ring-[var(--border)] hover:text-foreground"><I.dots /></button>
+            <button onClick={() => setMoreOpen((o) => !o)} aria-label="More" title="More" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-surface text-muted ring-1 ring-[var(--border)] hover:text-foreground"><I.dots /></button>
             {moreOpen && (<>
               <div className="fixed inset-0 z-30" onClick={() => { setMoreOpen(false); setPermPopoverOpen(false); }} />
               <div className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl bg-surface p-1 shadow-xl ring-1 ring-[var(--border)]">
@@ -531,6 +533,7 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
             </>)}
           </div>
         ) : null}
+        </div>
       </div>
 
       {/* The conversation with the reply box under it, and the side panel, as in the Inbox. */}
@@ -797,15 +800,15 @@ export function ClientJournal({ onOpenClientTasks, onBook, ghlUrl, notes, tasks,
               </button>
               {/* Icons only (Derek, 2026-10-07); each says what it does on hover. */}
               <div className="mt-3 grid grid-cols-5 gap-1.5">
-                <button onClick={() => startCompose("email")} disabled={!onComposeEmail || !toContact.email} title={toContact.email ? `Email ${toContact.email}` : "No email on file"} aria-label="Email" className={reachBtn}><I.mail /></button>
-                <button onClick={() => startCompose("sms")} disabled={!onSendMessage || !toContact.phone} title={toContact.phone ? `Text ${toContact.phone}` : "No phone on file"} aria-label="Text" className={reachBtn}><I.chatBubbles /></button>
+                <button onClick={() => startCompose("email")} disabled={!onComposeEmail || !toContact.email} title={toContact.email ? `Email ${toContact.email}` : "No email on file"} aria-label="Email" className={reachBtn}><I.mail className="h-6 w-6" /></button>
+                <button onClick={() => startCompose("sms")} disabled={!onSendMessage || !toContact.phone} title={toContact.phone ? `Text ${toContact.phone}` : "No phone on file"} aria-label="Text" className={reachBtn}><I.chatBubbles className="h-6 w-6" /></button>
                 {toContact.phone
-                  ? <a href={`tel:${toContact.phone}`} title={`Call ${toContact.phone}`} aria-label="Call" className={reachBtn}><I.phone /></a>
-                  : <button disabled title="No phone on file" aria-label="Call" className={reachBtn}><I.phone /></button>}
-                <button onClick={onBook} disabled={!onBook} title="Book a time" aria-label="Book a time" className={reachBtn}><I.calendar /></button>
+                  ? <a href={`tel:${toContact.phone}`} title={`Call ${toContact.phone}`} aria-label="Call" className={reachBtn}><I.phone className="h-6 w-6" /></a>
+                  : <button disabled title="No phone on file" aria-label="Call" className={reachBtn}><I.phone className="h-6 w-6" /></button>}
+                <button onClick={onBook} disabled={!onBook} title="Book a time" aria-label="Book a time" className={reachBtn}><I.calendar className="h-6 w-6" /></button>
                 {ghlUrl
-                  ? <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={reachBtn}><I.bolt /></a>
-                  : <button disabled title="Not in GoHighLevel" aria-label="Open in GoHighLevel" className={reachBtn}><I.bolt /></button>}
+                  ? <a href={ghlUrl} target="_blank" rel="noopener noreferrer" title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={reachBtn}><I.bolt className="h-6 w-6" /></a>
+                  : <button disabled title="Not in GoHighLevel" aria-label="Open in GoHighLevel" className={reachBtn}><I.bolt className="h-6 w-6" /></button>}
               </div>
             </div>
           )}
