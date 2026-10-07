@@ -7,6 +7,7 @@
 // Who has a calendar: teammates whose profile has a GoHighLevel user id
 // (profiles.ghl_user_id, filled by the GHL pull). Events come per person per
 // sub-account, across every calendar they are on, plus their blocked time.
+import { calendarConfigured, googleMeetings, withGoogleLinks, type GoogleMeeting } from "./googleCalendar";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { contactHome } from "@/lib/ghlPerson";
@@ -50,7 +51,7 @@ export function isLiveAppointment(ev: any): boolean {
   return status !== "cancelled" && status !== "invalid" && !!ev.startTime;
 }
 
-export type CalendarPerson = { memberId: string; name: string; ghlUserId: string };
+export type CalendarPerson = { memberId: string; name: string; ghlUserId: string; email?: string | null };
 
 export type CalendarEvent = {
   id: string;
@@ -122,10 +123,10 @@ export function bookingUrl(calendarId: string, domain: string | null | undefined
 
 /** Teammates with a GoHighLevel user id. Today: Derek and Justin. */
 export async function calendarPeople(): Promise<CalendarPerson[]> {
-  const { data } = await supabaseAdmin.from("profiles").select("id, member_id, name, ghl_user_id").not("ghl_user_id", "is", null);
+  const { data } = await supabaseAdmin.from("profiles").select("id, member_id, name, ghl_user_id, email").not("ghl_user_id", "is", null);
   return ((data ?? []) as any[])
     .filter((p) => String(p.ghl_user_id ?? "").trim())
-    .map((p) => ({ memberId: (p.member_id || p.id) as string, name: (p.name as string) || "Teammate", ghlUserId: String(p.ghl_user_id).trim() }));
+    .map((p) => ({ memberId: (p.member_id || p.id) as string, name: (p.name as string) || "Teammate", ghlUserId: String(p.ghl_user_id).trim(), email: (p.email as string | null) ?? null }));
 }
 
 // Calendars and a sub-account's domain change rarely; events change often.
@@ -177,7 +178,14 @@ export async function listEvents(_actor: CalendarActor, opts: { days?: number; f
       }
     }));
   }
-  const events = mergeEvents(found);
+  // Meeting links from Google Calendar for blocked times (googleCalendar.ts).
+  // Quietly nothing until the calendar scope is added in Google Admin.
+  const byMember = new Map<string, GoogleMeeting[]>();
+  if (calendarConfigured) await Promise.all(people.filter((p) => p.email?.endsWith("@clickuplocal.com")).map(async (p) => {
+    try { byMember.set(p.memberId, await googleMeetings(p.email!, startMs, endMs)); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); if (!/unauthorized_client|forbidden|403|insufficient/i.test(msg)) errors.push(`google/${p.name}: ${msg.slice(0, 120)}`); }
+  }));
+  const events = withGoogleLinks(mergeEvents(found), byMember);
 
   // Who each appointment is with, as a client in this app.
   const ghlIds = [...new Set(events.map((e) => e.ghlContactId).filter((x): x is string => !!x))];

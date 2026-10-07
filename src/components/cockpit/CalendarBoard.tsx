@@ -158,7 +158,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
       if ((all ? allDayKey(e.start) : dayKey(e.start)) !== key) continue;
       // The same working location can come stored two ways; once a day is enough.
       if (all) { if (!allDay.some((x) => x.title === e.title && x.people.join() === e.people.join())) allDay.push(e); }
-      else (e.busy ? busy : list).push(e);
+      // Blocked time with a meeting link (from Google Calendar) is a meeting.
+      else (e.busy && !e.joinUrl ? busy : list).push(e);
     }
     list.sort((a, b) => a.start.localeCompare(b.start));
     const busySpans = merge(busy.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number]));
@@ -171,7 +172,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     if (cursor < to) free.push([cursor, to]);
     return { key, list, busy: busy.sort((a, b) => a.start.localeCompare(b.start)), busySpans, allDay, free: free.filter(([a, b]) => b - a >= 30 * 60_000) };
   }), [shown, range7, now, workFrom, workTo]);
-  const nextUp = shown.filter((e) => !e.busy && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
+  const nextUp = shown.filter((e) => (!e.busy || !!e.joinUrl) && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
   const meetings = days.reduce((n, d) => n + d.list.length, 0);
   // Working days only: a quiet weekend shows "Nothing booked", so it isn't hours to book.
   const openHours = Math.round(days.filter((d) => ![0, 6].includes(new Date(`${d.key}T12:00:00Z`).getUTCDay()))
