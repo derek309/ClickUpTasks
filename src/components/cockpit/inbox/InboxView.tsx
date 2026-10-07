@@ -144,6 +144,13 @@ export default function InboxView(p: InboxViewProps) {
   const queued = p.prefs.queuedDrafts ?? [];
   const workDrafts = p.workDrafts ?? [];
   const reviewsBack = p.reviewsBack ?? [];
+  // Gmail checked every minute while this Inbox is on screen (the 5 minute
+  // timer covers everyone else). Only when the tab is showing.
+  const pullGmail = inbox.pullGmail;
+  useEffect(() => {
+    const i = setInterval(() => { if (document.visibilityState === "visible") void pullGmail(); }, 60_000);
+    return () => clearInterval(i);
+  }, [pullGmail]);
   const count = (f: Folder) => f === "drafts" ? drafts.size + queued.length + workDrafts.length : inbox.threads.filter((t) => t.unread && inFolder(t, f, () => false)).length;
 
   const undoToast = (text: string, undo: () => Promise<void> | void) => p.pushToast(text, { label: "Undo", run: () => { undo(); } });

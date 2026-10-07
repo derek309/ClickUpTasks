@@ -348,6 +348,70 @@ export async function readGmailThread(userEmail: string, threadId: string, max =
 /** Services that send a shared file on someone's behalf, from their own address. */
 const FILE_SHARE_SENDER = /@(google\.com|docs\.google\.com|dropbox\.com|dropboxmail\.com|box\.com|wetransfer\.com|onedrive\.com|sharepointonline\.com)$/;
 
+/** One Gmail message (format=full) as an Inbox email; null without a sender. */
+function parseInbound(m: any, userEmail: string): InboundEmail | null {
+    const headers: any[] = m.payload?.headers ?? [];
+    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
+    const fromRaw = h("from");
+    const match = fromRaw.match(/(?:"?([^"<]*)"?\s*)?<?([^<>@\s]+@[^<>\s]+)>?/);
+    let fromName = (match?.[1] ?? "").trim();
+    let fromEmail = (match?.[2] ?? "").trim().toLowerCase();
+    if (!fromEmail) return null;
+    // A file shared through Google Drive, Dropbox and the like comes from the
+    // service's own address with the person in Reply-To: it is from them
+    // (Derek, 2026-10-06: Pamela's video read as a stranger).
+    const shared = FILE_SHARE_SENDER.test(fromEmail) && h("reply-to").match(/[^<>@\s,"]+@[^<>\s,"]+/)?.[0]?.toLowerCase();
+    if (shared && shared !== fromEmail) { fromEmail = shared; fromName = fromName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim(); }
+    // Bulk / automated mail (newsletters, notifications, no-reply senders) sets
+    // these headers or uses a machine local-part — real person-to-person email
+    // doesn't. Used to keep the "unknown sender → Inbox" path from flooding.
+    const precedence = h("precedence").toLowerCase();
+    const autoSubmitted = h("auto-submitted").toLowerCase();
+    const fromLocal = fromEmail.split("@")[0];
+    const auto = !shared && (!!h("list-unsubscribe")
+      || ["bulk", "list", "junk", "auto_reply"].includes(precedence)
+      || (!!autoSubmitted && autoSubmitted !== "no")
+      || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal));
+    return {
+      gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
+      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
+      auto,
+      rfc822: h("message-id"),
+      attachments: gmailFiles(m.payload),
+      unread: Array.isArray(m.labelIds) ? m.labelIds.includes("UNREAD") : undefined,
+      // Gmail's tab for it: anything but Primary goes to the Inbox's Updates folder.
+      tab: tabOf(m.labelIds),
+      others: [...new Set([...`${h("to")},${h("cc")}`.matchAll(/[^<>@\s,"]+@[^<>\s,"]+/g)].map((x) => x[0].toLowerCase()))]
+        .filter((a) => a !== userEmail.toLowerCase() && a !== fromEmail).slice(0, 20),
+    };
+}
+
+/** The newest inbox message of each thread, read the same way as
+ *  readInboundGmail. For the mirror (Derek, 2026-10-07: "sync Gmail to CUL
+ *  Tasks, let's stop trying to filter"): a thread in Gmail's inbox the app has
+ *  never seen, such as snoozed mail coming back, however old. */
+export async function readInboxThreadsLatest(userEmail: string, threadIds: string[]): Promise<InboundEmail[]> {
+  if (!googleConfigured || !threadIds.length) return [];
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const out: InboundEmail[] = [];
+  for (let i = 0; i < threadIds.length; i += 8) {
+    const batch = await Promise.all(threadIds.slice(i, i + 8).map(async (id) => {
+      const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(id)}?format=full`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      const t = r?.ok ? await r.json().catch(() => null) : null;
+      const msgs: any[] = t?.messages ?? [];
+      const inInbox = msgs.filter((m) => Array.isArray(m.labelIds) && m.labelIds.includes("INBOX"));
+      const pick = inInbox.length ? inInbox : msgs;
+      const m = pick[pick.length - 1];
+      return m ? parseInbound(m, userEmail) : null;
+    }));
+    for (const em of batch) if (em) out.push(em);
+  }
+  return out;
+}
+
 export async function readInboundGmail(userEmail: string, query: string, max = 25): Promise<InboundEmail[]> {
   if (!googleConfigured) throw new Error("Google Workspace is not configured.");
   const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
@@ -371,42 +435,8 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
     full.push(...batch);
   }
   for (const m of full) {
-    if (!m) continue;
-    const headers: any[] = m.payload?.headers ?? [];
-    const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
-    const fromRaw = h("from");
-    const match = fromRaw.match(/(?:"?([^"<]*)"?\s*)?<?([^<>@\s]+@[^<>\s]+)>?/);
-    let fromName = (match?.[1] ?? "").trim();
-    let fromEmail = (match?.[2] ?? "").trim().toLowerCase();
-    if (!fromEmail) continue;
-    // A file shared through Google Drive, Dropbox and the like comes from the
-    // service's own address with the person in Reply-To: it is from them
-    // (Derek, 2026-10-06: Pamela's video read as a stranger).
-    const shared = FILE_SHARE_SENDER.test(fromEmail) && h("reply-to").match(/[^<>@\s,"]+@[^<>\s,"]+/)?.[0]?.toLowerCase();
-    if (shared && shared !== fromEmail) { fromEmail = shared; fromName = fromName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim(); }
-    // Bulk / automated mail (newsletters, notifications, no-reply senders) sets
-    // these headers or uses a machine local-part — real person-to-person email
-    // doesn't. Used to keep the "unknown sender → Inbox" path from flooding.
-    const precedence = h("precedence").toLowerCase();
-    const autoSubmitted = h("auto-submitted").toLowerCase();
-    const fromLocal = fromEmail.split("@")[0];
-    const auto = !shared && (!!h("list-unsubscribe")
-      || ["bulk", "list", "junk", "auto_reply"].includes(precedence)
-      || (!!autoSubmitted && autoSubmitted !== "no")
-      || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal));
-    out.push({
-      gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
-      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
-      internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
-      auto,
-      rfc822: h("message-id"),
-      attachments: gmailFiles(m.payload),
-      unread: Array.isArray(m.labelIds) ? m.labelIds.includes("UNREAD") : undefined,
-      // Gmail's tab for it: anything but Primary goes to the Inbox's Updates folder.
-      tab: tabOf(m.labelIds),
-      others: [...new Set([...`${h("to")},${h("cc")}`.matchAll(/[^<>@\s,"]+@[^<>\s,"]+/g)].map((x) => x[0].toLowerCase()))]
-        .filter((a) => a !== userEmail.toLowerCase() && a !== fromEmail).slice(0, 20),
-    });
+    const em = m ? parseInbound(m, userEmail) : null;
+    if (em) out.push(em);
   }
   return out;
 }

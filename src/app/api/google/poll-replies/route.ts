@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
-import { googleConfigured, gmailThreadIds, readInboundGmail, readSentGmail, type SentEmail } from "@/lib/googleMail";
+import { googleConfigured, gmailThreadIds, readInboundGmail, readInboxThreadsLatest, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, ingestTeammateCopy, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
-import { isBlocked, inboundGmailQuery, UPDATES_FROM } from "@/lib/inbox";
+import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -83,7 +83,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
   const sentQuery = `in:sent newer_than:${days}d`;
   // A catch-up reads more than one poll's worth.
   const max = days > 2 ? 200 : 50;
-  let ingested = 0, scanned = 0, matched = 0, unmatched = 0, skippedAuto = 0, mentionReplies = 0;
+  let ingested = 0, scanned = 0, matched = 0, unmatched = 0, mentionReplies = 0, mirrored = 0, reopened = 0, unreadInGmail = 0;
   let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0, archivedInGmail = 0, trashedInGmail = 0;
   const errors: string[] = [];
 
@@ -100,6 +100,28 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
     } catch (e) {
       errors.push(`${mailbox}: ${e instanceof Error ? e.message : "read failed"}`);
       continue;
+    }
+    // The mirror: every thread in their Gmail inbox is in their Inbox here,
+    // however old (snoozed mail coming back included). Up to 25 a run, so a
+    // first catch-up finishes over a few runs. Then Gmail's inbox and read
+    // state are copied onto the app's (syncInboxState).
+    if (memberId && !(only && !all)) {
+      try {
+        const inInbox = await gmailThreadIds(mailbox, "in:inbox newer_than:90d", 2);
+        const seen = new Set(emails.map((em) => em.threadId));
+        const ids = [...inInbox].filter((id) => !seen.has(id));
+        const known = new Set<string>();
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data } = await supabaseAdmin.from("messages").select("gmail_thread_id").eq("mailbox_member_id", memberId).in("gmail_thread_id", ids.slice(i, i + 200));
+          for (const r of data ?? []) known.add(r.gmail_thread_id as string);
+        }
+        const missing = ids.filter((id) => !known.has(id)).slice(0, 25);
+        if (missing.length) { const more = await readInboxThreadsLatest(mailbox, missing); emails.push(...more); mirrored += more.length; }
+        const r = await syncInboxState(memberId, mailbox, inInbox);
+        reopened += r.reopened; unreadInGmail += r.unread;
+      } catch (e) {
+        errors.push(`${mailbox} mirror: ${e instanceof Error ? e.message : "failed"}`);
+      }
     }
     const mentionThreads = await tasksForMentionThreads(emails.map((em) => em.threadId));
     // Read in Gmail: read in this teammate's Inbox too (Derek, 2026-10-01).
@@ -171,9 +193,9 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
         // Everything comes in now; automated mail, or what Gmail files
         // outside Primary, goes to the Updates folder (bulk). Updates began
         // today, so older mail like that is not pulled in.
-        const bulk = em.auto || (!!em.tab && em.tab !== "primary");
-        const allowed = !!memberId && isBlocked(em.fromEmail, allowsBy.get(memberId) ?? []);
-        if (bulk && !allowed && new Date(em.internalDate).getTime() < UPDATES_FROM) { skippedAuto++; continue; }
+        // Inbox or Updates by Gmail's own tab only, nothing guessed (Derek,
+        // 2026-10-07: "Inbox and Updates is fine, just two"; "stop trying to filter").
+        const bulk = !!em.tab && em.tab !== "primary";
         unmatched++;
         if (!memberId || isBlocked(em.fromEmail, blocksBy.get(memberId) ?? [])) continue;
         try {
@@ -239,7 +261,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
   }
 
   return NextResponse.json({
-    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, skippedAuto, mentionReplies,
+    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, mirrored, reopened, unreadInGmail, mentionReplies,
     sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail, archivedInGmail, trashedInGmail, teammateCopies,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
@@ -269,6 +291,44 @@ async function markReadFromGmail(memberId: string, emails: { threadId: string; i
   const { error } = await supabaseAdmin.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
   if (error) throw new Error(error.message);
   return rows.length;
+}
+
+// Back in Gmail's inbox, or unread there: the same here (the mirror, Derek
+// 2026-10-07). A conversation Done or Trashed here comes back when it is in
+// Gmail's inbox again (Gmail's snooze ending, moved back by hand), and one
+// unread in Gmail is unread here. Anything changed here in the last ten
+// minutes is left alone, so Done or read here isn't undone before Gmail has
+// caught up with it. Follows the Inbox Settings switches for archive and read.
+const SETTLE_MS = 10 * 60_000;
+async function syncInboxState(memberId: string, mailbox: string, inInbox: Set<string>): Promise<{ reopened: number; unread: number }> {
+  if (!inInbox.size) return { reopened: 0, unread: 0 };
+  const { data: pref } = await supabaseAdmin.from("inbox_prefs").select("prefs").eq("member_id", memberId).maybeSingle();
+  const prefs = (pref?.prefs ?? {}) as { gmailArchive?: boolean; gmailRead?: boolean };
+  const unreadIds = prefs.gmailRead === false ? new Set<string>() : await gmailThreadIds(mailbox, "in:inbox is:unread newer_than:90d", 1);
+  const keys = [...inInbox].map((id) => `gm:${id}`);
+  const states: any[] = [];
+  for (let i = 0; i < keys.length; i += 200) {
+    const { data } = await supabaseAdmin.from("inbox_state").select("thread_key, done_at, trashed_at, read_at, updated_at").eq("member_id", memberId).in("thread_key", keys.slice(i, i + 200));
+    states.push(...(data ?? []));
+  }
+  const settled = (s: any) => !s.updated_at || Date.now() - Date.parse(s.updated_at) > SETTLE_MS;
+  const now = new Date().toISOString();
+  const rows: any[] = [];
+  let reopened = 0, unread = 0;
+  for (const s of states) {
+    if (!settled(s)) continue;
+    const id = (s.thread_key as string).slice(3);
+    const patch: Record<string, unknown> = {};
+    if (prefs.gmailArchive !== false && (s.done_at || s.trashed_at)) { patch.done_at = null; patch.trashed_at = null; reopened++; }
+    if (prefs.gmailRead !== false && unreadIds.has(id) && s.read_at) { patch.read_at = null; unread++; }
+    else if (prefs.gmailRead !== false && !unreadIds.has(id) && !s.read_at) patch.read_at = now;
+    if (Object.keys(patch).length) rows.push({ member_id: memberId, thread_key: s.thread_key, ...patch, updated_at: now });
+  }
+  if (rows.length) {
+    const { error } = await supabaseAdmin.from("inbox_state").upsert(rows, { onConflict: "member_id,thread_key" });
+    if (error) throw new Error(error.message);
+  }
+  return { reopened, unread };
 }
 
 // Archived or deleted in Gmail: the same conversation leaves this teammate's

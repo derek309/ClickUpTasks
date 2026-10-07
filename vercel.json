@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/google/poll-replies",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/ghl/pull-messages",

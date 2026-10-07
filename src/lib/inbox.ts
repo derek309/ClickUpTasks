@@ -57,8 +57,10 @@ export function inboundGmailQuery(days: number, allows: string[], onlyAllowed = 
   // Every tab now (Derek, 2026-10-02: "let it all flow in"); what is not
   // Primary is sorted into the Updates folder. onlyAllowed: the catch-up after
   // adding someone to Always to Inbox looks for just them.
-  if (onlyAllowed) return `in:inbox {${froms.join(" ") || "from:nobody.invalid"}} newer_than:${days}d -from:me`;
-  return `in:inbox newer_than:${days}d -from:me`;
+  // Mail you sent yourself too, when it's in your inbox (Derek, 2026-10-07:
+  // "sync Gmail to CUL Tasks, let's stop trying to filter").
+  if (onlyAllowed) return `in:inbox {${froms.join(" ") || "from:nobody.invalid"}} newer_than:${days}d`;
+  return `in:inbox newer_than:${days}d`;
 }
 
 // What we keep of a formatted email, as plain text the Inbox and the task
