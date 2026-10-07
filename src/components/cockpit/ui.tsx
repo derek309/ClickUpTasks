@@ -3,6 +3,7 @@
 // Shared UI primitives for the Cockpit: the icon set, Avatar, misc formatting
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
 import { useEffect, useRef, useState } from "react";
+import { authedFetch } from "@/lib/supabase";
 import { users, userById, labelById, prettyLinkName, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
 
 // --- tiny inline icons ------------------------------------------------------
@@ -594,14 +595,36 @@ export type Toast = { id: string; text: string; action?: { label: string; run: (
 
 /** On a message GoHighLevel has no copy of an hour after it was seen (data.ts
  *  ghlConfirmState). GoHighLevel is the record, so this is worth a glance:
- *  usually whoever sent or received it has not connected Gmail sync there. */
-export function NotInGhlChip({ m, className = "" }: { m: Pick<Message, "channel" | "ghlMessageId" | "at">; className?: string }) {
+ *  usually whoever sent or received it has not connected Gmail sync there, or
+ *  the person was not a contact yet. On an email, Add puts a copy in their
+ *  GoHighLevel conversation without sending anything (Derek, 2026-10-07). */
+export function NotInGhlChip({ m, className = "" }: { m: Pick<Message, "id" | "channel" | "ghlMessageId" | "at">; className?: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "added" | { error: string }>("idle");
+  if (state === "added") return <span className={`inline-flex items-center whitespace-nowrap rounded-[5px] bg-success-soft px-1.5 py-0 font-semibold text-success ${className}`}>Added to GoHighLevel</span>;
   if (ghlConfirmState(m) !== "missing") return null;
+  const add = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setState("busy");
+    try {
+      const res = await authedFetch("/api/inbox/ghl-log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messageId: m.id }) });
+      const j = await res.json().catch(() => ({}));
+      setState(res.ok ? "added" : { error: j.error ?? "That didn't work." });
+    } catch { setState({ error: "That didn't work." }); }
+  };
+  const error = typeof state === "object" ? state.error : null;
   return (
-    <span
-      className={`inline-flex items-center whitespace-nowrap rounded-[5px] bg-danger-soft px-1.5 py-0 font-semibold text-danger ${className}`}
-      title="GoHighLevel has no copy of this yet. Check that whoever sent or received it has Gmail sync connected in their GoHighLevel profile.">
-      Not in GoHighLevel
+    <span className={`inline-flex flex-wrap items-center gap-1.5 ${className}`}>
+      <span className="inline-flex items-center whitespace-nowrap rounded-[5px] bg-danger-soft px-1.5 py-0 font-semibold text-danger"
+        title="GoHighLevel has no copy of this yet. Check that whoever sent or received it has Gmail sync connected in their GoHighLevel profile.">
+        Not in GoHighLevel
+      </span>
+      {m.channel === "email" && (
+        <button type="button" onClick={add} disabled={state === "busy"} title="Copy this email into their GoHighLevel conversation. Nothing is sent."
+          className="whitespace-nowrap rounded-[5px] px-1.5 py-0 font-semibold text-accent ring-1 ring-[var(--border)] hover:ring-accent disabled:opacity-50">
+          {state === "busy" ? "Adding…" : error ? "Try again" : "Add"}
+        </button>
+      )}
+      {error && <span className="text-danger">{error}</span>}
     </span>
   );
 }
