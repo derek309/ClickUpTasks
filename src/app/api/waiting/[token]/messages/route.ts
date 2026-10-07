@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { type Attachment } from "@/lib/data";
+import { type Attachment, clientAnswerPatch } from "@/lib/data";
 import { sanitizeWaitingAttachments } from "@/lib/waitingAttachments";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient, notifyTeamOfClientActivity } from "@/lib/waitingNotify";
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!taskId) return NextResponse.json({ error: "Missing taskId." }, { status: 400 });
   if (!text && attachments.length === 0) return NextResponse.json({ error: "Add a message or attachment first." }, { status: 400 });
 
-  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, contact_id, title, status").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id, contact_id, title, status, waiting_on_client, assignee_id").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
 
@@ -50,7 +50,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await clientAnsweredOnTask(taskId, "reply");
 
-  const notifyRecipient = await resolveNotifyRecipient(scope.assignedTo);
+  // The task's own owner first, as in respond and status.
+  const notifyRecipient = (task.assignee_id as string | null) ?? await resolveNotifyRecipient(scope.assignedTo);
+  // Their message answers a task that was waiting on them: it comes back to
+  // us in Review, the same rule as answering with a choice (Derek,
+  // 2026-10-07: Pam replied and the task still said Waiting).
+  const patch = clientAnswerPatch(task, notifyRecipient);
+  if (Object.keys(patch).length) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({
       notifyRecipient, clientId: scope.clientId, taskId, projectId: task.project_id ?? null,
