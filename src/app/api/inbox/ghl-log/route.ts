@@ -33,6 +33,17 @@ export async function POST(req: NextRequest) {
   if (caller.role !== "admin" && !mine) return NextResponse.json({ error: "That email isn't yours." }, { status: 403 });
   if (m.channel !== "email") return NextResponse.json({ error: "Only emails can be added this way." }, { status: 400 });
   if (isRealGhlId(m.ghl_message_id)) return NextResponse.json({ ok: true, already: true });
+  // The same email in another teammate's mailbox (one row each) that is
+  // already in GoHighLevel: reuse it rather than add it twice.
+  const rfc = (m.rfc822_message_id as string | null) || null;
+  const markCopies = (ghlId: string, convId: string | null) => {
+    const q = supabaseAdmin.from("messages").update({ ghl_message_id: ghlId, ...(convId ? { ghl_conversation_id: convId } : {}) });
+    return (rfc ? q.or(`id.eq.${m.id},rfc822_message_id.eq."${rfc.replace(/"/g, "")}"`) : q.eq("id", m.id)).or("ghl_message_id.is.null,ghl_message_id.like.synthetic:*");
+  };
+  if (rfc) {
+    const { data: twin } = await supabaseAdmin.from("messages").select("ghl_message_id, ghl_conversation_id").eq("rfc822_message_id", rfc).not("ghl_message_id", "is", null).not("ghl_message_id", "like", "synthetic:%").limit(1).maybeSingle();
+    if (twin?.ghl_message_id) { await markCopies(twin.ghl_message_id as string, (twin.ghl_conversation_id as string | null) ?? null); return NextResponse.json({ ok: true, already: true }); }
+  }
 
   const { data: contact } = m.contact_id ? await supabaseAdmin.from("contacts").select("name, email, ghl_contact_id").eq("id", m.contact_id).maybeSingle() : { data: null };
   if (!contact?.ghl_contact_id) return NextResponse.json({ error: "Save them as a contact first, then add this." }, { status: 400 });
@@ -76,6 +87,6 @@ export async function POST(req: NextRequest) {
   try { j = JSON.parse(text); } catch { /* not JSON */ }
   const ghlMessageId: string | null = j?.messageId ?? j?.message?.id ?? j?.id ?? null;
   if (!ghlMessageId) return NextResponse.json({ error: `GoHighLevel answered without a message id. ${text.slice(0, 240)}` }, { status: 502 });
-  await supabaseAdmin.from("messages").update({ ghl_message_id: ghlMessageId, ghl_conversation_id: conversationId }).eq("id", m.id);
+  await markCopies(ghlMessageId, conversationId);
   return NextResponse.json({ ok: true, ghlMessageId });
 }
