@@ -62,6 +62,8 @@ export async function notifyTeamOfClientActivity(opts: {
       subject: (opts.subject ?? `${opts.clientName} replied on "${opts.taskTitle}"`).slice(0, 200),
       body: html,
       isHtml: true,
+      fromName: "ClickUpTasks",
+      taskId: opts.taskId,
     });
   } catch { /* email is a nice-to-have; the in-app notification already fired */ }
 }

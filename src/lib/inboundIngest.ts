@@ -262,7 +262,7 @@ export async function sendInboundReplyEmail(opts: {
     // their alert, and the window has already been claimed either way.
     await Promise.all(targets.map(async (p: any) => {
       try {
-        await sendGmailAs(p.email.trim(), { to: p.email.trim(), subject, body: html, isHtml: true });
+        await sendGmailAs(p.email.trim(), { to: p.email.trim(), subject, body: html, isHtml: true, fromName: "ClickUpTasks", taskId: opts.taskId ?? undefined });
       } catch (e) {
         console.error("[inboundIngest] sendInboundReplyEmail: send failed", p.member_id, e);
       }
@@ -456,19 +456,21 @@ export async function ingestStrangerEmail(opts: {
   files?: GmailFile[]; others?: string[];
   /** Automated, or filed outside Gmail's Primary tab: the Updates folder. */
   bulk?: boolean;
+  /** The app's own notification about a task: filed on that task and client. */
+  task?: { id: string; clientId: string | null };
 }): Promise<boolean> {
   const { data: dupe } = await supabaseAdmin.from("messages").select("id").eq("gmail_message_id", opts.gmailMessageId).limit(1);
   if (dupe && dupe.length > 0) return false;
   // A conversation someone already linked to a task keeps collecting there.
-  let taskId: string | null = null;
-  if (opts.gmailThreadId) {
+  let taskId: string | null = opts.task?.id ?? null;
+  if (!taskId && opts.gmailThreadId) {
     const { data } = await supabaseAdmin.from("messages").select("task_id")
       .eq("gmail_thread_id", opts.gmailThreadId).eq("mailbox_member_id", opts.mailboxMemberId)
       .not("task_id", "is", null).order("created_at", { ascending: false }).limit(1);
     taskId = (data?.[0]?.task_id as string | undefined) ?? null;
   }
   const { error } = await supabaseAdmin.from("messages").insert({
-    id: "msg_" + crypto.randomUUID(), contact_id: null, client_id: null, task_id: taskId,
+    id: "msg_" + crypto.randomUUID(), contact_id: null, client_id: opts.task?.clientId ?? null, task_id: taskId,
     channel: "email", direction: opts.direction,
     subject: opts.subject?.trim() || null, body: opts.body,
     gmail_message_id: opts.gmailMessageId, gmail_thread_id: opts.gmailThreadId ?? null, rfc822_message_id: opts.rfc822 || null,

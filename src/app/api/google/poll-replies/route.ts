@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { contactsByEmail } from "@/lib/contactsByEmail";
-import { googleConfigured, gmailThreadIds, readInboundGmail, readInboxThreadsLatest, readSentGmail, type SentEmail } from "@/lib/googleMail";
+import { type InboundEmail, googleConfigured, gmailThreadIds, readInboundGmail, readInboxThreadsLatest, readSentGmail, type SentEmail } from "@/lib/googleMail";
 import { ingestInboundMessage, ingestOutboundMessage, ingestStrangerEmail, ingestTeammateCopy, strangerThreadsIn } from "@/lib/inboundIngest";
 import { tasksForMentionThreads, commentFromMentionReply } from "@/lib/mentionReply";
 import { isBlocked, inboundGmailQuery } from "@/lib/inbox";
@@ -84,7 +84,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
   // A catch-up reads more than one poll's worth.
   const max = days > 2 ? 200 : 50;
   let ingested = 0, scanned = 0, matched = 0, unmatched = 0, mentionReplies = 0, mirrored = 0, reopened = 0, unreadInGmail = 0;
-  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, strangerReplies = 0, readInGmail = 0, archivedInGmail = 0, trashedInGmail = 0;
+  let sentScanned = 0, sentMatched = 0, sentIngested = 0, strangers = 0, notices = 0, strangerReplies = 0, readInGmail = 0, archivedInGmail = 0, trashedInGmail = 0;
   const errors: string[] = [];
 
   // Each teammate's Block sender list: their blocked strangers are not kept.
@@ -134,6 +134,24 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
     }
     for (const em of emails) {
       scanned++;
+      // The app's own notification ("Pamela Macias replied on ...") is about
+      // a task: it goes in the Inbox on that task and its client, so it opens
+      // the task in one click (Derek, 2026-10-07: "I don't know how we
+      // connect it to a task"). Checked first: it is from a teammate to
+      // themselves, which nothing below would place.
+      const noticeTask = memberId && teamEmails.has(em.fromEmail) ? await notificationTask(em) : null;
+      if (noticeTask) {
+        try {
+          if (await ingestStrangerEmail({
+            mailboxMemberId: memberId!, direction: "inbound", peerName: "ClickUpTasks", peerAddress: em.fromEmail,
+            subject: em.subject, body: em.body, gmailMessageId: em.gmailId, gmailThreadId: em.threadId, rfc822: em.rfc822, at: em.internalDate,
+            bulk: !!em.tab && em.tab !== "primary", task: noticeTask,
+          })) notices++;
+        } catch (e) {
+          errors.push(`notice ${em.gmailId}: ${e instanceof Error ? e.message : "failed"}`);
+        }
+        continue;
+      }
       // A teammate answering a mention email, checked before anything else:
       // they are not a contact, so the lookup below would read their reply as
       // mail from a stranger and park it in the Inbox rather than putting it
@@ -261,7 +279,7 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
   }
 
   return NextResponse.json({
-    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, mirrored, reopened, unreadInGmail, mentionReplies,
+    ok: true, mailboxes: mailboxes.length, scanned, matched, ingested, unmatched, strangers, notices, mirrored, reopened, unreadInGmail, mentionReplies,
     sentScanned, sentMatched, sentIngested, strangerReplies, readInGmail, archivedInGmail, trashedInGmail, teammateCopies,
     ...(errors.length ? { errors: errors.slice(0, 10) } : {}),
   });
@@ -270,6 +288,22 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
 // A conversation whose emails here are all read in Gmail is read in the
 // teammate's Inbox as of the newest of them. Only moves read_at forward, and
 // only touches read_at, so snooze, archive and trash are left as they are.
+/** The task one of the app's notification emails is about: named in its
+ *  header, or, for one sent before the header, the task its subject quotes
+ *  ("Pamela Macias replied on "Tell us how many seats..."") on a notification. */
+async function notificationTask(em: InboundEmail): Promise<{ id: string; clientId: string | null } | null> {
+  let q = supabaseAdmin.from("tasks").select("id, client_id").is("deleted_at", null);
+  if (em.taskId) q = q.eq("id", em.taskId);
+  else {
+    const title = /This is a notification only/.test(em.body) ? em.subject.match(/"([^"]+)"\s*$/)?.[1] : undefined;
+    if (!title) return null;
+    q = q.eq("title", title);
+  }
+  const { data } = await q.order("updated_at", { ascending: false }).limit(1);
+  const t = data?.[0] as { id: string; client_id: string | null } | undefined;
+  return t ? { id: t.id, clientId: t.client_id } : null;
+}
+
 async function markReadFromGmail(memberId: string, emails: { threadId: string; internalDate: string; unread?: boolean }[]): Promise<number> {
   const byThread = new Map<string, { newest: number; anyUnread: boolean }>();
   for (const em of emails) {

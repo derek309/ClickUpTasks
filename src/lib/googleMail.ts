@@ -57,13 +57,25 @@ const formatFrom = (email: string, name?: string) => {
  *  the thread id in the sender's own mailbox (Gmail threads the Sent copy on it). */
 export type ReplyHeaders = { messageId: string; references: string; threadId: string | null };
 
+/** Header on the app's notification emails naming the task they are about. */
+export const TASK_HEADER = "X-ClickUpTasks-Task";
+
+/** A From header as name and address. A bare address has no name: the old
+ *  single pattern split derek@clickuplocal.com into "dere" and k@clickuplocal.com. */
+export function parseFrom(raw: string): { name: string; email: string } {
+  const angled = raw.match(/^\s*"?([^"<]*?)"?\s*<([^<>\s]+@[^<>\s]+)>/);
+  if (angled) return { name: angled[1].trim(), email: angled[2].trim().toLowerCase() };
+  const bare = raw.match(/[^<>\s",]+@[^<>\s",]+/);
+  return { name: "", email: (bare?.[0] ?? "").toLowerCase() };
+}
+
 export async function sendGmailAs(
   fromEmail: string,
   // isHtml: the caller already has real HTML (the Journal's rich-text email
   // composer) — send msg.body as-is instead of escaping+linebreak-converting
   // it as plain text. Defaults false: the other callers here (password
   // reset, mention/notification emails) still pass a plain string.
-  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; isHtml?: boolean; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[]; replyTo?: ReplyHeaders | null },
+  msg: { to: string; cc?: string[]; bcc?: string[]; subject?: string; body: string; isHtml?: boolean; fromName?: string; attachments?: { filename: string; mimeType: string; contentBase64: string }[]; replyTo?: ReplyHeaders | null; taskId?: string },
 ): Promise<{ id: string; threadId: string }> {
   if (!googleConfigured) throw new Error("Google Workspace sending is not configured.");
 
@@ -81,6 +93,9 @@ export async function sendGmailAs(
       `In-Reply-To: ${msg.replyTo.messageId}`,
       `References: ${[msg.replyTo.references, msg.replyTo.messageId].filter(Boolean).join(" ")}`,
     ] : []),
+    // The app's own notification about a task: the Gmail mirror reads it
+    // back and files the email on that task (see TASK_HEADER).
+    ...(msg.taskId ? [`${TASK_HEADER}: ${msg.taskId}`] : []),
     "MIME-Version: 1.0",
   ];
 
@@ -168,7 +183,9 @@ export type InboundEmail = { gmailId: string; threadId: string; fromEmail: strin
   /** Gmail's inbox tab. */
   tab?: "primary" | "updates" | "promotions" | "social" | "forums";
   /** Still unread in Gmail. Read there: the Inbox marks it read too. */
-  unread?: boolean };
+  unread?: boolean;
+  /** One of the app's own notification emails: the task it is about. */
+  taskId?: string };
 
 /** A file on an email, left in Gmail and fetched when someone opens it
  *  (api/inbox/attachment), so a photo shows as a preview in the Inbox
@@ -353,9 +370,9 @@ function parseInbound(m: any, userEmail: string): InboundEmail | null {
     const headers: any[] = m.payload?.headers ?? [];
     const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
     const fromRaw = h("from");
-    const match = fromRaw.match(/(?:"?([^"<]*)"?\s*)?<?([^<>@\s]+@[^<>\s]+)>?/);
-    let fromName = (match?.[1] ?? "").trim();
-    let fromEmail = (match?.[2] ?? "").trim().toLowerCase();
+    const parsed = parseFrom(fromRaw);
+    let fromName = parsed.name;
+    let fromEmail = parsed.email;
     if (!fromEmail) return null;
     // A file shared through Google Drive, Dropbox and the like comes from the
     // service's own address with the person in Reply-To: it is from them
@@ -384,6 +401,7 @@ function parseInbound(m: any, userEmail: string): InboundEmail | null {
       tab: tabOf(m.labelIds),
       others: [...new Set([...`${h("to")},${h("cc")}`.matchAll(/[^<>@\s,"]+@[^<>\s,"]+/g)].map((x) => x[0].toLowerCase()))]
         .filter((a) => a !== userEmail.toLowerCase() && a !== fromEmail).slice(0, 20),
+      taskId: h(TASK_HEADER.toLowerCase()).trim() || undefined,
     };
 }
 
