@@ -205,7 +205,14 @@ function TaskDetailBody({
   const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
   // The pages we're asking about ("Homepage: https://…") become cards to tap,
   // not long addresses inside the paragraph (Derek, 2026-10-07).
-  const { before, links, after } = splitLabeledLinks(t.description);
+  const split = splitLabeledLinks(t.description);
+  // A link to this portal itself ("Add your changes here", written for the
+  // email) points at the page they're already on, so it isn't shown here, and
+  // the "1." / "2." a numbered list leaves behind is trimmed (Derek,
+  // 2026-10-07: "I don't get add your changes here").
+  const links = split.links.filter((l) => !/\/waiting\/[a-f0-9]{16,}/i.test(l.url));
+  const before = split.before.replace(/\s*\d+[.)]\s*$/, "");
+  const after = split.after.replace(/^\s*\d+[.)]\s*/, "");
   const lastTeam = [...displayThreadOf(t)].reverse().find((m) => m.from === "team")?.sender ?? null;
   // A long thread shows its newest few until they ask for the rest.
   const [earlierFor, setEarlierFor] = useState<string | null>(null);
