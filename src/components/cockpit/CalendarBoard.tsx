@@ -160,7 +160,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
   }), [shown, range7, now, workFrom, workTo]);
   const nextUp = shown.filter((e) => !e.busy && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
   const meetings = days.reduce((n, d) => n + d.list.length, 0);
-  const openHours = Math.round(days.reduce((n, d) => n + d.free.reduce((m, [a, b]) => m + (b - a), 0), 0) / 3_600_000);
+  // Working days only: a quiet weekend shows "Nothing booked", so it isn't hours to book.
+  const openHours = Math.round(days.filter((d) => ![0, 6].includes(new Date(`${d.key}T12:00:00Z`).getUTCDay()))
+    .reduce((n, d) => n + d.free.reduce((m, [a, b]) => m + (b - a), 0), 0) / 3_600_000);
   const dayLabel = (key: string) => {
     const short = new Date(`${key}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
     return key === range7.today ? `Today · ${short}` : short;
@@ -223,8 +225,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
   const tab = (on: boolean) => `h-9 rounded-md px-3 font-semibold ${on ? "bg-surface ring-1 ring-[var(--border)]" : "text-muted hover:text-foreground"}`;
 
   return (
-    // The whole width (Derek, 2026-10-05): the agenda takes what the links column leaves.
-    <div className="w-full px-4 py-5 text-[16px] sm:px-6">
+    // Capped at 1280px (Derek, 2026-10-06): full width put the busy line and the
+    // Open chips a screen apart. The agenda takes what the links column leaves.
+    <div className="mx-auto w-full max-w-[1280px] px-4 py-5 text-[16px] sm:px-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="inline-flex gap-1 rounded-lg bg-background p-1">
           <button onClick={() => setWeek(0)} className={tab(week === 0)}>This week</button>
@@ -245,7 +248,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
               {found.map((c) => (
                 <button key={c.id} onClick={() => { setFindOpen(false); setBooking({ kind: "book", ghlContactId: c.ghlContactId!, name: c.name, ...(pendingStart ? { start: pendingStart } : {}) }); }} className="rounded-md px-3 py-2 text-left hover:bg-background">
                   <b className="block truncate font-semibold">{c.name}</b>
-                  <span className="block truncate text-[14px] text-muted">{[c.company, c.email].filter(Boolean).join(" · ")}</span>
+                  <span className="block truncate text-[16px] text-muted">{[c.company, c.email].filter(Boolean).join(" · ")}</span>
                 </button>
               ))}
               {findWords.length > 0 && !found.length && <div className="px-3 py-2 text-muted">No GoHighLevel contact matches.</div>}
@@ -264,7 +267,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           {nextUp && (
             <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold uppercase tracking-wider text-white/70">Next up · {whenLabel(nextUp)}</div>
+                <div className="text-[16px] font-bold uppercase tracking-wider text-white/70">Next up · {whenLabel(nextUp)}</div>
                 <b className="block truncate text-[20px]">{headline(nextUp)}</b>
                 <div className="text-white/80">{[`${time(nextUp.start)}, ${length(minutes(nextUp.start, nextUp.end))}`, purpose(nextUp, headline(nextUp)), nextUp.people.map(first).join(" and "), clientOf(nextUp) && clientNote ? clientNote(clientOf(nextUp)!) : null].filter(Boolean).join(" · ")}</div>
               </div>
@@ -275,7 +278,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           {days.map(({ key, list, busy, busySpans, allDay, free }) => {
             const quietWeekend = weekend(key) && !list.length;
             if (quietWeekend && weekend(key) && new Date(`${key}T12:00:00Z`).getUTCDay() === 0 && !days.some((d) => d.key < key && weekend(d.key) && d.list.length)) {
-              return <div key={key} className="mt-4 flex items-center gap-3 text-[14px] font-extrabold uppercase tracking-wider text-muted"><span>Weekend</span><span className="h-px flex-1 bg-[var(--border)]" /><span className="font-normal normal-case tracking-normal">Nothing booked</span></div>;
+              return <div key={key} className="mt-4 flex items-center gap-3 text-[16px] font-extrabold uppercase tracking-wider text-muted"><span>Weekend</span><span className="h-px flex-1 bg-[var(--border)]" /><span className="font-normal normal-case tracking-normal">Nothing booked</span></div>;
             }
             if (quietWeekend) return null;
             const where = allDay.map((e) => `${e.people.map(first).join(" & ")} at ${e.title}`).join(" · ");
@@ -284,9 +287,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                 {/* A date spacer between days (Derek, 2026-10-05: "easier on the
                     eye"); today's is the loud one. */}
                 <div className={`flex items-center gap-3 ${key === range7.today ? "mb-2 mt-1" : "mb-1.5 mt-4"}`}>
-                  <h2 className={key === range7.today ? "shrink-0 rounded-md bg-accent px-3 py-1 text-[16px] font-extrabold uppercase tracking-wider text-white" : "shrink-0 text-[14px] font-extrabold uppercase tracking-wider text-muted"}>{dayLabel(key)}</h2>
+                  <h2 className={key === range7.today ? "shrink-0 rounded-md bg-accent px-3 py-1 text-[16px] font-extrabold uppercase tracking-wider text-white" : "shrink-0 text-[16px] font-extrabold uppercase tracking-wider text-muted"}>{dayLabel(key)}</h2>
                   <span className="h-px flex-1 bg-[var(--border)]" />
-                  <span className="shrink-0 text-[14px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
+                  <span className="shrink-0 text-[16px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 <div className={`rounded-xl px-4 py-2 ${key === range7.today ? "bg-surface shadow-sm ring-2 ring-accent" : "bg-surface ring-1 ring-[var(--border)]"}`}>
                 {list.map((e) => {
@@ -302,20 +305,20 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                   const cid = clientOf(e);
                   return (
                   <div key={e.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2.5">
-                    <span className="w-[5.5rem] shrink-0 tabular-nums"><b>{time(e.start)}</b><span className="block text-[14px] text-muted">{length(minutes(e.start, e.end))}</span></span>
+                    <span className="w-[5.5rem] shrink-0 tabular-nums"><b>{time(e.start)}</b><span className="block text-[16px] text-muted">{length(minutes(e.start, e.end))}</span></span>
                     <span className="min-w-0 flex-1">
                       {cid ? <button onClick={() => onOpenClient(cid)} title="Open their page" className="block max-w-full truncate text-left text-[16px] font-bold hover:text-accent hover:underline">{head}</button>
                         : <b className="block truncate text-[16px]">{head}</b>}
-                      <span className="block truncate text-[15px] text-muted">{[what, e.people.map(first).join(" & "), cid && clientNote ? clientNote(cid) : null].filter(Boolean).join(" · ")}</span>
+                      <span className="block truncate text-[16px] text-muted">{[what, e.people.map(first).join(" & "), cid && clientNote ? clientNote(cid) : null].filter(Boolean).join(" · ")}</span>
                       {cancelId === e.id && <span className="font-semibold text-danger">Cancel it? GoHighLevel tells them. <button onClick={() => cancel(e)} className="underline">Yes, cancel</button> <button onClick={() => setCancelId(null)} className="text-muted underline">Keep</button></span>}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       {over && e.calendarId && st === "confirmed" ? <>
-                        <span className="text-[14px] text-muted">How did it go?</span>
+                        <span className="text-[16px] text-muted">How did it go?</span>
                         <button onClick={() => void setStatus(e, "showed")} className="h-9 rounded-md bg-success-soft px-3 font-bold text-success ring-1 ring-success/30 hover:ring-success">Showed</button>
                         <button onClick={() => void setStatus(e, "noshow")} className="h-9 rounded-md bg-danger-soft px-3 font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">No show</button>
                       </> : <>
-                        {st !== "confirmed" && <span className={`rounded-md bg-background px-2 py-1 text-[14px] font-semibold ${STATUS_TONE[st] ?? "text-muted"}`}>{STATUS_LABEL[st] ?? st}</span>}
+                        {st !== "confirmed" && <span className={`rounded-md bg-background px-2 py-1 text-[16px] font-semibold ${STATUS_TONE[st] ?? "text-muted"}`}>{STATUS_LABEL[st] ?? st}</span>}
                         {e.joinUrl && !over && <a href={e.joinUrl} target="_blank" rel="noopener noreferrer" className="grid h-9 place-items-center rounded-md bg-accent px-4 font-bold text-white hover:opacity-90">Join</a>}
                       </>}
                       {(e.calendarId || cid) && (
@@ -324,9 +327,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                             className="grid h-9 w-9 place-items-center rounded-md text-[18px] text-muted ring-1 ring-[var(--border)] hover:bg-background hover:text-foreground">⋯</button>
                           {menuId === e.id && <>
                             <div className="fixed inset-0 z-40" onClick={() => setMenuId(null)} />
-                            <div className="absolute right-0 top-10 z-50 w-60 rounded-lg bg-surface p-1.5 text-[15px] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                            <div className="absolute right-0 top-10 z-50 w-60 rounded-lg bg-surface p-1.5 text-[16px] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
                               {e.calendarId && <>
-                                <div className="px-3 pb-1 pt-0.5 text-[13px] font-bold uppercase tracking-wider text-muted">Status</div>
+                                <div className="px-3 pb-1 pt-0.5 text-[16px] font-bold uppercase tracking-wider text-muted">Status</div>
                                 {Object.entries(STATUS_LABEL).filter(([v]) => v !== "cancelled").map(([v, l]) => (
                                   <button key={v} onClick={() => { setMenuId(null); if (v !== st) void setStatus(e, v); }} className={`${item} ${STATUS_TONE[v] ?? ""}`}>
                                     <span className="w-4 text-accent">{v === st ? "✓" : ""}</span>{l}
@@ -351,22 +354,22 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                 {/* Busy time, one quiet line; in full when asked. Someone else's
                     busy time never shows its title (it's their own life). */}
                 {busyFull ? busy.map((e) => (
-                  <div key={e.id} className="flex items-center gap-3 border-b py-1.5 text-[15px] text-muted">
+                  <div key={e.id} className="flex items-center gap-3 border-b py-1.5 text-[16px] text-muted">
                     <span className="w-[5.5rem] tabular-nums">{time(e.start)}</span>
                     <span className="min-w-0 flex-1 truncate">{e.people.includes(meId) ? e.title : `Busy (${e.people.map(first).join(", ")})`}</span>
                   </div>
                 )) : null}
                 {/* Free time as chips; a chip starts a booking (mockup). */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 text-[15px]">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2 text-[16px]">
                   {!busyFull && busySpans.length > 0 && <span className="min-w-0 text-muted/80">Busy {busySpans.map(([a, b]) => range(a, b)).join(", ")}</span>}
                   <span className="flex-1" />
                   {free.length > 0 ? <>
-                    <span className="text-[14px] text-muted">Open</span>
+                    <span className="text-[16px] text-muted">Open</span>
                     {free.map(([a, b]) => (
                       <button key={a} onClick={() => { setPendingStart(new Date(a).toISOString()); setFindOpen(true); setFindQ(""); requestAnimationFrame(() => document.getElementById("calendar-book-finder")?.scrollIntoView({ behavior: "smooth", block: "nearest" })); }} title={`Book someone at ${clock(a, true)}`}
-                        className="rounded-md bg-success-soft px-2.5 py-1 text-[14px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">{range(a, b)}</button>
+                        className="rounded-md bg-success-soft px-2.5 py-1 text-[16px] font-semibold text-success ring-1 ring-success/30 hover:ring-success">{range(a, b)}</button>
                     ))}
-                  </> : <span className="text-muted">No open time between {hourLabel(workFrom)} and {hourLabel(workTo)}</span>}
+                  </> : <span className="text-muted">{key === range7.today ? "Nothing left open today" : `No open time between ${hourLabel(workFrom)} and ${hourLabel(workTo)}`}</span>}
                 </div>
                 </div>
               </section>
@@ -377,10 +380,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
       </div>
       <aside className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg p-3 ring-1 ring-[var(--border)] lg:sticky lg:top-4 lg:max-w-[460px]">
         <div className="flex items-baseline justify-between gap-2">
-          <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">📅 Booking links</h2>
-          <span className="text-[14px] text-muted">{linkRows.length}</span>
+          <h2 className="text-[16px] font-extrabold uppercase tracking-wider text-muted">📅 Booking links</h2>
+          <span className="text-[16px] text-muted">{linkRows.length}</span>
         </div>
-        <p className="-mt-1 text-[14px] text-muted">☆ keeps a link at the top. The eye hides it under Hidden.</p>
+        <p className="-mt-1 text-[16px] text-muted">☆ keeps a link at the top. The eye hides it under Hidden.</p>
         <input value={linkQ} onChange={(e) => setLinkQ(e.target.value)} placeholder="Search booking links" aria-label="Search booking links"
           className="h-10 w-full min-w-0 rounded-md bg-surface px-3 outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
         {(() => {
@@ -391,8 +394,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                 {/* The whole name, a size smaller (Derek, 2026-10-05: no cut off titles). */}
                 {/* The name opens the booking page (Derek, 2026-10-05: no separate arrow). */}
                 <a href={r.url} target="_blank" rel="noopener noreferrer" title={`Open the ${r.label} booking page`}
-                  className={`block text-[15px] font-semibold leading-snug hover:text-accent hover:underline ${isHidden ? "text-muted" : ""}`}>{r.label}</a>
-                <span className="text-[14px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}{r.calendarId === defaultCalendarId ? " · default" : ""}</span>
+                  className={`block text-[16px] font-semibold leading-snug hover:text-accent hover:underline ${isHidden ? "text-muted" : ""}`}>{r.label}</a>
+                <span className="text-[16px] text-muted">{r.who.map((id) => (id === meId ? "You" : nameOf(id).split(/\s+/)[0])).join(" & ")}{r.calendarId === defaultCalendarId ? " · default" : ""}</span>
               </span>
               {onSetStarred && <button onClick={() => toggleStar(r.calendarId)} title={starred.has(r.calendarId) ? "Starred. Click to unstar." : "Star it to keep it at the top"} aria-pressed={starred.has(r.calendarId)}
                 className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-[18px] hover:bg-background ${starred.has(r.calendarId) ? "text-amber-500" : "text-muted/70 hover:text-foreground"}`}>{starred.has(r.calendarId) ? "★" : "☆"}</button>}
@@ -416,7 +419,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           return <>
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
               {visible.map((r, i) => <div key={r.url} className="min-w-0">
-                {(i === 0 || visible[i - 1].group !== r.group) && <div className={`pb-0.5 text-[14px] font-bold uppercase tracking-wider text-muted ${i ? "pt-3" : "pt-1"}`}>{r.group}</div>}
+                {(i === 0 || visible[i - 1].group !== r.group) && <div className={`pb-0.5 text-[16px] font-bold uppercase tracking-wider text-muted ${i ? "pt-3" : "pt-1"}`}>{r.group}</div>}
                 {row(r, hidden.has(r.calendarId))}
               </div>)}
               {!visible.length && !folded.length && <div className="py-2 text-muted">{loading ? "Reading GoHighLevel…" : linkQ ? "No booking link matches." : "No booking pages found."}</div>}
@@ -425,10 +428,10 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
             {folded.length > 0 && (
               <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] border-t pt-1">
                 <button onClick={() => setHiddenOpen(!hiddenOpen)} aria-expanded={hiddenOpen} className="flex items-center justify-between py-1.5 text-left font-semibold text-muted hover:text-foreground">
-                  <span>{hiddenOpen ? "▾" : "▸"} Hidden</span><span className="text-[14px]">{folded.length}</span>
+                  <span>{hiddenOpen ? "▾" : "▸"} Hidden</span><span className="text-[16px]">{folded.length}</span>
                 </button>
                 {hiddenOpen && folded.map((r, i) => <div key={r.url} className="min-w-0">
-                  {(i === 0 || folded[i - 1].group !== r.group) && <div className="pb-0.5 pt-2 text-[14px] font-bold uppercase tracking-wider text-muted/80">{r.group}</div>}
+                  {(i === 0 || folded[i - 1].group !== r.group) && <div className="pb-0.5 pt-2 text-[16px] font-bold uppercase tracking-wider text-muted/80">{r.group}</div>}
                   {row(r, true)}
                 </div>)}
               </div>
@@ -436,11 +439,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
           </>;
         })()}
         <div className="mt-2 grid gap-1.5 border-t pt-3">
-          <h2 className="text-[14px] font-extrabold uppercase tracking-wider text-muted">{week ? "Next week" : "This week"}</h2>
+          <h2 className="text-[16px] font-extrabold uppercase tracking-wider text-muted">{week ? "Next week" : "This week"}</h2>
           <div className="flex justify-between"><span>Client meetings</span><b>{meetings}</b></div>
           <div className="flex justify-between"><span>Open hours to book</span><b>{openHours}</b></div>
           {onSetHours && (
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[15px] text-muted">
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[16px] text-muted">
               <span>Free time between</span>
               <select value={workFrom} onChange={(e) => onSetHours(e.target.value, e.target.value < workTo ? workTo : HOURS[Math.min(HOURS.indexOf(e.target.value) + 2, HOURS.length - 1)])} aria-label="Start of your working day"
                 className="h-8 rounded-md bg-surface px-1 text-foreground ring-1 ring-[var(--border)]">{HOURS.slice(0, -1).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
@@ -449,7 +452,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                 className="h-8 rounded-md bg-surface px-1 text-foreground ring-1 ring-[var(--border)]">{HOURS.filter((h) => h > workFrom).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
             </div>
           )}
-          <label className="mt-1 flex cursor-pointer items-center gap-2 text-[15px] text-muted"><input type="checkbox" checked={busyFull} onChange={(e) => setBusyFull(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time in full</label>
+          <label className="mt-1 flex cursor-pointer items-center gap-2 text-[16px] text-muted"><input type="checkbox" checked={busyFull} onChange={(e) => setBusyFull(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />Show busy time in full</label>
         </div>
       </aside>
       </div>
