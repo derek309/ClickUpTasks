@@ -29,6 +29,18 @@ describe("Inbox conversations", () => {
     expect(t2.key).toBe("ghl:cv");
   });
 
+  it("names an email after the person being answered, not another contact on the thread", () => {
+    const thread = [
+      msg({ id: "w", gmailThreadId: "t9", peerName: "Wendy Williams", peerAddress: "wendy@whitman.com", contactId: "ct_wendy", at: "2026-10-01T01:00:00Z" }),
+      msg({ id: "r", gmailThreadId: "t9", peerName: "Russell Lathrop", peerAddress: "russell@whitman.com", at: "2026-10-01T15:00:00Z" }),
+      msg({ id: "o", gmailThreadId: "t9", direction: "outbound", peerAddress: "russell@whitman.com", at: "2026-10-01T17:00:00Z" }),
+    ];
+    const nameOf = (m: Message) => (m.contactId === "ct_wendy" ? "Wendy Williams" : null);
+    const [t] = buildThreads(thread, new Map(), { now: NOW, nameOf });
+    expect(t.peerName).toBe("Russell Lathrop");
+    expect(t.peerAddress).toBe("russell@whitman.com");
+  });
+
   it("is read once opened, until they write again", () => {
     const s = new Map([["gm:t1", st({ threadKey: "gm:t1", readAt: "2026-10-01T17:30:00Z" })]]);
     expect(buildThreads(pam, s, { now: NOW })[0].unread).toBe(false);

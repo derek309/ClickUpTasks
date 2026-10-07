@@ -71,7 +71,11 @@ export function buildThreads(messages: Message[], states: Map<string, InboxState
     const st = states.get(key);
     const conv = latest.ghlConversationId ? opts.convs?.get(latest.ghlConversationId) : undefined;
     const peerMsg = msgs.find((m) => m.direction === "inbound" && m.peerName) ?? msgs.find((m) => m.peerName || m.peerAddress);
-    const named = msgs.map((m) => opts.nameOf?.(m)).find(Boolean);
+    // An email's name comes from the person being answered, by their address:
+    // a reply from Russell on Wendy's intro is Russell, not Wendy (Justin,
+    // 2026-10-07). Texts and chats keep the contact from any message.
+    const peerAddr = latest.channel === "email" ? peerMsg?.peerAddress?.trim().toLowerCase() : undefined;
+    const named = msgs.filter((m) => !peerAddr || (m.peerAddress ?? "").trim().toLowerCase() === peerAddr).map((m) => opts.nameOf?.(m)).find(Boolean);
     const inboundAt = time(lastInbound?.at);
     // A new message from them brings a conversation back from Done or Snoozed.
     const trashed = !!st?.trashedAt && inboundAt <= time(st.trashedAt);

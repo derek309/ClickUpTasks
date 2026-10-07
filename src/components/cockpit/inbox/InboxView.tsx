@@ -721,7 +721,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft }: {
       {compose?.m.id === last.id ? composer(last) : (
         <div className="flex flex-wrap gap-2 pt-4">
           <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
-          <button onClick={() => setCompose({ mode: "replyAll", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
+          <button onClick={() => setCompose({ mode: "replyAll", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })}className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
           <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">→ Forward</button>
         </div>
       )}
@@ -738,7 +738,10 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
   const { name, org } = whoWrote(m, t, p);
   const mine = m.direction === "outbound";
   const snippet = (m.body || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
-  const to = mine ? `to ${t.peerName}` : `to you${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}`;
+  // Your own email says who it really went to when that wasn't the person
+  // the conversation is with (an earlier reply to Wendy on Russell's thread).
+  const sentTo = m.peerAddress && m.peerAddress.toLowerCase() !== (t.peerAddress ?? "").toLowerCase() ? m.peerAddress : t.peerName;
+  const to = mine ? `to ${sentTo}${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}` :`to you${(m.cc?.length ?? 0) > 0 ? `, ${m.cc.join(", ")}` : ""}`;
   // 📌 Add to task: the email onto the linked task, as a comment.
   const pin = () => {
     if (!t.taskId) { p.pushToast("Link a task first, on the right."); return; }
@@ -1223,7 +1226,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [dropping, setDropping] = useState(false);
   const [quoteOpen, setQuoteOpen] = useState(false);
   // Reply all: everyone else who was on it, besides the person you answer.
-  const allOthers = (answering?.cc ?? []).filter((a) => a && a !== t.peerAddress);
+  const allOthers = (answering?.cc ?? []).filter((a) => a && a.toLowerCase() !== (t.peerAddress ?? "").toLowerCase() && a.toLowerCase() !== (p.me.email ?? "").toLowerCase());
   const [to, setTo] = useState(forward ? "" : t.peerAddress ?? "");
   const [ccOpen, setCcOpen] = useState(mode === "replyAll" && allOthers.length > 0);
   const [cc, setCc] = useState(mode === "replyAll" ? allOthers.join(", ") : ""); const [bcc, setBcc] = useState("");
