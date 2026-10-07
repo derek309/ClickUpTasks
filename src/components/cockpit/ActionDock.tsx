@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
-  User, TODAY, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
+  User, TODAY, addBusinessDaysIso, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
   Priority, type DelegateSpec,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
@@ -218,8 +218,12 @@ export function ActionDock({
   }, [replyTarget]);
 
   const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
-  const suggestFor = async (kind: TaskActionKind, note: string) => {
-    setAiBusy(true);
+  // After a send, the box fills at once with a plain default (Derek,
+  // 2026-10-07: "2 to 10 seconds, it needs to be instant") and the AI's
+  // suggestion replaces it quietly, only while the default is untouched.
+  const seedRef = useRef<string | null>(null);
+  const suggestFor = async (kind: TaskActionKind, note: string, quiet = false) => {
+    if (!quiet) { seedRef.current = null; setAiBusy(true); }
     try {
       const res = await authedFetch("/api/ai/next-step", {
         method: "POST",
@@ -236,15 +240,21 @@ export function ActionDock({
         }),
       });
       const j = await res.json();
-      if (!res.ok) { pushToast(j?.error ?? "Couldn't get a suggestion."); return; }
-      if (!j.nextStep) { pushToast("Nothing left to schedule, by the look of it."); return; }
+      if (quiet) {
+        // Taken only if they haven't changed the default in the meantime.
+        if (!res.ok || !j.nextStep || seedRef.current === null) return;
+        seedRef.current = null;
+      } else {
+        if (!res.ok) { pushToast(j?.error ?? "Couldn't get a suggestion."); return; }
+        if (!j.nextStep) { pushToast("Nothing left to schedule, by the look of it."); return; }
+      }
       setNextStep(j.nextStep);
       setNextDue(j.followUpAt ?? null);
       if (j.status) setStage(j.status as TaskStatus);
       if (j.size) setSize(j.size as TaskSize);
       setAiReason(j.reason ?? "");
-    } catch { pushToast("Couldn't reach the AI."); }
-    finally { setAiBusy(false); }
+    } catch { if (!quiet) pushToast("Couldn't reach the AI."); }
+    finally { if (!quiet) setAiBusy(false); }
   };
   // Reached through a ref by the auto-suggest effect below. useCallback would
   // have done the same job but the React compiler cannot preserve it here, and
@@ -258,7 +268,10 @@ export function ActionDock({
     if (!askNextStepFor) return;
     const r = requestAnimationFrame(() => {
       setView(askNextStepFor.kind);
-      setBody(askNextStepFor.body); setNextStep(""); setNextDue(null); setStage(null); setAiReason("");
+      const reached = CLIENT_FACING_ACTIONS.has(askNextStepFor.kind);
+      const seed = reached ? `Check for ${firstName}'s reply` : "Pick this back up";
+      seedRef.current = seed;
+      setBody(askNextStepFor.body); setNextStep(seed); setNextDue(addBusinessDaysIso(TODAY, 2)); setStage(null); setAiReason("");
       setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
       setWantNext(true);
       onAskNextStepHandled?.();
@@ -266,7 +279,7 @@ export function ActionDock({
       // moment a message goes out is exactly when the next step is knowable,
       // and it is also the moment someone is most likely to close the panel
       // and move on.
-      void suggestRef.current(askNextStepFor.kind, askNextStepFor.body);
+      void suggestRef.current(askNextStepFor.kind, askNextStepFor.body, true);
     });
     return () => cancelAnimationFrame(r);
     // task.assigneeId is deliberately out of the list: this effect seeds the
@@ -559,7 +572,7 @@ export function ActionDock({
               Nobody has said how long this takes. Pick one and the plan can place it.
             </div>
           )}
-          <button onClick={() => setEditingNext(true)} className="mt-2 text-[16px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
+          <button onClick={() => { seedRef.current = null; setEditingNext(true); }} className="mt-2 text-[16px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
         </div>
       ) : (
         <>

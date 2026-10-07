@@ -101,7 +101,8 @@ export async function POST(req: NextRequest) {
       headers: geminiHeaders(apiKey),
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
+        // No thinking: it added seconds to a box that should fill at once.
+        generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
       }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
