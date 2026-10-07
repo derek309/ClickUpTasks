@@ -98,7 +98,9 @@ export function useInboxPrefs(member: string) {
     };
     document.addEventListener("visibilitychange", pick);
     window.addEventListener("focus", pick);
-    return () => { document.removeEventListener("visibilitychange", pick); window.removeEventListener("focus", pick); };
+    // And whenever Drafts is opened (InboxView sends this).
+    window.addEventListener("inbox-check-drafts", pick);
+    return () => { document.removeEventListener("visibilitychange", pick); window.removeEventListener("focus", pick); window.removeEventListener("inbox-check-drafts", pick); };
   }, [member]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Only what changed is saved, on top of the latest saved copy. Saving this

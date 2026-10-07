@@ -206,7 +206,7 @@ export default function InboxView(p: InboxViewProps) {
       <nav className={`hidden shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r bg-background/40 md:flex ${slim ? "w-[68px] items-center px-2 py-3" : "w-48 p-2.5"}`}>
         <button onClick={() => { setComposeNew({}); setOpenKey(null); setFolder("inbox"); }} title="New message" aria-label="New message"
           className={`mb-3 h-11 shrink-0 rounded-lg bg-accent font-semibold text-white ${slim ? "w-11 text-[20px]" : "w-full"}`}>{slim ? "＋" : "＋ New message"}</button>
-        {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
+        {FOLDERS.map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={prefs.badge || f.id !== "inbox" ? count(f.id) : 0} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); if (f.id === "drafts") window.dispatchEvent(new Event("inbox-check-drafts")); }} />)}
         {slim ? <div className="my-2 h-px w-8 bg-[var(--border)]" /> : <div className="mx-2.5 mb-1 mt-3 text-[13px] font-bold tracking-wide text-muted">SHOW ONLY</div>}
         {FILTERS.filter((f) => !(prefs.hideKinds ?? []).includes(f.id)).map((f) => <FolderButton key={f.id} f={f} slim={slim} active={folder === f.id && !q} count={count(f.id)} onClick={() => { setFolder(f.id); setOpenKey(null); setQ(""); setComposeNew(false); }} />)}
         <div className={`mt-auto border-t pt-3 ${slim ? "flex w-full flex-col items-center gap-0.5" : ""}`}>
