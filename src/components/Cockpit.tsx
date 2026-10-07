@@ -54,6 +54,7 @@ import {
   THIS_MONTH_END,
   isReplyTask,
   unansweredPreviewByTask,
+  splitQuotedEmail, tidyEmailText, looksLikeHtml, htmlToText, plainTextToHtml,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { deleteClientEmailDraft, fetchClientEmailDraft, saveClientEmailDraft, upsertTask, seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
@@ -1888,6 +1889,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }, [inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
   // opts: what was typed in the Inbox's new task form (Derek, 2026-10-06:
   // "more custom control"); without it, the old one click version.
+  // The words of the email the task is made from, without the older emails
+  // quoted under them (Derek, 2026-10-07: "there was no content at all").
+  const emailAsDescription = (t: InboxThread): string => {
+    const m = t.messages.find((x) => x.direction === "inbound" && (x.body ?? "").trim());
+    if (!m || t.channel !== "email") return "";
+    const text = splitQuotedEmail(tidyEmailText(looksLikeHtml(m.body) ? htmlToText(m.body) : m.body)).visible.trim();
+    if (!text) return "";
+    const when = new Date(m.at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `<p><strong>From ${(m.peerName || t.peerName || "them").replace(/[<>&]/g, "")}, ${when}:</strong></p>${plainTextToHtml(text)}`;
+  };
   const newTaskFromThread = async (t: InboxThread, opts?: { title?: string; clientId?: string | null; projectId?: string | null; assigneeId?: string | null; due?: string | null }): Promise<string | null> => {
     const first = t.peerName.split(/\s+/)[0];
     // The client picked in the panel when the email isn't matched to one yet.
@@ -1899,7 +1910,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const personal = !project || owner === PERSONAL_CLIENT_ID;
     const task: Task = {
       id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? owner! : PERSONAL_CLIENT_ID,
-      title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: "",
+      title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: emailAsDescription(t),
       status: "todo", priority: "normal", assigneeId: opts && "assigneeId" in opts ? opts.assigneeId ?? null : me.id, contactId: t.contactId,
       due: opts && "due" in opts ? opts.due ?? null : TODAY,
       // A due date picked here sets its follow up, as it does anywhere else.

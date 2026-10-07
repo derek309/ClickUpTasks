@@ -214,6 +214,8 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // between the follow up and the deliverables, pushing the work down the page
   // on every task to show text that is read once.
   const [view, setView] = useState<"conversation" | "changes" | "all" | "description">(p.initialView ?? "conversation");
+  // An empty description shows as a post once Description is clicked, to write it.
+  const [descOpen, setDescOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{ id: string; channel: Channel } | null>(null);
@@ -635,8 +637,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {tab("conversation", "Conversation", conversationCount, unreadChannels.length > 0)}
         {tab("changes", "Changes", changesCount)}
         {tab("all", "Everything", allFeedItems.length)}
-        {description && tab("description", "Description", null, description.has, "This task has a description")}
-        <button hidden={view === "description"} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
+        {/* Description is the first post in the feed now (Derek, 2026-10-07:
+            "the description is being hidden"); this button jumps to it. */}
+        {description && (
+          <button onClick={() => showDescription()} title={description.has ? "Go to the description, the first post in the feed" : "Write a description"}
+            className="-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-2 pb-2.5 pt-1 text-[16px] font-medium text-muted hover:text-foreground sm:px-3">
+            Description{description.has && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" title="This task has a description" />}
+          </button>
+        )}
+        <button onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
           className={`mb-1.5 ml-auto shrink-0 rounded-lg p-2 ${searchOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.search /></button>
       </div>
       {searchOpen && (
@@ -1168,7 +1177,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   const feedArea = (
     <>
       {filterBar}
-      <div id="task-feed">{view === "description" && description ? description.node : commentsFeed}</div>
+      <div id="task-feed">
+        {description && view !== "changes" && (description.has || descOpen) && (
+          <article id="task-description-post" className="mb-4 scroll-mt-4 rounded-xl bg-surface px-4 py-3 ring-1 ring-[var(--border)]">
+            <div className="mb-1 text-[14px] font-bold uppercase tracking-wide text-muted">Description</div>
+            {description.node}
+          </article>
+        )}
+        {commentsFeed}
+      </div>
       <input ref={msgFileRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => { handleMsgFileSelect(e.target.files); e.target.value = ""; }} />
     </>
   );
@@ -1193,9 +1210,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // shipping a second, poorer one of its own.
   // Add → Description lands here: the tab, scrolled into view, since it sits
   // at the bottom of the page and the menu that opens it is near the top.
+  // The description is the feed's first post; this shows it (it isn't under
+  // Changes) and scrolls to it, opening an empty one to write.
   const showDescription = () => {
-    setView("description");
-    requestAnimationFrame(() => document.getElementById("task-feed")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    setDescOpen(true);
+    if (view === "changes" || view === "description") setView("all");
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("task-description-post")?.scrollIntoView({ behavior: "smooth", block: "start" })));
   };
   return { feedArea, composerFooter, openCompose, showDescription };
 }
