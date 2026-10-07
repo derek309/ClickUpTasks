@@ -1908,7 +1908,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       createdAt: new Date().toISOString(), createdBy: me.id,
     };
     setTasks((ts) => [...ts, task]);
-    upsertTask(task, me.id);
+    // The email's files come along (Derek, 2026-10-07: Kelly's photos didn't):
+    // from the newest email from them that has any, once the task is saved.
+    const withFiles = t.messages.find((m) => m.direction === "inbound" && (m.attachments ?? []).some((a) => (a as { gmailAttachmentId?: string }).gmailAttachmentId));
+    void Promise.resolve(upsertTask(task, me.id)).then(async () => {
+      if (!withFiles) return;
+      const res = await authedFetch("/api/inbox/attachment/to-task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: withFiles.id, taskId: task.id }) }).catch(() => null);
+      const j = res?.ok ? await res.json().catch(() => null) : null;
+      if (j?.attachments?.length) setTasks((ts) => ts.map((x) => (x.id === task.id ? { ...x, attachments: [...x.attachments, ...j.attachments] } : x)));
+      if (!res?.ok || j?.skipped?.length) pushToast(`${j?.skipped?.length ?? "Some"} of the email's files couldn't be added to the task. Add them from the email.`);
+    });
     return task.id;
   };
 
