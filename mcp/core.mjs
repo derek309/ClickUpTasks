@@ -515,6 +515,8 @@ export function createServer(opts = {}) {
         if (checkBack) patch.follow_up_at = checkBack;
       }
       else if (before.status === "waiting") patch.waiting_on_client = false;
+      // Done throws out an unsent draft email, as the app does.
+      if (status === "done") patch.draft_email = null;
       const [t] = await patchTask(id, patch);
       let ghl = "";
       if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }

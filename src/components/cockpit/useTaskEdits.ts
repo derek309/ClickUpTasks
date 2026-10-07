@@ -185,6 +185,9 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // date moves.
     const withAuto: Partial<Task> = patch.priority !== undefined && patch.priority !== before.priority ? { ...patch, priorityAuto: false } : patch;
     const synced: Partial<Task> = { ...withAuto, ...applyWaitingStatusSync(before, withAuto) };
+    // Done is done: an unsent draft email on it is thrown out, so Drafts
+    // doesn't fill with emails nobody will send (Derek, 2026-10-07).
+    if (synced.status === "done" && before.draftEmail && synced.draftEmail === undefined) synced.draftEmail = null;
     const checkBack = waitingFollowUp(before, synced);
     if (checkBack) synced.followUpAt = checkBack;
     const withDue = followUpWithDue(before, synced);

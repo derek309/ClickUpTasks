@@ -45,6 +45,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // reopens for the team the same way replying to it would. The rule lives in
   // clientAnswerPatch, shared with respond and the client review document.
   const patch = clientAnswerPatch(task, notifyRecipient, status as TaskStatus);
+  // Approved is done: its unsent draft email goes (as in the app's patchTask).
+  if (status === "done") patch.draft_email = null;
 
   const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

@@ -85,6 +85,7 @@ import { MindDumpModal, type ParsedRow } from "./cockpit/MindDumpModal";
 import { verbatimTaskRow } from "@/lib/quickAddRow";
 import { sidebarWidthFor, canvasMeasure, SIDEBAR_MIN_PX } from "@/lib/sidebarWidth";
 import { ClientEmail, type ClientEmailStart } from "./cockpit/ClientEmail";
+import { sentEmailFor } from "./cockpit/EmailWindow";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
@@ -2402,7 +2403,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
                 onText={canMsg && ct?.phone ? () => openClientText(activeClient) : null}
                 drafts={canMsg ? [
-                  ...(scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.draftEmail).map((t) => ({
+                  ...(scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.draftEmail && t.status !== "done" && !sentEmailFor(t.draftEmail, messages.filter((m) => m.taskId === t.id))).map((t) => ({
                     id: `task:${t.id}`, title: t.draftEmail!.subject.trim() || t.title, where: `On ${t.title}`, at: t.draftEmail!.updatedAt || t.draftEmail!.createdAt,
                     open: () => { setOpenTaskEmail(t.id); setOpenTaskId(t.id); },
                   })),
@@ -3025,7 +3026,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onPatchTask={(id, patch) => patchTask(id, patch)}
               listsFor={(cid) => projectsForClient(cid).map((x) => ({ id: x.id, name: x.name }))}
               // Task drafts and reviews sent back, in the Inbox (Derek, 2026-10-06).
-              workDrafts={pendingSends.drafts.map((d) => ({ id: d.id, taskId: d.taskId, clientId: d.clientId, subject: d.subject, preview: d.preview, at: d.at,
+              // Read against the tasks as they are now: the list was fetched when
+              // Drafts opened, and a draft since sent, deleted or on a task now
+              // done is gone (Derek, 2026-10-07: "there's no draft here").
+              workDrafts={pendingSends.drafts.filter((d) => { if (!d.taskId) return true; const t = tasks.find((x) => x.id === d.taskId); return !!t?.draftEmail && t.status !== "done" && !sentEmailFor(t.draftEmail, messages.filter((m) => m.taskId === t.id)); }).map((d) => ({ id: d.id, taskId: d.taskId, clientId: d.clientId, subject: d.subject, preview: d.preview, at: d.at,
                 where: d.taskId ? tasks.find((t) => t.id === d.taskId)?.title ?? null : null, clientName: clientById(d.clientId)?.name ?? null }))}
               // Only reviews on your own tasks, or on tasks nobody has (Derek,
               // 2026-10-07: Justin saw Brian's changes on Derek's tasks).
