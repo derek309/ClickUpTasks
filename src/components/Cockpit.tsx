@@ -2238,15 +2238,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (Derek, 2026-10-06). The same Assignee filter the View panel sets.
   const mineOn = filters.assignee === me.id;
   const mineToggle = (
-    <button onClick={() => setFilters((f) => ({ ...f, assignee: mineOn ? "all" : me.id }))} aria-pressed={mineOn}
-      title={mineOn ? "Showing just your tasks. Click to show everyone's." : "Show just your tasks"}
-      className={`${barButton} ${mineOn ? "border-accent bg-accent-soft font-semibold text-accent" : ""}`}>
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-        {mineOn ? <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-          : <path d="M17.9 17.9A10.1 10.1 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2M1 1l22 22" />}
-      </svg>
-      <span>Just mine</span>
-    </button>
+    <span className="inline-flex overflow-hidden rounded-md ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={!mineOn}
+        className={`px-2.5 py-1.5 text-[13px] ${!mineOn ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`}>Everyone</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={mineOn}
+        className={`px-2.5 py-1.5 text-[13px] ${mineOn ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
+    </span>
   );
   const groupSortControl = (
     <div className="relative">
@@ -2300,7 +2297,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // just that filter, Clear resets all three at once.
   // Just mine shows itself on its own button, so its chip is left out here
   // (Derek, 2026-10-06: "it's in a bad place").
-  const activeFilterBar = (filters.status !== "all" || filters.priority !== "all" || (filters.assignee !== "all" && filters.assignee !== me.id)) ? (
+  const activeFilterBar = !clientView && (filters.status !== "all" || filters.priority !== "all" || (filters.assignee !== "all" && filters.assignee !== me.id)) ? (
     <div className="mb-2 mt-2 flex flex-wrap items-center gap-1.5 px-4 sm:px-5">
       {filters.status !== "all" && (
         <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Status: {STATUS_META[filters.status].label}
@@ -2726,6 +2723,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <a href={contactForClient(activeClient)!.saasUrl} target="_blank" rel="noopener noreferrer" title="Open their SaaS account"
                     className="rounded-[5px] bg-accent-soft px-2 py-0.5 text-[13px] font-bold text-accent ring-1 ring-accent/30 hover:ring-accent">SaaS account ↗</a>
                 )}
+                {/* Quick links in the name row (header G), not a row of their own. */}
+                {clientView && (
+                  <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
+                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)} />
+                )}
                 {clientLate.length > 0 && (
                   <button onClick={() => setOpenTaskId(clientLate[0].id)} title={`Open the oldest: ${clientLate[0].title}`}
                     className="rounded-[5px] bg-danger-soft px-2 py-0.5 text-[13px] font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">{clientLate.length} overdue</button>
@@ -2793,8 +2795,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
                   / Review instead of a cluster of equal-weight buttons. Same
                   menu as the compact header — see overflowControl above. */}
-              {/* Just mine, top right before the ⋯ (Derek, 2026-10-06). */}
-              {mineToggle}
               {overflowControl}
               {/* New last, on the far right (mockup C): a task, or an email or
                   text to them (Derek, 2026-10-06). */}
@@ -2853,7 +2853,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // going shifted every other icon sideways between pages.
             // A client page keeps these in one View button on the list row
             // (mockup C); with no list row, the View button sits here.
-            clientView ? (railHidden ? viewControl : null) : (
+            clientView ? (railHidden ? <span className="inline-flex items-center gap-1.5">{mineToggle}{viewControl}</span> : null) : (
             <div className="flex items-center gap-1.5">
               {followingControl}
               {groupSortControl}
@@ -2876,7 +2876,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
         {/* Phones: the boxes under the header (the header is hidden there). */}
         {needsStrip && <div className="shrink-0 border-b bg-surface px-4 py-3 sm:hidden">{needsStrip}</div>}
-        {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && (
+        {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !clientView && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
             canEdit={canAdmin}
@@ -3041,7 +3041,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
                 onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onMoveList={moveListToFolder}
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
-                trailing={viewControl} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
+                trailing={<span className="inline-flex items-center gap-1.5">{mineToggle}{viewControl}</span>} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
             );
           })()}
           {activeProject && stagesForProject(activeProject).length > 0 ? (

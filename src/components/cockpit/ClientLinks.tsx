@@ -18,8 +18,10 @@ function groupLinks(links: ClientLink[]) {
   return order.map((key) => ({ key, links: map.get(key)! }));
 }
 
-export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder }: {
+export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder, inline = false }: {
   links: ClientLink[];
+  /** In the client's name row instead of a row of its own (Derek, 2026-10-06, header G). */
+  inline?: boolean;
   canEdit: boolean;
   onEdit: (link: ClientLink) => void;
   onDelete: (link: ClientLink) => void;
@@ -42,7 +44,7 @@ export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder }: {
   if (links.length === 0) return null;
 
   return (
-    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible sm:px-5">
+    <div className={inline ? "inline-flex flex-wrap items-center gap-1.5 text-[13px] font-normal" : "no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 sm:flex-wrap sm:overflow-visible sm:px-5"}>
       {groupLinks(links).map((g) => (
         <span key={g.key || "_"} className="inline-flex items-center gap-1.5">
           {g.key && <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">{g.key}</span>}
