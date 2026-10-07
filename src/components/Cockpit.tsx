@@ -2285,13 +2285,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   );
   // Just mine: one click shows only your tasks, another shows everyone's
   // (Derek, 2026-10-06). The same Assignee filter the View panel sets.
+  // Everyone, Mine or Claude (Derek, 2026-10-07: "add everyone, me, and
+  // Claude"): the tasks waiting on Claude, a click away.
   const mineOn = filters.assignee === me.id;
+  const claudeOn = filters.assignee === CLAUDE_ID;
+  const whoseBtn = (on: boolean) => `px-2.5 py-1.5 text-[13px] ${on ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`;
   const mineToggle = (
     <span className="inline-flex overflow-hidden rounded-md ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
-      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={!mineOn}
-        className={`px-2.5 py-1.5 text-[13px] ${!mineOn ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`}>Everyone</button>
-      <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={mineOn}
-        className={`px-2.5 py-1.5 text-[13px] ${mineOn ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`}>Mine</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={!mineOn && !claudeOn} className={whoseBtn(!mineOn && !claudeOn)}>Everyone</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={mineOn} className={whoseBtn(mineOn)}>Mine</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: CLAUDE_ID }))} aria-pressed={claudeOn} title="Tasks on Claude" className={whoseBtn(claudeOn)}>Claude</button>
     </span>
   );
   const groupSortControl = (
@@ -3110,6 +3113,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <FolderRail folders={cf} lists={cl} activeFolder={activeFolder} activeProject={activeProject} canAdmin={canAdmin}
                 starredLists={starredLists} onToggleStarList={toggleStarList}
                 onSelectAll={() => { setActiveFolder(null); setActiveProject(null); }}
+                onCopyAllForClaude={() => void copyClientForClaude()}
                 onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
                 onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}

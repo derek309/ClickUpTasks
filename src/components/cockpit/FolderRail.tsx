@@ -15,7 +15,7 @@ const FOLDERS_ON = false;
 
 export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
-  onSelectAll, onSelectFolder, onSelectList,
+  onSelectAll, onCopyAllForClaude, onSelectFolder, onSelectList,
   onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
   onReorderFolders, onReorderLists, onAddTask, trailing, onCopyListForClaude }: {
   folders: Folder[];           // this client's folders, in order
@@ -47,6 +47,8 @@ export function FolderRail({
   trailing?: React.ReactNode;
   /** Copy one list's open tasks as a brief for Claude (Derek, 2026-10-06). */
   onCopyListForClaude?: (id: string) => void;
+  /** ✳ on All: every list of this client for Claude. */
+  onCopyAllForClaude?: () => void;
 }) {
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
@@ -93,7 +95,14 @@ export function FolderRail({
 
   return (
     <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:flex-wrap lg:overflow-visible">
-      {chip("All", allActive, onSelectAll)}
+      {chip(
+        <>All{onCopyAllForClaude && (
+          // The whole client for Claude, like ✳ on each list (Derek, 2026-10-07).
+          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onCopyAllForClaude(); }}
+            title="Copy every list for Claude" aria-label="Copy every list for Claude"
+            className="-mr-0.5 rounded px-0.5 text-[14px] leading-none opacity-60 hover:opacity-100"><span aria-hidden>✳</span></span>
+        )}</>,
+        allActive, onSelectAll)}
       {folders.map((f) => chip(
         <><I.folder className="h-3.5 w-3.5" /> {f.name}</>,
         activeFolder === f.id,
