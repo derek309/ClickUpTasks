@@ -110,10 +110,10 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {items.map((a) => {
-        if (!a.url) return <span key={a.id} className="rounded-md border bg-background px-2 py-1 text-[16px] text-muted">{a.name}</span>;
+        if (!a.url) return <span key={a.id} className="rounded-[5px] border bg-background px-2 py-1 text-[16px] text-muted">{a.name}</span>;
         if (a.kind === "image") {
           return (
-            <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name} className="block h-20 w-20 overflow-hidden rounded-lg border">
+            <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name} className="block h-20 w-20 overflow-hidden rounded-[5px] border">
               {/* eslint-disable-next-line @next/next/no-img-element -- signed-URL thumbnail, not a next/image-friendly static asset. */}
               <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
             </a>
@@ -121,11 +121,11 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
         }
         if (isVideoName(a.name)) {
           return (
-            <video key={a.id} src={a.url} controls preload="metadata" className="h-40 max-w-full rounded-lg border bg-black" />
+            <video key={a.id} src={a.url} controls preload="metadata" className="h-40 max-w-full rounded-[5px] border bg-black" />
           );
         }
         return (
-          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px] text-accent hover:underline">
+          <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-[5px] border bg-background px-2 py-1 text-[16px] text-accent hover:underline">
             {a.kind === "link" ? "🔗" : "📄"} {a.name}
           </a>
         );
@@ -196,7 +196,7 @@ function TaskDetailBody({
   const nextRef = useRef<HTMLElement | null>(null);
   const markAnswered = () => { setAnsweredId(t.id); setTimeout(() => nextRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); };
   const next = otherWaiting[0] ?? null;
-  const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
+  const toolBtn = "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-foreground hover:bg-background";
   // The pages we're asking about ("Homepage: https://…") become cards to tap,
   // not long addresses inside the paragraph (Derek, 2026-10-07).
   const split = splitLabeledLinks(t.description);
@@ -238,12 +238,12 @@ function TaskDetailBody({
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
         placeholder={dragOver ? "Drop to attach…" : `Write to ${lastTeam?.name.split(/\s+/)[0] ?? "us"}`}
         rows={2}
-        className={`w-full resize-none rounded-xl border px-3 py-2.5 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-surface"}`}
+        className={`w-full resize-none rounded-[5px] border px-3 py-2.5 text-[16px] outline-none focus:border-accent ${dragOver ? "border-accent bg-accent-soft/30" : "bg-surface"}`}
       />
       {draft.attachments.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {draft.attachments.map((a) => (
-            <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px]">
+            <span key={a.id} className="inline-flex items-center gap-1.5 rounded-[5px] border bg-background px-2 py-1 text-[16px]">
               {a.name} <span className="text-muted">{a.size}</span>
               <button onClick={() => onRemoveAttachment(a.id)} title="Remove" className="text-muted hover:text-danger">✕</button>
             </span>
@@ -251,10 +251,10 @@ function TaskDetailBody({
         </div>
       )}
       {linkOpen && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-          <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-          <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-          <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[5px] border bg-background p-2">
+          <input autoFocus value={linkUrl} onChange={(e) => onLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <input value={linkLabel} onChange={(e) => onLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAddLink(); }} placeholder="Label (optional)" className="w-32 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <button onClick={onAddLink} disabled={!linkUrl.trim()} className="rounded-[5px] bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
         </div>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
@@ -269,7 +269,7 @@ function TaskDetailBody({
         <button
           onClick={() => { onSend(); markAnswered(); }}
           disabled={sending || uploading || (!draft.body.trim() && draft.attachments.length === 0)}
-          className="h-10 rounded-lg bg-accent px-5 text-[16px] font-bold text-white disabled:opacity-40"
+          className="h-10 rounded-[5px] bg-accent px-5 text-[16px] font-bold text-white disabled:opacity-40"
         >
           {sending ? "Sending…" : uploading ? "Uploading…" : "Send"}
         </button>
@@ -282,7 +282,7 @@ function TaskDetailBody({
   // look like this"): the conversation is the page, bubbles theirs on the
   // right and ours on the left, the box to write in at its foot, and the
   // task's details in a side panel.
-  const card = "rounded-xl border bg-surface";
+  const card = "rounded-[5px] border bg-surface";
   const shown = displayThread.slice(hiddenCount);
   return (
     <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
@@ -307,7 +307,7 @@ function TaskDetailBody({
               {shown.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.from === "client" ? "items-end" : "items-start"}`}>
                   {m.from === "team" && <span className="mb-1 text-[16px] text-muted">{m.sender?.name ?? "Our team"}</span>}
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "rounded-br-md bg-accent text-white" : "rounded-bl-md bg-background"}`}>
+                  <div className={`max-w-[85%] rounded-[5px] px-4 py-2.5 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "bg-accent text-white" : "bg-background"}`}>
                     {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
                     <AttachmentGallery items={m.attachments} />
                   </div>
@@ -318,16 +318,16 @@ function TaskDetailBody({
           )}
         </div>
         {answered && (
-          <div ref={nextRef as React.RefObject<HTMLDivElement>} className="mx-5 mb-3 rounded-xl border-2 border-success bg-success-soft px-4 py-3">
+          <div ref={nextRef as React.RefObject<HTMLDivElement>} className="mx-5 mb-3 rounded-[5px] border-2 border-success bg-success-soft px-4 py-3">
             <b className="block text-[18px]">Thank you, we have it. What would you like to do next?</b>
             <div className="mt-2 flex flex-wrap gap-2">
               {next && (
-                <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-lg bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
+                <button onClick={() => onOpenTask(next.id)} className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-[5px] bg-accent px-4 py-2 text-left text-[16px] font-bold text-white hover:opacity-90">
                   <span className="min-w-0">Next: {next.title}</span><span aria-hidden>→</span>
                 </button>
               )}
-              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-lg border bg-surface px-4 text-[16px] font-semibold hover:bg-background">{next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}</button>
-              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-lg px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay here</button>
+              <button onClick={onBack} className="inline-flex min-h-11 items-center rounded-[5px] border bg-surface px-4 text-[16px] font-semibold hover:bg-background">{next ? `See all ${otherWaiting.length} we need` : "Back to all my tasks"}</button>
+              <button onClick={() => setAnsweredId(null)} className="inline-flex min-h-11 items-center rounded-[5px] px-3 text-[16px] font-semibold text-muted hover:text-foreground">Stay here</button>
             </div>
           </div>
         )}
@@ -351,7 +351,7 @@ function TaskDetailBody({
                 <div className="my-3 grid gap-2">
                   {links.map((l, i) => (
                     <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
-                      className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-center font-bold ${i === 0 ? "bg-accent text-white hover:opacity-90" : "border text-accent hover:bg-background"}`}>
+                      className={`flex items-center justify-center gap-2 rounded-[5px] px-4 py-2.5 text-center font-bold ${i === 0 ? "bg-accent text-white hover:opacity-90" : "border text-accent hover:bg-background"}`}>
                       {l.label} <span aria-hidden>↗</span>
                     </a>
                   ))}
@@ -363,7 +363,7 @@ function TaskDetailBody({
           )}
           {!isDone && (
             <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[5px] border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
               ✓ All done, this looks good
             </button>
           )}
@@ -787,7 +787,7 @@ export default function WaitingView({ token }: { token: string }) {
   };
 
   const emptyState = (
-    <div className="rounded-2xl border border-dashed bg-surface px-6 py-14 text-center">
+    <div className="rounded-[5px] border border-dashed bg-surface px-6 py-14 text-center">
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-[26px] text-success">✓</div>
       <h2 className="text-[18px] font-bold">You&apos;re all caught up</h2>
       <p className="mt-1 text-[16px] text-muted">Nothing needs your input right now. We&apos;ll email you the moment something does.</p>
@@ -853,7 +853,7 @@ export default function WaitingView({ token }: { token: string }) {
       {selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
           <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
-            <button onClick={closeTask} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← All my tasks</button>
+            <button onClick={closeTask} className="inline-flex h-10 items-center gap-2 rounded-[5px] border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← All my tasks</button>
             {clientName && <span className="ml-auto truncate text-[16px] font-bold text-white">{clientName}</span>}
           </div>
         </div>
@@ -906,7 +906,7 @@ export default function WaitingView({ token }: { token: string }) {
       ) : (
       <div className="mx-auto w-full max-w-[1280px] px-4 pb-10 pt-5">
         {error ? (
-          <div className="rounded-lg bg-danger-soft px-3 py-2 text-[16px] text-danger">{error}</div>
+          <div className="rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] text-danger">{error}</div>
         ) : !tasks ? (
           <div className="py-8 text-center text-[16px] text-muted">Loading…</div>
         ) : (
@@ -918,7 +918,7 @@ export default function WaitingView({ token }: { token: string }) {
                   request route checks the same flag itself; this is only so
                   nobody is invited to press something that would fail. */}
               {canRequestNewTasks && (addElseOpen ? (
-                <div className="mb-5 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
+                <div className="mb-5 rounded-[5px] border bg-surface p-4 shadow-[var(--shadow-sm)]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-[16px] font-bold">New task</div>
@@ -927,7 +927,7 @@ export default function WaitingView({ token }: { token: string }) {
                     <div className="flex items-center gap-2">
                       {projects.length > 1 && (
                         <select value={effectiveNewProjectId ?? ""} onChange={(e) => setNewProjectId(e.target.value)} title="Which list this goes on"
-                          className="rounded-md border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent">
+                          className="rounded-[5px] border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent">
                           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       )}
@@ -943,12 +943,12 @@ export default function WaitingView({ token }: { token: string }) {
                     onDrop={(e) => { e.preventDefault(); setNewDragOver(false); handleNewFiles(e.dataTransfer.files); }}
                     placeholder={newDragOver ? "Drop to attach…" : "What do you need?"}
                     rows={3}
-                    className={`mt-2 w-full rounded-lg border px-2.5 py-2 text-[16px] outline-none focus:border-accent ${newDragOver ? "border-accent bg-accent-soft/30" : "bg-background"}`}
+                    className={`mt-2 w-full rounded-[5px] border px-2.5 py-2 text-[16px] outline-none focus:border-accent ${newDragOver ? "border-accent bg-accent-soft/30" : "bg-background"}`}
                   />
                   {newAttachments.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {newAttachments.map((a) => (
-                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-[16px]">
+                        <span key={a.id} className="inline-flex items-center gap-1.5 rounded-[5px] border bg-background px-2 py-1 text-[16px]">
                           {a.name} <span className="text-muted">{a.size}</span>
                           <button onClick={() => setNewAttachments((prev) => prev.filter((x) => x.id !== a.id))} title="Remove" className="text-muted hover:text-danger">✕</button>
                         </span>
@@ -956,10 +956,10 @@ export default function WaitingView({ token }: { token: string }) {
                     </div>
                   )}
                   {linkForId === "__new__" && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
-                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-md bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[5px] border bg-background p-2">
+                      <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                      <input value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLinkAttachment("__new__"); }} placeholder="Label (optional)" className="w-32 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                      <button onClick={() => addLinkAttachment("__new__")} disabled={!linkUrl.trim()} className="rounded-[5px] bg-accent px-2.5 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Add</button>
                     </div>
                   )}
                   <div className="mt-2 flex items-center justify-between gap-2">
@@ -973,7 +973,7 @@ export default function WaitingView({ token }: { token: string }) {
                     <button
                       onClick={submitNewRequest}
                       disabled={newSaving || newUploading || (!newBody.trim() && newAttachments.length === 0)}
-                      className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"
+                      className="rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"
                     >
                       {newSaving ? "Sending…" : newUploading ? "Uploading…" : "Send"}
                     </button>
@@ -981,7 +981,7 @@ export default function WaitingView({ token }: { token: string }) {
                   <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-t pt-2">
                     <label className="flex items-center gap-2 text-[16px]">
                       <span className="text-muted">Needed by</span>
-                      <input type="date" value={newNeededBy} min={todayKey()} onChange={(e) => setNewNeededBy(e.target.value)} className="rounded-md border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent" />
+                      <input type="date" value={newNeededBy} min={todayKey()} onChange={(e) => setNewNeededBy(e.target.value)} className="rounded-[5px] border bg-background px-2 py-1 text-[16px] outline-none focus:border-accent" />
                       {newNeededBy ? <button onClick={() => setNewNeededBy("")} className="text-muted hover:text-foreground">No rush</button> : <span className="text-muted">(optional)</span>}
                     </label>
                     <label className="flex cursor-pointer items-center gap-2 text-[16px]">
@@ -1002,7 +1002,7 @@ export default function WaitingView({ token }: { token: string }) {
                       button says exactly what it does, the reminder sits
                       below it. */}
                   <button onClick={() => setAddElseOpen(true)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed bg-background py-2.5 text-[16px] font-bold text-accent transition hover:bg-surface"
+                    className="flex w-full items-center justify-center gap-2 rounded-[5px] border-2 border-dashed bg-background py-2.5 text-[16px] font-bold text-accent transition hover:bg-surface"
                     style={{ borderColor: "color-mix(in srgb, var(--accent) 40%, var(--border))" }}>
                     <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[11px] font-black leading-none text-white">+</span> New task
                   </button>
@@ -1036,7 +1036,7 @@ export default function WaitingView({ token }: { token: string }) {
                   const open = doneOpenIds.has(key);
                   const p2 = mine.length ? Math.round((done.length / mine.length) * 100) : 0;
                   return (
-                    <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-xl border border-l-[6px] bg-surface shadow-[var(--shadow-sm)]" style={{ borderLeftColor: color }}>
+                    <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-[5px] border border-l-[6px] bg-surface shadow-[var(--shadow-sm)]" style={{ borderLeftColor: color }}>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3" style={{ background: `${color}14` }}>
                         <h2 className="text-[18px] font-bold">{single && lists.length === 1 ? "Your tasks" : l.name}</h2>
                         <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full" style={{ width: `${p2}%`, background: color }} /></span>
@@ -1061,10 +1061,10 @@ export default function WaitingView({ token }: { token: string }) {
                 const showing = view ?? (needCount ? "theirs" : "all");
                 const theirs = all.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
                 const toggle = all.length > 0 && (
-                  <div role="tablist" aria-label="Which tasks" className="grid grid-cols-2 gap-1 rounded-xl bg-border/60 p-1">
+                  <div role="tablist" aria-label="Which tasks" className="grid grid-cols-2 gap-1 rounded-[5px] bg-border/60 p-1">
                     {([["theirs", "What we need from you", needCount], ["all", "All tasks", all.length]] as const).map(([k, label, n]) => (
                       <button key={k} role="tab" aria-selected={showing === k} onClick={() => setView(k)}
-                        className={`flex h-11 items-center justify-center gap-2 rounded-lg px-3 text-[16px] font-bold ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
+                        className={`flex h-11 items-center justify-center gap-2 rounded-[5px] px-3 text-[16px] font-bold ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
                         {label}<span className={`rounded-full px-2 text-[15px] ${k === "theirs" && n ? "bg-highlight text-white" : "bg-background text-muted"}`}>{n}</span>
                       </button>
                     ))}
@@ -1073,7 +1073,7 @@ export default function WaitingView({ token }: { token: string }) {
                 if (showing === "theirs") return (
                   <div className="space-y-4">
                     {toggle}
-                    <div className="overflow-hidden rounded-xl border bg-surface shadow-[var(--shadow-sm)]">
+                    <div className="overflow-hidden rounded-[5px] border bg-surface shadow-[var(--shadow-sm)]">
                       <div className="border-b px-4 py-3">
                         <h2 className="text-[18px] font-bold">{theirs.length ? `We need ${theirs.length === 1 ? "one thing" : `${theirs.length} things`} from you` : "Nothing needed from you right now"}</h2>
                         <p className="text-[16px] text-muted">{theirs.length ? "Open one to answer it or send what it asks for. The soonest is at the top." : "We'll let you know when we need something. Everything we're working on is under All tasks."}</p>
@@ -1085,13 +1085,13 @@ export default function WaitingView({ token }: { token: string }) {
                 return (
                   <div className="space-y-4">
                     {toggle}
-                    <div className="grid gap-3 rounded-xl border bg-surface p-4 shadow-[var(--shadow-sm)]">
+                    <div className="grid gap-3 rounded-[5px] border bg-surface p-4 shadow-[var(--shadow-sm)]">
                       <div className="flex items-baseline justify-between gap-2"><b className="text-[18px]">{doneAll} of {all.length} done</b><span className="text-[16px] text-muted">{pct}%</span></div>
                       <div className="h-2 overflow-hidden rounded-full bg-border"><div className="h-full bg-success" style={{ width: `${pct}%` }} /></div>
                       <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-highlight">{needCount}</b><span className="text-[16px] text-muted">Need you</span></div>
-                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight">{progCount}</b><span className="text-[16px] text-muted">In progress</span></div>
-                        <div className="rounded-lg bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-success">{doneAll}</b><span className="text-[16px] text-muted">Done</span></div>
+                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-highlight">{needCount}</b><span className="text-[16px] text-muted">Need you</span></div>
+                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight">{progCount}</b><span className="text-[16px] text-muted">In progress</span></div>
+                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-success">{doneAll}</b><span className="text-[16px] text-muted">Done</span></div>
                       </div>
                     </div>
                     {lists.length > 1 && (
