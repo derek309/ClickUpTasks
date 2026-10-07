@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   if (!scope) return docNotFound();
   const [latest, { data: doc }, files, comments, versionFiles, sharedAt] = await Promise.all([
     latestPublished(scope.documentId, scope.kind),
-    supabaseAdmin.from("task_documents").select("status, approved_at, approved_by, title").eq("id", scope.documentId).maybeSingle(),
+    supabaseAdmin.from("task_documents").select("status, approved_at, approved_by, title, picks").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
     isFileKind(scope.kind) ? sharedVersionFiles(scope.documentId) : Promise.resolve<SharedVersionFile[]>([]),
@@ -46,6 +46,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     // sent, only the fact: who on the team did it is the team's business.
     approvedByTeam: doc.approved_by != null,
     closed: scope.taskStatus === "done" || doc.status === "completed",
+    // The option chosen, when a version holds several (pickReviewOption).
+    pick: ((doc.picks as { fileId?: string } | null)?.fileId as string | undefined) ?? null,
     files,
     comments,
     versionFiles,

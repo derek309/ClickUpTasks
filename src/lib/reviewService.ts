@@ -106,6 +106,17 @@ export async function renameReview(taskId: string, kind: ReviewKind, actor: Revi
   return update(doc.id, { title: rawTitle.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 200), ...stampOf(actor) });
 }
 
+/** Which of a version's pages or images was chosen, when it holds several
+ *  options (Derek, 2026-10-07: "mark one approved and decline the others").
+ *  The rest are not picked. A null file clears it. Stored as
+ *  { fileId, by, at } in task_documents.picks. */
+export async function pickReviewOption(taskId: string, kind: ReviewKind, actor: ReviewActor, raw: unknown): Promise<ReviewOutcome<{ document: Row }>> {
+  const doc = await liveDocument(taskId, kind);
+  if (!doc) return fail(404, noDocumentYet(kind));
+  const fileId = typeof raw === "string" && raw.trim() ? raw.trim().slice(0, 200) : null;
+  return update(doc.id, { picks: fileId ? { fileId, by: "team", at: new Date().toISOString() } : {}, ...stampOf(actor) });
+}
+
 /** The client document's working copy: new text, or an earlier version or saved
  *  draft brought back. Cleaned on the way in; a Save draft click or a restore is
  *  always kept in the history, typing every ten minutes (recordCheckpoint). */

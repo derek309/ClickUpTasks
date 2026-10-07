@@ -717,6 +717,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     await setStage("approved");
   };
 
+  // One of several options chosen (Derek, 2026-10-07): the rest are not picked.
+  const pickOption = async (fileId: string | null) => {
+    if (!doc) return;
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ pick: fileId }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not save the pick."); return; }
+    setDoc(rowToTaskDocument(j.document));
+  };
   const setStage = async (status: TaskDocumentStatus) => {
     if (!doc || status === doc.status) return;
     commit.flush();
@@ -1106,6 +1114,21 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         ) : (
           <h3 className="min-w-0 flex-1 text-[16px] font-semibold">{label}</h3>
         )}
+        {/* Pick one of several (Derek, 2026-10-07: "the client only commented
+            on one, so how do I mark one approved and decline the others?"). */}
+        {shownItems.length > 1 && (doc?.pick === item.file ? (
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <span className="rounded-full bg-success-soft px-2.5 py-0.5 text-[15px] font-bold text-success">✓ {doc.pickBy === "client" ? "Client's pick" : "Picked"}</span>
+            <button onClick={() => void pickOption(null)} className="text-[15px] font-semibold text-muted hover:text-foreground">Undo</button>
+          </span>
+        ) : doc?.pick && shownItems.some((x) => x.file === doc.pick) ? (
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <span className="rounded-full bg-background px-2.5 py-0.5 text-[15px] font-semibold text-muted">Not picked</span>
+            <button onClick={() => void pickOption(item.file)} className="text-[15px] font-semibold text-accent hover:underline">Pick this instead</button>
+          </span>
+        ) : (
+          <button onClick={() => void pickOption(item.file)} className="h-8 shrink-0 rounded-md bg-surface px-3 text-[15px] font-semibold text-success ring-1 ring-success/40 hover:bg-success-soft">✓ Pick this one</button>
+        ))}
         {menuItems.some(Boolean) && (
           <ActionMenu label="⋯" title={`${label} actions`}
             triggerClassName={`${quiet} opacity-60 transition group-hover:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100`}
@@ -1131,7 +1154,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
       onPlace={(fileId, place) => setPinDraft({ fileId, ...place, t: null, number: nextPin(comments, fileId) })}
       onPinClick={setFocusedComment}
       onEdit={(fileId, edit) => setPageEdits((st) => ({ body: shownFileId, edits: withPageEdit(st.body === shownFileId ? st.edits : {}, fileId, edit) }))}
-      header={(_, i) => setItemHeader(shownItems[i], i)} />
+      header={(_, i) => setItemHeader(shownItems[i], i)}
+      dim={(fileId) => !!doc?.pick && doc.pick !== fileId && shownItems.some((x) => x.file === doc.pick)} />
   );
 
   const versionArticle = (

@@ -21,7 +21,7 @@ export type StackPage = { fileId: string; label: string };
 
 export function PageReviewStack({
   pages, loadFrame, onLoadError, mode, onMode, device, onDevice, canEdit, canComment, pinsFor, pending, focus, edits,
-  onPlace, onPinClick, onEdit, header, actions, color,
+  onPlace, onPinClick, onEdit, header, actions, color, dim,
 }: {
   pages: StackPage[];
   /** A fresh frame address for one page, or null when it could not be had. */
@@ -52,6 +52,8 @@ export function PageReviewStack({
   actions?: ReactNode;
   /** The client page's navy for the chosen toolbar buttons. */
   color?: string;
+  /** Pages to show faded: options not picked when another one was. */
+  dim?: (fileId: string) => boolean;
 }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const ids = pages.map((p) => p.fileId).join("|");
@@ -85,7 +87,7 @@ export function PageReviewStack({
         {pages.map((page, i) => {
           const pins = pinsFor(page.fileId);
           return (
-            <section key={page.fileId} aria-label={page.label} data-page-anchor={page.fileId} className="group">
+            <section key={page.fileId} aria-label={page.label} data-page-anchor={page.fileId} className={`group transition-opacity ${dim?.(page.fileId) ? "opacity-45 hover:opacity-100" : ""}`}>
               {header ? header(page, i) : pages.length > 1 && <h2 className="mb-2 text-[18px] font-semibold">{page.label}</h2>}
               <PageReviewFrame
                 title={pages.length > 1 ? page.label : undefined}

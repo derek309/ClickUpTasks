@@ -805,6 +805,9 @@ export type TaskDocument = {
   reminderRoundAt: string | null;
   /** Last time the client's review page opened in a browser (supabase/task-document-followups.sql). */
   clientViewedAt: string | null;
+  /** The option chosen when a version holds several, and who chose it (task_documents.picks). */
+  pick: string | null;
+  pickBy: "team" | "client" | null;
 };
 export type TaskDocumentVersion = {
   id: string; version: number; kind: "sent" | "client_submitted" | "client_approved";
@@ -821,6 +824,8 @@ export const rowToTaskDocument = (r: any): TaskDocument => ({
   lastReminderAt: r.last_reminder_at ?? null,
   reminderRoundAt: r.reminder_round_at ?? null,
   clientViewedAt: r.client_viewed_at ?? null,
+  pick: (r.picks?.fileId as string | undefined) ?? null,
+  pickBy: (r.picks?.by as "team" | "client" | undefined) ?? null,
 });
 // The email a teammate is writing to a client outside any task (the Journal's
 // Email and Reply, Remind client): one per client, kept until it is sent or

@@ -46,6 +46,8 @@ type DocData = {
   /** An image or page review's versions the client can see, oldest first. body is the
    *  newest. A version can hold several images or pages, shown stacked. */
   versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
+  /** The option they (or the team) chose, when the newest version holds several. */
+  pick?: string | null;
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 /** The comment being placed but not posted: a spot on an image or page (x and y),
@@ -384,6 +386,22 @@ export default function DocReviewView({ token }: { token: string }) {
   const shownIds = shownImages.map((img) => img.fileId);
   const imagePlace = (fileId: string) => (shownImages.length > 1 ? shownImages.find((img) => img.fileId === fileId)?.label ?? null : null);
   const onNewest = !!data && shownFileId === data.body;
+  // Several options in one version, like three emails: they choose one
+  // (Derek, 2026-10-07: "make it clear for the client to choose").
+  const choosing = !!data && page && onNewest && shownImages.length > 1;
+  const picked = choosing && data?.pick && shownImages.some((img) => img.fileId === data.pick) ? data.pick : null;
+  const [choosingBusy, setChoosingBusy] = useState(false);
+  const choose = async (fileId: string | null) => {
+    if (choosingBusy) return;
+    setChoosingBusy(true);
+    try {
+      const r = await fetch(`/api/doc/${encodeURIComponent(token)}/pick`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setNotice({ tone: "warn", text: (j as { error?: string }).error ?? "We couldn't save your choice. Please try again." }); return; }
+      setData((d) => (d ? { ...d, pick: fileId } : d));
+      if (fileId) setNotice({ tone: "good", text: "Got it. Add a comment on it if anything should change, or approve it when it's ready." });
+    } finally { setChoosingBusy(false); }
+  };
   const noVersion = versioned && !!data && !data.body;
   // The client has changes, the same rule on every kind and on the server: their own
   // edits, or a comment of theirs still open on this round (reviewChanges.ts).
@@ -569,9 +587,32 @@ export default function DocReviewView({ token }: { token: string }) {
                       ))}
                     </div>
                   )}
+                  {choosing && !data.closed && (
+                    <div className="mb-4 rounded-xl border-2 border-[#1b3a5c] bg-[#eef3f9] px-4 py-3">
+                      <b className="block text-[18px]">{picked ? "Thanks, you chose one." : `There are ${shownImages.length} options. Choose the one you want.`}</b>
+                      <span className="text-[16px] text-muted">{picked ? "You can change your mind below. Comment on it if anything should change." : "Press Choose this one on your favorite, then comment on it if anything should change."}</span>
+                    </div>
+                  )}
                   {shownFileId && page && (
                     // Stacked under one toolbar, each page with its own pins and rewording (Derek, 2026-09-16: two emails in one review).
                     <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+                      header={choosing ? (pg) => (
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <h2 className="min-w-0 flex-1 text-[18px] font-semibold">{pg.label}</h2>
+                          {picked === pg.fileId ? (
+                            <span className="inline-flex items-center gap-2">
+                              <span className="rounded-full bg-success-soft px-3 py-1 text-[16px] font-bold text-success">✓ Your choice</span>
+                              {!data.closed && <button onClick={() => void choose(null)} disabled={choosingBusy} className="text-[16px] font-semibold text-muted hover:text-foreground">Undo</button>}
+                            </span>
+                          ) : !data.closed && (
+                            <button onClick={() => void choose(pg.fileId)} disabled={choosingBusy}
+                              className="h-10 rounded-lg px-4 text-[16px] font-bold text-white disabled:opacity-50" style={{ background: NAVY }}>
+                              {picked ? "Choose this one instead" : "Choose this one"}
+                            </button>
+                          )}
+                        </div>
+                      ) : undefined}
+                      dim={(fileId) => !!picked && picked !== fileId}
                       pages={shownImages.map((img) => ({ fileId: img.fileId, label: img.label }))}
                       loadFrame={loadFrame}
                       onLoadError={() => setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." })}
