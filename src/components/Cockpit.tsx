@@ -2694,7 +2694,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
           <div className="min-w-0">
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
-              <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}{followingControl && <span className="ml-1 text-[15px] font-normal">{followingControl}</span>}
+              <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}
                 {/* The client's quick links on their lists too (Derek, 2026-10-06: header G
                     left them only on the client's own page). */}
                 {clientView && (
@@ -2724,8 +2724,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <span role="button" tabIndex={-1} onClick={() => toggleStar(activeClient)} title={starred.has(activeClient) ? "Unpin from sidebar" : "Pin to sidebar"}
                     className={`shrink-0 rounded p-0.5 hover:bg-background ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></span>
                 )}
-                {/* Who follows them, beside the name (Derek, 2026-10-05). */}
-                {clientView && followingControl && <span className="text-[15px] font-normal">{followingControl}</span>}
                 {/* Their SaaS account, one click from their page (Derek, 2026-10-06). */}
                 {clientView && contactForClient(activeClient)?.saasUrl && (
                   <a href={contactForClient(activeClient)!.saasUrl} target="_blank" rel="noopener noreferrer" title="Open their SaaS account"
@@ -2803,6 +2801,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   header leads with Follow-up / tabs / Email-SMS / Follow / Status
                   / Review instead of a cluster of equal-weight buttons. Same
                   menu as the compact header — see overflowControl above. */}
+              {/* Who follows them, left of the ⋮ (Derek, 2026-10-06; was beside the name). */}
+              {followingControl}
               {overflowControl}
               {/* New last, on the far right (mockup C): a task, or an email or
                   text to them (Derek, 2026-10-06). */}
