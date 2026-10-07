@@ -137,6 +137,22 @@ export function readDraft(member: string, thread: string): string {
 export function writeDraft(member: string, thread: string, text: string) {
   try { if (text.trim()) localStorage.setItem(draftKey(member, thread), text); else localStorage.removeItem(draftKey(member, thread)); } catch { /* ignore */ }
 }
+/** One conversation's draft as the box saves it: half a second after the last
+ *  keystroke, or now. Saving now (Send, Discard, Send later, Undo) drops a save
+ *  still waiting, which otherwise wrote a just sent text back as a draft when
+ *  Enter came within half a second of typing (Derek, 2026-10-07). */
+export function draftSaver(member: string, thread: string, delay = 500) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const cancel = () => { if (timer) clearTimeout(timer); timer = null; };
+  return {
+    later(text: string, then?: () => void) {
+      cancel();
+      timer = setTimeout(() => { timer = null; writeDraft(member, thread, text); then?.(); }, delay);
+    },
+    now(text: string) { cancel(); writeDraft(member, thread, text); },
+    cancel,
+  };
+}
 export function draftKeys(member: string): Set<string> {
   const out = new Set<string>();
   try {

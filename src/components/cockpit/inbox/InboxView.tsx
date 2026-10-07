@@ -23,7 +23,7 @@ import {
   type ChatItem, type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
-import { draftKeys, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
+import { draftKeys, draftSaver, readDraft, type InboxPrefs } from "./inboxPrefs";
 import { allowEntry } from "@/lib/inbox";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
@@ -1253,22 +1253,20 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const [repliesOpen, setRepliesOpen] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keyed by the conversation, so one saver for as long as the box is open.
+  const [saver] = useState(() => draftSaver(p.me.id, t.key));
   const change = (v: string) => {
     setText(v); setNote(null);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    const keep = rich && !htmlToText(v).trim() ? "" : v;
-    saveTimer.current = setTimeout(() => { writeDraft(p.me.id, t.key, keep); onDraft(); }, 500);
+    saver.later(rich && !htmlToText(v).trim() ? "" : v, onDraft);
   };
   const putAndKeep = (v: string) => { change(v); setNonce((n) => n + 1); };
   // Discard (Derek, 2026-10-01: "struggling to close or cancel this draft"):
   // empties the box and the saved draft, with Undo, and closes an email reply.
   const discard = () => {
     const before = text, beforeFiles = files;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    put(""); setFiles([]); setNote(null); writeDraft(p.me.id, t.key, ""); onDraft();
+    put(""); setFiles([]); setNote(null); saver.now(""); onDraft();
     onClose?.();
-    p.pushToast("Draft discarded", { label: "Undo", run: () => { put(before); setFiles(beforeFiles); writeDraft(p.me.id, t.key, before); onDraft(); } });
+    p.pushToast("Draft discarded", { label: "Undo", run: () => { put(before); setFiles(beforeFiles); saver.now(before); onDraft(); } });
   };
   const channelForAi = t.channel === "email" ? "email" : t.channel === "chat" ? "chat" : "sms";
 
@@ -1367,25 +1365,25 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   const send = async () => {
     const body = rich ? text : text.trim();
     if (!hasText) return;
-    const clear = () => { put(""); writeDraft(p.me.id, t.key, ""); setFiles([]); setNote(null); onDraft(); };
+    const clear = () => { put(""); saver.now(""); setFiles([]); setNote(null); onDraft(); };
     const go = async () => {
       setBusy("send");
       try { await deliver(body); p.pushToast("Sent"); onSent(); }
-      catch (e) { put(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
+      catch (e) { put(body); saver.now(body); onDraft(); p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
       finally { setBusy(null); }
     };
     clear();
     if (p.prefs.undoSeconds > 0) {
       let cancelled = false;
       const timer = setTimeout(() => { if (!cancelled) go(); }, p.prefs.undoSeconds * 1000);
-      p.pushToast(`Sending in ${p.prefs.undoSeconds} seconds`, { label: "Undo", run: () => { cancelled = true; clearTimeout(timer); put(body); writeDraft(p.me.id, t.key, body); onDraft(); p.pushToast("Not sent. It's back in your reply."); } });
+      p.pushToast(`Sending in ${p.prefs.undoSeconds} seconds`, { label: "Undo", run: () => { cancelled = true; clearTimeout(timer); put(body); saver.now(body); onDraft(); p.pushToast("Not sent. It's back in your reply."); } });
     } else go();
   };
 
   const later = async (at: Date) => {
     setLaterOpen(false);
     if (!p.onSchedule || !hasText) return;
-    try { await p.onSchedule(t, rich ? text : text.trim(), at); put(""); writeDraft(p.me.id, t.key, ""); onDraft(); p.pushToast(`Scheduled for ${at.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`); }
+    try { await p.onSchedule(t, rich ? text : text.trim(), at); put(""); saver.now(""); onDraft(); p.pushToast(`Scheduled for ${at.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`); }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't schedule it."); }
   };
   const tomorrow8 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(8, 0, 0, 0); return d; };
