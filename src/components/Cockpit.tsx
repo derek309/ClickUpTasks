@@ -1868,11 +1868,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }, [inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
   // opts: what was typed in the Inbox's new task form (Derek, 2026-10-06:
   // "more custom control"); without it, the old one click version.
-  const newTaskFromThread = async (t: InboxThread, opts?: { title?: string; projectId?: string | null; assigneeId?: string | null; due?: string | null }): Promise<string | null> => {
+  const newTaskFromThread = async (t: InboxThread, opts?: { title?: string; clientId?: string | null; projectId?: string | null; assigneeId?: string | null; due?: string | null }): Promise<string | null> => {
     const first = t.peerName.split(/\s+/)[0];
-    const lists = t.clientId ? projectsForClient(t.clientId) : [];
+    // The client picked in the panel when the email isn't matched to one yet.
+    const owner = t.clientId || opts?.clientId || null;
+    const lists = owner ? projectsForClient(owner) : [];
     const project = (opts?.projectId ? lists.find((x) => x.id === opts.projectId) : null) ?? lists[0] ?? null;
-    const clientId = project ? t.clientId! : PERSONAL_PROJECT_ID;
+    const clientId = project ? owner! : PERSONAL_PROJECT_ID;
     const task: Task = {
       id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? clientId : PERSONAL_PROJECT_ID,
       title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: "",

@@ -345,6 +345,9 @@ export async function readGmailThread(userEmail: string, threadId: string, max =
 // scope). Used to pull client replies that came back through Gmail directly
 // (bypassing GHL) so they still land in the app. `query` is a Gmail search
 // string, e.g. "in:inbox newer_than:2d -from:me category:primary".
+/** Services that send a shared file on someone's behalf, from their own address. */
+const FILE_SHARE_SENDER = /@(google\.com|docs\.google\.com|dropbox\.com|dropboxmail\.com|box\.com|wetransfer\.com|onedrive\.com|sharepointonline\.com)$/;
+
 export async function readInboundGmail(userEmail: string, query: string, max = 25): Promise<InboundEmail[]> {
   if (!googleConfigured) throw new Error("Google Workspace is not configured.");
   const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_READ_SCOPE], subject: userEmail });
@@ -373,19 +376,24 @@ export async function readInboundGmail(userEmail: string, query: string, max = 2
     const h = (name: string) => headers.find((x) => x.name?.toLowerCase() === name)?.value ?? "";
     const fromRaw = h("from");
     const match = fromRaw.match(/(?:"?([^"<]*)"?\s*)?<?([^<>@\s]+@[^<>\s]+)>?/);
-    const fromName = (match?.[1] ?? "").trim();
-    const fromEmail = (match?.[2] ?? "").trim().toLowerCase();
+    let fromName = (match?.[1] ?? "").trim();
+    let fromEmail = (match?.[2] ?? "").trim().toLowerCase();
     if (!fromEmail) continue;
+    // A file shared through Google Drive, Dropbox and the like comes from the
+    // service's own address with the person in Reply-To: it is from them
+    // (Derek, 2026-10-06: Pamela's video read as a stranger).
+    const shared = FILE_SHARE_SENDER.test(fromEmail) && h("reply-to").match(/[^<>@\s,"]+@[^<>\s,"]+/)?.[0]?.toLowerCase();
+    if (shared && shared !== fromEmail) { fromEmail = shared; fromName = fromName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim(); }
     // Bulk / automated mail (newsletters, notifications, no-reply senders) sets
     // these headers or uses a machine local-part — real person-to-person email
     // doesn't. Used to keep the "unknown sender → Inbox" path from flooding.
     const precedence = h("precedence").toLowerCase();
     const autoSubmitted = h("auto-submitted").toLowerCase();
     const fromLocal = fromEmail.split("@")[0];
-    const auto = !!h("list-unsubscribe")
+    const auto = !shared && (!!h("list-unsubscribe")
       || ["bulk", "list", "junk", "auto_reply"].includes(precedence)
       || (!!autoSubmitted && autoSubmitted !== "no")
-      || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal);
+      || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal));
     out.push({
       gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
       subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),

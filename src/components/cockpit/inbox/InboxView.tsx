@@ -41,7 +41,7 @@ export type InboxViewProps = {
   /** from: what the task panel's "← back" says (the conversation). */
   onOpenTask: (taskId: string, from?: string) => void;
   /** Makes a task for a conversation and returns its id. */
-  onNewTask: (t: InboxThread, opts?: { title?: string; projectId?: string | null; assigneeId?: string | null; due?: string | null }) => Promise<string | null>;
+  onNewTask: (t: InboxThread, opts?: { title?: string; clientId?: string | null; projectId?: string | null; assigneeId?: string | null; due?: string | null }) => Promise<string | null>;
   /** Uploads a file the person attached; returns where it went. */
   onUpload: (prefix: string, file: File) => Promise<Attachment | null>;
   onSignedUrl: (path: string) => Promise<string | null>;
@@ -1638,10 +1638,21 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
       .filter((x) => words.every((w) => x.title.toLowerCase().includes(w) || (p.clientName(x.clientId) ?? "").toLowerCase().includes(w)))
       .slice(0, 6);
   }, [q, p, t.clientId]);
+  // Whose it is: the conversation's client, else the one picked here, else a
+  // guess from the sender's name ("Pamela Macias (via Google Drive)" is Pamela
+  // Macias), so her lists show without matching her email (Derek, 2026-10-06).
+  const [pickedClient, setPickedClient] = useState("");
+  const guessedClient = useMemo(() => {
+    const name = t.peerName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim().toLowerCase();
+    return name ? p.clients.find((c) => c.name.toLowerCase() === name)?.id ?? "" : "";
+  }, [t.peerName, p.clients]);
+  const whose = t.clientId || pickedClient || guessedClient;
+  const whoseLists = whose ? p.listsFor(whose) : [];
   // Their open tasks (this contact's, else this client's), soonest due first.
   const theirs = useMemo(() => p.tasks
-    .filter((x) => x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (t.clientId && x.clientId === t.clientId)))
-    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")), [p.tasks, t.contactId, t.clientId]);
+    .filter((x) => x.status !== "done" && !x.private && ((t.contactId && x.contactId === t.contactId) || (whose && x.clientId === whose)))
+    .sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")), [p.tasks, t.contactId, whose]);
+  const [searchOpen, setSearchOpen] = useState(false);
   const link = async (taskId: string | null) => {
     setBusy(true);
     try { await p.inbox.linkTask(t.key, taskId); p.pushToast(taskId ? "Linked. New messages here land on the task too." : "Unlinked"); setQ(""); }
@@ -1655,6 +1666,14 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const [newList, setNewList] = useState("");
   const [newOn, setNewOn] = useState("");
   const [newDue, setNewDue] = useState("");
+  // Open the new task form, on a list: the title from the email, on you, due today.
+  const startNew = (listId: string) => {
+    const last = [...t.messages].reverse().find((m) => m.direction === "inbound");
+    const firstLine = (last?.body ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 90);
+    const subject = (t.subject ?? "").replace(/^(re|fwd?):\s*/i, "").replace(/^(item|file|folder) shared with you:\s*/i, "");
+    setNewTitle(subject || firstLine || `Follow up with ${t.peerName.split(/\s+/)[0]}`);
+    setNewList(listId); setNewOn(p.me.id); setNewDue(new Date().toLocaleDateString("en-CA")); setNewOpen(true);
+  };
   const [listOpen, setListOpen] = useState(false);
   const lists = task ? p.listsFor(task.clientId) : [];
   // Label and value on one line (Derek, 2026-10-05: "more compact").
@@ -1757,8 +1776,31 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             </span>
           </div>
         </> : <>
-          <p className="mb-2 text-muted">Link it and every new message here lands on the task too.</p>
-          <input ref={linkSearchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={client ? `Search ${client}'s tasks` : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+          {/* Her lists first, one click to add a task there (Derek, 2026-10-06:
+              "see what list she has, click on the list and then add here").
+              Search waits behind a link. */}
+          {!t.clientId && (
+            <label className="mb-2 flex items-center gap-2"><span className="shrink-0 text-muted">Whose</span>
+              <select value={whose} onChange={(e) => { setPickedClient(e.target.value); setNewOpen(false); }} aria-label="Whose is it"
+                className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
+                <option value="">Pick a client</option>
+                {p.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select></label>
+          )}
+          {whoseLists.length > 0 && (
+            <div className="mb-3">
+              <div className="mb-1.5 text-muted">Add a task to {p.clientName(whose)?.split(/\s+/)[0] ?? "their"} list</div>
+              <div className="flex flex-wrap gap-1.5">
+                {whoseLists.map((l) => (
+                  <button key={l.id} disabled={busy} onClick={() => startNew(l.id)}
+                    className={`rounded-md px-3 py-1.5 font-semibold ring-1 disabled:opacity-50 ${newOpen && newList === l.id ? "bg-accent text-white ring-accent" : "bg-surface text-accent ring-[var(--border)] hover:ring-accent"}`}>＋ {l.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {!newOpen && <p className="mb-1.5 text-muted">{theirs.length ? "Or link it to one of their open tasks:" : "Link it and every new message here lands on the task too."}</p>}
+          {searchOpen || !whose ? <input ref={linkSearchRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={client ? `Search ${client}'s tasks` : "Search tasks"} className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+            : null}
           {/* Their open tasks, one click to link (Derek, 2026-10-02: "quick"):
               three, then Show more; typing searches every task. */}
           <div className="mt-1.5 space-y-1">
@@ -1772,25 +1814,20 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-[20px] font-bold text-white disabled:opacity-50">＋</button>
               </div>
             ))}
-            {!q && theirs.length === 0 && <p className="text-muted">No open tasks for them yet.</p>}
+            {!q && theirs.length === 0 && !whose && <p className="text-muted">No open tasks for them yet.</p>}
             {!q && theirs.length > 3 && !showAll && <button onClick={() => setShowAll(true)} className={linkBtn}>Show {Math.min(theirs.length, 12) - 3} more</button>}
+            {whose && !searchOpen && <button onClick={() => setSearchOpen(true)} className={`${linkBtn} block`}>Search all tasks</button>}
           </div>
           {/* Type the task, then create it (Derek, 2026-10-06: "more custom
               control"): title, list, who it's on and when it's due. */}
           {!newOpen ? (
-            <button disabled={busy} onClick={() => {
-              const last = [...t.messages].reverse().find((m) => m.direction === "inbound");
-              const firstLine = (last?.body ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 90);
-              setNewTitle(t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : firstLine || `Follow up with ${t.peerName.split(/\s+/)[0]}`);
-              setNewList(t.clientId ? p.listsFor(t.clientId)[0]?.id ?? "" : "");
-              setNewOn(p.me.id); setNewDue(new Date().toLocaleDateString("en-CA")); setNewOpen(true);
-            }} className={`${linkBtn} mt-2`}>＋ New task from this</button>
+            <button disabled={busy} onClick={() => startNew(whoseLists[0]?.id ?? "")} className={`${linkBtn} mt-2`}>＋ New task from this</button>
           ) : (
             <form className="mt-3 grid gap-2 rounded-lg bg-background p-3" onSubmit={async (e) => {
               e.preventDefault();
               if (!newTitle.trim()) return;
               setBusy(true);
-              const id = await p.onNewTask(t, { title: newTitle.trim(), projectId: newList || null, assigneeId: newOn || null, due: newDue || null });
+              const id = await p.onNewTask(t, { title: newTitle.trim(), clientId: whose || null, projectId: newList || null, assigneeId: newOn || null, due: newDue || null });
               if (id) await link(id);
               setBusy(false); setNewOpen(false);
             }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setNewOpen(false); } }}>
@@ -1798,10 +1835,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               <textarea autoFocus rows={2} value={newTitle} onChange={(e) => setNewTitle(e.target.value)} aria-label="What needs doing"
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
                 placeholder="What needs doing?" className="w-full resize-none rounded-md bg-surface px-3 py-2 text-[16px] font-semibold outline-none ring-1 ring-[var(--border)] focus:ring-accent" />
-              {t.clientId && p.listsFor(t.clientId).length > 0 && (
+              {whoseLists.length > 0 && (
                 <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">List</span>
                   <select value={newList} onChange={(e) => setNewList(e.target.value)} className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 ring-1 ring-[var(--border)]">
-                    {p.listsFor(t.clientId).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    {whoseLists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                   </select></label>
               )}
               <label className="flex items-center gap-2"><span className="w-12 shrink-0 text-muted">On</span>
@@ -2027,10 +2064,45 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
           {contact && <button onClick={() => { setForm(true); setShow(null); }} title={val ? "Change" : "Add one"} aria-label={val ? "Change" : "Add one"} className={mini}><Ico n="user" /></button>}
         </div>
       )}
+      {!contact && main && !form && <ConnectContact p={p} t={t} x={x} />}
       {form && (contact
         ? <ContactForm p={p} contact={contact} onClose={() => setForm(false)} />
         : <AddPersonForm p={p} t={t} x={x} onClose={() => setForm(false)} />)}
       {booking && contact?.ghlContactId && <BookAppointment target={{ kind: "book", ghlContactId: contact.ghlContactId, name }} meId={p.me.id} defaultCalendarId={p.prefs.defaultCalendarId ?? null} onSetDefault={(id) => p.setPrefs({ defaultCalendarId: id })} onClose={() => setBooking(false)} onDone={() => {}} pushToast={(m) => p.pushToast(m)} />}
+    </div>
+  );
+}
+
+/** Someone new on an email who is really a contact you have: Pamela sharing a
+ *  file through Google Drive comes from Google's address (Derek, 2026-10-06).
+ *  Connecting moves the conversation onto her and her client, so her tasks and
+ *  lists show; Google's address is not added to her. */
+function ConnectContact({ p, t, x }: { p: InboxViewProps; t: InboxThread; x: Person }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const bare = (x.name || t.peerName || "").replace(/\s*\(via [^)]*\)\s*$/i, "").trim().toLowerCase();
+  const guess = bare ? p.contacts.find((c) => (c.name ?? "").trim().toLowerCase() === bare) ?? null : null;
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = words.length ? p.contacts.filter((c) => words.every((w) => `${c.name ?? ""} ${c.email ?? ""}`.toLowerCase().includes(w))).slice(0, 5) : [];
+  const connect = async (c: ContactLite) => {
+    setBusy(true);
+    try { await p.inbox.addContact(t.key, { useContactId: c.id }); p.pushToast(`This conversation is now with ${c.name}`); }
+    catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't connect them."); }
+    finally { setBusy(false); }
+  };
+  const row = (c: ContactLite) => (
+    <div key={c.id} className="flex items-center gap-2 rounded-lg bg-background py-1.5 pl-3 pr-1.5">
+      <span className="min-w-0 flex-1"><b className="block truncate">{c.name}</b>{c.email && <span className="block truncate text-[14px] text-muted">{c.email}</span>}</span>
+      <button disabled={busy} onClick={() => connect(c)} className="h-9 shrink-0 rounded-lg bg-accent px-3 font-semibold text-white disabled:opacity-50">Connect</button>
+    </div>
+  );
+  return (
+    <div className="mt-3 grid gap-1.5 border-t pt-3">
+      <span className="font-semibold">{guess ? `Is this ${guess.name}?` : "Connect to a contact you have"}</span>
+      {guess && row(guess)}
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={guess ? "Someone else? Search contacts" : "Search contacts"} aria-label="Search contacts"
+        className="h-10 rounded-lg border bg-surface px-3 outline-none focus:border-accent" />
+      {hits.filter((c) => c.id !== guess?.id).map(row)}
     </div>
   );
 }
