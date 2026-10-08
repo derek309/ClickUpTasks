@@ -19,7 +19,6 @@ import {
 import { fetchTaskDocument, type TaskDocument as TaskDocumentRow } from "@/lib/db";
 import { kindTitle } from "@/lib/reviewKinds";
 import { I, Avatar, LinkedText, newId } from "./ui";
-import { ActionMenu } from "./ActionMenu";
 import { TaskDocument } from "./TaskDocument";
 import { useEscapeToClose } from "./useEscapeToClose";
 
@@ -165,13 +164,6 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
     </section>
   );
 
-  // Status, top right. Its menu lists the other three.
-  const statusMenu = (
-    <ActionMenu title="Where this handoff stands"
-      triggerClassName={`inline-flex h-10 items-center gap-2 rounded-lg px-3.5 text-[16px] font-bold ${STATUS[status].tone}`}
-      label={<><span className="h-2.5 w-2.5 rounded-full bg-current" />{STATUS[status].label} <span aria-hidden>▾</span></>}
-      items={(Object.keys(STATUS) as Shown[]).filter((k) => k !== status).map((k) => ({ label: STATUS[k].label, onClick: () => setStatus(k) }))} />
-  );
 
   const nameOf = (id: string | null | undefined) => (id ? userById(id)?.name ?? "Someone" : "Someone");
   const chat = (
@@ -257,7 +249,6 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-6">
         <span className="rounded-[5px] bg-violet-100 px-2 py-0.5 text-[16px] font-bold tracking-wide text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">HANDOFF</span>
         <span className="min-w-0 flex-1 truncate text-[16px] text-muted">from the task &quot;{task.title}&quot;</span>
-        {statusMenu}
         <button onClick={copyLink} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium hover:bg-background"><I.link /> Copy link</button>
         <button onClick={() => setEditing((e) => !e)} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium hover:bg-background">
           {editing ? <><I.check /> Done editing</> : <><I.pencil /> Edit</>}
@@ -289,6 +280,17 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
             {owner && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={owner.id} size={22} /> From {owner.name}</span>}
             {sub.due && <span className="rounded-[5px] bg-highlight-soft px-3 py-2 font-semibold text-highlight">Due {formatDue(sub.due)}</span>}
             {total > 0 && <span className="rounded-[5px] bg-violet-50 px-3 py-2 font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">{done} of {total} steps done</span>}
+          </div>
+
+          {/* Where it stands, in view and one press to change (Derek,
+              2026-10-08: the top right menu "is getting lost"). */}
+          <div role="radiogroup" aria-label="Where this handoff stands" className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {(Object.keys(STATUS) as Shown[]).map((k) => (
+              <button key={k} role="radio" aria-checked={status === k} onClick={() => setStatus(k)}
+                className={`flex h-12 items-center justify-center gap-2 rounded-[5px] px-3 text-[16px] font-bold transition ${status === k ? `${STATUS[k].tone} ring-2 ring-current` : "bg-surface text-muted ring-1 ring-border hover:text-foreground"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${status === k ? "bg-current" : "bg-border"}`} />{STATUS[k].label}
+              </button>
+            ))}
           </div>
 
           {section("The goal", null, editing ? (
@@ -337,19 +339,6 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                   <input value={stepDraft} onChange={(e) => setStepDraft(e.target.value)} placeholder="Add a step, then Enter" aria-label="New step" className={input} />
                   <button type="submit" className="shrink-0 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white">Add</button>
                 </form>
-              )}
-              {/* The links already saved against this client, one tap each. */}
-              {editing && clientLinks.some((c) => !h.links.some((l) => l.url === c.url)) && (
-                <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
-                  <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {clientLinks.filter((c) => !h.links.some((l) => l.url === c.url)).map((c) => (
-                      <button key={c.url} title={c.url}
-                        onClick={() => save({ links: [...h.links, { id: newId("hl_"), label: c.label, url: c.url }] })}
-                        className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {c.label}</button>
-                    ))}
-                  </div>
-                </div>
               )}
               {!editing && !total && <p className="text-[16px] text-muted">No steps yet.</p>}
             </>
@@ -410,6 +399,20 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                   <input value={linkDraft.url} onChange={(e) => setLinkDraft((d) => ({ ...d, url: e.target.value }))} placeholder="Paste the link" aria-label="Link address" className={`${input} min-w-[200px] flex-1`} />
                   <button type="submit" className="shrink-0 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white">Add</button>
                 </form>
+              )}
+              {/* The client's quick links, one tap each, under Links where they're
+                  looked for (Derek, 2026-10-08). */}
+              {editing && clientLinks.some((c) => !h.links.some((l) => l.url === c.url)) && (
+                <div className="mt-2 rounded-[10px] border bg-background px-2.5 py-2">
+                  <div className="mb-1.5 text-[16px] font-bold uppercase tracking-wider text-muted">From this client, one tap to add</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {clientLinks.filter((c) => !h.links.some((l) => l.url === c.url)).map((c) => (
+                      <button key={c.url} title={c.url}
+                        onClick={() => save({ links: [...h.links, { id: newId("hl_"), label: c.label, url: c.url }] })}
+                        className="max-w-[220px] truncate rounded-md border bg-surface px-2 py-1 text-[16px] font-medium text-accent hover:border-accent hover:bg-accent-soft">🔗 {c.label}</button>
+                    ))}
+                  </div>
+                </div>
               )}
             </>
           ), editing || h.links.length > 0)}
