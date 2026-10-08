@@ -366,7 +366,8 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
       return (
         <select value={task.projectId} onClick={(e) => e.stopPropagation()} onChange={(e) => onPatch(task.id, { projectId: e.target.value })} aria-label="List"
           className="max-w-full truncate rounded bg-transparent py-0.5 text-[16px] hover:bg-background sm:text-[13px]">
-          {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          {/* A to Z (Derek, 2026-10-08). */}
+          {[...lists].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
       );
     }

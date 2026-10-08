@@ -1012,7 +1012,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <Row label="List" icon={<I.list />}>
         <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }}
           className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">
-          {clientProjects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+          {[...clientProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
           {clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "List"}</option>}
           <option value="__new">+ New list…</option>
         </select>
