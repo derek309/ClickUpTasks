@@ -313,7 +313,8 @@ export default function InboxView(p: InboxViewProps) {
                 )}
                 {/* Reviews a client sent changes back on: yours to act on (2026-10-06). */}
                 {folder === "inbox" && !q && reviewsBack.length > 0 && (
-                  <div className="border-b bg-highlight-soft/40">
+                  // Orange: the client is waiting on us.
+                  <div className="border-b border-l-[6px] bg-highlight-soft/50" style={{ borderLeftColor: "var(--highlight)" }}>
                     <div className="px-4 pb-1 pt-3 text-[13px] font-bold uppercase tracking-wide text-highlight">Changes sent back · {reviewsBack.length}</div>
                     {reviewsBack.map((r) => (
                       <button key={r.id} onClick={() => p.onOpenTask(r.taskId, "Inbox")} className="flex w-full items-start gap-3 border-t px-4 py-2.5 text-left hover:bg-background">
@@ -322,7 +323,8 @@ export default function InboxView(p: InboxViewProps) {
                           <b className="block truncate">{r.clientName ? `${r.clientName.split(/\s+/)[0]} sent changes back: ` : "Changes sent back: "}{r.name}</b>
                           <span className="block truncate text-[14px] text-muted">{r.taskTitle ?? "Open the task"}</span>
                         </span>
-                        {r.days !== null && <span className="shrink-0 text-[14px] text-muted">{r.days === 0 ? "Today" : `${r.days} ${r.days === 1 ? "day" : "days"}`}</span>}
+                        {/* How long they've waited: grey, orange from 3 days, red past 7. */}
+                        {r.days !== null && <span className={`shrink-0 rounded-[5px] px-2 py-0.5 text-[14px] font-semibold ${r.days > 7 ? "bg-danger text-white" : r.days >= 3 ? "bg-highlight text-white" : "bg-background text-muted"}`}>{r.days === 0 ? "Today" : `${r.days} ${r.days === 1 ? "day" : "days"}`}</span>}
                       </button>
                     ))}
                   </div>
@@ -371,11 +373,24 @@ const Kbd = ({ children }: { children: React.ReactNode }) => <kbd className="mr-
 // client reminders and the document review nudges wait here until someone has
 // read them. Edit fixes the words; nothing goes until Send.
 type HeldReminder = { id: string; clientId: string; clientName: string; to: string | null; taskId: string | null; subject: string; body: string; from: string; at: string };
+/** 8 AM that many days from now, in this browser's time. */
+function nextAt(days: number): string {
+  const d = new Date(); d.setDate(d.getDate() + days); d.setHours(8, 0, 0, 0);
+  return d.toISOString();
+}
+/** The coming Monday, 8 AM (next week's when today is Monday). */
+function nextMonday(): string {
+  const d = new Date(); const add = ((8 - d.getDay()) % 7) || 7;
+  return nextAt(add);
+}
+
 function RemindersGoingOut({ p }: { p: InboxViewProps }) {
   const [list, setList] = useState<HeldReminder[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ id: string; subject: string; body: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [scheduleFor, setScheduleFor] = useState<string | null>(null);
+  const [pickAt, setPickAt] = useState("");
   // Read on open and every five minutes, for a reminder queued while it's open.
   useEffect(() => {
     let live = true;
@@ -384,21 +399,25 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
     const i = setInterval(load, 5 * 60_000);
     return () => { live = false; clearInterval(i); };
   }, []);
-  const act = async (id: string, action: "send" | "drop" | "save", extra?: { subject: string; body: string }) => {
+  const act = async (id: string, action: "send" | "drop" | "save" | "schedule", extra?: { subject?: string; body?: string; at?: string }) => {
     setBusy(id);
     const r = await authedFetch("/api/inbox/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action, ...extra }) }).catch(() => null);
     const j = r ? await r.json().catch(() => ({})) : {};
     setBusy(null);
     if (!r?.ok) { p.pushToast(j.error ?? "That didn't work. Try again."); return false; }
     const who = list.find((x) => x.id === id)?.clientName ?? "them";
-    if (action === "save") { setList((l) => l.map((x) => (x.id === id ? { ...x, ...extra! } : x))); setEdit(null); p.pushToast("Saved. It still waits for Send."); }
-    else { setList((l) => l.filter((x) => x.id !== id)); if (open === id) setOpen(null); p.pushToast(action === "send" ? `Reminder sent to ${who}` : `Reminder to ${who} won't go out`); }
+    if (action === "save") { setList((l) => l.map((x) => (x.id === id ? { ...x, subject: extra?.subject ?? x.subject, body: extra?.body ?? x.body } : x))); setEdit(null); p.pushToast("Saved. It still waits for Send."); }
+    else {
+      setList((l) => l.filter((x) => x.id !== id)); if (open === id) setOpen(null); setScheduleFor(null);
+      p.pushToast(action === "send" ? `Reminder sent to ${who}` : action === "schedule" ? `Reminder to ${who} goes ${new Date(extra!.at!).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : `Reminder to ${who} won't go out`);
+    }
     return true;
   };
   if (!list.length) return null;
   const fromName = (id: string) => (id === p.me.id ? "you" : p.team.find((m) => m.id === id)?.name ?? "the team");
   return (
-    <section aria-label="Reminder emails going out" className="border-b bg-highlight-soft/40 p-3">
+    // Blue: yours to send (Derek, 2026-10-08: colours to tell the sections apart).
+    <section aria-label="Reminder emails going out" className="border-b border-l-[6px] bg-accent-soft/50 p-3" style={{ borderLeftColor: "var(--accent)" }}>
       <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
         <b className="text-[16px]">📬 Reminder emails going out ({list.length})</b>
         <span className="text-muted">Nothing goes until you send it.</span>
@@ -412,7 +431,7 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
               <button onClick={() => { setOpen(isOpen ? null : r.id); setEdit(null); }} aria-expanded={isOpen} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
                 <span aria-hidden className="text-[20px]">✉️</span>
                 <span className="min-w-0 flex-1">
-                  <b className="block truncate">{r.clientName}: {r.subject}</b>
+                  <b className="flex items-center gap-2 truncate"><span className="truncate">{r.clientName}: {r.subject}</span><span className="shrink-0 rounded-[5px] bg-accent px-2 text-[14px] font-semibold text-white">Review &amp; send</span></b>
                   <span className="block truncate text-[14px] text-muted">To {r.to ?? "nobody (no email on file)"} · from {fromName(r.from)} · {htmlToText(r.body).slice(0, 110)}</span>
                 </span>
               </button>
@@ -431,6 +450,23 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
                       <button onClick={() => setEdit(null)} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background">Cancel</button>
                     </>) : (<>
                       <button disabled={busy === r.id || !r.to} onClick={() => void act(r.id, "send")} className="h-10 rounded-lg bg-accent px-4 font-bold text-white disabled:opacity-50">{busy === r.id ? "Sending…" : "Send"}</button>
+                      {/* Later instead of now (Derek, 2026-10-08: "this one I want to go tomorrow"). */}
+                      <span className="relative">
+                        <button disabled={busy === r.id || !r.to} onClick={() => { setScheduleFor(scheduleFor === r.id ? null : r.id); setPickAt(""); }} aria-expanded={scheduleFor === r.id}
+                          className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-50">Schedule ▾</button>
+                        {scheduleFor === r.id && (<>
+                          <div className="fixed inset-0 z-30" onClick={() => setScheduleFor(null)} />
+                          <div className="absolute left-0 top-11 z-40 w-64 rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                            {[["Tomorrow, 8 AM", nextAt(1)], ["Monday, 8 AM", nextMonday()]].map(([label, at]) => (
+                              <button key={label} onClick={() => void act(r.id, "schedule", { at })} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">{label}</button>
+                            ))}
+                            <div className="mt-1 border-t px-2 pt-2">
+                              <input type="datetime-local" value={pickAt} onChange={(e) => setPickAt(e.target.value)} aria-label="Send at" className="h-10 w-full rounded-md border bg-background px-2 text-[16px] outline-none focus:border-accent" />
+                              <button disabled={!pickAt} onClick={() => void act(r.id, "schedule", { at: new Date(pickAt).toISOString() })} className="mt-1.5 h-10 w-full rounded-md bg-accent font-semibold text-white disabled:opacity-40">Schedule</button>
+                            </div>
+                          </div>
+                        </>)}
+                      </span>
                       <button onClick={() => setEdit({ id: r.id, subject: r.subject, body: r.body })} className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Edit</button>
                       <button onClick={() => p.onOpenClient(r.clientId)} className="h-10 rounded-lg px-3 font-semibold text-accent hover:bg-background">Open their tasks</button>
                       <span className="flex-1" />

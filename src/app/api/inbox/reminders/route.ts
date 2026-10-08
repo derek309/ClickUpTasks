@@ -16,6 +16,7 @@ import { REVIEW_STATUS } from "@/lib/portalReminders";
 // POST { id, action: "save", subject, body }   change the words
 // POST { id, action: "send" }           send it now, in the sender's name
 // POST { id, action: "drop" }           don't send it
+// POST { id, action: "schedule", at }   send it later (Derek, 2026-10-08: "I want this one to go tomorrow")
 //
 // Admins only: these go to clients in a teammate's name.
 
@@ -43,13 +44,20 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await requireAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const b = (await req.json().catch(() => ({}))) as { id?: string; action?: string; subject?: string; body?: string };
+  const b = (await req.json().catch(() => ({}))) as { id?: string; action?: string; subject?: string; body?: string; at?: string };
   if (!b.id) return NextResponse.json({ error: "Which reminder?" }, { status: 400 });
 
   if (b.action === "save") {
     const subject = (b.subject ?? "").trim().slice(0, 200);
     if (!subject || !(b.body ?? "").trim()) return NextResponse.json({ error: "It needs a subject and some words." }, { status: 400 });
     const { data } = await supabaseAdmin.from("scheduled_messages").update({ subject, body: b.body }).eq("id", b.id).eq("status", REVIEW_STATUS).select("id");
+    return data?.length ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
+  }
+  if (b.action === "schedule") {
+    // Handed to the 15 minute sender, which sends it in the author's name then.
+    const at = typeof b.at === "string" ? Date.parse(b.at) : NaN;
+    if (!Number.isFinite(at) || at < Date.now() + 60_000) return NextResponse.json({ error: "Pick a time later than now." }, { status: 400 });
+    const { data } = await supabaseAdmin.from("scheduled_messages").update({ status: "pending", scheduled_at: new Date(at).toISOString() }).eq("id", b.id).eq("status", REVIEW_STATUS).select("id");
     return data?.length ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
   }
   if (b.action === "drop") {
