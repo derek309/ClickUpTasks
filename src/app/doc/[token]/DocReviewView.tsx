@@ -82,7 +82,9 @@ function readPageEdits(token: string, fileId: string): PageEdit[] {
 const longDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 const commentTime = (iso: string) => new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function DocReviewView({ token }: { token: string }) {
+/** back: the client's task list, when they came from it (Derek, 2026-10-08:
+ *  "a funnel, so when they are done it goes back to the client portal"). */
+export default function DocReviewView({ token, back = null }: { token: string; back?: string | null }) {
   const [data, setData] = useState<DocData | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "gone" | "error">("loading");
   // The version the editor opened from. Sends and approvals are built on it.
@@ -471,7 +473,9 @@ export default function DocReviewView({ token }: { token: string }) {
     <div className="min-h-[100dvh] bg-background text-foreground">
       <header style={{ background: NAVY }} className="text-white">
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-5">
-          <span className="text-[18px] font-bold tracking-wide">ClickUpLocal</span>
+          {back
+            ? <a href={back} className="inline-flex h-10 items-center gap-2 rounded-[5px] border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← Back to my tasks</a>
+            : <span className="text-[18px] font-bold tracking-wide">ClickUpLocal</span>}
           {data && <span className="text-[16px] text-white/85">Prepared for {data.clientName}</span>}
         </div>
       </header>
@@ -500,6 +504,12 @@ export default function DocReviewView({ token }: { token: string }) {
             <h1 className="text-[30px] font-bold leading-tight">{data.title}</h1>
             {!locked && !noVersion && <p className="mt-2 text-[18px] text-muted">{intro}</p>}
 
+            {/* Done here: straight back to the rest of their tasks. */}
+            {back && (data.status === "approved" || data.status === "client_submitted") && (
+              <a href={back} className="mt-5 flex min-h-[56px] items-center justify-center gap-2 rounded-[5px] px-6 text-[19px] font-bold text-white hover:opacity-90" style={{ background: NAVY }}>
+                {data.status === "approved" ? "Done. Back to my tasks" : "Sent. Back to my tasks"} <span aria-hidden>→</span>
+              </a>
+            )}
             {data.status === "approved" && (
               <div className="mt-5 flex items-start gap-4 rounded-2xl border-2 p-5" style={{ borderColor: GREEN, background: "#f0fdf4" }}>
                 <span aria-hidden className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[26px] text-white" style={{ background: GREEN }}>✓</span>

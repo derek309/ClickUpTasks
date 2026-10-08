@@ -28,6 +28,8 @@ type WaitingTask = {
   attachments: WaitingAttachment[];
   response: { body: string; submittedAt: string; attachments: WaitingAttachment[] } | null;
   thread: WaitingMessage[];
+  /** The review this task is for (doc, image, page or video), once sent. */
+  review?: string | null;
   /** Changes they sent, ticked off by the team. */
   changes?: { id: string; title: string; done: boolean }[];
 };
@@ -531,7 +533,23 @@ export default function WaitingView({ token }: { token: string }) {
   // so refreshing the browser lands back on the same task instead of
   // bouncing to the list — deepLinkTaskId above only reads this once at
   // first load, so without this a reload always lost the current view.
-  const openTask = (id: string) => {
+  // A task that is a review opens straight into it, and the review brings
+  // them back here when they're done (Derek, 2026-10-08: "we just need a
+  // funnel ... not into a chat").
+  const [goingTo, setGoingTo] = useState<string | null>(null);
+  const goToReview = async (id: string, kind: string) => {
+    setGoingTo(id);
+    try {
+      const res = await fetch(`/api/waiting/${token}/doc`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId: id, kind }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) { setGoingTo(null); alert(j.error || "Couldn't open it. Try again."); return; }
+      const u = new URL(j.url as string, window.location.origin);
+      u.searchParams.set("back", window.location.pathname);
+      window.location.assign(u.toString());
+    } catch { setGoingTo(null); }
+  };
+  const openTask = (id: string, review?: string | null) => {
+    if (review && !goingTo) { void goToReview(id, review); return; }
     setSelectedTaskId(id);
     const url = new URL(window.location.href);
     url.searchParams.set("task", id);
@@ -906,7 +924,7 @@ export default function WaitingView({ token }: { token: string }) {
     return (
       <button
         key={t.id}
-        onClick={() => openTask(t.id)}
+        onClick={() => openTask(t.id, t.status === "done" ? null : t.review)}
         className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-t px-4 py-3 text-left transition hover:bg-background sm:grid-cols-[minmax(0,1fr)_150px_110px_16px]"
       >
         <div className="min-w-0">
@@ -989,7 +1007,7 @@ export default function WaitingView({ token }: { token: string }) {
           onSend={() => sendChatMessage(selectedTask.id)}
           onSetStatus={(status) => setTaskStatus(selectedTask.id, status)}
           statusBusy={statusBusyIds.has(selectedTask.id)}
-          onDoc={() => void viewDoc(selectedTask.id)}
+          onDoc={() => void (selectedTask.hasDoc ? goToReview(selectedTask.id, "doc") : viewDoc(selectedTask.id))}
           docBusy={docBusyId === selectedTask.id}
           otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).sort(sortFn).map((o) => ({ id: o.id, title: o.title }))}
           onOpenTask={openTask}
@@ -1168,13 +1186,41 @@ export default function WaitingView({ token }: { token: string }) {
                 if (showing === "theirs") return (
                   <div className="space-y-4">
                     {toggle}
-                    <div className="overflow-hidden rounded-[5px] border bg-surface shadow-[var(--shadow-sm)]">
-                      <div className="border-b px-4 py-3">
-                        <h2 className="text-[18px] font-bold">{theirs.length ? `We need ${theirs.length === 1 ? "one thing" : `${theirs.length} things`} from you` : "Nothing needed from you right now"}</h2>
-                        <p className="text-[16px] text-muted">{theirs.length ? "Open one to answer it or send what it asks for. The soonest is at the top." : "We'll let you know when we need something. Everything we're working on is under All tasks."}</p>
+                    {/* The ask as a band of its own and each task as a card with
+                        one clear button, so what they owe stands out (Derek,
+                        2026-10-08: "the header and the task look the same"). */}
+                    {theirs.length ? (
+                      <div className="rounded-[5px] bg-highlight-soft px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-highlight text-[22px] font-extrabold text-white">{theirs.length}</span>
+                          <div>
+                            <h2 className="text-[20px] font-extrabold text-highlight">{theirs.length === 1 ? "1 thing we need from you" : `${theirs.length} things we need from you`}</h2>
+                            <p className="text-[16px] text-foreground/80">The soonest is first. Each one takes you right to it.</p>
+                          </div>
+                        </div>
                       </div>
-                      {theirs.length > 0 && <div>{tableHead}{theirs.map((t) => renderTaskRow(t))}</div>}
-                    </div>
+                    ) : (
+                      <div className="rounded-[5px] border bg-surface px-5 py-4">
+                        <h2 className="text-[18px] font-bold">Nothing needed from you right now</h2>
+                        <p className="text-[16px] text-muted">We&apos;ll let you know when we need something. Everything we&apos;re working on is under All tasks.</p>
+                      </div>
+                    )}
+                    {theirs.length > 0 && (
+                      <div className="grid gap-3">
+                        {theirs.map((t) => (
+                          <button key={t.id} onClick={() => openTask(t.id, t.review)} disabled={goingTo === t.id}
+                            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[5px] border border-l-[6px] border-l-highlight bg-surface px-5 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60">
+                            <div className="min-w-0 flex-1">
+                              <b className="block text-[18px]">{t.title}</b>
+                              <span className="text-[16px] text-muted">{[t.due ? `Due ${shortDate(t.due)}` : null, projects.length > 1 ? projectName(t.projectId) : null].filter(Boolean).join(" · ")}</span>
+                            </div>
+                            <span className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[5px] bg-highlight px-5 text-[16px] font-bold text-white">
+                              {goingTo === t.id ? "Opening…" : t.review ? "Review it" : "Answer it"} <span aria-hidden>→</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
                 return (

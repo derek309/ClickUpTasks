@@ -21,12 +21,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const scope = await resolveWaitingToken(token);
   if (!scope) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const payload = (await req.json().catch(() => null)) as { taskId?: string } | null;
+  const payload = (await req.json().catch(() => null)) as { taskId?: string; kind?: string } | null;
   const taskId = typeof payload?.taskId === "string" ? payload.taskId : "";
+  // An image, page or video review is opened, never made, from here.
+  const kind = payload?.kind === "image" || payload?.kind === "page" || payload?.kind === "video" ? payload.kind : "doc";
   let q = supabaseAdmin.from("tasks").select("id, title, client_id, project_id, status").eq("id", taskId).eq("client_id", scope.clientId).eq("is_private", false).is("deleted_at", null);
   if (scope.projectId) q = q.eq("project_id", scope.projectId);
   const { data: task } = await q.maybeSingle();
   if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (kind !== "doc") {
+    const { data: rev } = await supabaseAdmin.from("task_documents").select("id, status").eq("task_id", task.id as string).eq("kind", kind).is("deleted_at", null).maybeSingle();
+    if (!rev || rev.status === "draft") return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const okTask = await reviewTask(task.id as string);
+    if (!okTask.ok) return NextResponse.json({ error: okTask.error }, { status: okTask.status });
+    const origin = req.nextUrl.origin;
+    const st = await linkState(rev.id as string, origin);
+    const url = st.live && st.url ? st.url : await mintDocLink(rev.id as string, okTask.task, { memberId: null }, origin);
+    return NextResponse.json({ url, created: false }, { headers: NO_STORE });
+  }
   if (task.status === "done") return NextResponse.json({ error: "This task is finished. Start a new task for something new." }, { status: 400 });
   const ok = await reviewTask(task.id as string);
   if (!ok.ok) return NextResponse.json({ error: ok.error }, { status: ok.status });

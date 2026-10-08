@@ -148,9 +148,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // task, added like a file or a link). Only whether one exists leaves here;
   // opening it goes through ./doc, which hands back its link.
   const { data: docRows } = taskIds.length
-    ? await supabaseAdmin.from("task_documents").select("task_id").eq("kind", "doc").is("deleted_at", null).in("task_id", taskIds)
-    : { data: [] as { task_id: string }[] };
-  const withDoc = new Set((docRows ?? []).map((d) => d.task_id as string));
+    ? await supabaseAdmin.from("task_documents").select("task_id, kind, status").is("deleted_at", null).in("task_id", taskIds)
+    : { data: [] as { task_id: string; kind: string; status: string }[] };
+  const withDoc = new Set((docRows ?? []).filter((d) => d.kind === "doc").map((d) => d.task_id as string));
+  // The review a task is for, whatever its kind, once it has gone to them: a
+  // task that is a review opens straight into it (Derek, 2026-10-08).
+  const SHARED = ["with_client", "client_submitted", "approved"];
+  const reviewByTask = new Map<string, string>();
+  for (const d of docRows ?? []) {
+    if (!SHARED.includes(d.status as string)) continue;
+    const had = reviewByTask.get(d.task_id as string);
+    if (!had || d.status === "with_client") reviewByTask.set(d.task_id as string, d.kind as string);
+  }
 
   const tasks = await Promise.all(rows.map(async (t) => {
     const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
@@ -179,6 +188,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       // When it was finished, for "Done Oct 3" (the last change on a done task).
       doneAt: t.status === "done" ? t.updated_at ?? null : null,
       hasDoc: withDoc.has(t.id),
+      review: reviewByTask.get(t.id) ?? null,
       // Mockups/screenshots/staging links the team attached — the "review
       // pages, media, etc" surface, so the client sees what they're
       // approving/responding to, not just a text description.

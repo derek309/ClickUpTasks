@@ -13,7 +13,11 @@ export const metadata: Metadata = {
   referrer: "no-referrer",
 };
 
-export default async function DocPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function DocPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ back?: string | string[] }> }) {
   const { token } = await params;
-  return <DocReviewView token={token} />;
+  // Opened from the client's task list: the way back to it. Only a portal
+  // address on this site, so the link can't send them anywhere else.
+  const raw = (await searchParams).back;
+  const back = typeof raw === "string" && /^\/waiting\/[A-Za-z0-9]{16,}$/.test(raw) ? raw : null;
+  return <DocReviewView token={token} back={back} />;
 }
