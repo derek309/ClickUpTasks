@@ -451,10 +451,12 @@ export type DocComment = {
   quote: string | null;
   /** The spot on an image or page this comment is about. */
   pin: DocPin | null;
+  /** The comment this one replies to (one level). */
+  parentId: string | null;
   /** A file added with the comment; it is in the Files list too. */
   attachmentFileId: string | null;
 };
-const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote, pin_file_id, pin_x, pin_y, pin_t, pin_number, pin_node, pin_node_x, pin_node_y, pin_width, attachment_file_id";
+const COMMENT_COLUMNS = "id, body, author_id, author_label, created_at, edited_at, completed_at, completed_by_label, quote, pin_file_id, pin_x, pin_y, pin_t, pin_number, pin_node, pin_node_x, pin_node_y, pin_width, attachment_file_id, parent_id";
 
 const MAX_QUOTE_CHARS = 500;
 /** The words a comment is about, as selected in the document: plain text, one
@@ -483,6 +485,7 @@ const toComment = (r: Record<string, unknown>): DocComment => ({
   completedAt: (r.completed_at as string | null) ?? null,
   completedBy: (r.completed_by_label as string | null) ?? null,
   quote: (r.quote as string | null) ?? null,
+  parentId: (r.parent_id as string | null) ?? null,
   pin: r.pin_file_id && r.pin_number
     ? {
       fileId: r.pin_file_id as string, number: Number(r.pin_number),
@@ -524,6 +527,8 @@ export type CommentExtras = {
   attachmentFileId?: unknown;
   /** The client's side: a pin only on a version they were shown. */
   clientSide?: boolean;
+  /** A reply: the comment it answers, on the same document, itself not a reply. */
+  parentId?: unknown;
 };
 
 /** A comment needs words, or a file when it carries one (Derek, 2026-09-12: "add a
@@ -535,6 +540,14 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
   const attachment = extras.attachmentFileId == null ? null : await attachableFile(documentId, extras.attachmentFileId);
   if (extras.attachmentFileId != null && !attachment) return fail(400, "That file is no longer on the document.");
   if (!body && !attachment) return fail(400, "Write a comment first.");
+  let parentId: string | null = null;
+  if (extras.parentId != null) {
+    const { data: parent } = typeof extras.parentId === "string"
+      ? await supabaseAdmin.from("task_document_comments").select("id, parent_id").eq("id", extras.parentId).eq("document_id", documentId).maybeSingle()
+      : { data: null };
+    if (!parent || parent.parent_id) return fail(400, "That comment is no longer on the document.");
+    parentId = parent.id as string;
+  }
 
   let pin: ReviewPin | null = null;
   if (extras.pin != null) {
@@ -548,6 +561,7 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
 
   const base = {
     document_id: documentId, body: body ?? "", author_id: actor.id, author_label: actor.label,
+    ...(parentId ? { parent_id: parentId } : {}),
     quote: pin ? null : cleanQuote(extras.quote), attachment_file_id: attachment,
     pin_file_id: pin?.fileId ?? null, pin_x: pin?.x ?? null, pin_y: pin?.y ?? null, pin_t: pin?.t ?? null,
     pin_node: pin?.anchor?.node ?? null, pin_node_x: pin?.anchor?.nx ?? null, pin_node_y: pin?.anchor?.ny ?? null, pin_width: pin?.anchor?.width ?? null,

@@ -780,6 +780,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     if (j.emailedClient) pushToast("Comment posted. We emailed the client a link to it.");
     return true;
   };
+  // A reply under one comment; the client gets it by email with the link back.
+  const postReply = async (parentId: string, body: string) => {
+    const res = await api("/comments", { method: "POST", body: JSON.stringify({ body, parentId }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not send the reply."); return false; }
+    setComments((c) => [...c, { ...(j.comment as TaskDocumentComment), authorId: meId ?? null }]);
+    pushToast(j.emailedClient ? "Reply sent. We emailed the client a link back to the review." : "Reply posted.");
+    return true;
+  };
 
   // A comment picked in the thread: shown on the image, or on the page at the width its pin was dropped at.
   const focusComment = (id: string) => {
@@ -1443,7 +1452,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
             )}
           </FileDropLine>
         )}
-        <CommentThread comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
+        <CommentThread onReply={postReply} comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
           pinLabel={versioned ? imagePlace : undefined} pinGroups={image || shownItems.length > 1 ? shownItems.map((_, i) => itemLabel(shownItems, i)) : undefined}
           alignGroup={versioned ? (label) => {
             const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);

@@ -122,6 +122,8 @@ export type ThreadComment = {
   pin?: { fileId: string; x: number | null; y: number | null; t?: number | null; number: number; anchor?: { node: number; nx: number; ny: number; width: number } | null } | null;
   /** A file added with the comment. */
   attachmentFileId?: string | null;
+  /** The comment this one answers (one level: a reply under a comment). */
+  parentId?: string | null;
 };
 /** How many of the newest comments show before the rest fold away. */
 const LATEST_COMMENTS = 3;
@@ -140,11 +142,13 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ comments: allComments, onReply, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
   onPost: (body: string, quote?: string | null, attachmentFileId?: string | null) => Promise<boolean>;
+  /** Answer one comment, under it (Derek, 2026-10-08: "reply to this comment"). */
+  onReply?: (parentId: string, body: string) => Promise<boolean>;
   /** Words selected in the document for the next comment, shown above the box
    *  (Derek, 2026-09-12: comments on a specific sentence). */
   quote?: string | null;
@@ -244,6 +248,20 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
   // Newest first, under the box you write in; past the latest few, the older ones
   // fold away behind a toggle (Derek, 2026-09-11: "as the comments get longer can
   // we toggle the older ones ... newest at the top").
+  // Replies sit under the comment they answer, oldest first; the list is of
+  // the comments themselves.
+  const comments = allComments.filter((c) => !c.parentId);
+  const repliesOf = (id: string) => allComments.filter((r) => r.parentId === id);
+  const [replyFor, setReplyFor] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [replying, setReplying] = useState(false);
+  const sendReply = async (parentId: string) => {
+    if (!onReply || !replyText.trim() || replying) return;
+    setReplying(true);
+    const ok = await onReply(parentId, replyText.trim());
+    setReplying(false);
+    if (ok) { setReplyText(""); setReplyFor(null); }
+  };
   const newestFirst = [...comments].reverse();
   // Done comments fold away on their own, behind their own toggle (Derek,
   // 2026-09-11: "hide done comments?"); the latest few rule counts open ones.
@@ -395,8 +413,37 @@ export function CommentThread({ comments, onPost, when, viewer, buttonStyle, isM
           )}
           {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
           {/* Very small on purpose (Derek, 2026-09-14), an exception to the 16px rule. */}
-          <p className="mt-0.5 text-[13px] text-muted">{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</p>
+          <p className="mt-0.5 flex items-center gap-3 text-[13px] text-muted">
+            <span>{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
+            {onReply && <button onClick={() => { setReplyFor(replyFor === c.id ? null : c.id); setReplyText(""); }} className="text-[16px] font-semibold text-accent hover:underline">Reply</button>}
+          </p>
           {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
+          {repliesOf(c.id).length > 0 && (
+            <ul className="mt-2 space-y-2 border-l-2 pl-3">
+              {repliesOf(c.id).map((r) => (
+                <li key={r.id} className="text-[16px]">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">{r.authorLabel || (r.fromClient ? "Client" : "Team")}</span>
+                    <span className="text-[13px] text-muted">{when(r.createdAt)}</span>
+                    {canDelete(r) && <button onClick={() => void act(r.id, () => onDelete(r.id))} className="ml-auto text-[13px] text-muted hover:text-danger">Delete</button>}
+                  </div>
+                  <p className="whitespace-pre-wrap break-words leading-relaxed">{r.body}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {replyFor === c.id && (
+            <div className="mt-2">
+              <textarea value={replyText} onChange={(e) => setReplyText(e.target.value)} rows={2} maxLength={4000} autoFocus aria-label="Reply"
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void sendReply(c.id); } if (e.key === "Escape") { e.stopPropagation(); setReplyFor(null); } }}
+                placeholder={viewer === "team" ? "Reply; they get it by email with a link back here" : "Write your reply"}
+                className="w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+              <div className="mt-1 flex gap-4 text-[16px]">
+                <button onClick={() => void sendReply(c.id)} disabled={replying || !replyText.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{replying ? "Sending…" : "Send reply"}</button>
+                <button onClick={() => setReplyFor(null)} className="text-muted hover:underline">Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       </li>
     );

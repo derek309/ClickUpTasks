@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!o.ok) return o.res;
   const { scope, payload } = o;
   const r = await postDocComment(scope.documentId, payload.body, clientActor(scope), {
-    quote: payload.quote, pin: payload.pin, attachmentFileId: payload.attachmentFileId, clientSide: true,
+    quote: payload.quote, pin: payload.pin, attachmentFileId: payload.attachmentFileId, clientSide: true, parentId: payload.parentId,
   });
   if (!r.ok) return json({ error: r.error }, r.status);
 

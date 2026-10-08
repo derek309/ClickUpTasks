@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminConfigured } from "@/lib/supabaseAdmin";
+import { adminConfigured, supabaseAdmin } from "@/lib/supabaseAdmin";
 import { teamDocument, memberLabel, NO_STORE } from "@/lib/taskDocumentServer";
 import { postDocComment, editDocComment, deleteDocComment, pinImageName } from "@/lib/taskDocumentFiles";
 import { emailClientAboutComment } from "@/lib/docClientEmail";
@@ -17,7 +17,7 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
   const { id } = await params;
   const found = await teamDocument(req, id);
   if (!found.ok) return found;
-  const payload = (await req.json().catch(() => null) ?? {}) as { body?: unknown; commentId?: unknown; done?: unknown; quote?: unknown; pin?: unknown; attachmentFileId?: unknown };
+  const payload = (await req.json().catch(() => null) ?? {}) as { body?: unknown; commentId?: unknown; done?: unknown; quote?: unknown; pin?: unknown; attachmentFileId?: unknown; parentId?: unknown };
   const user = found.user;
   return { ok: true as const, documentId: found.doc.id, payload, user, task: found.task, actor: { id: user.memberId ?? user.id, label: await memberLabel(user) } };
 }
@@ -26,12 +26,16 @@ async function open(req: NextRequest, params: Promise<{ id: string }>) {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const o = await open(req, params);
   if (!o.ok) return o.res;
-  const r = await postDocComment(o.documentId, o.payload.body, o.actor, { quote: o.payload.quote, pin: o.payload.pin, attachmentFileId: o.payload.attachmentFileId });
+  const r = await postDocComment(o.documentId, o.payload.body, o.actor, { quote: o.payload.quote, pin: o.payload.pin, attachmentFileId: o.payload.attachmentFileId, parentId: o.payload.parentId });
   if (!r.ok) return json({ error: r.error }, r.status);
+  // A reply quotes what it answers, and is only emailed when the client wrote that.
+  const { data: parent } = r.comment.parentId ? await supabaseAdmin.from("task_document_comments").select("body, author_id").eq("id", r.comment.parentId).maybeSingle() : { data: null };
+  if (parent && parent.author_id !== null) return json({ comment: r.comment, emailedClient: false });
   const emailedClient = await emailClientAboutComment({
     user: o.user, task: o.task, documentId: o.documentId, comment: r.comment.body || "Added a file.",
     quote: r.comment.quote, pinNumber: r.comment.pin?.number ?? null, origin: req.nextUrl.origin,
     pinLabel: r.comment.pin ? await pinImageName(o.documentId, r.comment.pin.fileId) : null,
+    replyTo: parent ? (parent.body as string) || "your comment" : null,
   }).catch(() => false);
   return json({ comment: r.comment, emailedClient });
 }

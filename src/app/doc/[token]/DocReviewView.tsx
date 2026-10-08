@@ -301,6 +301,19 @@ export default function DocReviewView({ token, back = null }: { token: string; b
   };
 
   // A comment shows at once; the 15 second refresh brings the team's replies.
+  // Their reply under one of our comments (Derek, 2026-10-08).
+  const postReply = async (parentId: string, body: string) => {
+    try {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/comments`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body, parentId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 404) { setState("gone"); return false; }
+      if (!res.ok) { setNotice({ tone: "warn", text: (j as { error?: string }).error ?? "We couldn't send your reply. Please try again." }); return false; }
+      setData((d) => d ? { ...d, comments: [...(d.comments ?? []), j.comment as ThreadComment] } : d);
+      return true;
+    } catch { setNotice({ tone: "warn", text: "We couldn't send your reply. Please try again." }); return false; }
+  };
   const postComment = async (body: string, quote?: string | null, attachmentFileId?: string | null) => {
     const pin = !versioned || !pinDraft ? null
       : pinDraft.t !== null
@@ -709,7 +722,7 @@ export default function DocReviewView({ token, back = null }: { token: string; b
                     )}
                   </FileDropLine>
                 )}
-                <CommentThread comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
+                <CommentThread onReply={data.closed ? undefined : postReply} comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
                   pinLabel={versioned ? imagePlace : undefined} pinGroups={versioned && shownImages.length > 1 ? shownImages.map((img) => img.label) : image ? shownImages.map((img) => img.label) : undefined}
                   alignGroup={versioned ? (label) => {
                     const img = shownImages.find((x) => x.label === label);
