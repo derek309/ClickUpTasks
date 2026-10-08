@@ -776,11 +776,11 @@ export function ActionDock({
                       {/* Email is a letter, so it opens the full email window. */}
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
                       {canMessageClient && <button onClick={() => openPanel("call")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Call</button>}
-                      {canMessageClient && <button onClick={() => openPanel("meeting")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Book a meeting</button>}
+                      {canMessageClient && <button onClick={() => openPanel("meeting")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Book</button>}
                       <span aria-hidden className="hidden h-4 w-px bg-border sm:inline-block" />
-                      <button onClick={() => openPanel("met")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Log a meeting</button>
-                      <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message a teammate</button>
-                      {users.some((u) => u.id !== me?.id) && <button onClick={() => openPanel("delegate")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Delegate</button>}
+                      <button onClick={() => openPanel("met")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Log meeting</button>
+                      <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message team</button>
+                      {users.some((u) => u.id !== me?.id) && <button onClick={() => openPanel("delegate")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Delegate task</button>}
                       <button onClick={() => openPanel("askTask")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>✦ Ask AI</button>
                     </div>
                   )}
