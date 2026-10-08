@@ -74,7 +74,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // to answer "did you do the thing" without turning the page into an
   // archive. Still never private tasks, and a project-scoped token still
   // only ever reaches its own project.
-  const DONE_LIMIT = 25;
+  // Enough history for the Done tab to look back on (monthly recurring tasks).
+  const DONE_LIMIT = 150;
   const [{ data: waiting }, { data: responded }, { data: deepLinked }, { data: allOpen }, { data: recentDone }] = await Promise.all([
     scopedTaskQuery().eq("waiting_on_client", true),
     scopedTaskQuery().not("client_response", "is", null),
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       ? scopedTaskQuery().neq("status", "done")
       : Promise.resolve({ data: [] as Row[] }),
     scope.showAllTasks
-      ? scopedTaskQuery().eq("status", "done").order("due", { ascending: false, nullsFirst: false }).limit(DONE_LIMIT)
+      ? scopedTaskQuery().eq("status", "done").order("updated_at", { ascending: false }).limit(DONE_LIMIT)
       : Promise.resolve({ data: [] as Row[] }),
   ]);
   const byId = new Map<string, Row>();

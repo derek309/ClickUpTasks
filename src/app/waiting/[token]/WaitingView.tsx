@@ -601,8 +601,11 @@ export default function WaitingView({ token }: { token: string }) {
   // What we need from them, or every task (Derek, 2026-10-07: "when they go it
   // only shows what we need from them and if they want they click a toggle to
   // see all tasks"). Unset until they pick: it opens on theirs when there is any.
-  const [view, setView] = useState<"theirs" | "all" | null>(null);
-  const [doneOpenIds, setDoneOpenIds] = useState<Set<string>>(new Set());
+  const [view, setView] = useState<"theirs" | "all" | "done" | null>(null);
+  // The Done tab: newest or oldest first, by month or by list (Derek,
+  // 2026-10-08: "so they can refer back, especially for recurring tasks").
+  const [doneSort, setDoneSort] = useState<"newest" | "oldest">("newest");
+  const [doneGroup, setDoneGroup] = useState<"month" | "list">("month");
   // "What we're working on" starts open (Derek, 2026-09-16: "default it open",
   // reversing 2026-08-26). A client can still fold it away.
   const [inProgressOpen, setInProgressOpen] = useState(true);
@@ -1132,41 +1135,33 @@ export default function WaitingView({ token }: { token: string }) {
                 const needCount = all.filter((t) => t.status !== "done" && t.needsResponse).length;
                 const progCount = all.filter((t) => t.status !== "done" && !t.needsResponse).length;
                 const doneAll = all.filter((t) => t.status === "done").length;
-                const pct = all.length ? Math.round((doneAll / all.length) * 100) : 0;
                 const lists = [...projects.map((p) => ({ id: p.id as string | null, name: p.name })), ...(all.some((t) => !projects.some((p) => p.id === t.projectId)) ? [{ id: null, name: "Other" }] : [])];
                 const inList = (id: string | null) => (t: WaitingTask) => (id ? t.projectId === id : !projects.some((p) => p.id === t.projectId));
                 const shown = tab === "all" ? lists : lists.filter((l) => (l.id ?? "__other__") === tab);
+                const inProgress = (t: WaitingTask) => t.status !== "done" && !t.needsResponse;
+                const activeLists = lists.filter((l) => all.some((t) => inList(l.id)(t) && inProgress(t)));
                 // A colour per list, so the sections tell apart at a glance
                 // (Derek, 2026-10-07: "each section a different color").
                 const LIST_COLORS = ["#2563eb", "#e8772e", "#16a34a", "#7c3aed", "#0891b2", "#db2777"];
                 const box = (l: { id: string | null; name: string }, single: boolean) => {
                   const color = LIST_COLORS[Math.max(0, lists.indexOf(l)) % LIST_COLORS.length];
                   const mine = all.filter(inList(l.id));
-                  const need = mine.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
                   const prog = mine.filter((t) => t.status !== "done" && !t.needsResponse).sort(sortFn);
                   const done = mine.filter((t) => t.status === "done").sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""));
                   const key = l.id ?? "__other__";
-                  const open = doneOpenIds.has(key);
                   const p2 = mine.length ? Math.round((done.length / mine.length) * 100) : 0;
                   return (
                     <div key={key} ref={l.id ? (el) => { groupRefs.current[`req-${l.id}`] = el; } : undefined} className="overflow-hidden rounded-[5px] border border-l-[6px] bg-surface shadow-[var(--shadow-sm)]" style={{ borderLeftColor: color }}>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3" style={{ background: `${color}14` }}>
                         <h2 className="text-[18px] font-bold">{single && lists.length === 1 ? "Your tasks" : l.name}</h2>
                         <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border"><span className="block h-full" style={{ width: `${p2}%`, background: color }} /></span>
-                        <span className="ml-auto text-[16px] text-muted">{need.length ? `${need.length} need${need.length === 1 ? "s" : ""} you · ` : ""}{done.length} of {mine.length} done</span>
+                        <span className="ml-auto text-[16px] text-muted">{prog.length} in progress · {done.length} of {mine.length} done</span>
                       </div>
+                      {/* What we're doing only: what needs them and what's done have
+                          their own tabs (Derek, 2026-10-08: "they don't need an all view"). */}
                       <div>
                         {tableHead}
-                        {need.map((t) => renderTaskRow(t))}
                         {prog.map((t) => renderTaskRow(t))}
-                        {!need.length && !prog.length && <div className="border-t px-4 py-3 text-[16px] text-muted">Nothing open here right now.</div>}
-                        {done.length > 0 && (
-                          <button onClick={() => setDoneOpenIds((m) => { const n = new Set(m); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
-                            className="flex w-full items-center gap-1.5 border-t px-4 py-2.5 text-[16px] font-semibold text-success hover:underline">
-                            <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`} aria-hidden>›</span>{open ? "Hide" : "Show"} {done.length} done
-                          </button>
-                        )}
-                        {open && done.map((t) => renderTaskRow(t))}
                       </div>
                     </div>
                   );
@@ -1174,8 +1169,8 @@ export default function WaitingView({ token }: { token: string }) {
                 const showing = view ?? (needCount ? "theirs" : "all");
                 const theirs = all.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
                 const toggle = all.length > 0 && (
-                  <div role="tablist" aria-label="Which tasks" className="grid grid-cols-2 gap-1 rounded-[5px] bg-border/60 p-1">
-                    {([["theirs", "What we need from you", needCount], ["all", "All tasks", all.length]] as const).map(([k, label, n]) => (
+                  <div role="tablist" aria-label="Which tasks" className="grid grid-cols-3 gap-1 rounded-[5px] bg-border/60 p-1">
+                    {([["theirs", "What we need from you", needCount], ["all", "What we're doing", progCount], ["done", "What's been done", doneAll]] as const).map(([k, label, n]) => (
                       <button key={k} role="tab" aria-selected={showing === k} onClick={() => setView(k)}
                         className={`flex h-11 items-center justify-center gap-2 rounded-[5px] px-3 text-[16px] font-bold ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
                         {label}<span className={`rounded-full px-2 text-[15px] ${k === "theirs" && n ? "bg-highlight text-white" : "bg-background text-muted"}`}>{n}</span>
@@ -1183,6 +1178,58 @@ export default function WaitingView({ token }: { token: string }) {
                     ))}
                   </div>
                 );
+                if (showing === "done") {
+                  const finished = all.filter((t) => t.status === "done");
+                  const when = (t: WaitingTask) => t.doneAt ?? t.due ?? "";
+                  finished.sort((a, b) => (doneSort === "newest" ? when(b).localeCompare(when(a)) : when(a).localeCompare(when(b))));
+                  const monthOf = (t: WaitingTask) => { const d = when(t); return d ? new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "Earlier"; };
+                  const groups: { key: string; items: WaitingTask[] }[] = [];
+                  for (const t of finished) {
+                    const key = doneGroup === "month" ? monthOf(t) : projectName(t.projectId) ?? "Other";
+                    const g = groups.find((x) => x.key === key);
+                    if (g) g.items.push(t); else groups.push({ key, items: [t] });
+                  }
+                  const pick = (on: boolean) => `h-10 rounded-[5px] px-3 text-[16px] font-semibold ${on ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`;
+                  return (
+                    <div className="space-y-4">
+                      {toggle}
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Order">
+                          <button onClick={() => setDoneSort("newest")} className={pick(doneSort === "newest")}>Newest first</button>
+                          <button onClick={() => setDoneSort("oldest")} className={pick(doneSort === "oldest")}>Oldest first</button>
+                        </div>
+                        {projects.length > 1 && (
+                          <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Group">
+                            <button onClick={() => setDoneGroup("month")} className={pick(doneGroup === "month")}>By month</button>
+                            <button onClick={() => setDoneGroup("list")} className={pick(doneGroup === "list")}>By list</button>
+                          </div>
+                        )}
+                      </div>
+                      {finished.length === 0 ? (
+                        <div className="rounded-[5px] border bg-surface px-5 py-4 text-[16px] text-muted">Nothing finished yet.</div>
+                      ) : groups.map((g) => (
+                        <div key={g.key} className="overflow-hidden rounded-[5px] border bg-surface shadow-[var(--shadow-sm)]">
+                          <div className="flex items-center gap-2 border-b bg-success-soft/50 px-4 py-2.5">
+                            <b className="text-[17px]">{g.key}</b>
+                            <span className="text-[16px] text-muted">{g.items.length} done</span>
+                          </div>
+                          {g.items.map((t) => (
+                            <button key={t.id} onClick={() => openTask(t.id)}
+                              className="flex w-full items-center gap-3 border-t px-4 py-3 text-left first:border-t-0 hover:bg-background">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-success text-[13px] font-bold text-white">✓</span>
+                              <span className="min-w-0 flex-1">
+                                <b className="block break-words text-[17px] font-semibold">{t.title}</b>
+                                {doneGroup === "month" && projects.length > 1 && projectName(t.projectId) && <span className="text-[16px] text-muted">{projectName(t.projectId)}</span>}
+                              </span>
+                              <span className="shrink-0 text-[16px] text-muted">{when(t) ? shortDate(when(t).slice(0, 10)) : ""}</span>
+                              <span className="text-muted" aria-hidden>›</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
                 if (showing === "theirs") return (
                   <div className="space-y-4">
                     {toggle}
@@ -1227,18 +1274,9 @@ export default function WaitingView({ token }: { token: string }) {
                 return (
                   <div className="space-y-4">
                     {toggle}
-                    <div className="grid gap-3 rounded-[5px] border bg-surface p-4 shadow-[var(--shadow-sm)]">
-                      <div className="flex items-baseline justify-between gap-2"><b className="text-[18px]">{doneAll} of {all.length} done</b><span className="text-[16px] text-muted">{pct}%</span></div>
-                      <div className="h-2 overflow-hidden rounded-full bg-border"><div className="h-full bg-success" style={{ width: `${pct}%` }} /></div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-highlight">{needCount}</b><span className="text-[16px] text-muted">Need you</span></div>
-                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight">{progCount}</b><span className="text-[16px] text-muted">In progress</span></div>
-                        <div className="rounded-[5px] bg-background px-3 py-2"><b className="block text-[22px] leading-tight text-success">{doneAll}</b><span className="text-[16px] text-muted">Done</span></div>
-                      </div>
-                    </div>
-                    {lists.length > 1 && (
+                    {activeLists.length > 1 && (
                       <div className="flex gap-1 overflow-x-auto border-b">
-                        {[{ key: "all", name: "All", count: all.length }, ...lists.map((l) => ({ key: l.id ?? "__other__", name: l.name, count: all.filter(inList(l.id)).length }))].map((x) => (
+                        {[{ key: "all", name: "All", count: progCount }, ...activeLists.map((l) => ({ key: l.id ?? "__other__", name: l.name, count: all.filter(inList(l.id)).filter(inProgress).length }))].map((x) => (
                           <button key={x.key} onClick={() => setTab(x.key)}
                             className={`shrink-0 border-b-2 px-3 py-2 text-[16px] font-semibold ${tab === x.key ? "border-accent text-accent" : "border-transparent text-muted hover:text-foreground"}`}>
                             {x.name} <span className="font-normal text-muted">{x.count}</span>
@@ -1246,7 +1284,7 @@ export default function WaitingView({ token }: { token: string }) {
                         ))}
                       </div>
                     )}
-                    {all.length === 0 ? emptyState : shown.map((l) => box(l, tab !== "all"))}
+                    {all.length === 0 ? emptyState : !progCount ? <div className="rounded-[5px] border bg-surface px-5 py-4 text-[16px] text-muted">Nothing in progress with us right now.</div> : shown.filter((l) => activeLists.includes(l)).map((l) => box(l, tab !== "all"))}
                   </div>
                 );
               })()}
