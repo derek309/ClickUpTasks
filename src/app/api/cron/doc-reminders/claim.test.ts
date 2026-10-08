@@ -13,7 +13,7 @@ function query(table: string) {
   calls.push(call);
   const q: Record<string, unknown> = {};
   const chain = (...names: string[]) => names.forEach((n) => { q[n] = (...a: unknown[]) => { if (n === "eq" || n === "is" || n === "gt") call.filters.push([n, a[0] as string, a[1]]); return q; }; });
-  chain("eq", "is", "gt", "order", "limit");
+  chain("eq", "is", "gt", "order", "limit", "like");
   q.select = () => q;
   q.update = (payload: unknown) => { call.op = "update"; call.payload = payload; return q; };
   q.insert = async (payload: unknown) => { call.op = "insert"; call.payload = payload; return { error: state.insertError }; };

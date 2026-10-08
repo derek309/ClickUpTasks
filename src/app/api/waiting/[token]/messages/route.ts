@@ -59,12 +59,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // What they wrote goes on the task's checklist as one of their changes, so
   // it can be ticked off here and they see it done on their page (Derek,
   // 2026-10-07). A few words of thanks are not a change.
+  if (Object.keys(patch).length) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   const firstLine = text.split(/\n/).map((x) => x.trim()).find(Boolean) ?? "";
   if (firstLine.split(/\s+/).length >= 4) {
-    const list = Array.isArray(task.subtasks) ? task.subtasks : [];
-    patch.subtasks = [...list, { id: "s_" + randomUUID().replace(/-/g, "").slice(0, 12), title: firstLine.slice(0, 200), done: false, fromClient: true }];
+    // Appended against the list as it is now, and only while nobody else has
+    // changed the task since it was read, so a teammate's checklist edit at
+    // the same moment is never lost (audit 2026-10-07). A few tries, then
+    // left: the message itself is already saved. At most 50 of theirs.
+    const item = { id: "s_" + randomUUID().replace(/-/g, "").slice(0, 12), title: firstLine.slice(0, 200), done: false, fromClient: true };
+    for (let tries = 0; tries < 4; tries++) {
+      const { data: cur } = await supabaseAdmin.from("tasks").select("subtasks, updated_at").eq("id", taskId).maybeSingle();
+      const list = Array.isArray(cur?.subtasks) ? (cur!.subtasks as { fromClient?: boolean }[]) : [];
+      if (list.filter((x) => x.fromClient).length >= 50) break;
+      const { data: done } = await supabaseAdmin.from("tasks").update({ subtasks: [...list, item], updated_by: null })
+        .eq("id", taskId).eq("updated_at", cur?.updated_at as string).select("id");
+      if (done?.length) break;
+    }
   }
-  if (Object.keys(patch).length) await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({
       notifyRecipient, clientId: scope.clientId, taskId, projectId: task.project_id ?? null,

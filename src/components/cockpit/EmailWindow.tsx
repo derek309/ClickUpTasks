@@ -424,7 +424,7 @@ export function EmailWindow({
               <button onClick={send} disabled={!!cannotSend} title={cannotSend}
                 className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">Send</button>
               {followUp && onSend && (
-                <label className="inline-flex items-center gap-1.5 text-[16px] text-muted" title="The task waits on them, and comes back with a reminder to them on that day">
+                <label className="inline-flex items-center gap-1.5 text-[16px] text-muted" title="The task waits on them and comes back to you that day; it joins their Monday reminder email">
                   Follow up in
                   <select value={followUpDays ?? "none"} onChange={(e) => { const v = e.target.value === "none" ? null : Number(e.target.value); setFollowUpDays(v); try { localStorage.setItem(FOLLOW_UP_KEY, v === null ? "none" : String(v)); } catch { /* not kept */ } }}
                     className="rounded-md border bg-surface px-2 py-1.5 text-[16px] font-semibold text-foreground outline-none focus:border-accent">

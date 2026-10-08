@@ -115,7 +115,12 @@ async function run(req: NextRequest, days: number, only: string | null, all = fa
       // Only what isn't stored yet.
       const { data: had } = await supabaseAdmin.from("messages").select("gmail_message_id").in("gmail_message_id", emails.map((em) => em.gmailId));
       const stored = new Set((had ?? []).map((r: any) => r.gmail_message_id as string));
-      emails = emails.filter((em) => !stored.has(em.gmailId));
+      // Blocked senders and replies to a mention email are never stored as
+      // a message, so they'd pass this every minute and cost a full contacts
+      // read each time; the 5 minute run handles them (audit 2026-10-07).
+      const blocked = memberId ? blocksBy.get(memberId) ?? [] : [];
+      const mention = await tasksForMentionThreads(emails.map((em) => em.threadId));
+      emails = emails.filter((em) => !stored.has(em.gmailId) && !isBlocked(em.fromEmail, blocked) && !(em.threadId && mention.has(em.threadId)));
     }
     if (quick && !emails.length) continue;
     if (memberId && !(only && !all) && !quick) {

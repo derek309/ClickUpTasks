@@ -116,6 +116,11 @@ async function run(req: NextRequest) {
     // row still holds what this run read, so a second run at the same time (an
     // admin pressing the route while the cron runs) matches nothing and queues
     // nothing.
+    // One waiting at a time: while the last one sits unreviewed in the Inbox,
+    // another would pile up behind it and count as sent (audit 2026-10-07).
+    const { data: waitingOne } = await supabaseAdmin.from("scheduled_messages").select("id")
+      .like("id", `${REMINDER_MESSAGE_PREFIX}%`).eq("task_id", task.id).eq("status", REVIEW_STATUS).limit(1);
+    if (waitingOne?.length) continue;
     const count = decision.sentThisRound + 1;
     const previous = { reminders_sent: Number(doc.reminders_sent ?? 0), last_reminder_at: (doc.last_reminder_at as string | null) ?? null };
     const claim = supabaseAdmin.from("task_documents").update({ reminders_sent: count, last_reminder_at: now })
@@ -140,7 +145,7 @@ async function run(req: NextRequest) {
     if (count >= MAX_REMINDERS) {
       await supabaseAdmin.from("notifications").insert({
         id: "n_" + randomUUID(), recipient_id: owner,
-        text: `${MAX_REMINDERS} reminders have gone to the client about "${name}", in your name, and it is still not approved. Restart the reminders on the review if you want another round.`,
+        text: `${MAX_REMINDERS} reminders about "${name}" have been written for the client, and it is still not approved. Send any still waiting in your Inbox, or restart the reminders on the review for another round.`,
         task_id: task.id, actor_id: null, client_id: task.client_id, project_id: task.project_id,
         at: now, read: false, kind: "activity",
       });

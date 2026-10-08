@@ -46,10 +46,12 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
   // "outbound" half of the Chat tab's Messages view; the webhook (see
   // src/app/api/ghl/webhook/route.ts) covers inbound replies, so together
   // the two capture a full two-way conversation with no gap and no polling.
-  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null) => {
-    if (!body.trim()) return;
+  // True once it went: a caller that throws something away after a send
+  // (a queued Claude draft) waits for this, not just for the call to end.
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null): Promise<boolean> => {
+    if (!body.trim()) return false;
     const contact = contactForClient(clientId);
-    if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return; }
+    if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return false; }
     // Chat needs neither GHL nor Gmail — it's just a `messages` row the
     // client sees on their own /waiting/[token] page (picked up by the
     // page's own polling), not something delivered through either provider.
@@ -76,7 +78,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       } finally {
         setSendingMessage(false);
       }
-      return;
+      return true;
     }
     // A reply goes to whoever wrote the email being answered, not the client's
     // main contact (answering Russell on Matthew's task went to Matthew,
@@ -86,7 +88,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
     const replyPeer = answering && answering.channel === "email" && answering.clientId === clientId && peerEmail.includes("@") && !peerEmail.endsWith("@clickuplocal.com") ? peerEmail : null;
     const toEmail = replyPeer ?? contact.email;
     const target = ghlTargetForContact(contact);
-    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return; }
+    if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return false; }
     // Cc/Bcc are an email-only concept — never carry them onto an SMS send.
     const emailCc = channel === "email" ? cc : [];
     const emailBcc = channel === "email" ? bcc : [];
@@ -105,7 +107,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
         });
         if (gres.status !== 501) {
           const gj = await gres.json().catch(() => ({}));
-          if (!gres.ok || gj.error) { pushToast(gj.error || "Failed to send email."); return; }
+          if (!gres.ok || gj.error) { pushToast(gj.error || "Failed to send email."); return false; }
           // The send succeeded but something did not go with it. Said out
           // loud, because an email that quietly leaves the screenshot behind
           // is worse than one that fails.
@@ -121,7 +123,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
           setMessages((ms) => [...ms, gm]);
           insertMessage(gm);
           if (taskId) onAnswered?.(taskId);
-          return;
+          return true;
         }
         // 501 → fall through to the GHL path below.
       }
@@ -129,7 +131,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       // reply that was meant for someone else on the thread.
       if (replyPeer && replyPeer !== (contact.email ?? "").trim().toLowerCase()) {
         pushToast(`This reply is to ${replyPeer}, and only an email from your own ClickUpLocal address can reach them.`);
-        return;
+        return false;
       }
       // GHL fetches attachments itself from a URL rather than accepting an
       // upload — an hour is ample time for that fetch, without leaving the
@@ -140,7 +142,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
         body: JSON.stringify({ clientId, locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, isHtml: channel === "email", attachments: attachmentUrls, cc: emailCc, bcc: emailBcc, replyToMessageId }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return; }
+      if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return false; }
       const m: Message = {
         id: newId("msg_"), contactId: contact.id, clientId, taskId, channel, direction: "outbound",
         subject: channel === "email" && subject.trim() ? subject.trim() : null, body,
@@ -150,8 +152,10 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       setMessages((ms) => [...ms, m]);
       insertMessage(m);
       if (taskId) onAnswered?.(taskId);
+      return true;
     } catch {
       pushToast("Failed to send message.");
+      return false;
     } finally {
       setSendingMessage(false);
     }

@@ -1833,7 +1833,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { prefs: inboxPrefs, setPrefs: setInboxPrefs } = useInboxPrefs(me.id);
   // A Claude draft opened from the client's page leaves the Inbox's queue once it goes.
   const afterQueuedSend = <T,>(queuedId: string | undefined, sent: T): T => {
-    if (queuedId) void Promise.resolve(sent).then(() => setInboxPrefs({ queuedDrafts: (inboxPrefs.queuedDrafts ?? []).filter((x) => x.id !== queuedId) }), () => {});
+    // Only once it actually went (audit 2026-10-07: a failed send dropped it too).
+    if (queuedId) void Promise.resolve(sent).then((ok) => { if (ok === true) setInboxPrefs({ queuedDrafts: (inboxPrefs.queuedDrafts ?? []).filter((x) => x.id !== queuedId) }); }, () => {});
     return sent;
   };
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);

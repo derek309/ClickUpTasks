@@ -5,7 +5,7 @@ import { authorizeCron } from "@/lib/cronAuth";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveContact } from "@/lib/sendMessageServer";
 import { APP_URL } from "@/lib/appUrl";
-import { addBusinessDaysIso, subtractBusinessDaysIso, todayPacific } from "@/lib/data";
+import { subtractBusinessDaysIso, todayPacific } from "@/lib/data";
 import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX, REMINDER_GAP_BUSINESS_DAYS, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -67,6 +67,9 @@ async function run(req: NextRequest) {
     const gapStart = new Date(`${subtractBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS - 1)}T00:00:00-08:00`).toISOString();
     const { data: sent } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).gte("scheduled_at", gapStart < startOfDay ? gapStart : startOfDay).limit(1);
     if (sent?.length) { tally.alreadyToday++; continue; }
+    // Last week's still waiting for review: not a second one (audit 2026-10-07).
+    const { data: open } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).eq("status", REVIEW_STATUS).limit(1);
+    if (open?.length) { tally.alreadyToday++; continue; }
 
     const { data: working } = client.portal_shows_all_tasks
       ? await supabaseAdmin.from("tasks").select("title, due").eq("client_id", clientId).eq("waiting_on_client", false).neq("status", "done").eq("is_private", false).is("deleted_at", null).order("due", { ascending: true, nullsFirst: false }).limit(20)
@@ -91,12 +94,7 @@ async function run(req: NextRequest) {
       id: PORTAL_REMINDER_PREFIX + randomUUID(), client_id: clientId, task_id: null, channel: "email",
       subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: REVIEW_STATUS, created_by: owner,
     });
-    if (!qErr) {
-      tally.queued++;
-      // Their follow ups move on by the same gap, so the next nudge waits too.
-      const ids = followUpDue.filter((t) => t.client_id === clientId).map((t) => t.id);
-      if (ids.length) await supabaseAdmin.from("tasks").update({ follow_up_at: addBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS), updated_by: null }).in("id", ids);
-    }
+    if (!qErr) tally.queued++;
   }
   const out = { ok: true, dry, ...tally, ...(dry ? { previews } : {}) };
   console.log("[cron/portal-reminders]", JSON.stringify({ ...out, previews: undefined }));

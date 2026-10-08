@@ -35,6 +35,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const { data: task } = await supabaseAdmin.from("tasks").select("*").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
   if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (task.status === "done") return NextResponse.json({ error: "This item has already been completed." }, { status: 400 });
+  // A client says done only to what is with them, and a task with a doc is
+  // approved inside the doc (audit 2026-10-07: a direct call could finish the
+  // team's own tasks, or skip the doc).
+  if (status === "done") {
+    const withThem = task.waiting_on_client === true || ["waiting", "review", "changes_requested"].includes(task.status as string);
+    if (!withThem) return NextResponse.json({ error: "This one is still with our team." }, { status: 400 });
+    const { data: doc } = await supabaseAdmin.from("task_documents").select("id, status").eq("task_id", taskId).eq("kind", "doc").is("deleted_at", null).maybeSingle();
+    if (doc && doc.status !== "approved" && doc.status !== "completed") return NextResponse.json({ error: "Please approve the document instead." }, { status: 400 });
+  }
 
   // The task's own owner first, same as respond/route.ts: waiting keeps the
   // assignee, so only a task nobody owns falls back to the client's followers.
