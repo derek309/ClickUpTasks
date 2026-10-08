@@ -2773,7 +2773,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     left them only on the client's own page). */}
                 {clientView && (
                   <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
-                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)} />
+                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)}
+                    onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
@@ -2806,7 +2807,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {/* Quick links in the name row (header G), not a row of their own. */}
                 {clientView && (
                   <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
-                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)} />
+                    onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)}
+                    onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}
                 {clientLate.length > 0 && (
                   <button onClick={() => setOpenTaskId(clientLate[0].id)} title={`Open the oldest: ${clientLate[0].title}`}
@@ -2965,6 +2967,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onEdit={(link) => setLinkModal({ initial: link })}
             onDelete={deleteLink}
             onReorder={(ids) => reorderLinks(activeClient, ids)}
+            onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })}
           />
         )}
 
