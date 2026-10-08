@@ -33,6 +33,7 @@ import { DraftEmail } from "./DraftEmail";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
+import { QuickLinksBar } from "./ClientLinks";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
@@ -1739,6 +1740,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <span className="shrink-0">/</span>
             <button onClick={onRenameProject} title="Rename list" className="-mx-1 truncate rounded px-1 hover:bg-background hover:text-foreground hover:underline">{project.name}</button>
           </span>
+          {/* The client's quick links, as on their page, in reach from any of
+              their tasks (Derek, 2026-10-08). Edited on the client's page. */}
+          {!!clientLinks?.length && (
+            <QuickLinksBar inline links={clientLinks} canEdit={false} onEdit={() => {}} onDelete={() => {}} onReorder={() => {}} />
+          )}
           <div className="ml-auto flex items-center gap-1">
             {navTotal > 1 && (
               <div className="mr-1 flex items-center">
