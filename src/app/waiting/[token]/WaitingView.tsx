@@ -1209,7 +1209,8 @@ export default function WaitingView({ token }: { token: string }) {
                       <div className="grid gap-3">
                         {theirs.map((t) => (
                           <button key={t.id} onClick={() => openTask(t.id, t.review)} disabled={goingTo === t.id}
-                            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[5px] border border-l-[6px] border-l-highlight bg-surface px-5 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60">
+                            style={{ borderLeftColor: "var(--highlight)" }}
+                            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[5px] border border-l-[6px] bg-surface px-5 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60">
                             <div className="min-w-0 flex-1">
                               <b className="block text-[18px]">{t.title}</b>
                               <span className="text-[16px] text-muted">{[t.due ? `Due ${shortDate(t.due)}` : null, projects.length > 1 ? projectName(t.projectId) : null].filter(Boolean).join(" · ")}</span>
