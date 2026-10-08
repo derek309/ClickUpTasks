@@ -28,6 +28,9 @@ import { createReviewServices } from "@/lib/mcpReviewServices";
 import { createCalendarServices } from "@/lib/mcpCalendarServices";
 import { sameSecret } from "@/lib/sameSecret";
 import { memberForClaudeToken } from "@/lib/claudeCodeAccess";
+import { visibleClientIds } from "@/lib/extensionApi";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import type { AuthedUser } from "@/lib/serverAuth";
 
 function json(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -57,10 +60,19 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
   if (req.method === "GET") return new Response(null, { status: 405, headers: { Allow: "POST, DELETE" } });
 
   const memberId = personal || process.env.CLICKUPTASKS_MEMBER_ID || "u_claude";
+  // A teammate's own token sees what they see in the app: their role, and the
+  // clients visibleClientIds allows them (audit 2026-10-07).
+  let role = "admin";
+  let visibleClients: "all" | Set<string> = "all";
+  if (personal) {
+    const { data: prof } = await supabaseAdmin.from("profiles").select("role").eq("member_id", personal).maybeSingle();
+    role = (prof?.role as string | undefined) ?? "va";
+    visibleClients = await visibleClientIds({ role, memberId: personal } as unknown as AuthedUser);
+  }
   const server = createServer({
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
     key: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    memberId,
+    memberId, role, visibleClients,
     // The review tools run the app's own review code, so only this server has them.
     // Calendar tools (lib/mcpCalendarServices) ride on the same gate.
     services: { ...createReviewServices({ memberId }), ...createCalendarServices({ memberId }) },

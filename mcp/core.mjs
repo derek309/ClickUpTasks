@@ -116,7 +116,8 @@ export function docHtmlToText(html) {
 }
 
 /**
- * @param {{ url?: string, key?: string, memberId?: string, services?: object }} [opts]
+ * @param {{ url?: string, key?: string, memberId?: string, services?: object, role?: string, visibleClients?: "all" | Set<string> }} [opts]
+ *   role and visibleClients: a teammate's own token sees what they see in the app.
  *   Falls back to CLICKUPTASKS_URL/CLICKUPTASKS_KEY/CLICKUPTASKS_MEMBER_ID
  *   env vars when omitted (the stdio server's original behavior). services: the
  *   app's review code (src/lib/mcpReviewServices.ts); the review tools exist only
@@ -146,6 +147,16 @@ export function createServer(opts = {}) {
     ...(t.attachments || []).filter((a) => a.path).map((a) => ({ ...a, where: "task" })),
     ...(t.comments || []).flatMap((c) => (c.attachments || []).filter((a) => a.path).map((a) => ({ ...a, where: "comment" }))),
   ];
+  /** A stored path that belongs to this task: its own folder, the client's
+   *  portal uploads for it, or the shared comment and client message images.
+   *  Nothing with a dot segment, backslash or encoded character. */
+  function fileOfTask(path, t) {
+    if (typeof path !== "string" || !path || path.length > 500) return false;
+    if (/[\\%]/.test(path) || path.startsWith("/")) return false;
+    if (path.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) return false;
+    return path.startsWith(`${t.id}/`) || path.startsWith(`waiting/${t.client_id}/`)
+      || path.startsWith(`messages/${t.client_id}/`) || /^comments\/[^/]+$/.test(path);
+  }
   async function signedFileUrl(path, seconds = 3600) {
     const res = await fetch(`${URL}/storage/v1/object/sign/${TASK_FILES}/${path.split("/").map(enc).join("/")}`, { method: "POST", headers: H, body: JSON.stringify({ expiresIn: seconds }) });
     const j = res.ok ? await res.json() : null;
@@ -162,11 +173,17 @@ export function createServer(opts = {}) {
   // pseudo-client, so without this a client listing there returns the whole
   // team's private work.
   const LIVE = "&deleted_at=is.null";
-  const maySee = (t) => !!t && !t.deleted_at && (!t.is_private || t.assignee_id === ME);
+  // And, for a teammate on their own token, only the clients they can see in
+  // the app (visibleClientIds, src/lib/extensionApi.ts): "all" for an admin,
+  // Derek's shared connector and Claude. Admin only tools refuse others.
+  const VISIBLE = opts.visibleClients ?? "all";
+  const IS_ADMIN = (opts.role ?? "admin") === "admin";
+  const clientOk = (id) => VISIBLE === "all" || (typeof id === "string" && VISIBLE.has(id));
+  const maySee = (t) => !!t && !t.deleted_at && (t.is_private ? t.assignee_id === ME : clientOk(t.client_id));
   // Every task read goes through this, so no tool can forget either rule, and
   // every task write carries LIVE so a row trashed mid-call is not written to.
   async function loadTask(id, cols = "*") {
-    const select = cols === "*" ? "*" : `${cols},deleted_at,is_private,assignee_id`;
+    const select = cols === "*" ? "*" : `${cols},deleted_at,is_private,assignee_id,client_id`;
     const [t] = await sb(`tasks?select=${select}&id=eq.${enc(id)}${LIVE}`);
     return maySee(t) ? t : null;
   }
@@ -234,6 +251,21 @@ export function createServer(opts = {}) {
   const brief = (t) => `[${t.id}] ${t.title}\n  status: ${t.status} · priority: ${t.priority} · due: ${t.due || "—"}\n  client: ${clientNames[t.client_id] || t.client_id} · list: ${projectNames[t.project_id] || "—"}`;
 
   const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
+  // Every tool that names a client checks it against what this person can
+  // see, before the tool runs (audit 2026-10-07: a VA's token reached every
+  // client). Tools that take a task go through loadTask and maySee.
+  const ADMIN_ONLY = new Set(["add_client"]);
+  const registerTool = server.tool.bind(server);
+  server.tool = (name, ...rest) => {
+    const handler = rest[rest.length - 1];
+    rest[rest.length - 1] = async (args, extra) => {
+      if (ADMIN_ONLY.has(name) && !IS_ADMIN) return { content: [{ type: "text", text: `${name} is for admins.` }] };
+      const cid = args?.client_id;
+      if (cid && !clientOk(cid)) return { content: [{ type: "text", text: `No client ${cid}.` }] };
+      return handler(args, extra);
+    };
+    return registerTool(name, ...rest);
+  };
 
   server.tool("list_my_tasks",
     "List tasks assigned to you (or delegated to you via a checklist item). Filter by client name, status, priority. Excludes Done unless include_done. for_claude: true lists the tasks the team has put on Claude instead (work for you, the AI, to do: read each with get_task, do it, then comment and set its status).",
@@ -318,6 +350,10 @@ export function createServer(opts = {}) {
       const all = storedFiles(t);
       const f = all.find((a) => a.id === file) || all.find((a) => (a.name || "").toLowerCase() === file.toLowerCase());
       if (!f) return { content: [{ type: "text", text: `No file "${file}" on ${task_id}. Files: ${all.map((a) => `${a.name} (${a.id})`).join(", ") || "none"}.` }] };
+      // The path comes from the task's own JSON, which teammates can edit, and
+      // this reads with the service key: only that task's own folders, and no
+      // way out of them (audit 2026-10-07).
+      if (!fileOfTask(f.path, t)) return { content: [{ type: "text", text: `${f.name} is not stored with this task, so it can't be opened here.` }] };
       const ext = (f.name || f.path).split(".").pop().toLowerCase();
       const mimeType = IMAGE_TYPES[ext];
       if (mimeType) {
@@ -962,7 +998,7 @@ export function createServer(opts = {}) {
     {},
     async () => {
       await names();
-      const rows = await sb("clients?select=id,name&deleted_at=is.null&order=name");
+      const rows = (await sb("clients?select=id,name&deleted_at=is.null&order=name")).filter((c) => clientOk(c.id));
       return { content: [{ type: "text", text: rows.map((c) => `${c.name}  [${c.id}]`).join("\n") }] };
     });
 

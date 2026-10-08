@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { mintToken, tokenCryptoReady } from "@/lib/tokenCrypto";
+import { CLAUDE_CODE_TOKEN } from "@/lib/claudeCodeAccess";
 
 // Personal API tokens for external clients (the Gmail Chrome extension) that
 // can't do an interactive login — see requireApiToken in serverAuth.ts.
@@ -36,6 +37,9 @@ export async function POST(req: NextRequest) {
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Chrome extension";
+  // "Claude Code" is the token the Team switch makes, and the one the MCP
+  // accepts; only an admin turns it on (/api/team). Not self-service.
+  if (name.toLowerCase() === CLAUDE_CODE_TOKEN.toLowerCase()) return NextResponse.json({ error: "Claude Code access is turned on by an admin in Settings, Team." }, { status: 403 });
   const { raw, hash, enc } = mintToken("cut_");
   const id = "tok_" + randomUUID();
   const { error } = await supabaseAdmin.from("api_tokens").insert({ id, owner_id: caller.id, name, token_hash: hash, token_enc: enc });
