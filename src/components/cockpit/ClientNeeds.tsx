@@ -93,15 +93,16 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   // Our turn when their latest came after ours.
   const theirTurn = !!lastIn && (!lastOut || lastIn.at > lastOut.at);
   const last = !lastIn ? lastOut : !lastOut ? lastIn : lastIn.at > lastOut.at ? lastIn : lastOut;
-  const box = "flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5";
+  // One line each, the button inline: half the height (Derek, 2026-10-08).
+  const box = "flex min-w-0 items-center gap-3 rounded-lg px-3 py-1.5";
   const btn = "h-9 shrink-0 rounded-md bg-surface px-3 text-[15px] font-semibold ring-1 hover:bg-background";
   return (
     <div className="grid gap-2.5 sm:grid-cols-3">
       {/* Messages: their reply waiting on us, else when we last talked. */}
       <div className={`${box} ${theirTurn ? "bg-accent-soft" : "bg-background"}`}>
-        <div className="min-w-0 flex-1">
-          <b className={`block ${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
-          <span className="block truncate text-[14px] text-muted">{theirTurn ? lastIn!.preview : last ? (last === lastOut ? "You wrote last" : `${first} wrote last`) : `Say hello to ${first}`}</span>
+        <div className="min-w-0 flex-1 truncate">
+          <b className={`${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
+          <span className="text-[16px] text-muted"> · {theirTurn ? lastIn!.preview : last ? (last === lastOut ? "You wrote last" : `${first} wrote last`) : `Say hello to ${first}`}</span>
         </div>
         {allDrafts.length > 0 && (
           <span className="relative shrink-0">
@@ -113,7 +114,7 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
                 {allDrafts.map((d) => (
                   <button key={d.id} onClick={() => { setDraftsOpen(false); d.open(); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
                     <b className="block truncate font-semibold">{d.title}</b>
-                    <span className="block truncate text-[14px] text-muted">{d.where} · {shortDay(d.at)}</span>
+                    <span className="block truncate text-[16px] text-muted">{d.where} · {shortDay(d.at)}</span>
                   </button>
                 ))}
               </div>
@@ -126,16 +127,16 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
         </>}
       </div>
       <div className={`${box} ${waiting ? "bg-highlight-soft" : "bg-background"}`}>
-        <div className="min-w-0 flex-1">
-          <b className={`block ${waiting ? "text-highlight" : ""}`}>{waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`}</b>
-          <span className="block truncate text-[14px] text-muted">{oldestWaiting ?? "Ball's in our court"}</span>
+        <div className="min-w-0 flex-1 truncate">
+          <b className={`${waiting ? "text-highlight" : ""}`}>{waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`}</b>
+          <span className="text-[16px] text-muted"> · {oldestWaiting ?? "Ball's in our court"}</span>
         </div>
         {waiting > 0 && onRemind && <button onClick={onRemind} title="Email them what we're waiting on, with their page" className={`${btn} ring-highlight/40`}>Remind</button>}
       </div>
       <div className={`${box} bg-background`}>
-        <div className="min-w-0 flex-1">
-          <b className="block">{meeting === undefined ? "Meetings" : meeting ? "Next meeting" : "No meeting booked"}</b>
-          <span className="block truncate text-[14px] text-muted">{meeting === undefined ? "Reading the calendar…" : meeting ? `${when(meeting.start)}${meeting.calendarName ? ` · ${meeting.calendarName}` : ""}` : canBook ? "Book one or ask them to pick" : "Not in GoHighLevel yet"}</span>
+        <div className="min-w-0 flex-1 truncate">
+          <b>{meeting === undefined ? "Meetings" : meeting ? "Next meeting" : "No meeting booked"}</b>
+          <span className="text-[16px] text-muted"> · {meeting === undefined ? "Reading the calendar…" : meeting ? `${when(meeting.start)}${meeting.calendarName ? ` · ${meeting.calendarName}` : ""}` : canBook ? "Book one or ask them to pick" : "Not in GoHighLevel yet"}</span>
         </div>
         {onRequest && (
           <span className="relative shrink-0">

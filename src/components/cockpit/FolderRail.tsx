@@ -53,7 +53,15 @@ export function FolderRail({
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
   const [dragFolder, setDragFolder] = useState<string | null>(null);
   const [dragList, setDragList] = useState<string | null>(null);
-  const standalone = lists.filter((l) => !l.folderId).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  // A to Z (Derek, 2026-10-08), and one line: past VISIBLE the rest sit under
+  // More, with the open list always kept in view.
+  const standalone = lists.filter((l) => !l.folderId).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  const VISIBLE = 7;
+  const activeIdx = standalone.findIndex((l) => l.id === activeProject);
+  const shownLists = standalone.length <= VISIBLE + 1 ? standalone
+    : activeIdx >= VISIBLE ? [...standalone.slice(0, VISIBLE - 1), standalone[activeIdx]] : standalone.slice(0, VISIBLE);
+  const moreLists = standalone.filter((l) => !shownLists.includes(l));
+  const [moreOpen, setMoreOpen] = useState(false);
   const allActive = !activeFolder && !activeProject;
 
   // Drag-sort helpers — same splice-before-target idiom as QuickLinksBar.
@@ -75,11 +83,11 @@ export function FolderRail({
       draggable={canAdmin && !!drag} onDragStart={drag?.onDragStart}
       onDragOver={(e) => { if (canAdmin && drag) e.preventDefault(); }} onDrop={(e) => { if (drag) { e.preventDefault(); drag.onDrop(); } }}>
       <button onClick={onClick}
-        className={`inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[13px] font-medium ${active ? "border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
+        className={`group/chip inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[16px] font-medium ${active ? "is-active border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
         {label}
         {canAdmin && menuKey && (
           <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setMenu((m) => (m === menuKey ? null : menuKey)); }}
-            className="-mr-1 hidden rounded p-0.5 opacity-60 hover:opacity-100 sm:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
+            className="-mr-1 hidden rounded p-0.5 opacity-60 hover:opacity-100 sm:group-hover/chip:inline-block sm:group-[.is-active]/chip:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
         )}
       </button>
       {menu === menuKey && menuKey && (<>
@@ -94,13 +102,13 @@ export function FolderRail({
   );
 
   return (
-    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:flex-wrap lg:overflow-visible">
+    <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:overflow-visible">
       {chip(
         <>All{onCopyAllForClaude && (
           // The whole client for Claude, like ✳ on each list (Derek, 2026-10-07).
           <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onCopyAllForClaude(); }}
             title="Copy every list for Claude" aria-label="Copy every list for Claude"
-            className="-mr-0.5 rounded px-0.5 text-[14px] leading-none opacity-60 hover:opacity-100"><span aria-hidden>✳</span></span>
+            className="-mr-0.5 hidden rounded px-0.5 text-[14px] leading-none opacity-60 hover:opacity-100 group-hover/chip:inline group-[.is-active]/chip:inline"><span aria-hidden>✳</span></span>
         )}</>,
         allActive, onSelectAll)}
       {folders.map((f) => chip(
@@ -115,7 +123,7 @@ export function FolderRail({
         </>,
         { dim: dragFolder === f.id, onDragStart: () => setDragFolder(f.id), onDrop: () => dropFolder(f.id) },
       ))}
-      {standalone.map((l) => chip(
+      {shownLists.map((l) => chip(
         <>
           {l.name}
           {/* Copy for Claude on the tab, Pin under ⋮ (Derek, 2026-10-07: "flip
@@ -123,7 +131,7 @@ export function FolderRail({
           {onCopyListForClaude && (
             <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onCopyListForClaude(l.id); }}
               title="Copy for Claude" aria-label={`Copy ${l.name} for Claude`}
-              className="-mr-0.5 rounded px-0.5 text-[14px] leading-none opacity-60 hover:opacity-100"><span aria-hidden>✳</span></span>
+              className="-mr-0.5 hidden rounded px-0.5 text-[14px] leading-none opacity-60 hover:opacity-100 group-hover/chip:inline group-[.is-active]/chip:inline"><span aria-hidden>✳</span></span>
           )}
           {!canAdmin && (
             <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStarList(l.id); }}
@@ -144,6 +152,20 @@ export function FolderRail({
         </>,
         { dim: dragList === l.id, onDragStart: () => setDragList(l.id), onDrop: () => dropList(l.id) },
       ))}
+      {moreLists.length > 0 && (
+        <span className="relative inline-flex shrink-0">
+          <button onClick={() => setMoreOpen((v) => !v)} aria-expanded={moreOpen}
+            className="inline-flex items-center gap-1 rounded-[5px] border bg-surface px-3 py-1 text-[16px] font-medium text-muted hover:text-foreground">More {moreLists.length} ▾</button>
+          {moreOpen && (<>
+            <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+            <div className="absolute left-0 top-full z-40 mt-1 max-h-[60vh] w-56 overflow-y-auto rounded-lg border bg-surface p-1 shadow-soft-md">
+              {moreLists.map((l) => (
+                <button key={l.id} onClick={() => { setMoreOpen(false); onSelectList(l.id); }} className="block w-full rounded px-2 py-1.5 text-left text-[16px] hover:bg-background">{l.name}</button>
+              ))}
+            </div>
+          </>)}
+        </span>
+      )}
       {canAdmin && (
         <span className="ml-1 inline-flex shrink-0 gap-1">
           {FOLDERS_ON && <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>}

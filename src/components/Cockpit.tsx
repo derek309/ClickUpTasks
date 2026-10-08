@@ -2388,7 +2388,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientLate = clientView && clientById(activeClient)
     ? (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold" && !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""))
     : [];
-  const needsStrip = clientView && clientTab !== "chat" && clientById(activeClient) ? (() => {
+  // Not on ClickUpLocal's own projects: messages, waiting and meetings are
+  // about a client (Derek, 2026-10-08).
+  const needsStrip = clientView && clientTab !== "chat" && activeClient !== WORKSPACE_CLIENT_ID && clientById(activeClient) ? (() => {
           const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
           const ct = contactForClient(activeClient);
           const talk = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms")) : [];
@@ -2777,8 +2779,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}</h1>
               <p className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
-                <button onClick={() => goToView("dashboard")} className="hover:text-foreground hover:underline">Clients</button>
-                <span>›</span>
+                {/* One Clients, not two (Derek, 2026-10-08). */}
                 <button onClick={() => { setDirView("clients"); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setActiveProject(null); setOpenTaskId(null); }} className="hover:text-foreground hover:underline">Clients</button>
                 <span>›</span>
                 <button onClick={() => setActiveProject(null)} className="hover:text-foreground hover:underline">{clientById(activeClient)?.name}</button>

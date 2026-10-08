@@ -468,7 +468,9 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
                         </>)}
                       </span>
                       <button onClick={() => setEdit({ id: r.id, subject: r.subject, body: r.body })} className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Edit</button>
-                      <button onClick={() => p.onOpenClient(r.clientId)} className="h-10 rounded-lg px-3 font-semibold text-accent hover:bg-background">Open their tasks</button>
+                      {/* The task it's about, to check or change before it goes (Derek, 2026-10-08). */}
+                      {r.taskId && <AppLink href={taskHref(r.taskId)} onOpen={() => p.onOpenTask(r.taskId!, "Inbox")} className="inline-flex h-10 items-center rounded-lg px-3 font-semibold text-accent hover:bg-background">Open task</AppLink>}
+                      <AppLink href={clientHref(r.clientId)} onOpen={() => p.onOpenClient(r.clientId)} className="inline-flex h-10 items-center rounded-lg px-3 font-semibold text-accent hover:bg-background">Open their tasks</AppLink>
                       <span className="flex-1" />
                       <button disabled={busy === r.id} onClick={() => void act(r.id, "drop")} className="h-10 rounded-lg px-3 font-semibold text-muted hover:text-danger">Don&apos;t send</button>
                     </>)}
