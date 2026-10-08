@@ -1905,7 +1905,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     finally { setBusy(false); }
   };
   const [ownerOpen, setOwnerOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newList, setNewList] = useState("");
@@ -2030,7 +2029,14 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
           {/* Four boxes, one column (Derek, 2026-10-05, mockup
               https://claude.ai/artifact/7dKMyY11n8qXpwfpVM7Nhj, B): status, who
               it's on, due and follow up, each a click to change. */}
-          <b className="block text-[18px] leading-snug">{task.title}</b>
+          {/* The title opens the task; the broken link unlinks it (Derek,
+              2026-10-08: no Open task button, no menu). */}
+          <div className="flex items-start gap-2">
+            <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} title="Open task"
+              className="min-w-0 flex-1 text-[18px] font-bold leading-snug text-foreground hover:text-accent hover:underline">{task.title}</AppLink>
+            <button disabled={busy} onClick={() => unlink(task.id)} title="Unlink from this conversation" aria-label={`Unlink ${task.title}`}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-background hover:text-danger disabled:opacity-50"><BrokenLinkIcon /></button>
+          </div>
           {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
           <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
             <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
@@ -2096,19 +2102,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
               <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
                 className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
             </div>
-          </div>
-          <div className="mt-3 flex items-center gap-3 border-t pt-3">
-            <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} className={linkBtn}>Open task →</AppLink>
-            <span className="flex-1" />
-            <span className="relative">
-              <button onClick={() => setMoreOpen(!moreOpen)} title="More" aria-label="More" className="grid h-9 w-9 place-items-center rounded-md text-muted ring-1 ring-[var(--border)] hover:bg-background">⋯</button>
-              {moreOpen && (
-                <Menu right onClose={() => setMoreOpen(false)}>
-                  <button onClick={() => { setMoreOpen(false); p.onOpenTask(task.id, t.subject || t.peerName); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">Open task</button>
-                  <button disabled={busy} onClick={() => { setMoreOpen(false); unlink(task.id); }} className="block w-full rounded-md px-3 py-2 text-left text-danger hover:bg-background">Unlink from this conversation</button>
-                </Menu>
-              )}
-            </span>
           </div>
           {/* The other tasks on this conversation, then add one more. */}
           {others.length > 0 && (
@@ -2297,6 +2290,15 @@ function AppLink({ href, onOpen, children, ...rest }: { href: string; onOpen: ()
       e.preventDefault();
       onOpen();
     }}>{children}</a>
+  );
+}
+
+function BrokenLinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 15l-1.5 1.5a3.5 3.5 0 0 1-5-5L5 9" /><path d="M15 9l1.5-1.5a3.5 3.5 0 0 1 5 5L19 15" />
+      <path d="M8 3v3M3 8h3M16 21v-3M21 16h-3" />
+    </svg>
   );
 }
 
