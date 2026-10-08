@@ -56,7 +56,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (checkBack) synced.followUpAt = checkBack;
     // A new due date brings its follow up (followUpWithDue), unless this change sets one.
     const withDue = cur ? followUpWithDue(cur, synced) : undefined;
-    if (withDue) synced.followUpAt = withDue;
+    // null clears it: a due date this close needs no follow up.
+    if (withDue !== undefined) synced.followUpAt = withDue;
     // Recurrence also needs its own copy, for the same reason — dragging a
     // recurring task into a done-flagged Kanban stage went through here, not
     // patchTask, so it was marking the task done with no next occurrence
@@ -191,7 +192,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     const checkBack = waitingFollowUp(before, synced);
     if (checkBack) synced.followUpAt = checkBack;
     const withDue = followUpWithDue(before, synced);
-    if (withDue) synced.followUpAt = withDue;
+    if (withDue !== undefined) synced.followUpAt = withDue;
     const events = describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
     const updated: Task = { ...before, ...synced, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;

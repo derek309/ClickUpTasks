@@ -32,22 +32,20 @@ export function addDaysIso(iso: string, days: number): string {
 }
 export const TOMORROW = addDaysIso(TODAY, 1);
 
-/** When to follow up on a task due `due` (Derek, 2026-10-05: a follow up goes
- *  with every due date, as a reminder): 3 days before when it is further out
- *  than that, else the day before, never earlier than today. A follow up in
- *  the future keeps the task quiet until then (isSnoozed), so this is the day
- *  it comes back to you. */
-export function followUpForDue(due: string, today: string = todayIso()): string {
-  const early = addDaysIso(due, -3);
-  if (early > today) return early;
+/** When to follow up on a task due `due`: the day before, or none when that
+ *  is today or already past (Derek, 2026-10-08: "if we set a due date for
+ *  tomorrow don't set the follow up for today, I just updated it today; 2
+ *  days out, the day before; 3 days out, 2 days out"). A follow up in the
+ *  future keeps the task quiet until then (isSnoozed). */
+export function followUpForDue(due: string, today: string = todayIso()): string | null {
   const dayBefore = addDaysIso(due, -1);
-  return dayBefore > today ? dayBefore : today;
+  return dayBefore > today ? dayBefore : null;
 }
 
 /** The follow up a due date change brings with it, or undefined to leave it:
  *  only when the due date really changes to a date and the same change doesn't
  *  set a follow up of its own. */
-export function followUpWithDue(before: { due: string | null }, patch: { due?: string | null; followUpAt?: string | null }, today: string = todayIso()): string | undefined {
+export function followUpWithDue(before: { due: string | null }, patch: { due?: string | null; followUpAt?: string | null }, today: string = todayIso()): string | null | undefined {
   if (patch.followUpAt !== undefined || !patch.due || patch.due === before.due) return undefined;
   return followUpForDue(patch.due, today);
 }
