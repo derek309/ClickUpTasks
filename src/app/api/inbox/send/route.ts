@@ -12,6 +12,7 @@ import { parseThreadKey, threadRows, canUseThread, ghlConversation, linkedTaskId
 import { richToText } from "@/lib/inbox";
 import { isClientVisible } from "@/lib/extensionApi";
 import { contactHome } from "@/lib/ghlPerson";
+import { smsText } from "@/lib/smsText";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -201,13 +202,15 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
   }
 }
 
-async function sendGhl(caller: any, b: Body, text: string, rows: any[], conv: any, peer: ReturnType<typeof peerOf>, taskId: string | null) {
+async function sendGhl(caller: any, b: Body, rawText: string, rows: any[], conv: any, peer: ReturnType<typeof peerOf>, taskId: string | null) {
   if (!conv) return NextResponse.json({ error: "That conversation hasn't synced from GoHighLevel yet. Try again in a few minutes." }, { status: 404 });
   // The newest row on a channel that can be answered (a GoHighLevel
   // conversation can hold email too).
   const channel = (rows.find((r) => GHL_SEND_TYPE[r.channel as string])?.channel as string) ?? "sms";
   const type = GHL_SEND_TYPE[channel];
   if (!type) return NextResponse.json({ error: "Reply to this one from GoHighLevel." }, { status: 400 });
+  // A text or a Facebook or Instagram message is plain words, never HTML.
+  const text = type === "Email" ? rawText : smsText(rawText);
   const token = await tokenForLocation(conv.location_id as string);
   if (!token) return NextResponse.json({ error: "No GoHighLevel token for this sub-account." }, { status: 501 });
 
@@ -240,7 +243,8 @@ async function sendGhl(caller: any, b: Body, text: string, rows: any[], conv: an
 
 // A new text to any GoHighLevel contact, from New message. Sent from that
 // contact's sub-account number; the reply comes back on the same conversation.
-async function sendNewText(caller: any, b: Body, text: string) {
+async function sendNewText(caller: any, b: Body, rawText: string) {
+  const text = smsText(rawText);
   const { data: contact } = await supabaseAdmin.from("contacts").select("id, name, phone, ghl_contact_id, client_id").eq("id", b.contactId ?? "-").maybeSingle();
   if (!contact?.ghl_contact_id) return NextResponse.json({ error: "Pick a contact from GoHighLevel to text." }, { status: 400 });
   if (!contact.phone) return NextResponse.json({ error: `${contact.name} has no phone number in GoHighLevel.` }, { status: 400 });

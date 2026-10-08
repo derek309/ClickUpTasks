@@ -14,6 +14,7 @@ import { TASK_FILES_BUCKET } from "./db";
 import { appendSignatureHtml } from "./emailSignature";
 import { ghlReplyFields } from "./ghlReply";
 import { closeAnsweredReplyTask } from "./ghlConversationTask";
+import { smsText } from "./smsText";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -171,7 +172,7 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     ? await ghlReplyFields({ token, clientId: input.clientId, ghlContactId: contact.ghlContactId, locationId, replyToMessageId: input.replyToMessageId })
     : null;
   const payload = input.channel === "sms"
-    ? { type: "SMS", contactId: contact.ghlContactId, message: input.body, ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
+    ? { type: "SMS", contactId: contact.ghlContactId, message: smsText(input.body), ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: contact.ghlContactId, subject: (input.subject || "").slice(0, 200), html: emailHtml,
         ...(input.cc.length ? { emailCc: input.cc } : {}), ...(input.bcc.length ? { emailBcc: input.bcc } : {}),
         ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) };

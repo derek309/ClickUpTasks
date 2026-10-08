@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { appendSignatureHtml } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ghlReplyFields } from "@/lib/ghlReply";
+import { smsText } from "@/lib/smsText";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
   // A reply goes out in the thread it answers (ghlReply.ts); null sends a new email.
   const reply = channel === "email" ? await ghlReplyFields({ token, clientId, ghlContactId, locationId, replyToMessageId }) : null;
   const payload = channel === "sms"
-    ? { type: "SMS", contactId: ghlContactId, message: body, ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
+    ? { type: "SMS", contactId: ghlContactId, message: smsText(body), ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
         // Attribute the send to the teammate's GHL user so GHL uses their own
         // email as the "from" (native per-user sending). userId is the primary

@@ -29,6 +29,7 @@ import { addPendingSend, removePendingSend, usePendingSends } from "./pendingSen
 import { allowEntry } from "@/lib/inbox";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
+import { smsText } from "@/lib/smsText";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -799,7 +800,8 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
 
 /** A text's words, with any link shown as its website. */
 function ChatText({ text }: { text: string }) {
-  const parts = useMemo(() => bodyParts(text.trim()), [text]);
+  // One sent with HTML in it shows as the words it should have been.
+  const parts = useMemo(() => bodyParts(smsText(text)), [text]);
   return <>{parts.map((part, i) => "url" in part
     ? <a key={i} href={part.url} target="_blank" rel="noopener noreferrer nofollow" title={part.url} className="font-semibold underline">🔗 {part.label}</a>
     : <span key={i}>{part.text}</span>)}</>;
