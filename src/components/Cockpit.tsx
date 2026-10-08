@@ -2016,7 +2016,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return needsReply.length ? [{ key: "needs_reply", label: "Needs your reply", color: "#0ea5e9", tasks: needsReply }, ...buckets] : buckets;
     }
     if (dim === "due") return DUE_BUCKETS.map((b) => ({ key: b.key, label: b.label, color: b.color, tasks: list.filter((t) => dueBucket(t) === b.key) }));
-    return visibleProjects.map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
+    // By list, A to Z like the list tabs (Derek, 2026-10-08).
+    return [...visibleProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
   };
 
 
@@ -2242,7 +2243,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Group &amp; sort</span>
             {(sortBy !== "due" || groupBy !== "priority") && <button onClick={() => { setGroupBy("priority"); setSortBy("due"); }} className="text-[13px] font-medium text-accent">Reset</button>}
           </div>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">Project</option></select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">List</option></select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Days left (due date)</option><option value="created">Created (oldest first)</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
           <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
