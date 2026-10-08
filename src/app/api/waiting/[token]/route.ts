@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import {
-  htmlToText, initialsOf,
+  htmlToText, initialsOf, splitQuotedEmail, tidyEmailText,
   type Attachment,
 } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
@@ -109,10 +109,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // already scoped to a task via task_id, so this is the same data the
   // team's own task drawer reads, just filtered to this client and stripped
   // to a public-safe shape (no createdBy, no ghl/gmail ids, no cc/bcc).
-  type MessageRow = { id: string; task_id: string | null; direction: string; body: string; created_at: string; attachments: Attachment[] | null; created_by: string | null };
+  type MessageRow = { id: string; task_id: string | null; direction: string; body: string; created_at: string; attachments: Attachment[] | null; created_by: string | null; channel: string | null };
   const taskIds = rows.map((t) => t.id);
   const { data: messageRows } = taskIds.length
-    ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments, created_by")
+    ? await supabaseAdmin.from("messages").select("id, task_id, direction, body, created_at, attachments, created_by, channel")
         .eq("client_id", scope.clientId).in("task_id", taskIds)
         // The app's own "X replied on ..." email, brought in from Gmail and
         // linked to the task for the team's Inbox, is not part of their
@@ -174,9 +174,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         // here it's the client's own message, so this is the one field
         // worth translating rather than leaking the app's internal framing.
         from: m.direction === "inbound" ? "client" as const : "team" as const,
-        body: htmlToText(m.body ?? ""),
+        // An email without the earlier ones quoted under it, the way the team's
+        // Inbox shows it (Derek, 2026-10-08: the thread was every reply again).
+        body: m.channel === "email" ? splitQuotedEmail(tidyEmailText(htmlToText(m.body ?? ""))).visible : htmlToText(m.body ?? ""),
         at: m.created_at,
-        attachments: await resolveAttachments(m.attachments ?? []),
+        // A file left in Gmail comes through ./attachment, which checks the
+        // message is on one of this client's tasks before reading it.
+        attachments: await resolveAttachments((m.attachments ?? []).map((a) => ((a as { gmailAttachmentId?: string }).gmailAttachmentId && !a.path && !a.url
+          ? { ...a, url: `/api/waiting/${encodeURIComponent(token)}/attachment?message=${encodeURIComponent(m.id)}&att=${encodeURIComponent(a.id)}` }
+          : a))),
         sender: m.direction === "outbound" && m.created_by ? senderById.get(m.created_by) ?? null : null,
       }))),
     ]);
