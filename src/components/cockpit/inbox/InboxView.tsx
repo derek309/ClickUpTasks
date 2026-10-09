@@ -708,6 +708,14 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
             )}
           </div>
         )}
+        {/* The conversation's link and the whole of it for a Claude chat, up
+            with the other things done to the conversation, as icons (Derek,
+            2026-10-09: "same line ... left aligned with just icons"). */}
+        <span aria-hidden className="mx-1 h-5 w-px bg-[var(--border)]" />
+        <button onClick={() => navigator.clipboard.writeText(threadLink(t)).then(() => p.pushToast("Link copied"), () => p.pushToast("Couldn't copy"))}
+          title="Copy link to this conversation" aria-label="Copy link" className="h-9 rounded-md px-2.5 text-muted hover:bg-background hover:text-foreground">🔗</button>
+        <button onClick={() => navigator.clipboard.writeText(threadForClaude(t, p)).then(() => p.pushToast("Copied. Paste it into Claude."), () => p.pushToast("Couldn't copy"))}
+          title="Copy for Claude: the whole conversation, to paste into a Claude chat" aria-label="Copy for Claude" className="h-9 rounded-md px-2.5 font-bold text-[#7c3aed] hover:bg-background">✳</button>
         {t.updates && t.peerAddress && (
           <button onClick={() => letIn(p, t.peerAddress!)} title="Their email goes to your Inbox from now on, not Updates" className="h-9 rounded-md px-2.5 font-semibold text-accent hover:bg-background">📥<span className="hidden sm:inline"> To Inbox</span></button>
         )}
@@ -917,10 +925,6 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive, cl
           <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
           <button onClick={() => setCompose({ mode: "replyAll", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })}className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
           <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">→ Forward</button>
-          <button onClick={() => navigator.clipboard.writeText(threadLink(t)).then(() => p.pushToast("Link copied"), () => p.pushToast("Couldn't copy"))}
-            title="Copy a link straight to this conversation" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:ml-auto sm:px-4">🔗 Copy link</button>
-          <button onClick={() => navigator.clipboard.writeText(threadForClaude(t, p)).then(() => p.pushToast("Copied. Paste it into Claude."), () => p.pushToast("Couldn't copy"))}
-            title="Copy the whole conversation to paste into Claude" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">✳ Copy for Claude</button>
         </div>
       )}
     </div>
