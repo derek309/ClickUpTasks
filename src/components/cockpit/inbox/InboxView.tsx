@@ -884,10 +884,35 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: 
           <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
           <button onClick={() => setCompose({ mode: "replyAll", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })}className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
           <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">→ Forward</button>
+          <button onClick={() => navigator.clipboard.writeText(threadForClaude(t, p)).then(() => p.pushToast("Copied. Paste it into Claude."), () => p.pushToast("Couldn't copy"))}
+            title="Copy the whole conversation to paste into Claude" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:ml-auto sm:px-4">✳ Copy for Claude</button>
         </div>
       )}
     </div>
   );
+}
+
+// The conversation as plain text to paste into a Claude chat ("here's the
+// email I want you to respond to", Derek, 2026-10-09): who, the linked
+// task with its id so Claude can open it through the ClickUpTasks tools,
+// then every email oldest first with the quoted history left off.
+function threadForClaude(t: InboxThread, p: InboxViewProps): string {
+  const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
+  const when = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const head = [
+    `Email conversation from ClickUpTasks: ${t.subject || "(no subject)"}`,
+    `With: ${t.peerName}${t.peerAddress ? ` <${t.peerAddress}>` : ""}`,
+    task ? `Linked task: ${task.title} (task id ${task.id})` : null,
+    task && p.clientName(task.clientId) ? `Client: ${p.clientName(task.clientId)}` : null,
+  ].filter(Boolean).join("\n");
+  const emails = [...t.messages].reverse().map((m) => {
+    const raw = looksLikeHtml(m.body || "") ? htmlToText(m.body) : m.body || "";
+    const body = splitQuotedEmail(tidyEmailText(raw)).visible || "(no text)";
+    const who = m.direction === "outbound" ? `${whoWrote(m, t, p).name} (us)` : `${whoWrote(m, t, p).name}${m.peerAddress ? ` <${m.peerAddress}>` : ""}`;
+    const files = (m.attachments ?? []).filter((a) => !isSignatureImage(a)).map((a) => a.name);
+    return [`--- ${who} · ${when(m.at)}`, m.cc?.length ? `Cc: ${m.cc.join(", ")}` : null, "", body, files.length ? `\n[Attached: ${files.join(", ")}]` : null].filter((x) => x !== null).join("\n");
+  });
+  return `${head}\n\n${emails.join("\n\n")}\n`;
 }
 
 function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
@@ -1251,26 +1276,7 @@ function Files({ m, p }: { m: Message; p: InboxViewProps }) {
           ))}
         </div>
       )}
-      {big !== null && (
-        <div className="fixed inset-0 z-[90] grid place-items-center bg-black/85 p-6" onClick={() => setBig(null)} role="dialog" aria-label={imgs[big].name}
-          tabIndex={-1} ref={(el) => el?.focus()}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { e.stopPropagation(); setBig(null); }
-            else if (e.key === "ArrowRight" && imgs.length > 1) setBig((big + 1) % imgs.length);
-            else if (e.key === "ArrowLeft" && imgs.length > 1) setBig((big - 1 + imgs.length) % imgs.length);
-          }}>
-          <div className="text-center" onClick={(e) => e.stopPropagation()}>
-            <FileImage a={imgs[big]} m={m} p={p} className="max-h-[78vh] max-w-[min(1000px,100%)] rounded-lg bg-white" />
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-white">
-              {imgs.length > 1 && <button onClick={() => setBig((big - 1 + imgs.length) % imgs.length)} className="h-10 rounded-lg border border-white/40 px-3 font-semibold">← Previous</button>}
-              <span>{imgs[big].name}{imgs.length > 1 ? `  ·  ${big + 1} of ${imgs.length}` : ""}</span>
-              {imgs.length > 1 && <button onClick={() => setBig((big + 1) % imgs.length)} className="h-10 rounded-lg border border-white/40 px-3 font-semibold">Next →</button>}
-              <button onClick={() => openFile(imgs[big], m, p, true)} className="h-10 rounded-lg border border-white/40 px-3 font-semibold">Download</button>
-              <button onClick={() => setBig(null)} className="h-10 rounded-lg border border-white/40 px-3 font-semibold">✕ Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {big !== null && <FileLightbox items={imgs.map((a) => ({ a, m }))} index={big} onIndex={setBig} onClose={() => setBig(null)} p={p} />}
     </>
   );
 }
@@ -1292,6 +1298,82 @@ async function openFile(a: Attachment, m: Message, p: InboxViewProps, download: 
   link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
   if (download) link.download = a.name;
   link.click();
+}
+// Saves the file under its own name. A signed storage link is on another
+// host, where the browser ignores a download name and just opens it, so the
+// file is fetched first and saved from here.
+async function saveFile(a: Attachment, m: Message, p: InboxViewProps) {
+  const url = await fileUrl(a, m, p, true);
+  if (!url) { p.pushToast(`Couldn't download ${a.name}`); return; }
+  let href = url;
+  if (!url.startsWith("blob:")) {
+    try { const res = await fetch(url); if (!res.ok) throw new Error(); href = URL.createObjectURL(await res.blob()); }
+    catch { href = url; }
+  }
+  const link = document.createElement("a");
+  link.href = href; link.download = a.name; link.rel = "noopener noreferrer";
+  if (href === url && !url.startsWith("blob:")) link.target = "_blank";
+  link.click();
+  if (href !== url) setTimeout(() => URL.revokeObjectURL(href), 10_000);
+}
+// Puts the picture on the clipboard to paste into a task, a chat or Canva.
+// The clipboard only takes PNG, so anything else is redrawn as one.
+async function copyImage(a: Attachment, m: Message, p: InboxViewProps) {
+  try {
+    const url = await fileUrl(a, m, p);
+    if (!url) throw new Error();
+    const png = (async () => {
+      const blob = await (await fetch(url)).blob();
+      if (blob.type === "image/png") return blob;
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+      c.getContext("2d")!.drawImage(bmp, 0, 0);
+      return await new Promise<Blob>((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error())), "image/png"));
+    })();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+    p.pushToast("Picture copied");
+  } catch { p.pushToast(`Couldn't copy ${a.name}. Try Download.`); }
+}
+
+/** One picture full screen, with the rest of the set a click or an arrow away
+ *  (Derek, 2026-10-09: the side panel's files open here too, with Download
+ *  and Copy right on it). */
+function FileLightbox({ items, index, onIndex, onClose, p }: {
+  items: { a: Attachment; m: Message }[]; index: number; onIndex: (i: number) => void; onClose: () => void; p: InboxViewProps;
+}) {
+  const it = items[index];
+  if (!it) return null;
+  const n = items.length;
+  const go = (d: number) => onIndex((index + d + n) % n);
+  const btn = "h-10 rounded-lg border border-white/40 px-3 font-semibold text-white hover:bg-white/10";
+  return createPortal(
+    <div className="fixed inset-0 z-[110] flex flex-col bg-black/85" onClick={onClose} role="dialog" aria-modal="true" aria-label={it.a.name}
+      tabIndex={-1} ref={(el) => el?.focus()}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+        else if (e.key === "ArrowRight" && n > 1) go(1);
+        else if (e.key === "ArrowLeft" && n > 1) go(-1);
+      }}>
+      <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-2 px-4 py-3 text-white">
+        <span className="min-w-0 flex-1 truncate font-medium">
+          {it.a.name}{n > 1 ? `  ·  ${index + 1} of ${n}` : ""}
+          <span className="ml-2 text-white/60">{[it.m.direction === "inbound" ? (it.m.peerName || it.m.peerAddress) : "You", new Date(it.m.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }), it.a.size].filter(Boolean).join(" · ")}</span>
+        </span>
+        <button onClick={() => saveFile(it.a, it.m, p)} className="h-10 rounded-lg bg-white px-4 font-semibold text-black hover:bg-white/90">⬇ Download</button>
+        {typeof ClipboardItem !== "undefined" && <button onClick={() => copyImage(it.a, it.m, p)} className={btn}>Copy</button>}
+        <button onClick={() => openFile(it.a, it.m, p, false)} className={btn}>Open in new tab</button>
+        <button onClick={onClose} className={btn}>✕ Close</button>
+      </div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6">
+        {n > 1 && <button onClick={(e) => { e.stopPropagation(); go(-1); }} aria-label="Previous picture" className="absolute left-3 z-10 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">‹</button>}
+        <span onClick={(e) => e.stopPropagation()} className="contents">
+          <FileImage key={`${it.m.id}:${it.a.id}`} a={it.a} m={it.m} p={p} className="max-h-[calc(100dvh-6rem)] max-w-[calc(100vw-7rem)] rounded-lg bg-white object-contain shadow-2xl" />
+        </span>
+        {n > 1 && <button onClick={(e) => { e.stopPropagation(); go(1); }} aria-label="Next picture" className="absolute right-3 z-10 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">›</button>}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: InboxViewProps; className?: string }) {
   const [src, setSrc] = useState<string | null>(a.url ?? null);
@@ -2196,31 +2278,83 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   );
 }
 
-// Every file in the conversation in one list under the people (Derek,
-// 2026-10-09), newest first, so a screenshot from three emails back is one
-// click away. Signature logos are left out, same as under each email.
+// Every file in the conversation under the people, newest first, so a
+// screenshot from three emails back is one click away (Derek, 2026-10-09).
+// Pictures as a gallery with no names (Derek, same day: "just do a gallery
+// view"); a click opens the lightbox with Download and Copy. Other files are
+// small tiles. Signature logos are left out, same as under each email.
 function ThreadFiles({ p, t }: { p: InboxViewProps; t: InboxThread }) {
   const files = t.messages.flatMap((m) => (m.attachments ?? []).filter((a) => !isSignatureImage(a)).map((a) => ({ a, m })))
     .sort((x, y) => y.m.at.localeCompare(x.m.at));
+  const imgs = files.filter((f) => f.a.kind === "image");
+  const docs = files.filter((f) => f.a.kind !== "image");
+  const [big, setBig] = useState<number | null>(null);
+  const [zipping, setZipping] = useState(false);
+  const saveable = files.filter((f) => f.a.kind !== "link");
+  // Every file in one zip, named after the subject.
+  const downloadAll = async () => {
+    setZipping(true);
+    try {
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let missed = 0;
+      for (const { a, m } of saveable) {
+        const url = await fileUrl(a, m, p, true);
+        const res = url ? await fetch(url).catch(() => null) : null;
+        if (!res?.ok) { missed++; continue; }
+        let name = a.name, i = 1;
+        while (used.has(name)) name = a.name.replace(/(\.[^.]*)?$/, (ext) => ` (${i++})${ext}`);
+        used.add(name);
+        zip.file(name, await res.blob());
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href; link.download = `${(t.subject || "Attachments").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "Attachments"}.zip`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(href), 10_000);
+      if (missed) p.pushToast(`${missed} file${missed === 1 ? "" : "s"} couldn't be added`);
+    } catch { p.pushToast("Couldn't make the zip"); }
+    finally { setZipping(false); }
+  };
   if (!files.length) return null;
   return (
     <>
-      <div className="px-1 pt-1 text-[14px] font-bold tracking-wide text-muted">ATTACHMENTS IN THIS THREAD</div>
-      <div className="rounded-lg bg-surface p-1.5 ring-1 ring-[var(--border)]">
-        {files.map(({ a, m }) => (
-          <button key={`${m.id}:${a.id}`} onClick={() => openFile(a, m, p, a.kind !== "image" && a.kind !== "pdf" && a.kind !== "link")}
-            title={a.kind === "image" || a.kind === "pdf" || a.kind === "link" ? `Open ${a.name}` : `Download ${a.name}`}
-            className="flex w-full items-center gap-3 rounded-md p-1.5 text-left hover:bg-background">
-            {a.kind === "image"
-              ? <FileImage a={a} m={m} p={p} className="h-11 w-11 shrink-0 rounded-md object-cover ring-1 ring-[var(--border)]" />
-              : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-danger-soft text-[12px] font-extrabold text-danger">{a.kind === "pdf" ? "PDF" : a.kind === "sheet" ? "XLS" : a.kind === "link" ? "LINK" : "DOC"}</span>}
-            <span className="min-w-0">
-              <b className="block truncate font-semibold">{a.name}</b>
-              <span className="block truncate text-[14px] text-muted">{[m.direction === "inbound" ? (m.peerName || m.peerAddress) : "You", new Date(m.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }), a.size].filter(Boolean).join(" · ")}</span>
-            </span>
+      <div className="flex items-center gap-2 px-1 pt-1">
+        <span className="flex-1 text-[14px] font-bold tracking-wide text-muted">ATTACHMENTS · {files.length}</span>
+        {saveable.length > 1 && (
+          <button onClick={downloadAll} disabled={zipping} className="text-[14px] font-semibold text-accent hover:underline disabled:opacity-50">
+            {zipping ? "Zipping…" : "⬇ Download all"}
           </button>
-        ))}
+        )}
       </div>
+      {imgs.length > 0 && (
+        <div className="columns-2 gap-1.5 [&>*]:mb-1.5">
+          {imgs.map((f, i) => (
+            <button key={`${f.m.id}:${f.a.id}`} onClick={() => setBig(i)} aria-label={`Preview ${f.a.name}`}
+              title={`${f.a.name} · ${new Date(f.m.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+              className="block w-full break-inside-avoid overflow-hidden rounded-md bg-surface ring-1 ring-[var(--border)] transition hover:ring-2 hover:ring-accent">
+              <FileImage a={f.a} m={f.m} p={p} className="block min-h-16 w-full" />
+            </button>
+          ))}
+        </div>
+      )}
+      {docs.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {docs.map(({ a, m }) => {
+            const opens = a.kind === "pdf" || a.kind === "link";
+            return (
+              <button key={`${m.id}:${a.id}`} onClick={() => openFile(a, m, p, !opens)} title={`${opens ? "Open" : "Download"} ${a.name}`}
+                className="flex max-w-full items-center gap-2 rounded-md bg-surface py-1 pl-1 pr-2.5 ring-1 ring-[var(--border)] hover:ring-accent">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded bg-danger-soft text-[11px] font-extrabold text-danger">{a.kind === "pdf" ? "PDF" : a.kind === "sheet" ? "XLS" : a.kind === "link" ? "LINK" : "DOC"}</span>
+                <span className="truncate text-[14px] font-semibold">{a.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {big !== null && <FileLightbox items={imgs} index={big} onIndex={setBig} onClose={() => setBig(null)} p={p} />}
     </>
   );
 }
