@@ -8,7 +8,7 @@
 // — feedArea always scrolls with whatever's around it, composerFooter is a
 // pinned element that sits OUTSIDE that scroll area — so TaskDrawer places
 // the two pieces itself rather than this module dictating layout.
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
@@ -1187,7 +1187,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               <span className="text-[14px] font-bold uppercase tracking-wide text-muted">Description</span>
               {description.onEdit && <button onClick={description.onEdit} className="ml-auto rounded-md px-2 py-0.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>}
             </div>
-            {description.node}
+            {/* Folded to its first lines while reading (Derek, 2026-10-09: "the
+                description is taking up so much space"); whole while editing. */}
+            {description.onEdit ? <ClampBox key={task.id}>{description.node}</ClampBox> : description.node}
           </article>
         )}
         {commentsFeed}
@@ -1240,4 +1242,29 @@ function GmailImageTile({ item, messageId }: { item: Attachment; messageId: stri
     return () => { live = false; if (made) URL.revokeObjectURL(made); };
   }, [item.id, messageId]);
   return <AttachmentTile item={item} small url={src ?? undefined} onOpen={() => { if (src) window.open(src, "_blank", "noopener"); }} />;
+}
+
+/** Its first ~7 lines, faded at the cut, with Show more; whole when short. */
+function ClampBox({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [tall, setTall] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setTall(el.scrollHeight > 200);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <>
+      <div ref={ref} className={tall && !open ? "relative max-h-[180px] overflow-hidden" : ""}>
+        {children}
+        {tall && !open && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[var(--surface)] to-transparent" />}
+      </div>
+      {tall && <button onClick={() => setOpen(!open)} className="mt-1 text-[16px] font-medium text-accent hover:underline">{open ? "Show less" : "Show more"}</button>}
+    </>
+  );
 }
