@@ -2,6 +2,7 @@
 
 // The ClickUp-style grouped list view: group headers, task rows, quick-add,
 // expandable subtasks, and the inline cell editors (priority/assignee/due).
+import { createPortal } from "react-dom";
 import { useMemo, useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 import {
@@ -659,7 +660,7 @@ const MO = ["January", "February", "March", "April", "May", "June", "July", "Aug
 const isoOf = (y: number, m: number, d: number) => `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 const dowIso = (iso: string) => { const [y, m, d] = iso.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
 const WD_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-function friendlyDue(iso: string): string {
+export function friendlyDue(iso: string): string {
   if (iso === TODAY) return "Today";
   if (iso === addDaysIso(TODAY, 1)) return "Tomorrow";
   if (iso === addDaysIso(TODAY, -1)) return "Yesterday";
@@ -777,7 +778,10 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
   const daysIn = new Date(Date.UTC(ym.y, ym.m + 1, 0)).getUTCDate();
   const cells: (number | null)[] = [...Array(firstDow).fill(null), ...Array.from({ length: daysIn }, (_, i) => i + 1)];
   const shift = (n: number) => setYm((s) => { const dt = new Date(Date.UTC(s.y, s.m + n, 1)); return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() }; });
-  return (
+  // To the page's body: a picker opened from inside something moved with a
+  // transform (the floating bulk bar) was placed against that, not the
+  // window, and opened off the bottom of the screen (2026-10-09).
+  return createPortal(
     <>
       <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
       <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-50 flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
@@ -821,6 +825,7 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

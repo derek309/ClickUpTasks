@@ -89,7 +89,7 @@ import { sentEmailFor } from "./cockpit/EmailWindow";
 import { draftLinkHtml, escapeHtml } from "@/lib/draftLink";
 import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModal, MergeClientModal, type ConfirmSpec, type PromptSpec } from "./cockpit/modals";
 import { CommandK } from "./cockpit/CommandK";
-import { GroupedList } from "./cockpit/GroupedList";
+import { GroupedList, InlineDate, friendlyDue } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
@@ -3188,7 +3188,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{pickableStatuses().map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
           <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
-          <input type="date" onChange={(e) => { if (e.target.value) { bulkPatch({ due: e.target.value }, `Set due date to ${e.target.value}`); e.target.value = ""; } }} title="Due date" className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none" />
+          {/* The same quick picks as every other date (Derek, 2026-10-09: "quick
+              today, tomorrow, Monday, etc like the others"). */}
+          <InlineDate value={null} onChange={(d) => { if (d) bulkPatch({ due: d }, `Set due date to ${friendlyDue(d)}`); }} emptyLabel="Due date…"
+            className="rounded-md border bg-background px-2 py-1 text-[15px] text-foreground" />
           <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className="rounded-md border bg-background px-2 py-1 text-[15px] text-muted hover:bg-danger-soft hover:text-danger">Remove dates</button>
           <div className="w-40">
             <SearchableSelect value="" onChange={(v) => v && bulkMoveTo(v)}
