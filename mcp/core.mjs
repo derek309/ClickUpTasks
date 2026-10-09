@@ -11,6 +11,24 @@ import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
+// What every Claude connected here is told about working a task (Derek,
+// 2026-10-09: "so when we look back we can see what Claude's doing, what
+// it's done, what it's planning"). Sent as the server's instructions, so
+// Claude Code, the Claude app and the cloud routines all get it.
+const WORKING_RULES = `ClickUpTasks is the team's task manager. When you WORK on a task (not when you only read or look one up), keep the task itself current so the team can look back and see what Claude did:
+
+1. When you start: set_task_status to "in_progress" (unless it already is), and add_comment one short note: "Started: <what you're about to do, in a sentence or two>".
+2. While working: no running commentary. Add one comment only if something changes the plan: you're blocked, you need a decision or something from someone, or you found a problem worth knowing about. Say what and who it's waiting on.
+3. When you stop: add_comment a summary: "Done: <what you did>", the files, links, commits or drafts made, and "Next: <what's left, or nothing>". Then set the status:
+   - "review" when a person should check it before it counts as finished (the usual case for anything sent to a client, published, or built),
+   - "done" only when nothing is left for anyone,
+   - "waiting" when it's waiting on the client,
+   - leave it "in_progress" if you're stopping partway; say so in the comment.
+4. Tick checklist items you finished (check_item) and add ones you discovered (add_checklist_items) rather than listing them only in a comment.
+5. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
+
+Keep comments short and plain, written for a teammate skimming the task later. Never paste secrets, keys or passwords into a comment.`;
+
 const STATUSES = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "approved", "delegated", "done"];
 const GHL = "https://services.leadconnectorhq.com";
 const SUB2LOC = { c_agency: "7B0Y8xCOblcTHzYnM1Kc", c_directory: "GN4HK1ybbTBWcolEjLHl" };
@@ -251,7 +269,7 @@ export function createServer(opts = {}) {
   }
   const brief = (t) => `[${t.id}] ${t.title}\n  status: ${t.status} · priority: ${t.priority} · due: ${t.due || "—"}\n  client: ${clientNames[t.client_id] || t.client_id} · list: ${projectNames[t.project_id] || "—"}`;
 
-  const server = new McpServer({ name: "clickuptasks", version: "1.0.0" });
+  const server = new McpServer({ name: "clickuptasks", version: "1.0.0" }, { instructions: WORKING_RULES });
   // Every tool that names a client checks it against what this person can
   // see, before the tool runs (audit 2026-10-07: a VA's token reached every
   // client). Tools that take a task go through loadTask and maySee.
@@ -577,7 +595,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("set_task_status",
-    `Set a task's status (${STATUSES.join(" | ")}). Use to start or complete work. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column. \"on_hold\" pauses it (the client put it on the back burner); it never nudges the client and is never late.`,
+    `Set a task's status (${STATUSES.join(" | ")}). Set "in_progress" when you start work on it and "review" or "done" when you stop, each with an add_comment saying what you're doing or did. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column. \"on_hold\" pauses it (the client put it on the back burner); it never nudges the client and is never late.`,
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
       const before = await loadTask(id, "status,follow_up_at");
@@ -601,7 +619,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("add_comment",
-    "Add a progress comment to a task (logged as you).",
+    "Add a progress comment to a task. Use it when you start work on a task (\"Started: …\") and when you stop (\"Done: … Next: …\"), plus when you're blocked; see the server's working rules. Written as Claude.",
     { id: z.string(), text: z.string() },
     async ({ id, text }) => {
       if (!await loadTask(id, "id")) return noTask(id);
@@ -610,7 +628,10 @@ export function createServer(opts = {}) {
       // stamps updated_by with the author and the app skips live updates
       // stamped with the viewer's own id, so clear it or the comment would not
       // show live for that teammate (same order as clientPublish).
-      await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body: text, at: nowIso() } });
+      // Through a teammate's own token the comment is logged as them, so say
+      // it was Claude; as Claude (u_claude) the author already says so.
+      const body = ME === "u_claude" || /^🤖|^claude:/i.test(text.trim()) ? text : `🤖 Claude: ${text}`;
+      await sb("rpc/append_comment", "POST", { task_id: id, comment: { id: rid("cm_"), authorId: ME, body, at: nowIso() } });
       await patchTask(id, { updated_by: null });
       return { content: [{ type: "text", text: `Comment added to ${id}.` }] };
     });
