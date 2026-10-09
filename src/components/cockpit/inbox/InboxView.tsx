@@ -13,7 +13,6 @@ import { safeMessageHtml } from "@/lib/safeHtml";
 import { createPortal } from "react-dom";
 import SignaturePanel from "../../SignaturePanel";
 import { RichTextEditor } from "../RichTextEditor";
-import { InlineDate } from "../GroupedList";
 import { SearchableSelect } from "../ui";
 import { loadBookingLinks, type BookingLink } from "../useCalendar";
 import { BookingLinkMenu } from "../BookingLinkMenu";
@@ -1895,7 +1894,6 @@ async function copyText(text: string, p: InboxViewProps) {
 function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread; linkSearchRef: React.RefObject<HTMLInputElement | null>; onOpenOther: (key: string) => void }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [statusOpen, setStatusOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   // Change contact: everyone outside the team on the conversation.
   const [peopleOpen, setPeopleOpen] = useState(false);
@@ -1994,7 +1992,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't unlink it."); }
     finally { setBusy(false); }
   };
-  const [ownerOpen, setOwnerOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newList, setNewList] = useState("");
@@ -2008,13 +2005,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     setNewTitle(subject || firstLine || `Follow up with ${t.peerName.split(/\s+/)[0]}`);
     setNewList(listId); setNewOn(p.me.id); setNewDue(new Date().toLocaleDateString("en-CA")); setNewOpen(true);
   };
-  const [listOpen, setListOpen] = useState(false);
-  const lists = task ? p.listsFor(task.clientId) : [];
-  // Label and value on one line (Derek, 2026-10-05: "more compact").
-  // Each box shares the card's two columns (subgrid), so the labels are only as
-  // wide as the longest one and the values always fit the card (Derek,
-  // 2026-10-05: "clean and tight").
-  const fieldBox = "col-span-2 grid min-h-10 min-w-0 grid-cols-subgrid items-center rounded-md px-3 py-1.5 text-left ring-1 ring-[var(--border)] hover:ring-accent";
   const ownerMember = task?.assigneeId ? p.team.find((x) => x.id === task.assigneeId) ?? (task.assigneeId === CLAUDE_ID ? { id: CLAUDE_ID, name: "Claude" } : null) : null;
   const owner = task?.assigneeId ? (task.assigneeId === p.me.id ? "You" : ownerMember?.name ?? null) : null;
   const dueLabel = (d: string | null | undefined) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) : null);
@@ -2107,118 +2097,64 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   const whoseName = whose && whose !== PERSONAL_CLIENT_ID ? p.clientName(whose) : null;
   return (
     <aside className="min-w-0 space-y-3 p-4">
-      {whoseName && (
-        <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`}
-          className="flex h-11 w-full items-center justify-between gap-2 rounded-xl bg-accent px-4 text-left text-[16px] font-bold text-white hover:opacity-90">
-          <span className="min-w-0 truncate">Open {whoseName}&apos;s tasks</span><span aria-hidden>→</span>
-        </AppLink>
-      )}
-      <div className={card}>
-        <div className={label}>{task ? (others.length ? "LINKED TASKS" : "LINKED TASK") : "LINK TO A TASK"}</div>
-        {task ? <>
-          {/* Four boxes, one column (Derek, 2026-10-05, mockup
-              https://claude.ai/artifact/7dKMyY11n8qXpwfpVM7Nhj, B): status, who
-              it's on, due and follow up, each a click to change. */}
-          {/* The title opens the task; the broken link unlinks it (Derek,
-              2026-10-08: no Open task button, no menu). */}
-          <div className="flex items-start gap-2">
-            <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} title="Open task"
-              className="min-w-0 flex-1 text-[18px] font-bold leading-snug text-foreground hover:text-accent hover:underline">{task.title}</AppLink>
-            <button disabled={busy} onClick={() => unlink(task.id)} title="Unlink from this conversation" aria-label={`Unlink ${task.title}`}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted hover:bg-background hover:text-danger disabled:opacity-50"><BrokenLinkIcon /></button>
-          </div>
-          {p.clientName(task.clientId) && <div className="text-muted">{p.clientName(task.clientId)}</div>}
-          <div className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-2">
-            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-              <button onClick={() => setStatusOpen(!statusOpen)} className={fieldBox}>
-                <span className="text-muted">Status</span>
-                <span className="flex min-w-0 items-center gap-2 truncate font-semibold"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[task.status].dot }} />{STATUS_META[task.status].label}{task.waitingOnClient && <span className="font-normal text-highlight">· waiting on client</span>}</span>
-              </button>
-              {statusOpen && (
-                <Menu onClose={() => setStatusOpen(false)}>
-                  {STATUS_ORDER.filter((st) => !HIDDEN_STATUSES.has(st)).map((st) => (
-                    <button key={st} onClick={() => { setStatusOpen(false); p.onPatchTask(task.id, { status: st }); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
-                      <span className="h-2 w-2 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}{st === task.status ? " ✓" : ""}
-                    </button>
-                  ))}
-                </Menu>
-              )}
+      {task ? (
+        // The task IS the bar once it's linked (Derek, 2026-10-09, mockup C):
+        // what it is, where it stands, one click to the task to change it.
+        // The five boxes that were here are edits the drawer already does.
+        <div className="space-y-2">
+          <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} title="Open the task to view or change it"
+            className="block w-full rounded-xl bg-accent px-4 py-3 text-left text-white hover:opacity-90">
+            <span className="flex items-start gap-2">
+              <b className="min-w-0 flex-1 text-[17px] leading-snug">{task.title}</b>
+              <span aria-hidden className="text-[18px] leading-snug">→</span>
+            </span>
+            <span className="mt-1 flex flex-wrap items-center gap-x-1.5 text-white/85">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-white/70" style={{ background: STATUS_META[task.status].dot }} />
+              {[
+                STATUS_META[task.status].label + (task.waitingOnClient ? ", waiting on client" : ""),
+                owner,
+                task.due ? `${task.status !== "done" && isOverdue(task.due) ? "overdue" : "due"} ${dueLabel(task.due)}` : null,
+                task.followUpAt ? `follow up ${dueLabel(task.followUpAt.slice(0, 10))}` : null,
+              ].filter(Boolean).join(" · ")}
+            </span>
+          </AppLink>
+          {others.map((x) => (
+            <div key={x.id} className="flex items-center gap-2 rounded-xl bg-surface py-1.5 pl-3 pr-1.5 ring-1 ring-[var(--border)]">
+              <AppLink href={taskHref(x.id)} onOpen={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 flex-1 text-left" title="Open task">
+                <span className="block truncate font-semibold">{x.title}</span>
+                <span className="flex items-center gap-1.5 truncate text-muted"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[x.status].dot }} />{STATUS_META[x.status].label}{x.due ? ` · due ${dueLabel(x.due)}` : ""}</span>
+              </AppLink>
+              <button disabled={busy} onClick={() => unlink(x.id)} title="Unlink from this conversation" aria-label={`Unlink ${x.title}`}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-background hover:text-danger disabled:opacity-50"><BrokenLinkIcon /></button>
             </div>
-            {/* Which list it's in (Derek, 2026-10-05: "select the list as
-                well"). A new task from an email starts in the client's first. */}
-            {lists.length > 0 && (
-              <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-                <button onClick={() => setListOpen(!listOpen)} className={fieldBox}>
-                  <span className="text-muted">List</span>
-                  <span className="truncate font-semibold">{lists.find((l) => l.id === task.projectId)?.name ?? "Pick a list"}</span>
-                </button>
-                {listOpen && (
-                  <Menu onClose={() => setListOpen(false)}>
-                    {lists.map((l) => (
-                      <button key={l.id} onClick={() => { setListOpen(false); if (l.id !== task.projectId) { p.onPatchTask(task.id, { projectId: l.id }); p.pushToast(`Moved to ${l.name}`); } }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
-                        {l.name}{l.id === task.projectId ? " ✓" : ""}
-                      </button>
-                    ))}
-                  </Menu>
-                )}
-              </div>
-            )}
-            <div className="relative col-span-2 grid min-w-0 grid-cols-subgrid">
-              <button onClick={() => setOwnerOpen(!ownerOpen)} className={fieldBox}>
-                <span className="text-muted">On</span>
-                <span className="flex min-w-0 items-center gap-2 font-semibold">
-                  {ownerMember && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(ownerMember.name) }}>{initials(ownerMember.name)}</span>}
-                  <span className="truncate">{owner ?? "Nobody yet"}</span>
-                </span>
-              </button>
-              {ownerOpen && (
-                <Menu onClose={() => setOwnerOpen(false)}>
-                  {[...[...p.team].sort((a, b) => (a.id === p.me.id ? -1 : b.id === p.me.id ? 1 : a.name.localeCompare(b.name))), { id: CLAUDE_ID, name: "Claude" }].map((m) => (
-                    <button key={m.id} onClick={() => { setOwnerOpen(false); if (m.id !== task.assigneeId) { p.onPatchTask(task.id, { assigneeId: m.id }); p.pushToast(`On ${m.id === p.me.id ? "you" : m.name} now`); } }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left hover:bg-background">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: avatarColor(m.name) }}>{initials(m.name)}</span>
-                      {m.id === p.me.id ? "You" : m.name}{m.id === task.assigneeId ? " ✓" : ""}
-                    </button>
-                  ))}
-                </Menu>
-              )}
-            </div>
-            <div className={`${fieldBox} cursor-default`}>
-              <span className="text-muted">Due</span>
-              <InlineDate value={task.due} onChange={(d) => p.onPatchTask(task.id, { due: d })} onClear={() => p.onPatchTask(task.id, { due: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
-                className={`-mx-1 font-semibold ${!task.due ? "text-accent" : task.status !== "done" && isOverdue(task.due) ? "text-danger" : ""}`} />
-            </div>
-            <div className={`${fieldBox} cursor-default`}>
-              <span className="text-muted">Follow up</span>
-              <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => p.onPatchTask(task.id, { followUpAt: d })} onClear={() => p.onPatchTask(task.id, { followUpAt: null })} emptyLabel="＋ Add" formatValue={dueLabel as (iso: string) => string}
-                className={`-mx-1 font-semibold ${task.followUpAt ? "" : "text-accent"}`} />
-            </div>
-          </div>
-          {/* The other tasks on this conversation, then add one more. */}
-          {others.length > 0 && (
-            <div className="mt-3 space-y-1.5 border-t pt-3">
-              {others.map((x) => (
-                <div key={x.id} className="flex items-center gap-2 rounded-lg bg-background py-1.5 pl-3 pr-1.5">
-                  <AppLink href={taskHref(x.id)} onOpen={() => p.onOpenTask(x.id, t.subject || t.peerName)} className="min-w-0 flex-1 text-left" title="Open task">
-                    <span className="block truncate font-semibold">{x.title}</span>
-                    <span className="flex items-center gap-1.5 truncate text-[14px] text-muted"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_META[x.status].dot }} />{STATUS_META[x.status].label}{x.due ? ` · due ${dueLabel(x.due)}` : ""}</span>
-                  </AppLink>
-                  <button disabled={busy} onClick={() => unlink(x.id)} title="Unlink from this conversation" aria-label={`Unlink ${x.title}`}
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface hover:text-danger disabled:opacity-50">✕</button>
-                </div>
-              ))}
-            </div>
-          )}
+          ))}
           {addOpen ? (
-            <div className="mt-3 border-t pt-3">
+            <div className={card}>
               <div className="mb-2 flex items-center"><span className={`${label} mb-0 flex-1`}>ANOTHER TASK</span>
                 <button onClick={() => { setAddOpen(false); setNewOpen(false); setQ(""); }} className="font-semibold text-muted hover:text-foreground">Cancel</button></div>
               {picker}
             </div>
           ) : (
-            <button onClick={() => setAddOpen(true)} className={`${linkBtn} mt-3 block`}>＋ Link another task</button>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
+              {whoseName && <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} className={linkBtn}>{whoseName.split(/\s+/)[0]}&apos;s tasks →</AppLink>}
+              <button onClick={() => setAddOpen(true)} className={linkBtn}>＋ Link another</button>
+              <button disabled={busy} onClick={() => unlink(task.id)} title="Unlink from this conversation"
+                className="ml-auto flex items-center gap-1 font-semibold text-muted hover:text-danger disabled:opacity-50"><BrokenLinkIcon /> Unlink</button>
+            </div>
           )}
-        </> : picker}
-      </div>
+        </div>
+      ) : <>
+        {whoseName && (
+          <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`}
+            className="flex h-11 w-full items-center justify-between gap-2 rounded-xl bg-accent px-4 text-left text-[16px] font-bold text-white hover:opacity-90">
+            <span className="min-w-0 truncate">Open {whoseName}&apos;s tasks</span><span aria-hidden>→</span>
+          </AppLink>
+        )}
+        <div className={card}>
+          <div className={label}>LINK TO A TASK</div>
+          {picker}
+        </div>
+      </>}
 
       {/* Just the task and the people (Derek, 2026-10-02): the person's other
           tasks and conversations were more than this needs. */}
