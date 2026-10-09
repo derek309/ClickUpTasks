@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isClientVisible } from "@/lib/extensionApi";
 import { readGmailAttachment } from "@/lib/googleMail";
+import { contentDisposition } from "@/lib/contentDisposition";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,11 +42,10 @@ export async function GET(req: NextRequest) {
     const mime = String(att.mimeType || "").toLowerCase();
     const safeInline = /^image\/(jpeg|png|gif|webp|heic|heif)$/.test(mime) || mime === "application/pdf";
     const download = req.nextUrl.searchParams.get("download") === "1" || !safeInline;
-    const name = String(att.name || "file").replace(/["\r\n]/g, "");
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
         "Content-Type": safeInline ? mime : "application/octet-stream",
-        "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${name}"`,
+        "Content-Disposition": contentDisposition(download ? "attachment" : "inline", String(att.name || "file")),
         "Cache-Control": "private, max-age=3600",
         "X-Content-Type-Options": "nosniff",
       },
