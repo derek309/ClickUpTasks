@@ -1244,7 +1244,7 @@ function GmailImageTile({ item, messageId }: { item: Attachment; messageId: stri
   return <AttachmentTile item={item} small url={src ?? undefined} onOpen={() => { if (src) window.open(src, "_blank", "noopener"); }} />;
 }
 
-/** Its first ~7 lines, faded at the cut, with Show more; whole when short. */
+/** Its first ~7 lines, faded at the cut, with Read more; whole when short. */
 function ClampBox({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -1264,7 +1264,7 @@ function ClampBox({ children }: { children: React.ReactNode }) {
         {children}
         {tall && !open && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[var(--surface)] to-transparent" />}
       </div>
-      {tall && <button onClick={() => setOpen(!open)} className="mt-1 text-[16px] font-medium text-accent hover:underline">{open ? "Show less" : "Show more"}</button>}
+      {tall && <button onClick={() => setOpen(!open)} className="mt-1 text-[16px] font-medium text-accent hover:underline">{open ? "Read less" : "Read more"}</button>}
     </>
   );
 }

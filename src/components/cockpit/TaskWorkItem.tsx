@@ -727,14 +727,33 @@ export function ImageThumbGrid({ images, onOpen }: { images: PreviewImage[]; onO
   );
 }
 
+/** The picture on the clipboard, to paste into a chat or a design. The
+ *  clipboard only takes PNG, so anything else is redrawn as one. */
+async function copyPicture(url: string) {
+  try {
+    const png = (async () => {
+      const blob = await (await fetch(url)).blob();
+      if (blob.type === "image/png") return blob;
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+      c.getContext("2d")!.drawImage(bmp, 0, 0);
+      return await new Promise<Blob>((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error())), "image/png"));
+    })();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+  } catch { /* the button stays; Download still works */ }
+}
+
 /** A full screen preview of one image, with the others a click or an arrow key
  *  away (Derek, 2026-09-11: "show the images if they are added and open in light
  *  box if opened so we can preview"). */
-export function ImageLightbox({ images, index, onIndex, onClose }: {
+export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
   images: PreviewImage[];
   index: number;
   onIndex: (index: number) => void;
   onClose: () => void;
+  /** Saves the file under its own name (a signed link on another host can't
+   *  be named by the page); without it Download opens the original. */
+  onDownload?: (img: PreviewImage) => void;
 }) {
   const nav = useRef({ index, count: images.length, onIndex, onClose });
   useEffect(() => { nav.current = { index, count: images.length, onIndex, onClose }; });
@@ -761,7 +780,11 @@ export function ImageLightbox({ images, index, onIndex, onClose }: {
         <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white">
           {img.name}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
         </span>
-        <a href={img.downloadUrl ?? img.url} target="_blank" rel="noopener noreferrer" className={control}>{img.downloadUrl ? "Download" : "Open original"}</a>
+        {onDownload
+          ? <button onClick={() => onDownload(img)} className="rounded-lg bg-white px-3 py-1.5 text-[16px] font-semibold text-black hover:bg-white/90">⬇ Download</button>
+          : <a href={img.downloadUrl ?? img.url} target="_blank" rel="noopener noreferrer" className={control}>{img.downloadUrl ? "Download" : "Open original"}</a>}
+        {typeof ClipboardItem !== "undefined" && <button onClick={() => copyPicture(img.url)} className={control}>Copy</button>}
+        {onDownload && <a href={img.url} target="_blank" rel="noopener noreferrer" className={control}>Open in new tab</a>}
         <button onClick={onClose} className={control}>Close</button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6">

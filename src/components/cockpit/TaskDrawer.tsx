@@ -16,6 +16,7 @@ import { ActionMenu } from "./ActionMenu";
 import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
+import { ImageLightbox } from "./TaskWorkItem";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -364,15 +365,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onAddFiles(e.dataTransfer.files);
     },
   };
-  const [previewAtt, setPreviewAtt] = useState<Attachment | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  // Escape closes the photo preview, not the drawer behind it.
-  useEscapeToClose(() => setPreviewAtt(null), !!previewAtt);
-  const openPreview = async (att: Attachment) => {
-    setPreviewAtt(att);
-    setPreviewUrl(null);
-    if (att.path) setPreviewUrl(await onGetSignedUrl(att.path));
-  };
   // Copies a message attachment (e.g. a photo the client sent over chat)
   // onto the task's own Attachments section — same storage object, just a
   // second reference with its own id, same idiom as fillFromTask's link
@@ -404,6 +396,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attImagePaths]);
+  // Files that came in the conversation (a flyer the client sent in chat, a
+  // screenshot on a note) and aren't on the task itself: shown with the
+  // task's own in the side column (Derek, 2026-10-09).
+  const conversationFiles = useMemo(() => {
+    const own = new Set(task.attachments.map((a) => a.path).filter(Boolean));
+    const seen = new Set<string>();
+    return [...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])]
+      .filter((a) => !!a.path && !own.has(a.path) && !seen.has(a.path) && !!seen.add(a.path));
+  }, [task.attachments, messages, task.comments]);
+  // Every picture on the task and in its conversation, for the lightbox:
+  // a click on any of them opens it there, the rest an arrow away. It used
+  // to live inside the files card, so a picture from chat on a task with no
+  // files of its own opened nothing (Derek, 2026-10-09).
+  const galleryImages = useMemo(() => [...task.attachments, ...conversationFiles]
+    .filter((a) => a.kind === "image" && a.path && attImageUrls[a.path])
+    .map((a) => ({ id: a.path!, name: a.name, url: attImageUrls[a.path!] })), [task.attachments, conversationFiles, attImageUrls]);
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  // A picture opens in the lightbox; anything else opens in its own tab,
+  // where the browser previews a PDF. The tab opens on the click so no popup
+  // blocker stops it, then goes to the file.
+  const openPreview = async (att: Attachment) => {
+    if (!att.path) { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); return; }
+    const i = att.kind === "image" ? galleryImages.findIndex((g) => g.id === att.path) : -1;
+    if (i >= 0) { setLightbox(i); return; }
+    const tab = window.open("about:blank", "_blank");
+    const url = await onGetSignedUrl(att.path);
+    if (tab && url) { tab.opener = null; tab.location.href = url; } else tab?.close();
+  };
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Packages the task as a ready-to-paste brief for a Claude Code session.
@@ -1086,7 +1106,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setOpenSections((s) => (s.taskId === task.id ? { taskId: task.id, keys: [...s.keys, k] } : { taskId: task.id, keys: [k] }));
   const hasDescription = htmlToText(task.description).trim().length > 0;
   const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
-  const showAttachments = task.attachments.length > 0 || sectionOpen("attachments");
+  const showAttachments = task.attachments.length > 0 || conversationFiles.length > 0 || sectionOpen("attachments");
   // A client document is for sharing, so a private task and the Personal client
   // never get one. Whether one exists is only known once TaskDocument loads it,
   // so it reports back; keyed by task id like openSections, because this drawer
@@ -1367,10 +1387,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (attSort === "type") return ATT_KIND_ORDER[a.kind] - ATT_KIND_ORDER[b.kind];
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   }), [task.attachments, attSort]);
+  const galleryTiles = [
+    ...sortedAttachments.filter((a) => a.kind === "image").map((a) => ({ a, own: true })),
+    ...conversationFiles.filter((a) => a.kind === "image").map((a) => ({ a, own: false })),
+  ];
   const attachmentsBlock = !showAttachments ? null : (
     <div className={`mt-4 rounded-xl bg-surface p-4 ${!hasMessaging && task.comments.length === 0 ? "border" : "shadow-soft"}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[16px] font-semibold">Links and files {task.attachments.length > 0 && <span className="font-normal text-muted">· {task.attachments.length}</span>}</span>
+        <span className="text-[16px] font-semibold">Links and files {task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>}</span>
         <span className="flex items-center gap-3">
           {/* Sorting two things is not a job. It earns its place at five. */}
           {task.attachments.length >= 5 && (
@@ -1403,31 +1427,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
         className={`grid grid-cols-3 gap-2 rounded-lg transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
       >
-        {task.attachments.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
-        {sortedAttachments.filter((a) => a.kind === "image").map((a) => (
-          <div key={a.id} className="flex flex-col gap-1">
-            <AttachmentTile
-              item={a}
-              url={a.path ? attImageUrls[a.path] : undefined}
-              onOpen={a.path ? () => openPreview(a) : undefined}
-              drag={attSort === "added" ? { dragging: dragAttId === a.id, onDragStart: () => setDragAttId(a.id), onDrop: () => reorderAttachments(a.id) } : undefined}
-              actions={
-                <>
-                  {a.path && (
-                    <>
-                      <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
-                    </>
-                  )}
-                  <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
-                </>
-              }
-            />
-            <div className="truncate text-center text-[16px]" title={a.name}>{a.name}</div>
-            <div className="text-center text-[16px] text-muted">{a.size}</div>
-          </div>
-        ))}
+        {task.attachments.length === 0 && conversationFiles.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
       </div>
+      {/* Pictures as a gallery with no names, the task's own then the ones
+          from the conversation (Derek, 2026-10-09: "same as in mail"). A
+          click opens the lightbox; the name is on hover. */}
+      {galleryTiles.length > 0 && (
+        <div className="mt-2 columns-2 gap-2">
+          {galleryTiles.map(({ a, own }) => (
+            <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
+              onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
+              onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
+              className={`group relative mb-2 break-inside-avoid overflow-hidden rounded-lg bg-background ring-1 ring-[var(--border)] hover:ring-2 hover:ring-accent ${dragAttId === a.id ? "opacity-40" : ""}`}>
+              <button onClick={() => openPreview(a)} title={a.name} aria-label={`Preview ${a.name}`} className="block w-full">
+                {a.path && attImageUrls[a.path]
+                  // eslint-disable-next-line @next/next/no-img-element
+                  ? <img src={attImageUrls[a.path]} alt={a.name} className="block w-full" />
+                  : <span className="grid h-24 w-full place-items-center text-muted">🖼️</span>}
+              </button>
+              <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>}
+                {own
+                  ? <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
+                  : <button onClick={() => attachToTask(a)} title="Keep it with the task's files" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-3.5 w-3.5" /></button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Non-image attachments (docs, sheets, links) used to render as
           empty-looking AttachmentTile boxes with no real thumbnail to show
           — a compact link chip carries the same info (name, type, size)
@@ -1435,6 +1462,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* One per row, not wrapped chips: a 90 character URL in an inline-flex
           chip either burst the card or wrapped into an unreadable block, and
           a full-width row can truncate cleanly with room for the buttons. */}
+      {conversationFiles.some((a) => a.kind !== "image") && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {conversationFiles.filter((a) => a.kind !== "image").map((a) => (
+            <button key={a.id} onClick={() => openPreview(a)} title={`Open ${a.name}`}
+              className="flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-2 text-left text-[16px] font-medium text-accent hover:underline">
+              <I.link className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 truncate">{a.name}</span><span className="shrink-0 font-normal text-muted">· from the conversation</span>
+            </button>
+          ))}
+        </div>
+      )}
       {sortedAttachments.some((a) => a.kind !== "image") && (
         <div className="mt-2 flex flex-col gap-1.5">
           {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
@@ -1470,25 +1507,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             );
           })}
         </div>
-      )}
-      {previewAtt && (
-        <>
-          <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setPreviewAtt(null)} />
-          <div className="fixed inset-8 z-50 flex flex-col items-center justify-center gap-3" onClick={() => setPreviewAtt(null)}>
-            {previewUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={previewUrl} alt={previewAtt.name} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
-            ) : (
-              <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            )}
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              {previewAtt.path && (
-                <button onClick={() => onDownloadFileAs(previewAtt.path!, previewAtt.name)} className="flex items-center gap-1.5 rounded-md bg-white/10 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/20"><I.download />Download</button>
-              )}
-              <button onClick={() => setPreviewAtt(null)} className="rounded-md bg-white/10 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/20">Close</button>
-            </div>
-          </div>
-        </>
       )}
     </div>
   );
@@ -1879,6 +1897,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           pushToast={pushToast}
           bar={!!slideOver && !full}
         />
+      {lightbox !== null && galleryImages[lightbox] && (
+        <ImageLightbox images={galleryImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)}
+          onDownload={(img) => onDownloadFileAs(img.id, img.name)} />
+      )}
       </aside>
     </>
   );
