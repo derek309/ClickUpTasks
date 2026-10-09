@@ -7,6 +7,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
+import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -619,6 +620,25 @@ export function createServer(opts = {}) {
   // as "From Claude", ready to open, check and send. Never sends anything. Kept
   // on inbox_prefs.prefs.queuedDrafts, because the Inbox's own drafts live
   // only in the browser.
+  /** Whose Inbox a Claude draft goes in: the teammate named (id or first
+   *  name), else you. The hosted connector runs as Claude (u_claude), whose
+   *  Inbox nobody opens, so its drafts go to Derek. null: nobody by that name. */
+  async function draftOwner(forMember, fallback) {
+    await members();
+    if (!forMember) return fallback || (ME === "u_claude" ? "u_derek" : ME);
+    const want = forMember.trim().toLowerCase();
+    const hit = Object.entries(memberNames).find(([id, n]) => id !== "u_claude" && (id.toLowerCase() === want || String(n).toLowerCase() === want || String(n).toLowerCase().split(/\s+/)[0] === want));
+    return hit ? hit[0] : null;
+  }
+  /** Adds a draft to that person's Inbox, Drafts (inbox_prefs.prefs.queuedDrafts). */
+  async function queueDraft(owner, draft) {
+    const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
+    const prefs = row?.prefs ?? {};
+    const next = { ...prefs, queuedDrafts: [...(prefs.queuedDrafts ?? []), draft] };
+    if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
+    else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
+  }
+
   server.tool("draft_message",
     "Write an email or a text for a teammate to check and send from their Inbox (it appears in Inbox, Drafts, at the top, marked From Claude). Never sends anything. Give either `to` (an email address or phone number) or `client_id` (from list_clients) and the client's contact is used. A text needs someone in GoHighLevel with a phone number. Prefer this over draft_email for messages to clients.",
     {
@@ -630,16 +650,8 @@ export function createServer(opts = {}) {
       for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members). Defaults to Derek when you are connected as Claude, else you."),
     },
     async ({ channel, to, client_id, subject, body, for_member }) => {
-      // The hosted connector runs as Claude (u_claude), whose Inbox nobody
-      // opens, so its drafts go to Derek unless someone else is named.
-      await members();
-      let owner = ME === "u_claude" ? "u_derek" : ME;
-      if (for_member) {
-        const want = for_member.trim().toLowerCase();
-        const hit = Object.entries(memberNames).find(([id, n]) => id !== "u_claude" && (id.toLowerCase() === want || String(n).toLowerCase() === want || String(n).toLowerCase().split(/\s+/)[0] === want));
-        if (!hit) return { content: [{ type: "text", text: `No teammate "${for_member}". Call list_members.` }] };
-        owner = hit[0];
-      }
+      const owner = await draftOwner(for_member);
+      if (!owner) return { content: [{ type: "text", text: `No teammate "${for_member}". Call list_members.` }] };
       if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
       let contact = null;
       if (client_id) {
@@ -660,11 +672,7 @@ export function createServer(opts = {}) {
       if (!address) return { content: [{ type: "text", text: `${contact?.name ?? "That contact"} has no ${channel === "email" ? "email address" : "phone number"}.` }] };
       if (channel === "text" && !contact) return { content: [{ type: "text", text: "A text goes through GoHighLevel, so it needs someone who is a contact there. No contact has that number." }] };
       const draft = { id: rid("qd_"), kind: channel, to: address, name: contact?.name || address, contactId: contact?.id ?? null, ...(channel === "email" && subject ? { subject } : {}), body, createdAt: nowIso(), by: "Claude" };
-      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
-      const prefs = row?.prefs ?? {};
-      const next = { ...prefs, queuedDrafts: [...(prefs.queuedDrafts ?? []), draft] };
-      if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
-      else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
+      await queueDraft(owner, draft);
       return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in ${memberNames[owner] ?? owner}'s Inbox, Drafts. Nothing was sent.` }] };
     });
 
@@ -679,6 +687,157 @@ export function createServer(opts = {}) {
       const saved = await sb(`tasks?id=eq.${enc(id)}${LIVE}${replace ? "" : "&draft_email=is.null"}`, "PATCH", { draft_email, updated_by: null });
       if (!saved.length) return { content: [{ type: "text", text: `${id} already has a draft email waiting. Pass replace: true to swap it.` }] };
       return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
+    });
+
+  // Reading an Inbox conversation (2026-10-09: a Claude chat handed an Inbox
+  // link could not open it). The same access rules as the Inbox's own routes
+  // (src/lib/inboxServer.ts threadRows / canUseThread): an admin reads any
+  // conversation; anyone else a Gmail thread only in their own mailbox, and a
+  // GoHighLevel one when it is assigned to them or to nobody (or, before the
+  // timer has catalogued it, when they can see its client). A task's portal
+  // chat goes through loadTask, like every other task read.
+  const THREAD_COLS = "id,contact_id,client_id,task_id,channel,direction,subject,body,created_at,created_by,gmail_thread_id,ghl_conversation_id,mailbox_member_id,peer_name,peer_address,cc,attachments";
+  const THREAD_INPUT = z.string().min(1).describe('the Inbox link (".../?view=mail&thread=gm%3A..."), or the conversation key itself: gm:<Gmail thread id>, ghl:<GoHighLevel conversation id> or chat:<task id>');
+  const notThread = (thread) => reply(`"${String(thread).slice(0, 120)}" is not an Inbox conversation. Give the Inbox link (it has thread= in it) or a key like gm:..., ghl:... or chat:<task id>.`);
+  /** { ref, rows (oldest first), conv } or { error }. */
+  async function loadThread(thread) {
+    const ref = parseThreadInput(thread);
+    if (!ref) return { error: notThread(thread) };
+    const none = { error: reply(`No conversation ${ref.key} that you can open.`) };
+    if (ref.kind === "chat") {
+      if (!await loadTask(ref.id, "id")) return none;
+      const rows = await sb(`messages?select=${THREAD_COLS}&task_id=eq.${enc(ref.id)}&channel=eq.chat&order=created_at.asc&limit=500`);
+      return rows.length ? { ref, rows, conv: null } : { error: reply(`Task ${ref.id} has no portal chat messages.`) };
+    }
+    const col = ref.kind === "gm" ? "gmail_thread_id" : "ghl_conversation_id";
+    let rows = await sb(`messages?select=${THREAD_COLS}&${col}=eq.${enc(ref.id)}${ref.kind === "gm" && !IS_ADMIN ? `&mailbox_member_id=eq.${enc(ME)}` : ""}&order=created_at.asc&limit=500`);
+    if (!rows.length) return none;
+    let conv = null;
+    if (ref.kind === "gm") {
+      // A Gmail thread id is only unique inside one mailbox. An admin reaching
+      // into several reads their own copy, else the newest message's mailbox.
+      const mine = ME === "u_claude" ? "u_derek" : ME;
+      const box = rows.some((r) => r.mailbox_member_id === mine) ? mine : rows[rows.length - 1].mailbox_member_id;
+      if (box) rows = rows.filter((r) => r.mailbox_member_id === box);
+    } else {
+      conv = (await sb(`ghl_conversations?select=*&id=eq.${enc(ref.id)}&limit=1`).catch(() => []))[0] ?? null;
+      if (!IS_ADMIN) {
+        const ok = conv ? !conv.assigned_member_id || conv.assigned_member_id === ME : clientOk(rows.find((r) => r.client_id)?.client_id);
+        if (!ok) return none;
+      }
+    }
+    return { ref, rows, conv };
+  }
+  /** The person on the other end (peerOf in src/lib/inboxServer.ts). */
+  function threadPeer(rows, conv) {
+    const newestFirst = [...rows].reverse();
+    const inbound = newestFirst.find((r) => r.direction === "inbound" && r.peer_address) ?? newestFirst.find((r) => r.peer_address);
+    return {
+      contactId: newestFirst.find((r) => r.contact_id)?.contact_id ?? null,
+      name: inbound?.peer_name ?? conv?.contact_name ?? null,
+      address: inbound?.peer_address ?? conv?.phone ?? conv?.email ?? null,
+    };
+  }
+  const asList = (v) => (Array.isArray(v) ? v : []);
+
+  server.tool("get_email_thread",
+    "Read one conversation from the Inbox: an email thread, a GoHighLevel text or message conversation, or a task's portal chat. Pass the Inbox link someone shares (it has thread= in it) or the key. Returns the subject, the people in it, the task(s) it is linked to, and every message oldest first with who sent it, when, CC, the text with quoted history taken off, and attachment names. To answer it, write the reply with draft_email_reply.",
+    { thread: THREAD_INPUT },
+    async ({ thread }) => {
+      const got = await loadThread(thread);
+      if (got.error) return got.error;
+      const { ref, rows, conv } = got;
+      await Promise.all([members(), names()]);
+      const who = (id) => (id ? memberNames[id] ?? id : null);
+      const subject = rows.find((r) => r.subject)?.subject ?? "(no subject)";
+      const people = new Map();
+      const addPerson = (address, name) => {
+        const a = String(address || "").trim();
+        if (!a) return;
+        const k = a.toLowerCase();
+        if (!people.has(k) || (!people.get(k) && name)) people.set(k, name || people.get(k) || "");
+      };
+      for (const r of rows) { addPerson(r.peer_address, r.peer_name); for (const c of asList(r.cc)) addPerson(typeof c === "string" ? c : c?.email, typeof c === "string" ? "" : c?.name); }
+      if (conv) addPerson(conv.email || conv.phone, conv.contact_name);
+      const ours = [...new Set(rows.map((r) => r.mailbox_member_id || (r.direction === "outbound" ? r.created_by : null)).filter(Boolean))].map(who);
+
+      // Linked tasks: the newest message's task, then any others put on it.
+      const main = [...rows].reverse().find((r) => r.task_id)?.task_id ?? null;
+      const extra = ref.kind === "chat" ? [] : (await sb(`inbox_task_links?select=task_id&thread_key=eq.${enc(ref.key)}&order=created_at.desc`).catch(() => [])).map((r) => r.task_id);
+      const taskIds = [...new Set([main, ...extra].filter(Boolean))];
+      const tasks = (await Promise.all(taskIds.map((id) => loadTask(id, "id,title,status")))).filter(Boolean);
+
+      const kind = ref.kind === "gm" ? "Email (Gmail)" : ref.kind === "chat" ? "Task portal chat" : `GoHighLevel conversation${conv?.channel_type ? ` (${conv.channel_type})` : ""}`;
+      const msgs = rows.map((r, i) => {
+        const from = r.direction === "inbound"
+          ? `${r.peer_name || r.peer_address || "them"}${r.peer_name && r.peer_address ? ` <${r.peer_address}>` : ""}`
+          : `${who(r.created_by) || who(r.mailbox_member_id) || "us"} (our side)`;
+        const cc = asList(r.cc).map((c) => (typeof c === "string" ? c : c?.email)).filter(Boolean);
+        const files = asList(r.attachments).map((a) => a?.name).filter(Boolean);
+        let text = messageText(r.body);
+        if (text.length > 8000) text = `${text.slice(0, 8000)}\n[... cut, ${text.length - 8000} more characters]`;
+        return [
+          `--- ${i + 1}. ${r.direction === "inbound" ? "From" : "Sent by"} ${from} · ${r.created_at}${r.channel && r.channel !== "email" ? ` · ${r.channel}` : ""}`,
+          r.subject && r.subject !== subject ? `Subject: ${r.subject}` : "",
+          cc.length ? `CC: ${cc.join(", ")}` : "",
+          files.length ? `Attachments: ${files.join(", ")}` : "",
+          "",
+          text || "(no text)",
+        ].filter((l, j) => l || j === 4).join("\n");
+      });
+      const text = [
+        `Conversation ${ref.key}`,
+        `Kind: ${kind}`,
+        `Subject: ${subject}`,
+        `People: ${[...people].map(([a, n]) => (n ? `${n} <${a}>` : a)).join(", ") || "(unknown)"}`,
+        ours.length ? `Our side: ${ours.join(", ")}` : "",
+        `Linked task${tasks.length === 1 ? "" : "s"}: ${tasks.length ? tasks.map((t) => `[${t.id}] ${t.title} (${t.status})`).join("; ") : "none"}`,
+        `Messages (${rows.length}, oldest first; quoted history removed):`,
+        "",
+        msgs.join("\n\n"),
+      ].filter((l, i) => l || i === 7).join("\n");
+      return reply(text);
+    });
+
+  server.tool("draft_email_reply",
+    "Write a reply to an Inbox conversation (from get_email_thread) for a teammate to check and send. Never sends anything. It goes in their Inbox, Drafts, at the top, marked From Claude, addressed to the person on the other end: an email thread gets an email with \"Re:\" on its subject, a GoHighLevel conversation gets a text. For a Gmail thread it goes to whoever's mailbox the thread is in unless for_member says otherwise.",
+    {
+      thread: THREAD_INPUT,
+      body: z.string().min(1).describe("plain text, paragraphs separated by a blank line"),
+      subject: z.string().optional().describe('email only; defaults to "Re: " and the conversation\'s subject'),
+      for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members)"),
+    },
+    async ({ thread, body, subject, for_member }) => {
+      const got = await loadThread(thread);
+      if (got.error) return got.error;
+      const { ref, rows, conv } = got;
+      if (ref.kind === "chat") return reply("A task's portal chat is answered on the task, not from Inbox Drafts. Use add_comment or draft_email on the task instead.");
+      const newest = rows[rows.length - 1];
+      const box = ref.kind === "gm" ? rows.find((r) => r.mailbox_member_id)?.mailbox_member_id : null;
+      const owner = await draftOwner(for_member, box && box !== "u_claude" ? box : undefined);
+      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
+      const kind = ref.kind === "gm" || newest.channel === "email" ? "email" : "text";
+      const peer = threadPeer(rows, conv);
+      let address = peer.address;
+      let name = peer.name;
+      // The conversation's own address is the right one, but a text needs a
+      // phone number, which an email conversation's address is not.
+      if (kind === "text" && (!address || address.includes("@")) && peer.contactId) {
+        const [ct] = await sb(`contacts?select=id,name,phone&id=eq.${enc(peer.contactId)}&limit=1`);
+        address = ct?.phone ?? null; name = name || ct?.name || null;
+      }
+      if (!address) return reply(`Can't tell who to reply to in ${ref.key}: no address on its messages.`);
+      if (kind === "text" && !peer.contactId) return reply("A text goes through GoHighLevel, so it needs someone who is a contact there. This conversation has no contact.");
+      const subj = kind === "email" ? (subject?.trim() || replySubject(rows.find((r) => r.subject)?.subject)) : "";
+      const draft = {
+        id: rid("qd_"), kind, to: address, name: name || address, contactId: peer.contactId,
+        ...(subj ? { subject: subj } : {}), body, createdAt: nowIso(), by: "Claude",
+        // The conversation it answers, and the message, so the Inbox can send
+        // it in that thread.
+        threadKey: ref.key, replyToMessageId: [...rows].reverse().find((r) => r.direction === "inbound")?.id ?? newest.id,
+      };
+      await queueDraft(owner, draft);
+      return reply(`Draft ${kind === "email" ? "reply" : "text"} to ${draft.name} (${address})${subj ? `, "${subj}",` : ""} is in ${memberNames[owner] ?? owner}'s Inbox, Drafts. Nothing was sent.`);
     });
 
   // Client reviews on a task: the client document (kind "doc"), the image review

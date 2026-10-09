@@ -3,6 +3,7 @@ import { requireUser, type AuthedUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isClientVisible } from "@/lib/extensionApi";
 import { parseThreadKey, threadRows, canUseThread } from "@/lib/inboxServer";
+import { copyThreadFilesToTask, copySoon } from "@/lib/emailFilesServer";
 
 // Link an Inbox conversation to a task, or unlink it (taskId null). Every
 // message in the conversation gets the task, and the ingest paths already
@@ -23,6 +24,13 @@ async function canLinkTask(caller: AuthedUser, taskId: string): Promise<string |
   if (caller.role !== "admin" && !mine && !(task.client_id && (await isClientVisible(caller, task.client_id as string))))
     return "You can't link to that task.";
   return null;
+}
+
+// Every file already sent in the conversation goes onto the task it is linked
+// to (Derek, 2026-10-09), after the response. Never fails the link.
+async function filesToTask(messageIds: string[], taskId: string) {
+  try { await copySoon(`link ${taskId}`, () => copyThreadFilesToTask(supabaseAdmin, messageIds, taskId)); }
+  catch (e) { console.error("[inbox/link] files to task", e); }
 }
 
 async function extraTaskIds(threadKey: string): Promise<string[]> {
@@ -78,6 +86,7 @@ export async function POST(req: NextRequest) {
     const { error } = await supabaseAdmin.from("inbox_task_links")
       .upsert({ thread_key: threadKey, task_id: taskId, linked_by: caller.memberId }, { onConflict: "thread_key,task_id", ignoreDuplicates: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await filesToTask(ids, taskId);
     return NextResponse.json({ ok: true, taskId: main, taskIds: await extraTaskIds(threadKey) });
   }
 
@@ -85,6 +94,9 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // Unlinking everything clears the others too; the main task is never also an "other".
   if (!taskId) await supabaseAdmin.from("inbox_task_links").delete().eq("thread_key", threadKey);
-  else await supabaseAdmin.from("inbox_task_links").delete().eq("thread_key", threadKey).eq("task_id", taskId);
+  else {
+    await supabaseAdmin.from("inbox_task_links").delete().eq("thread_key", threadKey).eq("task_id", taskId);
+    await filesToTask(ids, taskId);
+  }
   return NextResponse.json({ ok: true, linked: ids.length, taskId, taskIds: await extraTaskIds(threadKey) });
 }

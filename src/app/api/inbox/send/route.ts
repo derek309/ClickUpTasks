@@ -13,6 +13,7 @@ import { richToText } from "@/lib/inbox";
 import { isClientVisible } from "@/lib/extensionApi";
 import { contactHome } from "@/lib/ghlPerson";
 import { smsText } from "@/lib/smsText";
+import { copyEmailFilesToTask, copySoon } from "@/lib/emailFilesServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -196,6 +197,12 @@ async function sendEmail(caller: any, b: Body, text: string, rows: any[], peer: 
     };
     const { error } = await supabaseAdmin.from("messages").insert(row);
     if (error) console.error("[inbox/send] stored copy failed", error.message);
+    // The files sent go on the conversation's task too (Derek, 2026-10-09).
+    // Already in storage: copied there, not fetched again.
+    else if (taskId && stored.length) {
+      try { await copySoon(`send ${row.id}`, () => copyEmailFilesToTask(supabaseAdmin, row.id, taskId)); }
+      catch (e) { console.error("[inbox/send] files to task", e); }
+    }
     return NextResponse.json({ ok: true, messageId: row.id, threadKey: `gm:${threadId}` });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gmail send failed." }, { status: 502 });

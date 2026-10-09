@@ -753,6 +753,9 @@ export interface Attachment {
   gmailAttachmentId?: string;
   mimeType?: string;
   url?: string; // for kind "link" — a drive/website URL rather than a stored file
+  /** On a task: the email file this was copied from (lib/emailFiles
+   *  emailFileSources), so the same file is never copied onto it twice. */
+  emailSource?: string;
   /** Which Vault folder this attachment has been filed into, if any — see
    * VaultFolder. Unset = "Unfiled". Purely organizational, doesn't move the
    * underlying file; the attachment still lives on whichever task/comment/

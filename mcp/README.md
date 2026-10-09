@@ -21,6 +21,15 @@ Tasks: `list_my_tasks`, `list_client_tasks`, `get_task`, `set_project_instructio
 `list_projects`, `list_notes`, `add_note`, `list_links`, `get_client_link`,
 `get_client_overview`.
 
+Inbox: `draft_message` (a new email or text in someone's Inbox, Drafts),
+`get_email_thread` (read one conversation from an Inbox link like
+`.../?view=mail&thread=gm%3A...` or a key `gm:`, `ghl:`, `chat:<task id>`:
+subject, people, linked tasks, every message oldest first with quoted history
+removed) and `draft_email_reply` (a reply to that conversation in Drafts,
+marked From Claude; never sent). Same access as the Inbox: an admin reads any
+conversation, anyone else only their own mailbox and GoHighLevel conversations
+assigned to them or nobody.
+
 Reviews (hosted only), for a task's client document (kind `doc`), image review
 (`image`) and HTML review (`page`): `list_reviews`, `get_review`,
 `create_review`, `update_review`, `write_document`, `start_image_upload`,
