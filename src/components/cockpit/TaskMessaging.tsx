@@ -1220,11 +1220,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
   // at the bottom of the page and the menu that opens it is near the top.
   // The description is the feed's first post; this shows it (it isn't under
   // Changes) and scrolls to it, opening an empty one to write.
-  const showDescription = () => {
+  function showDescription() {
     setDescOpen(true);
     if (view === "changes" || view === "description") setView("all");
     requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById("task-description-post")?.scrollIntoView({ behavior: "smooth", block: "start" })));
-  };
+  }
   return { feedArea, composerFooter, openCompose, showDescription };
 }
 
