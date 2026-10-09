@@ -1156,8 +1156,12 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
   const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg/i.test(html);
   const sender = (m.peerAddress ?? "").toLowerCase();
   const remote = REMOTE_IMAGES.test(html);
-  // Your own sent mail shows as it is.
-  const showImages = !remote || m.direction !== "inbound" || imagesOn || (!!sender && (p.prefs.imageSenders ?? []).includes(sender));
+  // Your own sent mail shows as it is, and so does mail from one of your
+  // contacts: hiding pictures is about strangers learning you opened it, and
+  // a contact already knows you (Derek, 2026-10-09).
+  const fromContact = !!m.contactId || (!!sender && p.contacts.some((c) => (c.email ?? "").toLowerCase() === sender
+    || (c.additionalEmails ?? []).some((e) => e.toLowerCase() === sender)));
+  const showImages = !remote || m.direction !== "inbound" || imagesOn || fromContact || (!!sender && (p.prefs.imageSenders ?? []).includes(sender));
   const csp = showImages ? "" : `<meta http-equiv="Content-Security-Policy" content="img-src data: blob:">`;
   const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
   return (
@@ -2187,7 +2191,37 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         {adding && <AddToClient p={p} t={t} person={adding} onDone={() => setAdding(null)} />}
       </div>
       )}
+      <ThreadFiles p={p} t={t} />
     </aside>
+  );
+}
+
+// Every file in the conversation in one list under the people (Derek,
+// 2026-10-09), newest first, so a screenshot from three emails back is one
+// click away. Signature logos are left out, same as under each email.
+function ThreadFiles({ p, t }: { p: InboxViewProps; t: InboxThread }) {
+  const files = t.messages.flatMap((m) => (m.attachments ?? []).filter((a) => !isSignatureImage(a)).map((a) => ({ a, m })))
+    .sort((x, y) => y.m.at.localeCompare(x.m.at));
+  if (!files.length) return null;
+  return (
+    <>
+      <div className="px-1 pt-1 text-[14px] font-bold tracking-wide text-muted">ATTACHMENTS IN THIS THREAD</div>
+      <div className="rounded-lg bg-surface p-1.5 ring-1 ring-[var(--border)]">
+        {files.map(({ a, m }) => (
+          <button key={`${m.id}:${a.id}`} onClick={() => openFile(a, m, p, a.kind !== "image" && a.kind !== "pdf" && a.kind !== "link")}
+            title={a.kind === "image" || a.kind === "pdf" || a.kind === "link" ? `Open ${a.name}` : `Download ${a.name}`}
+            className="flex w-full items-center gap-3 rounded-md p-1.5 text-left hover:bg-background">
+            {a.kind === "image"
+              ? <FileImage a={a} m={m} p={p} className="h-11 w-11 shrink-0 rounded-md object-cover ring-1 ring-[var(--border)]" />
+              : <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-danger-soft text-[12px] font-extrabold text-danger">{a.kind === "pdf" ? "PDF" : a.kind === "sheet" ? "XLS" : a.kind === "link" ? "LINK" : "DOC"}</span>}
+            <span className="min-w-0">
+              <b className="block truncate font-semibold">{a.name}</b>
+              <span className="block truncate text-[14px] text-muted">{[m.direction === "inbound" ? (m.peerName || m.peerAddress) : "You", new Date(m.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }), a.size].filter(Boolean).join(" · ")}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
