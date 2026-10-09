@@ -599,3 +599,49 @@ export async function readGmailHtml(mailbox: string, gmailMessageId: string): Pr
   }
   return out;
 }
+
+const GMAIL_DRAFTS = "https://gmail.googleapis.com/gmail/v1/users/me/drafts";
+/** A reply saved as a Gmail draft inside its conversation, so a reply Claude
+ *  writes (draft_email_reply) is in Gmail as well as the Inbox (Derek,
+ *  2026-10-09). bodyHtml is the finished HTML, signature included. Needs
+ *  gmail.modify. Returns the draft's id. */
+export async function createGmailDraft(mailbox: string, msg: { to: string; subject: string; bodyHtml: string; fromName?: string; replyTo: ReplyHeaders | null }): Promise<string> {
+  if (!googleConfigured) throw new Error("Google Workspace is not configured.");
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_MODIFY_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const mime = [
+    `From: ${formatFrom(mailbox, msg.fromName)}`,
+    `To: ${msg.to}`,
+    `Subject: ${encodeHeader(msg.subject || "")}`,
+    ...(msg.replyTo ? [
+      `In-Reply-To: ${msg.replyTo.messageId}`,
+      `References: ${[msg.replyTo.references, msg.replyTo.messageId].filter(Boolean).join(" ")}`,
+    ] : []),
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    msg.bodyHtml,
+  ].join("\r\n");
+  const raw = b64url(Buffer.from(mime, "utf8"));
+  const res = await fetch(GMAIL_DRAFTS, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ message: msg.replyTo?.threadId ? { raw, threadId: msg.replyTo.threadId } : { raw } }),
+  });
+  if (!res.ok) throw new Error(`Gmail draft failed (${res.status})`);
+  const j = await res.json();
+  return j.id as string;
+}
+
+/** Removes a draft createGmailDraft made. Already gone (sent from Gmail, or
+ *  deleted there) counts as done. */
+export async function deleteGmailDraft(mailbox: string, draftId: string): Promise<void> {
+  if (!googleConfigured) return;
+  const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [GMAIL_MODIFY_SCOPE], subject: mailbox });
+  const { token } = await jwt.getAccessToken();
+  if (!token) throw new Error("Could not obtain a Google access token.");
+  const res = await fetch(`${GMAIL_DRAFTS}/${encodeURIComponent(draftId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok && res.status !== 404) throw new Error(`Gmail draft delete failed (${res.status})`);
+}

@@ -656,11 +656,16 @@ export function createServer(opts = {}) {
    *  draft; a reply to a conversation replaces Claude's earlier reply to the
    *  same conversation, so corrections don't pile up (Loomis chat, 2026-10-09).
    *  Returns how many it replaced. */
+  /** A draft's Gmail copy goes when the draft does (replaced or deleted). */
+  async function dropGmailCopies(drafts) {
+    for (const d of drafts) if (d.gmailDraftId && d.gmailMailbox && opts.services?.deleteGmailDraft) await opts.services.deleteGmailDraft(d.gmailMailbox, d.gmailDraftId);
+  }
   async function queueDraft(owner, draft, replaceId) {
     const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
     const prefs = row?.prefs ?? {};
     const was = prefs.queuedDrafts ?? [];
     const kept = was.filter((d) => d.id !== replaceId && !(draft.threadKey && d.threadKey === draft.threadKey && (d.by ?? "Claude") === "Claude"));
+    await dropGmailCopies(was.filter((d) => !kept.includes(d)));
     const next = { ...prefs, queuedDrafts: [...kept, draft] };
     if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
     else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
@@ -865,8 +870,16 @@ export function createServer(opts = {}) {
         // it in that thread.
         threadKey: ref.key, replyToMessageId: [...rows].reverse().find((r) => r.direction === "inbound")?.id ?? newest.id,
       };
+      // The same reply as a Gmail draft in that conversation, in the mailbox
+      // it's in, when this server can reach Gmail (Derek, 2026-10-09).
+      let gmailNote = "";
+      if (kind === "email" && box && opts.services?.gmailReplyDraft) {
+        const g = await opts.services.gmailReplyDraft({ mailboxMemberId: box, answerId: draft.replyToMessageId, to: address, subject: subj, body });
+        if (g.draftId) { draft.gmailDraftId = g.draftId; draft.gmailMailbox = g.mailbox; gmailNote = ` It's also a draft in ${g.mailbox}'s Gmail, in the conversation.`; }
+        else gmailNote = ` (Not in Gmail: ${g.error}.)`;
+      }
       const swapped = await queueDraft(owner, draft);
-      return reply(`Draft ${kind === "email" ? "reply" : "text"} to ${draft.name} (${address})${subj ? `, "${subj}",` : ""} is in ${memberNames[owner] ?? owner}'s Inbox, Drafts (draft id ${draft.id}${swapped ? ", replacing Claude's earlier reply to this conversation" : ""}). Opening it opens the conversation with the reply in the box. Nothing was sent.`);
+      return reply(`Draft ${kind === "email" ? "reply" : "text"} to ${draft.name} (${address})${subj ? `, "${subj}",` : ""} is in ${memberNames[owner] ?? owner}'s Inbox (draft id ${draft.id}${swapped ? ", replacing Claude's earlier reply to this conversation" : ""}): opening the conversation shows it in the reply box, marked From Claude.${gmailNote} Nothing was sent.`);
     });
 
   // See and clear Claude's drafts, so a correction doesn't leave the old one
@@ -894,7 +907,9 @@ export function createServer(opts = {}) {
       const was = prefs.queuedDrafts ?? [];
       if (!was.some((d) => d.id === id)) return reply(`No draft ${id} in ${memberNames[owner] ?? owner}'s Inbox. Call list_drafts.`);
       await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: { ...prefs, queuedDrafts: was.filter((d) => d.id !== id) }, updated_at: nowIso() });
-      return reply(`Deleted draft ${id}.`);
+      const gone = was.find((d) => d.id === id);
+      await dropGmailCopies([gone]);
+      return reply(`Deleted draft ${id}${gone.gmailDraftId ? " and its copy in Gmail" : ""}.`);
     });
 
   // Client reviews on a task: the client document (kind "doc"), the image review

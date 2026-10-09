@@ -25,6 +25,7 @@ import { NextRequest } from "next/server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "../../../../mcp/core.mjs";
 import { createReviewServices } from "@/lib/mcpReviewServices";
+import { createMailServices } from "@/lib/mcpMailServices";
 import { createCalendarServices } from "@/lib/mcpCalendarServices";
 import { sameSecret } from "@/lib/sameSecret";
 import { memberForClaudeToken } from "@/lib/claudeCodeAccess";
@@ -75,7 +76,7 @@ export async function handleMcp(req: NextRequest, pathToken?: string): Promise<R
     memberId, role, visibleClients,
     // The review tools run the app's own review code, so only this server has them.
     // Calendar tools (lib/mcpCalendarServices) ride on the same gate.
-    services: { ...createReviewServices({ memberId }), ...createCalendarServices({ memberId }) },
+    services: { ...createReviewServices({ memberId }), ...createCalendarServices({ memberId }), ...createMailServices() },
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);

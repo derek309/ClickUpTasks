@@ -72,7 +72,7 @@ export const DEFAULT_PREFS: InboxPrefs = {
 /** threadKey / replyToMessageId: set by MCP draft_email_reply, the
  *  conversation the draft answers. Not read by the Inbox yet, so such a draft
  *  still opens as a new message to the same person. */
-export type QueuedDraft = { id: string; kind: "email" | "text"; to: string; name: string; contactId?: string | null; subject?: string; body: string; createdAt: string; by?: string; threadKey?: string; replyToMessageId?: string };
+export type QueuedDraft = { id: string; kind: "email" | "text"; to: string; name: string; contactId?: string | null; subject?: string; body: string; createdAt: string; by?: string; threadKey?: string; replyToMessageId?: string; gmailDraftId?: string; gmailMailbox?: string };
 
 const key = (member: string) => `inboxPrefs:${member}`;
 

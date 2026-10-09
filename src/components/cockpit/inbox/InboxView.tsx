@@ -187,12 +187,7 @@ export default function InboxView(p: InboxViewProps) {
   // conversation not loaded here, opens as a new message as before.
   const openQueued = (d: NonNullable<InboxPrefs["queuedDrafts"]>[number]) => {
     const th = d.threadKey ? inbox.threads.find((x) => x.key === d.threadKey) : null;
-    if (th) {
-      writeDraft(p.me.id, th.key, d.body);
-      p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((x) => x.id !== d.id) });
-      refreshDrafts(); setFolder("inbox"); openThread(th);
-      return;
-    }
+    if (th) { setFolder("inbox"); openThread(th); return; }
     setOpenKey(null); setComposeNew({ kind: d.kind, to: d.to, name: d.name, contactId: d.contactId ?? undefined, subject: d.subject, body: d.body, queuedId: d.id });
   };
   const step = (d: 1 | -1) => {
@@ -632,7 +627,25 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
   // message it answers, so it is clear what is being answered (Derek,
   // 2026-10-01). A draft already started opens it as a reply.
   const lastFromThem = t.messages.find((m) => m.direction === "inbound") ?? t.messages[0];
-  const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => (readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null));
+  // A reply Claude drafted for this conversation (mcp draft_email_reply) is
+  // in the reply box when it opens, inline (Derek, 2026-10-09), unless you've
+  // started your own or have written to them since it was drafted.
+  const claudeDraft = (p.prefs.queuedDrafts ?? []).find((d) => d.threadKey === t.key) ?? null;
+  const claudeStale = !!claudeDraft && t.messages.some((m) => m.direction === "outbound" && m.at > claudeDraft.createdAt);
+  const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => {
+    if (claudeDraft && !claudeStale && !readDraft(p.me.id, t.key)) writeDraft(p.me.id, t.key, claudeDraft.body);
+    return readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null;
+  });
+  // Sent or thrown away here, or answered since: Claude's draft is done, and
+  // its copy in Gmail goes too so it can't be sent twice.
+  const dropClaude = () => {
+    if (!claudeDraft) return;
+    void authedFetch("/api/inbox/claude-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeDraft.id }) }).catch(() => null)
+      .finally(() => p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((x) => x.id !== claudeDraft.id) }));
+  };
+  const draftChanged = () => { onDraft(); if (claudeDraft && !readDraft(p.me.id, t.key)) dropClaude(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when it opens
+  useEffect(() => { if (claudeStale) dropClaude(); }, []);
   const [blockOpen, setBlockOpen] = useState(false);
   const domain = t.channel === "email" && t.peerAddress?.includes("@") ? "@" + t.peerAddress.split("@")[1] : null;
   const blockIt = async (address: string) => {
@@ -720,13 +733,13 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} emailInstead={emailInstead} onArchive={done} />
+          <ChatView p={p} t={t} typing={typing} onDraft={draftChanged} emailInstead={emailInstead} onArchive={done} />
           <SideResizer p={p} />
           <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
         </div>
       ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} onArchive={done} />
+        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={draftChanged} onArchive={done} claude={claudeDraft && !claudeStale ? claudeDraft : null} />
         <SideResizer p={p} />
         <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
       </div>
@@ -858,7 +871,8 @@ const fullTime = (iso: string) => new Date(iso).toLocaleString([], { month: "sho
 // ── An email conversation (Derek, 2026-10-01, mockup
 // https://claude.ai/artifact/Tei4W4znGdehdTpFJAxBP1): oldest first, older
 // emails folded to one line, the newest open at the bottom with Reply under it.
-function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: {
+function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive, claude = null }: {
+  claude?: NonNullable<InboxPrefs["queuedDrafts"]>[number] | null;
   p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; onArchive?: () => void;
   compose: { mode: ComposeMode; m: Message } | null; setCompose: (c: { mode: ComposeMode; m: Message } | null) => void;
 }) {
@@ -876,7 +890,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: 
   const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const others = [...new Set(oldestFirst.filter((m) => m.direction === "inbound").map((m) => whoWrote(m, t, p).name))];
   const composer = (m: Message) => compose?.m.id === m.id
-    ? <div className="mt-3"><Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} onArchive={onArchive} /></div>
+    ? <div className="mt-3">{claude && <div className="mb-1.5 flex items-center gap-2 font-semibold text-[#7c3aed]">✳ Claude drafted this reply{claude.gmailDraftId ? <span className="font-normal text-muted">· also in your Gmail Drafts, sending here removes it there</span> : null}</div>}<Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} onArchive={onArchive} /></div>
     : null;
   return (
     <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1000px]:overflow-y-auto">
