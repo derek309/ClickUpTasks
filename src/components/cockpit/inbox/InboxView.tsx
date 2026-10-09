@@ -2102,6 +2102,12 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
         // what it is, where it stands, one click to the task to change it.
         // The five boxes that were here are edits the drawer already does.
         <div className="space-y-2">
+          {/* Label left, the jump right, same as the sections under it
+              (Derek, 2026-10-09: "some consistency"). */}
+          <div className="flex items-center gap-2 px-1 pt-1">
+            <span className="flex-1 text-[14px] font-bold tracking-wide text-muted">{others.length ? "LINKED TASKS" : "LINKED TASK"}</span>
+            {whoseName && <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} title={`Open ${whoseName}'s task list`} className="text-[14px] font-semibold text-accent hover:underline">{whoseName.split(/\s+/)[0]}&apos;s tasks →</AppLink>}
+          </div>
           <AppLink href={taskHref(task.id)} onOpen={() => p.onOpenTask(task.id, t.subject || t.peerName)} title="Open the task to view or change it"
             className="block w-full rounded-xl bg-accent px-4 py-3 text-left text-white hover:opacity-90">
             <span className="flex items-start gap-2">
@@ -2136,7 +2142,6 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
-              {whoseName && <AppLink href={clientHref(whose)} onOpen={() => p.onOpenClient(whose)} className={linkBtn}>{whoseName.split(/\s+/)[0]}&apos;s tasks →</AppLink>}
               <button onClick={() => setAddOpen(true)} className={linkBtn}>＋ Link another</button>
               <button disabled={busy} onClick={() => unlink(task.id)} title="Unlink from this conversation"
                 className="ml-auto flex items-center gap-1 font-semibold text-muted hover:text-danger disabled:opacity-50"><BrokenLinkIcon /> Unlink</button>
