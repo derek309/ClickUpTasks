@@ -652,12 +652,19 @@ export function createServer(opts = {}) {
     return hit ? hit[0] : null;
   }
   /** Adds a draft to that person's Inbox, Drafts (inbox_prefs.prefs.queuedDrafts). */
-  async function queueDraft(owner, draft) {
+  /** Adds a draft to someone's Inbox Drafts. `replaceId` swaps out that
+   *  draft; a reply to a conversation replaces Claude's earlier reply to the
+   *  same conversation, so corrections don't pile up (Loomis chat, 2026-10-09).
+   *  Returns how many it replaced. */
+  async function queueDraft(owner, draft, replaceId) {
     const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
     const prefs = row?.prefs ?? {};
-    const next = { ...prefs, queuedDrafts: [...(prefs.queuedDrafts ?? []), draft] };
+    const was = prefs.queuedDrafts ?? [];
+    const kept = was.filter((d) => d.id !== replaceId && !(draft.threadKey && d.threadKey === draft.threadKey && (d.by ?? "Claude") === "Claude"));
+    const next = { ...prefs, queuedDrafts: [...kept, draft] };
     if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
     else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
+    return was.length - kept.length;
   }
 
   server.tool("draft_message",
@@ -669,8 +676,9 @@ export function createServer(opts = {}) {
       subject: z.string().optional().describe("email only"),
       body: z.string().min(1).describe("plain text, paragraphs separated by a blank line"),
       for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members). Defaults to Derek when you are connected as Claude, else you."),
+      replace_id: z.string().optional().describe("a draft id (from list_drafts or an earlier draft_message) this one replaces, for a correction"),
     },
-    async ({ channel, to, client_id, subject, body, for_member }) => {
+    async ({ channel, to, client_id, subject, body, for_member, replace_id }) => {
       const owner = await draftOwner(for_member);
       if (!owner) return { content: [{ type: "text", text: `No teammate "${for_member}". Call list_members.` }] };
       if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
@@ -693,8 +701,8 @@ export function createServer(opts = {}) {
       if (!address) return { content: [{ type: "text", text: `${contact?.name ?? "That contact"} has no ${channel === "email" ? "email address" : "phone number"}.` }] };
       if (channel === "text" && !contact) return { content: [{ type: "text", text: "A text goes through GoHighLevel, so it needs someone who is a contact there. No contact has that number." }] };
       const draft = { id: rid("qd_"), kind: channel, to: address, name: contact?.name || address, contactId: contact?.id ?? null, ...(channel === "email" && subject ? { subject } : {}), body, createdAt: nowIso(), by: "Claude" };
-      await queueDraft(owner, draft);
-      return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in ${memberNames[owner] ?? owner}'s Inbox, Drafts. Nothing was sent.` }] };
+      const swapped = await queueDraft(owner, draft, replace_id);
+      return { content: [{ type: "text", text: `Draft ${channel === "email" ? "email" : "text"} to ${draft.name} (${address}) is in ${memberNames[owner] ?? owner}'s Inbox, Drafts (draft id ${draft.id}${swapped ? ", replacing the earlier one" : ""}). Nothing was sent.` }] };
     });
 
   server.tool("draft_email",
@@ -857,8 +865,36 @@ export function createServer(opts = {}) {
         // it in that thread.
         threadKey: ref.key, replyToMessageId: [...rows].reverse().find((r) => r.direction === "inbound")?.id ?? newest.id,
       };
-      await queueDraft(owner, draft);
-      return reply(`Draft ${kind === "email" ? "reply" : "text"} to ${draft.name} (${address})${subj ? `, "${subj}",` : ""} is in ${memberNames[owner] ?? owner}'s Inbox, Drafts. Nothing was sent.`);
+      const swapped = await queueDraft(owner, draft);
+      return reply(`Draft ${kind === "email" ? "reply" : "text"} to ${draft.name} (${address})${subj ? `, "${subj}",` : ""} is in ${memberNames[owner] ?? owner}'s Inbox, Drafts (draft id ${draft.id}${swapped ? ", replacing Claude's earlier reply to this conversation" : ""}). Opening it opens the conversation with the reply in the box. Nothing was sent.`);
+    });
+
+  // See and clear Claude's drafts, so a correction doesn't leave the old one
+  // behind (Loomis chat, 2026-10-09: two stale drafts to clear by hand).
+  server.tool("list_drafts",
+    "List the drafts waiting in a teammate's Inbox, Drafts that were written through these tools (draft_message, draft_email_reply): id, email or text, who to, subject, the conversation it answers, when.",
+    { for_member: z.string().optional().describe("whose Inbox: a member id or first name. Defaults to Derek when you are connected as Claude, else you.") },
+    async ({ for_member }) => {
+      const owner = await draftOwner(for_member);
+      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
+      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
+      const list = row?.prefs?.queuedDrafts ?? [];
+      if (!list.length) return reply(`No drafts in ${memberNames[owner] ?? owner}'s Inbox from these tools.`);
+      return reply(list.map((d) => `${d.id} · ${d.kind} to ${d.name || d.to}${d.subject ? ` · "${d.subject}"` : ""}${d.threadKey ? ` · reply in ${d.threadKey}` : ""} · ${d.createdAt?.slice(0, 16).replace("T", " ")} · by ${d.by ?? "Claude"}`).join("\n"));
+    });
+
+  server.tool("delete_draft",
+    "Delete a draft from a teammate's Inbox, Drafts (an id from list_drafts). Only drafts written through these tools; nothing is sent or touched in Gmail.",
+    { id: z.string(), for_member: z.string().optional().describe("whose Inbox: a member id or first name. Defaults to Derek when you are connected as Claude, else you.") },
+    async ({ id, for_member }) => {
+      const owner = await draftOwner(for_member);
+      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
+      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
+      const prefs = row?.prefs ?? {};
+      const was = prefs.queuedDrafts ?? [];
+      if (!was.some((d) => d.id === id)) return reply(`No draft ${id} in ${memberNames[owner] ?? owner}'s Inbox. Call list_drafts.`);
+      await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: { ...prefs, queuedDrafts: was.filter((d) => d.id !== id) }, updated_at: nowIso() });
+      return reply(`Deleted draft ${id}.`);
     });
 
   // Client reviews on a task: the client document (kind "doc"), the image review
