@@ -26,6 +26,7 @@ import type { useInbox } from "./useInbox";
 import { draftKeys, draftSaver, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
 import { addPendingSend, removePendingSend, usePendingSends } from "./pendingSends";
 import { allowEntry } from "@/lib/inbox";
+import { isSignatureImage } from "@/lib/emailFiles";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
 import { smsText } from "@/lib/smsText";
@@ -43,6 +44,8 @@ export type InboxViewProps = {
   tasks: Task[];
   /** from: what the task panel's "← back" says (the conversation). */
   onOpenTask: (taskId: string, from?: string) => void;
+  openKey?: string | null;
+  onOpenKey?: (key: string | null) => void;
   /** Makes a task for a conversation and returns its id. */
   onNewTask: (t: InboxThread, opts?: { title?: string; clientId?: string | null; projectId?: string | null; assigneeId?: string | null; due?: string | null }) => Promise<string | null>;
   /** Uploads a file the person attached; returns where it went. */
@@ -104,7 +107,11 @@ export default function InboxView(p: InboxViewProps) {
   const { inbox, prefs } = p;
   const [folder, setFolder] = useState<Folder | "settings">("inbox");
   const [q, setQ] = useState("");
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  // Held by the Cockpit when it passes it, so the open conversation is in
+  // the URL (?view=mail&thread=…) and a link opens it.
+  const [localKey, setLocalKey] = useState<string | null>(null);
+  const openKey = p.openKey !== undefined ? p.openKey : localKey;
+  const setOpenKey = p.onOpenKey ?? setLocalKey;
   // The highlighted row, and where it was: when it leaves the list (archived,
   // deleted, snoozed) the one that slides into its place is highlighted, so you
   // work down the list without reaching for the mouse (Derek, 2026-10-05).
@@ -117,7 +124,7 @@ export default function InboxView(p: InboxViewProps) {
     const onCompose = (e: Event) => { const d = (e as CustomEvent<NewStart>).detail; setOpenKey(null); setComposeNew(d); };
     window.addEventListener("inbox-compose", onCompose);
     return () => window.removeEventListener("inbox-compose", onCompose);
-  }, []);
+  }, [setOpenKey]);
   const [drafts, setDrafts] = useState<Set<string>>(() => draftKeys(p.me.id));
   // A search also looks past the 30 days loaded, once you stop typing.
   const searchOlder = inbox.searchOlder;
@@ -174,6 +181,19 @@ export default function InboxView(p: InboxViewProps) {
   const openThread = (t: InboxThread) => {
     setOpenKey(t.key); setCursor(t.key); setComposeNew(false);
     if (t.unread) inbox.markRead([t.key]);
+  };
+  // A reply Claude wrote to a conversation (draft_email_reply) opens in that
+  // conversation as your reply, not as a new message; anything else, or a
+  // conversation not loaded here, opens as a new message as before.
+  const openQueued = (d: NonNullable<InboxPrefs["queuedDrafts"]>[number]) => {
+    const th = d.threadKey ? inbox.threads.find((x) => x.key === d.threadKey) : null;
+    if (th) {
+      writeDraft(p.me.id, th.key, d.body);
+      p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((x) => x.id !== d.id) });
+      refreshDrafts(); setFolder("inbox"); openThread(th);
+      return;
+    }
+    setOpenKey(null); setComposeNew({ kind: d.kind, to: d.to, name: d.name, contactId: d.contactId ?? undefined, subject: d.subject, body: d.body, queuedId: d.id });
   };
   const step = (d: 1 | -1) => {
     if (!visible.length) return;
@@ -277,7 +297,7 @@ export default function InboxView(p: InboxViewProps) {
                     {[...queued].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((d) => (
                       <div key={d.id} className="flex items-center gap-3 rounded-lg bg-surface px-3 py-2.5 ring-1 ring-[var(--border)]">
                         <span aria-hidden className="text-[20px]">{d.kind === "email" ? "✉️" : "💬"}</span>
-                        <button onClick={() => { setOpenKey(null); setComposeNew({ kind: d.kind, to: d.to, name: d.name, contactId: d.contactId ?? undefined, subject: d.subject, body: d.body, queuedId: d.id }); }} className="min-w-0 flex-1 text-left">
+                        <button onClick={() => openQueued(d)} className="min-w-0 flex-1 text-left">
                           <b className="block truncate">{d.kind === "email" ? "Email" : "Text"} to {d.name}{d.subject ? `: ${d.subject}` : ""}</b>
                           <span className="block truncate text-[14px] text-muted">From {d.by ?? "Claude"} · {htmlToText(d.body).slice(0, 120)}</span>
                         </button>
@@ -883,8 +903,10 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: 
           <button onClick={() => setCompose({ mode: "reply", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })} className="h-9 rounded-full bg-accent px-3.5 font-bold text-white sm:px-4">↩ Reply</button>
           <button onClick={() => setCompose({ mode: "replyAll", m: last.direction === "inbound" ? last : (oldestFirst.slice().reverse().find((m) => m.direction === "inbound") ?? last) })}className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">↩↩ <span className="hidden sm:inline">Reply </span>All</button>
           <button onClick={() => setCompose({ mode: "forward", m: last })} className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">→ Forward</button>
+          <button onClick={() => navigator.clipboard.writeText(threadLink(t)).then(() => p.pushToast("Link copied"), () => p.pushToast("Couldn't copy"))}
+            title="Copy a link straight to this conversation" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:ml-auto sm:px-4">🔗 Copy link</button>
           <button onClick={() => navigator.clipboard.writeText(threadForClaude(t, p)).then(() => p.pushToast("Copied. Paste it into Claude."), () => p.pushToast("Couldn't copy"))}
-            title="Copy the whole conversation to paste into Claude" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:ml-auto sm:px-4">✳ Copy for Claude</button>
+            title="Copy the whole conversation to paste into Claude" className="h-9 rounded-full px-3.5 font-semibold ring-1 ring-[var(--border)] hover:bg-background sm:px-4">✳ Copy for Claude</button>
         </div>
       )}
     </div>
@@ -895,12 +917,14 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive }: 
 // email I want you to respond to", Derek, 2026-10-09): who, the linked
 // task with its id so Claude can open it through the ClickUpTasks tools,
 // then every email oldest first with the quoted history left off.
+const threadLink = (t: InboxThread) => `${window.location.origin}/?view=mail&thread=${encodeURIComponent(t.key)}`;
 function threadForClaude(t: InboxThread, p: InboxViewProps): string {
   const task = t.taskId ? p.tasks.find((x) => x.id === t.taskId) : null;
   const when = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   const head = [
     `Email conversation from ClickUpTasks: ${t.subject || "(no subject)"}`,
     `With: ${t.peerName}${t.peerAddress ? ` <${t.peerAddress}>` : ""}`,
+    `Link: ${threadLink(t)}`,
     task ? `Linked task: ${task.title} (task id ${task.id})` : null,
     task && p.clientName(task.clientId) ? `Client: ${p.clientName(task.clientId)}` : null,
   ].filter(Boolean).join("\n");
@@ -971,9 +995,9 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
       {open && (
         <div className="pb-4 pl-1 sm:pl-[52px]">
           {m.channel !== t.channel && <div className="mb-1 text-muted">{CHANNEL_ICON[m.channel]} {CHANNEL_LABEL[m.channel]}</div>}
-          {isHtmlEmail ? <EmailHtml m={m} p={p} asText={asText} />
+          {isHtmlEmail ? <EmailHtml m={m} p={p} asText={asText} signer={mine ? p.me.name : name} />
             : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
-            : <EmailBody body={m.body} />}
+            : <EmailBody body={m.body} signer={mine ? p.me.name : name} />}
           {m.attachments?.length > 0 && <Files m={m} p={p} />}
         </div>
       )}
@@ -1134,9 +1158,13 @@ function tidyEmailHtml(html: string): string {
     .replace(/(?:<br\s*\/?>\s*(?:&nbsp;|&#160;)?\s*){3,}/gi, "<br><br>");
 }
 const QUOTE_CSS = ".gmail_quote,.gmail_extra,blockquote,.yahoo_quoted,#appendonsend,#divRplyFwdMsg,#divRplyFwdMsg~*,hr#stopSpelling~*{display:none!important}";
+// The signature folds behind the same ••• as the quoted history (Derek,
+// 2026-10-09): name, title, links, phone and a logo were taller than what
+// the person wrote, and the header already says who they are.
+const SIG_CSS = ".gmail_signature,.gmail_signature_prefix,[data-smartmail=gmail_signature],#Signature,#x_Signature{display:none!important}";
 // Show as text lives in the email's ⋯ menu (Derek, 2026-10-01), so the
 // switch is held by the email above this (EmailItem).
-function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; asText?: boolean }) {
+function EmailHtml({ m, p, asText = false, signer }: { m: Message; p: InboxViewProps; asText?: boolean; signer?: string | null }) {
   const [html, setHtml] = useState<string | null | undefined>(HTML_CACHE.has(m.id) ? HTML_CACHE.get(m.id) : undefined);
   const [quoted, setQuoted] = useState(false);
   const [imagesOn, setImagesOn] = useState(false);
@@ -1167,17 +1195,19 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
     // Links open in a new tab that cannot reach back into this one, and do
     // not tell the site where they came from.
     doc.querySelectorAll("a[href]").forEach((a) => { a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener noreferrer"); });
-    const size = () => setHeight(Math.min(6000, Math.max(60, doc.documentElement.scrollHeight)));
+    // The body's own height, not the page's: the page is never shorter than
+    // the frame, so a fold (••• hiding the signature) would leave the gap.
+    const size = () => setHeight(Math.min(6000, Math.max(60, Math.ceil(doc.body?.getBoundingClientRect().height ?? doc.documentElement.scrollHeight))));
     size();
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", size, { once: true }));
   };
   if (html === undefined) return <p className="text-muted">Loading the email…</p>;
   if (html === null || asText) return (
     <>
-      <EmailBody body={m.body} />
+      <EmailBody body={m.body} signer={signer} />
     </>
   );
-  const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg/i.test(html);
+  const hasQuote = /gmail_quote|<blockquote|yahoo_quoted|divRplyFwdMsg|gmail_signature|id="(x_)?Signature"/i.test(html);
   const sender = (m.peerAddress ?? "").toLowerCase();
   const remote = REMOTE_IMAGES.test(html);
   // Your own sent mail shows as it is, and so does mail from one of your
@@ -1187,7 +1217,7 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
     || (c.additionalEmails ?? []).some((e) => e.toLowerCase() === sender)));
   const showImages = !remote || m.direction !== "inbound" || imagesOn || fromContact || (!!sender && (p.prefs.imageSenders ?? []).includes(sender));
   const csp = showImages ? "" : `<meta http-equiv="Content-Security-Policy" content="img-src data: blob:">`;
-  const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS}</style></head><body>${html}</body></html>`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS + SIG_CSS}</style></head><body>${html}</body></html>`;
   return (
     <>
       {!showImages && (
@@ -1204,7 +1234,7 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
       </div>
       {hasQuote && (
         <div className="mt-2">
-          <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide earlier messages" : "Show earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>
+          <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide the signature and earlier messages" : "Show the signature and earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>
         </div>
       )}
     </>
@@ -1214,7 +1244,21 @@ function EmailHtml({ m, p, asText = false }: { m: Message; p: InboxViewProps; as
 // What the person wrote, readable: tracking links show as their website,
 // earlier messages quoted underneath fold away, and the email exactly as it
 // came is one click off (Derek, 2026-10-01: "emails that look like all links").
-function EmailBody({ body }: { body: string }) {
+// Where the signature starts in plain text: the "-- " line mail programs
+// put above one, else the last line near the end that is just their name.
+function signatureAt(text: string, signer?: string | null): number {
+  const lines = text.split("\n");
+  const from = Math.max(1, lines.length - 15);
+  for (let i = lines.length - 1; i >= from; i--) if (/^--\s*$/.test(lines[i])) return lines.slice(0, i).join("\n").length;
+  const name = (signer ?? "").trim().toLowerCase();
+  if (name.split(/\s+/).length < 2) return -1;
+  for (let i = lines.length - 1; i >= from; i--) {
+    const l = lines[i].replace(/[*_]/g, "").trim().toLowerCase();
+    if (l === name || l === `- ${name}` || l === `-${name}`) return lines.slice(0, i).join("\n").length;
+  }
+  return -1;
+}
+function EmailBody({ body, signer }: { body: string; signer?: string | null }) {
   const [original, setOriginal] = useState(false);
   const [quoted, setQuoted] = useState(false);
   const text = useMemo(() => tidyEmailText(body || ""), [body]);
@@ -1226,7 +1270,11 @@ function EmailBody({ body }: { body: string }) {
       <button onClick={() => setOriginal(false)} className="mt-2 font-semibold text-accent hover:underline">Show it tidied</button>
     </>
   );
-  const shown = quoted ? text : split.visible || text;
+  const visible = split.visible || text;
+  const sigAt = signatureAt(visible, signer);
+  const trimmed = sigAt > 0 ? visible.slice(0, sigAt).trimEnd() : visible;
+  const shown = quoted ? text : trimmed;
+  const more = (!!split.quoted && !!split.visible) || trimmed !== visible;
   return (
     <>
       <p className="whitespace-pre-wrap break-words leading-relaxed">
@@ -1235,7 +1283,7 @@ function EmailBody({ body }: { body: string }) {
           : <span key={i}>{part.text}</span>)}
       </p>
       <div className="mt-2 flex flex-wrap gap-4">
-        {split.quoted && split.visible && <button onClick={() => setQuoted(!quoted)} className="font-semibold text-accent hover:underline">{quoted ? "Hide earlier messages" : "Show earlier messages"}</button>}
+        {more && <button onClick={() => setQuoted(!quoted)} title={quoted ? "Hide the signature and earlier messages" : "Show the signature and earlier messages"} className="rounded-full bg-background px-3 font-bold tracking-widest text-muted hover:text-foreground">•••</button>}
         {isLinkHeavy(text) && <button onClick={() => setOriginal(true)} className="font-semibold text-muted hover:underline">Show original</button>}
       </div>
     </>
@@ -1246,8 +1294,7 @@ function EmailBody({ body }: { body: string }) {
 // 2026-10-01: "show a preview if there are images").
 // A small "image.png" on an email stored before signatures were left out:
 // a logo or social icon from the signature, not a file anyone sent.
-const kbOf = (size: string) => { const n = parseFloat(size); return /mb/i.test(size) ? n * 1000 : n; };
-const isSignatureImage = (a: Attachment) => a.kind === "image" && !!a.gmailAttachmentId && /^image\d*\.(png|jpe?g|gif)$/i.test(a.name) && kbOf(a.size || "0") < 100;
+// The same test the server uses before copying files onto a task.
 
 function Files({ m, p }: { m: Message; p: InboxViewProps }) {
   const imgs = m.attachments.filter((a) => a.kind === "image" && !isSignatureImage(a));
@@ -2095,6 +2142,19 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
   // Straight to their task list, the first thing in the panel (Derek,
   // 2026-10-07: "I need a way to get to their main task list quickly").
   const whoseName = whose && whose !== PERSONAL_CLIENT_ID ? p.clientName(whose) : null;
+  // When they wrote last, how long they've been waiting on us (Derek,
+  // 2026-10-09): amber after a day, red after two.
+  const newest = t.messages[0];
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const i = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(i); }, []);
+  const waiting = useMemo(() => {
+    if (!newest || newest.direction !== "inbound") return null;
+    const mins = Math.max(0, Math.round((now - new Date(newest.at).getTime()) / 60_000));
+    const days = mins / 1440;
+    const age = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} hr` : `${Math.floor(days)} day${Math.floor(days) === 1 ? "" : "s"}`;
+    return { who: whoWrote(newest, t, p).name.split(/\s+/)[0], age, days };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- p is a fresh object every render
+  }, [newest, t, now]);
   return (
     <aside className="min-w-0 space-y-3 p-4">
       {task ? (
@@ -2123,6 +2183,11 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
                 task.followUpAt ? `follow up ${dueLabel(task.followUpAt.slice(0, 10))}` : null,
               ].filter(Boolean).join(" · ")}
             </span>
+            {waiting && (
+              <span className={`mt-2 inline-flex items-center gap-1.5 rounded-[5px] px-2 py-0.5 text-[15px] font-semibold ${waiting.days >= 2 ? "bg-[#dc2626] text-white" : waiting.days >= 1 ? "bg-[#fbbf24] text-[#1c2030]" : "bg-white/15 text-white"}`}>
+                ⏱ {waiting.who} waiting {waiting.age}
+              </span>
+            )}
           </AppLink>
           {others.map((x) => (
             <div key={x.id} className="flex items-center gap-2 rounded-xl bg-surface py-1.5 pl-3 pr-1.5 ring-1 ring-[var(--border)]">
@@ -2429,7 +2494,9 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
   const [booking, setBooking] = useState(false);
   const name = contact?.name || x.name || x.address;
   const company = contact?.company || (main ? p.clientName(clientId) : null);
-  const ib = "grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground";
+  // A word on each button (Derek, 2026-10-09): icons alone meant hovering
+  // to find out which one the lightning was.
+  const ib = "flex h-9 items-center gap-1.5 rounded-lg px-2 text-muted hover:bg-background hover:text-foreground";
   // Open in GoHighLevel: the server finds which sub-account they live in. The
   // tab opens on the click (so no popup blocker), then goes there.
   const openGhl = async () => {
@@ -2464,19 +2531,19 @@ function PersonCard({ p, t, x, contact, main, busy, clientId, onMakeMain }: {
         <div className="min-w-0 flex-1">
           <button onClick={() => { setForm(!form); setShow(null); }} aria-expanded={form} title={contact ? "See and change this contact" : "Add as a contact"}
             className="block max-w-full truncate text-left text-[18px] font-bold leading-tight underline decoration-transparent underline-offset-[3px] transition hover:decoration-current">{name}</button>
-          {company && company.toLowerCase() !== name.toLowerCase() && <div className="flex items-center gap-1.5 truncate text-muted"><Ico n="building" className="h-4 w-4" />{company}</div>}
+          {company && company.toLowerCase() !== name.toLowerCase() && <div className="flex items-start gap-1.5 text-muted"><Ico n="building" className="mt-1 h-4 w-4 shrink-0" /><span className="line-clamp-2">{company}</span></div>}
         </div>
         {!contact ? <span className="shrink-0 rounded-full bg-highlight-soft px-2.5 py-0.5 font-semibold text-highlight">New</span>
           : main && <span title="Replies go to them" aria-label="Replies go to them" className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent-soft text-accent"><Ico n="reply" className="h-4 w-4" /></span>}
       </div>
-      <div className="mt-2 flex items-center gap-0.5">
-        <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /></button>
-        {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /></button>}
-        {main && clientId && <AppLink href={clientHref(clientId)} onOpen={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /></AppLink>}
-        {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /></button>}
-        {contact?.ghlContactId && <button onClick={() => setBooking(true)} title={`Book ${name.split(/\s+/)[0]} in GoHighLevel`} aria-label="Book a time" className={ib}><Ico n="calendar" /></button>}
-        {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /></button>}
-        {contact?.ghlContactId && <button disabled={syncing} onClick={resync} title="Refresh from GoHighLevel" aria-label="Refresh from GoHighLevel" className={`${ib} ml-auto text-[18px] leading-none disabled:opacity-50 ${syncing ? "animate-spin" : ""}`}>↻</button>}
+      <div className="mt-2 flex flex-wrap items-center gap-0.5">
+        <button onClick={() => setShow(show === "email" ? null : "email")} title="Email" aria-label="Email" className={`${ib} ${show === "email" ? "bg-accent-soft text-accent" : ""}`}><Ico n="mail" /><span>Email</span></button>
+        {contact && <button onClick={() => setShow(show === "phone" ? null : "phone")} title="Phone" aria-label="Phone" className={`${ib} ${show === "phone" ? "bg-accent-soft text-accent" : ""}`}><Ico n="phone" /><span>Phone</span></button>}
+        {main && clientId && <AppLink href={clientHref(clientId)} onOpen={() => p.onOpenClient(clientId)} title="Open client" aria-label="Open client" className={ib}><Ico n="building" /><span>Client</span></AppLink>}
+        {contact && <button onClick={openGhl} title="Open in GoHighLevel" aria-label="Open in GoHighLevel" className={ib}><Ico n="bolt" /><span>GoHighLevel</span></button>}
+        {contact?.ghlContactId && <button onClick={() => setBooking(true)} title={`Book ${name.split(/\s+/)[0]} in GoHighLevel`} aria-label="Book a time" className={ib}><Ico n="calendar" /><span>Book</span></button>}
+        {contact && !main && <button disabled={busy} onClick={onMakeMain} title={`Send replies to ${name}`} aria-label={`Send replies to ${name}`} className={ib}><Ico n="reply" /><span>Reply to</span></button>}
+        {contact?.ghlContactId && <button disabled={syncing} onClick={resync} title="Refresh from GoHighLevel" aria-label="Refresh from GoHighLevel" className={`ml-auto grid h-9 w-9 place-items-center rounded-lg text-[18px] leading-none text-muted hover:bg-background hover:text-foreground disabled:opacity-50 ${syncing ? "animate-spin" : ""}`}>↻</button>}
       </div>
       {show && (
         // One line: the address or number, then small buttons (names on hover).

@@ -348,6 +348,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that shows a thread: null means no DM page at all (see the render branch
   // further down), so it always moves in lockstep with inboxView.
   const [dmUserId, setDmUserId] = useState<string | null>(null);
+  // The conversation open in the Inbox, in the URL so it can be linked.
+  const [mailThread, setMailThread] = useState<string | null>(null);
   // Shared, admin-controlled — "we don't need DMs for now... make it so we
   // can turn it on and off in case we want it later" (Derek). Off by
   // default; see supabase/app-settings.sql. Fails soft to false (DMs hidden)
@@ -814,6 +816,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     client: activeClient, project: activeProject, task: openTaskId,
     clientTab, vaultFolder: null, // read from an old folder link on load, never written as you browse
     dm: inboxView ? dmUserId : null,
+    thread: dirView === "inbox" ? mailThread : null,
     assignee: activeClient === "all" ? allTasksScope : null,
     sub: myWork ? (dashboardView === "work" ? null : dashboardView) : (showCompletedLog ? "completed" : null),
   });
@@ -824,6 +827,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // bare view=inbox with no dm (an old bookmark) must not open a blank page.
     setInboxView(s.view === "inbox" && !!s.dm);
     setDmUserId(s.view === "inbox" ? s.dm : null);
+    setMailThread(s.view === "mail" ? s.thread ?? null : null);
     setDirView(s.view === "clients" || s.view === "projects" || s.view === "calendar" ? s.view : s.view === "mail" ? "inbox" : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
@@ -861,7 +865,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const next = buildSearch(currentNav());
     if (next !== window.location.search) window.history.pushState(null, "", next || window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId, allTasksScope, dashboardView, allTasksCompleted]);
+  }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId, mailThread, allTasksScope, dashboardView, allTasksCompleted]);
   // Back/forward → state.
   useEffect(() => {
     const onPop = () => applyNav(parseSearch(window.location.search));
@@ -3016,7 +3020,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">
-            <InboxView inbox={inbox} me={{ id: me.id, name: me.name, email: myEmail }} team={users.map((u) => ({ id: u.id, name: u.name }))}
+            <InboxView openKey={mailThread} onOpenKey={setMailThread} inbox={inbox} me={{ id: me.id, name: me.name, email: myEmail }} team={users.map((u) => ({ id: u.id, name: u.name }))}
               prefs={inboxPrefs} setPrefs={setInboxPrefs} clientName={(id) => (id ? clientById(id)?.name ?? null : null)}
               tasks={tasks} onOpenTask={(id, from) => { setInboxBackLabel(from ?? null); setOpenTaskId(id); }} onNewTask={newTaskFromThread}
               onUpload={uploadOneImage} onSignedUrl={(path) => signedUrlForFile(path)}

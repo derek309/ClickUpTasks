@@ -10,6 +10,8 @@
 //   ?view=work|clients|personal|settings   the special boards
 //   ?view=inbox&dm=<userId>                a DM thread
 //   ?view=mail                             the Inbox (email, texts, task chats)
+//   ?view=mail&thread=<key>                one conversation in it, a link to
+//                                          paste into a Claude chat (2026-10-09)
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
 //   ?assignee=<id>|all            All Tasks scoped to one person or everyone
 //                                  (the default "mine" is never encoded)
@@ -24,12 +26,13 @@
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
 export type NavSub = "reviews" | "drafts" | "completed";
-export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; assignee: string | null; sub: NavSub | null };
+export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; thread?: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
     p.set("view", s.view);
     if (s.view === "inbox" && s.dm) p.set("dm", s.dm);
+    if (s.view === "mail" && s.thread) p.set("thread", s.thread);
     // Only My Work has these halves; anywhere else the parameter would be noise.
     if (s.view === "work" && (s.sub === "reviews" || s.sub === "drafts")) p.set("sub", s.sub);
   } else if (s.client !== "all") {
@@ -69,6 +72,7 @@ export function parseSearch(search: string): NavState {
     clientTab: tab === "chat" || tab === "vault" ? "chat" : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
+    thread: p.get("thread"),
     assignee: p.get("assignee"),
     // Plan and Next steps were removed (2026-09-28); an old ?sub=plan link
     // lands on Work.
