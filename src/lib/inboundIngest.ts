@@ -15,7 +15,6 @@ import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
 import type { GmailFile } from "@/lib/googleMail";
-import { copyEmailFilesToTask, copySoon } from "@/lib/emailFilesServer";
 
 /** An email's files as the row's attachments: each stays in Gmail and is
  *  fetched when opened (api/inbox/attachment), so a photo can be previewed. */
@@ -350,7 +349,6 @@ export async function ingestInboundMessage(opts: {
   else if (raiseReplyTasks()) taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   // Whatever they sent lands on the task too (Derek, 2026-10-09).
-  if (taskId && opts.files?.length) await filesToTaskSoon(messageId, taskId);
   await clientAnsweredOnTask(taskId, "reply");
   // With reply tasks off, a message on no task is news only in the Inbox:
   // no bell and no email about it.
@@ -430,17 +428,13 @@ export async function ingestOutboundMessage(opts: {
     ...(opts.files?.length ? { attachments: gmailFilesToAttachments(opts.files) } : {}),
   });
   if (error) return false; // unique-index hit (already ingested) — not a real failure
-  if (taskId && opts.files?.length) await filesToTaskSoon(outId, taskId);
   await closeAnsweredReplyTask(taskId, opts.at ?? new Date().toISOString(), opts.createdBy, "email");
   return true;
 }
 
-// An email's files onto the task it was filed on, after the response when
-// there is one (lib/emailFilesServer). Never fails the ingest.
-async function filesToTaskSoon(messageId: string, taskId: string) {
-  try { await copySoon(`ingest ${messageId}`, () => copyEmailFilesToTask(supabaseAdmin, messageId, taskId)); }
-  catch (e) { console.error("[inboundIngest] files to task", e); }
-}
+// An email's files go onto its task from /api/cron/email-files, every 5
+// minutes, not from here: done inline, the Gmail check carried every
+// download and upload and ran past its 60 seconds (2026-10-09).
 
 // A row stored before the Inbox existed gets its mailbox (and who the other
 // person is, and its files) the next time the Gmail poll sees it. Only blanks
@@ -497,7 +491,6 @@ export async function ingestStrangerEmail(opts: {
   });
   // A linked conversation's files land on its task too; the app's own
   // notification about a task is not something the client sent.
-  if (!error && taskId && !opts.task && opts.files?.length) await filesToTaskSoon(strangerId, taskId);
   return !error;
 }
 
@@ -544,6 +537,5 @@ export async function ingestTeammateCopy(opts: {
     ...(opts.others?.length ? { cc: opts.others } : {}),
     ...(opts.at ? { created_at: opts.at } : {}),
   });
-  if (!error && taskId && opts.files?.length) await filesToTaskSoon(copyId, taskId);
   return !error;
 }

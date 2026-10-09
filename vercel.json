@@ -9,6 +9,10 @@
       "schedule": "7-59/15 * * * *"
     },
     {
+      "path": "/api/cron/email-files",
+      "schedule": "2-59/5 * * * *"
+    },
+    {
       "path": "/api/cron/send-scheduled",
       "schedule": "*/15 * * * *"
     },
