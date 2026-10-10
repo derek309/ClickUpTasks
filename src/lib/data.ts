@@ -2417,6 +2417,13 @@ export function htmlToText(html: string): string {
  *  for one, same "don't migrate old data, degrade gracefully" approach as
  *  noteTypeMeta's fallback above. A plain-text message starting with a
  *  literal "<" is not a real-world case worth guarding against. */
+/** "&amp;" and friends back to the characters, for a plain line like an
+ *  email subject: some senders (a WordPress form) send "J&amp;J" there, and
+ *  it became a task title as written (Derek, 2026-10-10). */
+export function decodeEntities(s: string): string {
+  return s.replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&");
+}
+
 export function looksLikeHtml(body: string): boolean {
   return /^\s*<[a-z][\s\S]*>/i.test(body);
 }

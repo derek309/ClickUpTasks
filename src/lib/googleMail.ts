@@ -7,6 +7,7 @@
 // Server-only: never import this client-side (it reads the service-account
 // private key). One service account, authorized once in the Workspace Admin
 // console for the gmail.send scope, can impersonate any @clickuplocal.com user.
+import { decodeEntities } from "./data";
 import { JWT } from "google-auth-library";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -346,7 +347,7 @@ export async function readGmailThread(userEmail: string, threadId: string, max =
     const toEmails = [...h("to").matchAll(/[\w.+-]+@[\w.-]+\.\w+/g)].map((x) => x[0].toLowerCase());
     return {
       gmailId: m.id, threadId: m.threadId ?? threadId, fromEmail, fromName,
-      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      subject: decodeEntities(h("subject")), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: new Date(Number(m.internalDate ?? Date.now())).toISOString(),
       auto: false,
       rfc822: h("message-id"),
@@ -391,7 +392,7 @@ function parseInbound(m: any, userEmail: string): InboundEmail | null {
       || /^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce|notif|newsletter|mailer|updates?|news|marketing|billing|alerts?)\b|[-.]?(no-?reply|noreply)/.test(fromLocal));
     return {
       gmailId: m.id, threadId: m.threadId ?? "", fromEmail, fromName,
-      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      subject: decodeEntities(h("subject")), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
       auto,
       rfc822: h("message-id"),
@@ -497,7 +498,7 @@ export async function readSentGmail(userEmail: string, query: string, max = 25):
     if (!toEmails.length) continue;
     out.push({
       gmailId: m.id, threadId: m.threadId ?? "", toEmails,
-      subject: h("subject"), body: extractBody(m.payload, m.snippet ?? ""),
+      subject: decodeEntities(h("subject")), body: extractBody(m.payload, m.snippet ?? ""),
       internalDate: m.internalDate ? new Date(Number(m.internalDate)).toISOString() : new Date().toISOString(),
       rfc822: h("message-id"),
       attachments: gmailFiles(m.payload),

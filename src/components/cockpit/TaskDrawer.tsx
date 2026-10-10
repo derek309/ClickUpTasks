@@ -665,7 +665,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Tinted blocks with 5px corners, no outlines, and colour only where it
   // means something (Derek, 2026-09-16: the page read "very flat"; "I don't
   // like pills so make them 5px").
-  const [phoneDetails, setPhoneDetails] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const chip = "inline-flex min-h-10 items-center gap-2 rounded-[5px] bg-background px-3 text-[16px]";
   const tint = (color: string) => ({ background: `${color}1f` });
   // Each dropdown is only as wide as what it shows. Sized to their longest
@@ -677,12 +677,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Colour only when it means something: amber inside three days, red once late.
   const dueTone = dueDays === null ? "" : dueDays < 0 ? "late" : dueDays <= 3 ? "soon" : "";
   const recurrenceInput = "rounded-md border bg-background px-2 py-0.5 text-[16px] outline-none focus:border-accent";
-  // On a phone the five fields read as one sentence you tap to change
-  // (Derek, 2026-10-10, mockup 2): the chips wrapped onto three rows.
+  // The five fields read as one sentence you click to change (Derek,
+  // 2026-10-10, mockup 2, then "clean up desktop too"): the chips wrapped
+  // onto three rows on a phone and were a wall of boxes on a desktop.
   const ownerName = task.assigneeId ? userById(task.assigneeId)?.name?.split(/\s+/)[0] ?? "someone" : "nobody";
   const detailsSentence = (
-    <button onClick={() => setPhoneDetails((o) => !o)} aria-expanded={phoneDetails} title="Change status, owner, priority or due date"
-      className="mt-4 block w-full rounded-[5px] text-left text-[16px] leading-relaxed sm:hidden">
+    <button onClick={() => setDetailsOpen((o) => !o)} aria-expanded={detailsOpen} title="Change status, owner, priority or due date"
+      className="mt-4 block w-full rounded-[5px] text-left text-[16px] leading-relaxed sm:text-[18px]">
       <span className="font-semibold underline decoration-dotted underline-offset-4">
         <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
         {STATUS_META[effectiveStatus(task)].label}
@@ -690,11 +691,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       , on <span className="font-semibold underline decoration-dotted underline-offset-4">{ownerName}</span>
       , <span className={`font-semibold underline decoration-dotted underline-offset-4 ${task.priority === "urgent" ? "text-danger" : ""}`}>{PRIORITY_META[task.priority].label}</span>
       {task.due ? <>, due <span className={`font-semibold underline decoration-dotted underline-offset-4 ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`}>{formatDue(task.due)}{task.status !== "done" ? `, ${dueCountdown(task.due)}` : ""}</span></> : <>, <span className="font-semibold text-accent underline decoration-dotted underline-offset-4">no due date</span></>}
-      <span className="ml-1 text-muted">{phoneDetails ? "▴" : "▾"}</span>
+      {/* What chases the client while it waits, which was its own chip. */}
+      {(reminders.length > 0 || task.waitingOnClient) && (
+        <span className="text-muted">. Reminders: {reminders.length === 1 ? reminders[0].summary : reminders.length > 1 ? `${reminders.length} reviews` : task.followUpAt ? `we follow up ${formatDue(task.followUpAt)}` : "none set"}</span>
+      )}
+      <span className="ml-1 text-muted">{detailsOpen ? "▴" : "▾"}</span>
     </button>
   );
   const chipRow = (
-    <div className={`mt-5 flex-wrap items-center gap-2 sm:flex ${phoneDetails ? "flex flex-col items-stretch rounded-xl bg-background/60 p-2 sm:flex-row sm:items-center sm:bg-transparent sm:p-0" : "hidden"}`}>
+    <div className={`mt-3 flex-wrap items-center gap-2 ${detailsOpen ? "flex flex-col items-stretch rounded-xl bg-background/60 p-2 sm:flex-row sm:items-center" : "hidden"}`}>
       <label className={chip} style={tint(STATUS_META[effectiveStatus(task)].dot)}>
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
         <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} aria-label="Status" className={`${chipSelect} font-medium`}>
@@ -918,14 +923,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     : stepDate.label;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
     <div className={`mt-7 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
-      {/* On a phone no band: the date under the step says how late it is
-          (Derek, 2026-10-10: "follow up is very clunky"). */}
-      <div className={`hidden items-center gap-3 px-4 py-2.5 sm:flex sm:px-5 ${barTone}`}>
+      {/* No coloured band: the date under the step says how late it is
+          (Derek, 2026-10-10: "follow up is very clunky", desktop too). */}
+      <div className={`hidden items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
         <span className="text-[16px] font-bold tracking-wide">FOLLOW UP</span>
         <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
       </div>
-      <div className="sm:hidden px-4 pt-2.5 text-[14px] font-bold tracking-wide text-muted">FOLLOW UP</div>
-      <div className="flex items-start gap-3.5 px-4 pb-3 pt-1.5 sm:px-5 sm:py-4">
+      <div className="px-4 pt-2.5 text-[14px] font-bold tracking-wide text-muted sm:px-5">FOLLOW UP</div>
+      <div className="flex items-start gap-3.5 px-4 pb-3 pt-1.5 sm:px-5">
       <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
         className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-default disabled:border-dashed disabled:opacity-50 ${asking ? "border-success bg-success text-white" : "border-accent bg-surface text-transparent hover:bg-accent-soft hover:text-accent"}`}>
         <I.check className="h-4 w-4" />
@@ -968,15 +973,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
                 onBlur={saveStepDraft} aria-label="Follow up"
-                className="mt-0.5 w-full rounded-lg bg-background px-2 py-1 text-[17px] font-bold sm:text-[21px] outline-none ring-2 ring-accent" />
+                className="mt-0.5 w-full rounded-lg bg-background px-2 py-1 text-[17px] font-bold sm:text-[19px] outline-none ring-2 ring-accent" />
             ) : openStep ? (
               <button onClick={() => setStepDraft({ taskId: task.id, text: openStep.nextStep ?? "" })} title="Click to edit"
-                className="-ml-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[21px] leading-snug [overflow-wrap:anywhere] hover:bg-background">
+                className="-ml-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[19px] leading-snug [overflow-wrap:anywhere] hover:bg-background">
                 {openStep.nextStep}
               </button>
             ) : (
               <button onClick={() => { setAskNext(task.id); setNextDraft(""); }}
-                className="-ml-1.5 mt-0.5 block rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[21px] leading-snug text-muted hover:bg-background">
+                className="-ml-1.5 mt-0.5 block rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[19px] leading-snug text-muted hover:bg-background">
                 {followUp ? "Check back on this task" : "What happens next? Click to write it"}
               </button>
             )}
@@ -1616,7 +1621,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
     <section className="mt-10" id={title === "Deliverables" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-[17px] font-bold sm:text-[21px] tracking-[-0.01em]">{title}</h2>
+        <h2 className="text-[17px] font-bold sm:text-[19px] tracking-[-0.01em]">{title}</h2>
         {right}
       </div>
       {children}

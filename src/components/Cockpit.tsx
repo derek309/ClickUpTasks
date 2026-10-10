@@ -55,6 +55,7 @@ import {
   isReplyTask,
   unansweredPreviewByTask,
   splitQuotedEmail, tidyEmailText, looksLikeHtml, htmlToText, plainTextToHtml,
+  decodeEntities,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
 import { deleteClientEmailDraft, fetchClientEmailDraft, saveClientEmailDraft, upsertTask, seedIfEmpty, fetchAll, fetchOlderDoneTasks, fetchTaskById, type SyncMarks, fetchContacts, upsertClient, markNotifReadDb, signedUrlForFile, upsertClientNote, upsertVaultFolder, deleteVaultFolderDb, fetchDmReads, markDmReadDb, markMessagesReadDb, fetchAppSetting, upsertAppSetting } from "@/lib/db";
@@ -1924,7 +1925,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const personal = !project || owner === PERSONAL_CLIENT_ID;
     const task: Task = {
       id: newId("t_"), projectId: project?.id ?? PERSONAL_PROJECT_ID, clientId: project ? owner! : PERSONAL_CLIENT_ID,
-      title: opts?.title?.trim() || (t.subject ? t.subject.replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: emailAsDescription(t),
+      title: opts?.title?.trim() || (t.subject ? decodeEntities(t.subject).replace(/^(re|fwd?):\s*/i, "") : `Follow up with ${first}`), description: emailAsDescription(t),
       status: "todo", priority: "normal", assigneeId: opts && "assigneeId" in opts ? opts.assigneeId ?? null : me.id, contactId: t.contactId,
       due: opts && "due" in opts ? opts.due ?? null : TODAY,
       // A due date picked here sets its follow up, as it does anywhere else.
