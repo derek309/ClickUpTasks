@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.1.8",
+  "version": "1.3.0",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-07 21:18:58",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.1.8.zip",
+  "last_updated": "2026-10-10 17:00:49",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.3.0.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* The menu icon shows in its own blue, green and white again. WordPress was repainting it in one colour, which left a blank square."
+  "changelog": "* Shows who on your team is working on this website, so two people don't change the same site at once. The WebsitePusher app checks a site out when someone starts and frees it when they're done.\n* Remembers where the website's code lives on GitHub, so every teammate's app can find it.\n* When a website stops being shared with a teammate, the app can give it a new connection code, so the old one stops working."
 }
