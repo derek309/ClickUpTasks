@@ -94,7 +94,17 @@ function fakeDb() {
     upload: async (...args: unknown[]) => { storage.push({ op: "upload", args }); return { error: null }; },
     copy: async (...args: unknown[]) => { storage.push({ op: "copy", args }); return { error: null }; },
   };
-  return { from, storage: { from: () => bucket } } as any;
+  // append_task_attachments (supabase/task-attachments-append.sql): adds only
+  // what isn't on the task yet, by emailSource or path, and returns it.
+  const rpc = (name: string, args: { task_id: string; items: Row[] }) => {
+    if (name !== "append_task_attachments") return Promise.resolve({ data: null, error: { message: "no such function" } });
+    const t = (tables.tasks ?? []).find((x) => x.id === args.task_id);
+    const list = ((t?.attachments as Row[] | undefined) ?? []);
+    const add = args.items.filter((i) => !list.some((a) => (i.emailSource && a.emailSource === i.emailSource) || (i.path && a.path === i.path)));
+    if (t && add.length) t.attachments = [...list, ...add];
+    return Promise.resolve({ data: add, error: null });
+  };
+  return { from, rpc, storage: { from: () => bucket } } as any;
 }
 
 const { copyEmailFilesToTask, copyThreadFilesToTask } = await import("./emailFilesServer");

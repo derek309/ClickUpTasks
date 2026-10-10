@@ -80,8 +80,13 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
       } catch { skipped.push(name); }
     }
     if (added.length) {
-      // Read again just before writing: another copy may have finished while
-      // these downloaded, and anything it added is kept and not doubled.
+      // One statement that adds only what isn't there yet
+      // (supabase/task-attachments-append.sql), so a file someone added while
+      // these downloaded is never written over.
+      const { data: kept, error: rpcError } = await db.rpc("append_task_attachments", { task_id: taskId, items: added });
+      if (!rpcError) { added.splice(0, added.length, ...(((kept as Attachment[] | null) ?? []))); return { added, skipped }; }
+      // The function isn't in the database yet: read again just before
+      // writing, as before, so anything another copy added is kept.
       const { data: fresh } = await db.from("tasks").select("attachments").eq("id", taskId).maybeSingle();
       const current = ((fresh?.attachments as Attachment[] | null) ?? []);
       const have = new Set(current.map((a) => a.emailSource).filter(Boolean));
