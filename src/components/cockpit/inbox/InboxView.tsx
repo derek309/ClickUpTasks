@@ -107,6 +107,9 @@ export default function InboxView(p: InboxViewProps) {
   const { inbox, prefs } = p;
   const [folder, setFolder] = useState<Folder | "settings">("inbox");
   const [q, setQ] = useState("");
+  // The clock the rows' waiting badges count from, once a minute.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const i = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(i); }, []);
   // Held by the Cockpit when it passes it, so the open conversation is in
   // the URL (?view=mail&thread=…) and a link opens it.
   const [localKey, setLocalKey] = useState<string | null>(null);
@@ -139,10 +142,15 @@ export default function InboxView(p: InboxViewProps) {
   const visible = useMemo(() => {
     if (folder === "settings") return [];
     if (q.trim()) return inbox.threads.filter((t) => matchesSearch(t, q, p.clientName(t.clientId)));
-    const list = inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
+    const all = inbox.threads.filter((t) => inFolder(t, folder, (k) => drafts.has(k)) && (!p.prefs.unreadOnly || t.unread));
+    // Longest waiting first: the ones where they wrote last, oldest first,
+    // then the rest as they were (Derek, 2026-10-10).
+    const list = p.prefs.sortWaiting
+      ? [...all.filter((t) => waitingOn(t, 0)).sort((a, b) => a.latest.at.localeCompare(b.latest.at)), ...all.filter((t) => !waitingOn(t, 0))]
+      : all;
     // Starred conversations stay pinned at the top (Derek, 2026-10-02: "front and center").
     return folder === "starred" ? list : [...list.filter((t) => t.starred), ...list.filter((t) => !t.starred)];
-  }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
+  }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly, p.prefs.sortWaiting]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
   // A link to a conversation that isn't among those loaded (older than 30
   // days, or another mailbox): say so instead of a silent list (Fable audit).
@@ -294,6 +302,9 @@ export default function InboxView(p: InboxViewProps) {
                 </>}
                 <button onClick={() => p.setPrefs({ unreadOnly: !p.prefs.unreadOnly })} aria-pressed={p.prefs.unreadOnly}
                   className={`h-10 rounded-lg border px-3 font-semibold ${p.prefs.unreadOnly ? "border-accent bg-accent-soft text-accent" : "hover:bg-background"}`}>{p.prefs.unreadOnly ? "● Unread only" : "Show: All"}</button>
+                <button onClick={() => p.setPrefs({ sortWaiting: !p.prefs.sortWaiting })} aria-pressed={!!p.prefs.sortWaiting}
+                  title={p.prefs.sortWaiting ? "Back to newest first" : "The ones waiting longest on a reply first"}
+                  className={`h-10 rounded-lg border px-3 font-semibold ${p.prefs.sortWaiting ? "border-accent bg-accent-soft text-accent" : "hover:bg-background"}`}>{p.prefs.sortWaiting ? "⏱ Longest waiting" : "Newest first"}</button>
                 <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}${searchingOlder ? ", searching older…" : ""}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
                 <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setOpenKey(null); }} placeholder="Search people, words, files" aria-label="Search the Inbox"
                   className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent sm:w-72" />
@@ -345,7 +356,7 @@ export default function InboxView(p: InboxViewProps) {
                   return (
                     <div key={t.key}>
                       {head && <div className="border-b px-5 pb-2 pt-4 text-[14px] font-extrabold uppercase tracking-wider text-muted">{head}</div>}
-                      <Row t={t} p={p} active={cursor === t.key} checked={selected.has(t.key)} draft={drafts.has(t.key)} where={q.trim() ? whereIs(t) : null}
+                      <Row t={t} p={p} now={now} active={cursor === t.key} checked={selected.has(t.key)} draft={drafts.has(t.key)} where={q.trim() ? whereIs(t) : null}
                         onCheck={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(t.key); else n.delete(t.key); return n; })}
                         onOpen={() => openThread(t)} picking={selected.size > 0}
                         onArchive={() => done([t.key])} onDelete={() => del([t.key], t.trashed)}
@@ -537,8 +548,17 @@ function Avatar({ t, size = 40 }: { t: InboxThread; size?: number }) {
 // as a blue dot and bold, the avatar turns into a checkbox on hover (or for
 // every row once one is picked), and Archive, Snooze and Delete take the
 // time's place on hover. The star shows on hover or once starred.
-function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, onArchive, onSnooze, onDelete }: {
-  t: InboxThread; p: InboxViewProps; active: boolean; checked: boolean; picking: boolean; draft: boolean; where: string | null;
+// How long they've been waiting on us: their message is the newest one. Not
+// for team chats or Updates (newsletters wait on nobody).
+function waitingOn(t: InboxThread, now: number): { mins: number; days: number; age: string } | null {
+  if (t.channel === "team" || t.updates || !t.latest || t.latest.direction !== "inbound") return null;
+  const mins = Math.max(0, Math.round((now - new Date(t.latest.at).getTime()) / 60_000));
+  const days = mins / 1440;
+  const age = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} hr` : `${Math.floor(days)} day${Math.floor(days) === 1 ? "" : "s"}`;
+  return { mins, days, age };
+}
+function Row({ t, p, active, checked, picking, draft, where, now, onCheck, onOpen, onArchive, onSnooze, onDelete }: {
+  t: InboxThread; p: InboxViewProps; active: boolean; checked: boolean; picking: boolean; draft: boolean; where: string | null; now: number;
   onCheck: (v: boolean) => void; onOpen: () => void; onArchive: () => void; onSnooze: () => void; onDelete: () => void;
 }) {
   // Words first: links in the preview are just noise.
@@ -580,6 +600,13 @@ function Row({ t, p, active, checked, picking, draft, where, onCheck, onOpen, on
           </span>
         </div>
         <div className="flex min-w-0 items-baseline gap-2 text-muted">
+          {/* Waiting on us a day or more: amber, red from two (Derek, 2026-10-10). */}
+          {(() => {
+            const w = waitingOn(t, now);
+            return w && w.days >= 1 && !t.done && !t.trashed
+              ? <span title={`They wrote last, ${w.age} ago`} className={`shrink-0 rounded-[5px] px-1.5 font-semibold ${w.days >= 2 ? "bg-[#dc2626] text-white" : "bg-[#fbbf24] text-[#1c2030]"}`}>⏱ {w.age}</span>
+              : null;
+          })()}
           {draft && <span className="shrink-0 font-bold text-danger">Draft</span>}
           {where && where !== "Inbox" && <span className="shrink-0 rounded-md bg-background px-1.5 font-semibold">{where}</span>}
           {t.subject && <span className={`max-w-full shrink-0 truncate text-foreground sm:max-w-[55%] ${t.unread ? "font-extrabold" : "font-semibold"}`}>{t.subject}</span>}

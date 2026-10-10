@@ -11,6 +11,8 @@ export type InboxPrefs = {
   byDay: boolean;
   /** Only conversations with something unread (the switch above the list). */
   unreadOnly: boolean;
+  /** The ones waiting longest on a reply first (Derek, 2026-10-10). */
+  sortWaiting?: boolean;
   showClientAndTask: boolean;
   replies: { name: string; text: string }[];
   undoSeconds: 0 | 5 | 10 | 30;
