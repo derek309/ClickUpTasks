@@ -88,9 +88,9 @@ describe("draft_message", () => {
     ]);
     const text = await call(await connect(), "draft_message", { channel: "email", client_id: "cl_ct_ghl_G1", subject: "Hi", body: "Hello Pam" });
     expect(text).toContain("Nothing was sent");
-    const w = writes.find((x) => x.url.includes("inbox_prefs"));
-    expect(w?.method).toBe("PATCH");
-    expect(w?.body.prefs.queuedDrafts[0]).toMatchObject({ kind: "email", to: "pam@example.com", contactId: "ct_1", subject: "Hi", body: "Hello Pam", by: "Claude" });
+    const w = writes.find((x) => x.url.includes("rpc/queued_draft_put"));
+    expect(w?.method).toBe("POST");
+    expect(w?.body.draft).toMatchObject({ kind: "email", to: "pam@example.com", contactId: "ct_1", subject: "Hi", body: "Hello Pam", by: "Claude" });
     expect(writes.every((x) => !x.url.includes("send"))).toBe(true);
   });
   it("goes to Derek's Inbox when connected as Claude", async () => {
@@ -105,7 +105,7 @@ describe("draft_message", () => {
     await Promise.all([server.connect(a), client.connect(b)]);
     const text = await call(client, "draft_message", { channel: "email", to: "pam@example.com", body: "Hi" });
     expect(text).toContain("Derek Fox's Inbox");
-    expect(writes.find((x) => x.url.includes("inbox_prefs"))?.body.member_id).toBe("u_derek");
+    expect(writes.find((x) => x.url.includes("rpc/queued_draft_put"))?.body.member).toBe("u_derek");
   });
   it("needs a contact for a text", async () => {
     fake([{ table: "contacts", rows: [] }, { table: "inbox_prefs", rows: [] }]);

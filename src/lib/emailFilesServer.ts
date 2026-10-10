@@ -31,9 +31,16 @@ const taskPath = (taskId: string, name: string) => `${taskId}/f_${randomUUID().s
 
 /** One email's files onto a task. Never throws: returns what it added and the
  *  names it could not copy. */
-export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: string): Promise<{ added: Attachment[]; skipped: string[] }> {
+export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: string, deadline?: number): Promise<{ added: Attachment[]; skipped: string[]; unfinished?: boolean }> {
   const added: Attachment[] = [];
   const skipped: string[] = [];
+  let unfinished = false;
+  // Uploads that end up not on the task (another copy got there first) are
+  // deleted, not left in storage (audit 2026-10-10).
+  const removeStored = async (gone: Attachment[]) => {
+    const paths = gone.map((a) => a.path).filter((p): p is string => !!p && p.startsWith(`${taskId}/f_`));
+    if (paths.length) await db.storage.from(TASK_FILES_BUCKET).remove(paths).catch(() => null);
+  };
   try {
     const { data: row } = await db.from("messages").select("id, gmail_message_id, rfc822_message_id, mailbox_member_id, attachments").eq("id", messageId).maybeSingle();
     const files = ((row?.attachments as any[] | null) ?? []).filter((a) => a && (a.gmailAttachmentId || a.path));
@@ -52,6 +59,9 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
 
     for (const { file, source } of plan) {
       const name = String(file.name || "attachment");
+      // Out of time: stop between files, and say so, so this email is tried
+      // again rather than marked done (audit 2026-10-10).
+      if (deadline && Date.now() > deadline) { unfinished = true; break; }
       try {
         let path: string;
         let bytes: number | null = null;
@@ -84,13 +94,19 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
       // (supabase/task-attachments-append.sql), so a file someone added while
       // these downloaded is never written over.
       const { data: kept, error: rpcError } = await db.rpc("append_task_attachments", { task_id: taskId, items: added });
-      if (!rpcError) { added.splice(0, added.length, ...(((kept as Attachment[] | null) ?? []))); return { added, skipped }; }
+      if (!rpcError) {
+        const keep = ((kept as Attachment[] | null) ?? []);
+        await removeStored(added.filter((a) => !keep.some((k) => k.path === a.path)));
+        added.splice(0, added.length, ...keep);
+        return { added, skipped, unfinished };
+      }
       // The function isn't in the database yet: read again just before
       // writing, as before, so anything another copy added is kept.
       const { data: fresh } = await db.from("tasks").select("attachments").eq("id", taskId).maybeSingle();
       const current = ((fresh?.attachments as Attachment[] | null) ?? []);
       const have = new Set(current.map((a) => a.emailSource).filter(Boolean));
       const toAdd = added.filter((a) => !have.has(a.emailSource));
+      await removeStored(added.filter((a) => have.has(a.emailSource)));
       if (toAdd.length) {
         const { error } = await db.from("tasks").update({ attachments: [...current, ...toAdd], updated_by: null }).eq("id", taskId);
         if (error) throw new Error(error.message);
@@ -100,7 +116,7 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
   } catch (e) {
     console.error("[emailFiles] copy to task failed", messageId, taskId, e instanceof Error ? e.message : e);
   }
-  return { added, skipped };
+  return { added, skipped, unfinished };
 }
 
 /** Every file in a conversation onto a task, oldest email first: linking an

@@ -104,6 +104,16 @@ describe("get_email_thread", () => {
   });
 });
 
+describe("Drafts belong to their owner", () => {
+  it("a teammate's own token can't list or delete someone else's drafts", async () => {
+    fake([{ table: "profiles", rows: [{ member_id: "u_derek", name: "Derek Fox" }, { member_id: "u_va", name: "Val Assistant" }] }]);
+    const va = await connect({ memberId: "u_va", role: "va", visibleClients: new Set(["c_1"]) });
+    expect(await call(va, "list_drafts", { for_member: "derek" })).toContain("whose Drafts you can use");
+    expect(await call(va, "delete_draft", { id: "qd_1", for_member: "derek" })).toContain("whose Drafts you can use");
+    expect(writes).toHaveLength(0);
+  });
+});
+
 describe("draft_email_reply", () => {
   it("puts a Re: reply in the mailbox owner's Drafts with the thread key, and sends nothing", async () => {
     fake([
@@ -113,9 +123,9 @@ describe("draft_email_reply", () => {
     ]);
     const text = await call(await connect({ memberId: "u_claude" }), "draft_email_reply", { thread: "gm:18f2a", body: "Done, take a look." });
     expect(text).toContain("Nothing was sent");
-    const w = writes.find((x) => x.url.includes("inbox_prefs"));
-    expect(w?.url).toContain("member_id=eq.u_derek");
-    expect(w?.body.prefs.queuedDrafts[0]).toMatchObject({ kind: "email", to: "pam@example.com", contactId: "ct_1", subject: "Re: Website changes", body: "Done, take a look.", by: "Claude", threadKey: "gm:18f2a", replyToMessageId: "m1" });
+    const w = writes.find((x) => x.url.includes("rpc/queued_draft_put"));
+    expect(w?.body.member).toBe("u_derek");
+    expect(w?.body.draft).toMatchObject({ kind: "email", to: "pam@example.com", contactId: "ct_1", subject: "Re: Website changes", body: "Done, take a look.", by: "Claude", threadKey: "gm:18f2a", replyToMessageId: "m1" });
     expect(writes.every((x) => !x.url.includes("send"))).toBe(true);
   });
   it("answers a GoHighLevel text conversation with a text", async () => {
@@ -126,9 +136,9 @@ describe("draft_email_reply", () => {
       { table: "inbox_prefs", rows: [] },
     ]);
     await call(await connect(), "draft_email_reply", { thread: "ghl:cv1", body: "Yes" });
-    const w = writes.find((x) => x.url.includes("inbox_prefs"));
+    const w = writes.find((x) => x.url.includes("rpc/queued_draft_put"));
     expect(w?.method).toBe("POST");
-    expect(w?.body.prefs.queuedDrafts[0]).toMatchObject({ kind: "text", to: "+15555550100", threadKey: "ghl:cv1" });
-    expect(w?.body.prefs.queuedDrafts[0].subject).toBeUndefined();
+    expect(w?.body.draft).toMatchObject({ kind: "text", to: "+15555550100", threadKey: "ghl:cv1" });
+    expect(w?.body.draft.subject).toBeUndefined();
   });
 });

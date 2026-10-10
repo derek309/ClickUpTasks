@@ -646,10 +646,18 @@ export function createServer(opts = {}) {
    *  Inbox nobody opens, so its drafts go to Derek. null: nobody by that name. */
   async function draftOwner(forMember, fallback) {
     await members();
-    if (!forMember) return fallback || (ME === "u_claude" ? "u_derek" : ME);
-    const want = forMember.trim().toLowerCase();
-    const hit = Object.entries(memberNames).find(([id, n]) => id !== "u_claude" && (id.toLowerCase() === want || String(n).toLowerCase() === want || String(n).toLowerCase().split(/\s+/)[0] === want));
-    return hit ? hit[0] : null;
+    let owner;
+    if (!forMember) owner = fallback || (ME === "u_claude" ? "u_derek" : ME);
+    else {
+      const want = forMember.trim().toLowerCase();
+      const hit = Object.entries(memberNames).find(([id, n]) => id !== "u_claude" && (id.toLowerCase() === want || String(n).toLowerCase() === want || String(n).toLowerCase().split(/\s+/)[0] === want));
+      owner = hit ? hit[0] : null;
+    }
+    // A teammate's own token works on their own Drafts only; an admin, or
+    // Claude's own connector, on anyone's (audit 2026-10-10: a VA's token
+    // could list or delete Derek's drafts and their Gmail copies).
+    if (owner && owner !== ME && !IS_ADMIN && ME !== "u_claude") return null;
+    return owner;
   }
   /** Adds a draft to that person's Inbox, Drafts (inbox_prefs.prefs.queuedDrafts). */
   /** Adds a draft to someone's Inbox Drafts. `replaceId` swaps out that
@@ -657,15 +665,31 @@ export function createServer(opts = {}) {
    *  same conversation, so corrections don't pile up (Loomis chat, 2026-10-09).
    *  Returns how many it replaced. */
   /** A draft's Gmail copy goes when the draft does (replaced or deleted). */
-  async function dropGmailCopies(drafts) {
-    for (const d of drafts) if (d.gmailDraftId && d.gmailMailbox && opts.services?.deleteGmailDraft) await opts.services.deleteGmailDraft(d.gmailMailbox, d.gmailDraftId);
+  // Only in the owner's own mailbox: the draft list is a row its owner can
+  // write, so a mailbox named in it isn't trusted on its own (audit
+  // 2026-10-10).
+  async function dropGmailCopies(owner, drafts) {
+    const copies = drafts.filter((d) => d?.gmailDraftId && d.gmailMailbox);
+    if (!copies.length || !opts.services?.deleteGmailDraft) return;
+    const [p] = await sb(`profiles?select=email&member_id=eq.${enc(owner)}&limit=1`);
+    const mine = String(p?.email ?? "").toLowerCase();
+    for (const d of copies) if (mine && String(d.gmailMailbox).toLowerCase() === mine) await opts.services.deleteGmailDraft(d.gmailMailbox, d.gmailDraftId);
   }
   async function queueDraft(owner, draft, replaceId) {
+    // One draft at a time in a locked row (supabase/queued-drafts-functions.sql),
+    // so a browser tab saving its list can't erase this one or bring back the
+    // one it replaced. The whole-list write below is the fallback until the
+    // functions are in the database.
+    try {
+      const gone = await sb("rpc/queued_draft_put", "POST", { member: owner, draft, replace_id: replaceId ?? null });
+      await dropGmailCopies(owner, gone ?? []);
+      return (gone ?? []).filter((d) => d.id !== draft.id).length;
+    } catch { /* functions not there yet */ }
     const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
     const prefs = row?.prefs ?? {};
     const was = prefs.queuedDrafts ?? [];
     const kept = was.filter((d) => d.id !== replaceId && !(draft.threadKey && d.threadKey === draft.threadKey && (d.by ?? "Claude") === "Claude"));
-    await dropGmailCopies(was.filter((d) => !kept.includes(d)));
+    await dropGmailCopies(owner, was.filter((d) => !kept.includes(d)));
     const next = { ...prefs, queuedDrafts: [...kept, draft] };
     if (row) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: next, updated_at: nowIso() });
     else await sb("inbox_prefs", "POST", { member_id: owner, prefs: next, updated_at: nowIso() });
@@ -685,7 +709,7 @@ export function createServer(opts = {}) {
     },
     async ({ channel, to, client_id, subject, body, for_member, replace_id }) => {
       const owner = await draftOwner(for_member);
-      if (!owner) return { content: [{ type: "text", text: `No teammate "${for_member}". Call list_members.` }] };
+      if (!owner) return { content: [{ type: "text", text: `No teammate "${for_member}" whose Drafts you can use. Call list_members.` }] };
       if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
       let contact = null;
       if (client_id) {
@@ -849,7 +873,7 @@ export function createServer(opts = {}) {
       const newest = rows[rows.length - 1];
       const box = ref.kind === "gm" ? rows.find((r) => r.mailbox_member_id)?.mailbox_member_id : null;
       const owner = await draftOwner(for_member, box && box !== "u_claude" ? box : undefined);
-      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
+      if (!owner) return reply(`No teammate "${for_member}" whose Drafts you can use. Call list_members.`);
       const kind = ref.kind === "gm" || newest.channel === "email" ? "email" : "text";
       const peer = threadPeer(rows, conv);
       let address = peer.address;
@@ -889,7 +913,7 @@ export function createServer(opts = {}) {
     { for_member: z.string().optional().describe("whose Inbox: a member id or first name. Defaults to Derek when you are connected as Claude, else you.") },
     async ({ for_member }) => {
       const owner = await draftOwner(for_member);
-      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
+      if (!owner) return reply(`No teammate "${for_member}" whose Drafts you can use. Call list_members.`);
       const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
       const list = row?.prefs?.queuedDrafts ?? [];
       if (!list.length) return reply(`No drafts in ${memberNames[owner] ?? owner}'s Inbox from these tools.`);
@@ -901,14 +925,19 @@ export function createServer(opts = {}) {
     { id: z.string(), for_member: z.string().optional().describe("whose Inbox: a member id or first name. Defaults to Derek when you are connected as Claude, else you.") },
     async ({ id, for_member }) => {
       const owner = await draftOwner(for_member);
-      if (!owner) return reply(`No teammate "${for_member}". Call list_members.`);
-      const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
-      const prefs = row?.prefs ?? {};
-      const was = prefs.queuedDrafts ?? [];
-      if (!was.some((d) => d.id === id)) return reply(`No draft ${id} in ${memberNames[owner] ?? owner}'s Inbox. Call list_drafts.`);
-      await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: { ...prefs, queuedDrafts: was.filter((d) => d.id !== id) }, updated_at: nowIso() });
-      const gone = was.find((d) => d.id === id);
-      await dropGmailCopies([gone]);
+      if (!owner) return reply(`No teammate "${for_member}" whose Drafts you can use. Call list_members.`);
+      let gone = null;
+      try { gone = await sb("rpc/queued_draft_remove", "POST", { member: owner, draft_id: id }); }
+      catch {
+        // Until supabase/queued-drafts-functions.sql is in: the whole list.
+        const [row] = await sb(`inbox_prefs?select=prefs&member_id=eq.${enc(owner)}&limit=1`);
+        const prefs = row?.prefs ?? {};
+        const was = prefs.queuedDrafts ?? [];
+        gone = was.find((d) => d.id === id) ?? null;
+        if (gone) await sb(`inbox_prefs?member_id=eq.${enc(owner)}`, "PATCH", { prefs: { ...prefs, queuedDrafts: was.filter((d) => d.id !== id) }, updated_at: nowIso() });
+      }
+      if (!gone) return reply(`No draft ${id} in ${memberNames[owner] ?? owner}'s Inbox. Call list_drafts.`);
+      await dropGmailCopies(owner, [gone]);
       return reply(`Deleted draft ${id}${gone.gmailDraftId ? " and its copy in Gmail" : ""}.`);
     });
 

@@ -612,7 +612,8 @@ export async function createGmailDraft(mailbox: string, msg: { to: string; subje
   if (!token) throw new Error("Could not obtain a Google access token.");
   const mime = [
     `From: ${formatFrom(mailbox, msg.fromName)}`,
-    `To: ${msg.to}`,
+    // No line breaks in an address: one could add a header of its own.
+    `To: ${msg.to.replace(/[\r\n]+/g, " ")}`,
     `Subject: ${encodeHeader(msg.subject || "")}`,
     ...(msg.replyTo ? [
       `In-Reply-To: ${msg.replyTo.messageId}`,

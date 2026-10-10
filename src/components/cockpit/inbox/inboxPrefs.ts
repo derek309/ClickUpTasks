@@ -115,13 +115,9 @@ export function useInboxPrefs(member: string) {
   // (Derek, 2026-10-05: his starred booking links and default calendar were
   // wiped when another tab changed something small).
   const pending = useRef<Partial<InboxPrefs>>({});
-  const setPrefs = useCallback((patch: Partial<InboxPrefs>) => {
-    pending.current = { ...pending.current, ...patch };
-    setPrefsState((p) => {
-      const n = { ...p, ...patch };
-      try { localStorage.setItem(key(member), JSON.stringify(n)); } catch { /* private window: this session only */ }
-      return n;
-    });
+  const latest = useRef(prefs);
+  useEffect(() => { latest.current = prefs; }, [prefs]);
+  const save = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const change = pending.current;
@@ -131,6 +127,34 @@ export function useInboxPrefs(member: string) {
       await supabase.from("inbox_prefs").upsert({ member_id: member, prefs: merged, updated_at: new Date().toISOString() }, { onConflict: "member_id" });
     }, 600);
   }, [member]);
+  const setPrefs = useCallback((patch: Partial<InboxPrefs>) => {
+    const { queuedDrafts, ...rest } = patch;
+    const before = latest.current.queuedDrafts ?? [];
+    pending.current = { ...pending.current, ...rest };
+    setPrefsState((p) => {
+      const n = { ...p, ...patch };
+      try { localStorage.setItem(key(member), JSON.stringify(n)); } catch { /* private window: this session only */ }
+      latest.current = n;
+      return n;
+    });
+    if (Object.keys(rest).length) save();
+    // Drafts a Claude chat queues change one at a time on the server
+    // (supabase/queued-drafts-functions.sql), never as this tab's whole list:
+    // a tab that hadn't seen Claude's newest draft erased it (audit
+    // 2026-10-10). Without those functions yet, the old whole-list save.
+    if (queuedDrafts) {
+      const keep = new Set(queuedDrafts.map((d) => d.id));
+      const had = new Set(before.map((d) => d.id));
+      void Promise.all([
+        ...before.filter((d) => !keep.has(d.id)).map((d) => supabase.rpc("queued_draft_remove", { member, draft_id: d.id })),
+        ...queuedDrafts.filter((d) => !had.has(d.id)).map((d) => supabase.rpc("queued_draft_put", { member, draft: d })),
+      ]).then((rs) => {
+        if (!rs.some((r) => r.error)) return;
+        pending.current = { ...pending.current, queuedDrafts };
+        save();
+      });
+    }
+  }, [member, save]);
   return { prefs, setPrefs };
 }
 

@@ -21,10 +21,16 @@ async function run(req: NextRequest) {
   if (!adminConfigured) return NextResponse.json({ error: "Server not configured." }, { status: 501 });
   if (!(await authorizeCron(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const started = Date.now();
-  const { data, error } = await supabaseAdmin.from("messages").select("id, task_id, gmail_thread_id, ghl_conversation_id")
+  // Newest first, each email once (messages.files_copied_at,
+  // supabase/messages-files-copied.sql). Without that column yet, the old
+  // read of the whole window.
+  const base = () => supabaseAdmin.from("messages").select("id, task_id, gmail_thread_id, ghl_conversation_id")
     .not("task_id", "is", null).neq("attachments", "[]").eq("channel", "email")
     .gte("created_at", new Date(started - WINDOW_MS).toISOString())
-    .order("created_at", { ascending: true }).limit(60);
+    .order("created_at", { ascending: false }).limit(40);
+  let marked = true;
+  let { data, error } = await base().is("files_copied_at", null);
+  if (error && /files_copied_at/.test(error.message)) { marked = false; ({ data, error } = await base()); }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   // A conversation linked to more than one task (inbox_task_links) sends its
   // files to each of them, not only the one the email was filed on.
@@ -40,10 +46,16 @@ async function run(req: NextRequest) {
     looked++;
     const k = keyOf(m);
     const taskIds = [...new Set([m.task_id as string, ...(links ?? []).filter((l) => l.thread_key === k).map((l) => l.task_id as string)])];
+    let done = true;
     for (const taskId of taskIds) {
-      try { added += (await copyEmailFilesToTask(supabaseAdmin, m.id as string, taskId)).added.length; }
-      catch (e) { console.error("[cron/email-files]", m.id, taskId, e instanceof Error ? e.message : e); }
+      try {
+        const r = await copyEmailFilesToTask(supabaseAdmin, m.id as string, taskId, started + BUDGET_MS);
+        added += r.added.length;
+        if (r.unfinished) done = false;
+      } catch (e) { done = false; console.error("[cron/email-files]", m.id, taskId, e instanceof Error ? e.message : e); }
     }
+    // Done once, even with nothing to copy (a signature logo), so it isn't read again.
+    if (done && marked) await supabaseAdmin.from("messages").update({ files_copied_at: new Date().toISOString() }).eq("id", m.id);
   }
   const out = { ok: true, emails: data?.length ?? 0, looked, added };
   console.log("[cron/email-files]", JSON.stringify(out));

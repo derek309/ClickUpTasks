@@ -16,6 +16,10 @@ export async function POST(req: NextRequest) {
   const { data: row } = await supabaseAdmin.from("inbox_prefs").select("prefs").eq("member_id", caller.memberId).maybeSingle();
   const d = ((row?.prefs as { queuedDrafts?: { id: string; gmailDraftId?: string; gmailMailbox?: string }[] } | null)?.queuedDrafts ?? []).find((x) => x.id === b.id);
   if (!d?.gmailDraftId || !d.gmailMailbox) return NextResponse.json({ ok: true, gmail: false });
+  // Only in the caller's own mailbox: their draft list is a row they can
+  // write, so the mailbox named in it isn't trusted on its own (audit
+  // 2026-10-10).
+  if (d.gmailMailbox.toLowerCase() !== caller.email.toLowerCase()) return NextResponse.json({ ok: true, gmail: false });
   try {
     await deleteGmailDraft(d.gmailMailbox, d.gmailDraftId);
     return NextResponse.json({ ok: true, gmail: true });

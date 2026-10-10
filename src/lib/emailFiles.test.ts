@@ -93,6 +93,7 @@ function fakeDb() {
   const bucket = {
     upload: async (...args: unknown[]) => { storage.push({ op: "upload", args }); return { error: null }; },
     copy: async (...args: unknown[]) => { storage.push({ op: "copy", args }); return { error: null }; },
+    remove: async (...args: unknown[]) => { storage.push({ op: "remove", args }); return { error: null }; },
   };
   // append_task_attachments (supabase/task-attachments-append.sql): adds only
   // what isn't on the task yet, by emailSource or path, and returns it.
