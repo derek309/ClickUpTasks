@@ -233,7 +233,7 @@ function withSlot<T>(run: () => PromiseLike<T>): Promise<T> {
  *  every page alike. */
 type Query = ReturnType<ReturnType<typeof supabase.from>["select"]>;
 type Narrow = (q: Query) => Query;
-async function fetchAllRows(table: string, orderCol?: string, ascending = true, excludeDeleted = false, narrow: Narrow = (q) => q) {
+async function fetchAllRows(table: string, orderCol?: string, ascending = true, excludeDeleted = false, narrow: Narrow = (q) => q, big = false) {
   const PAGE_SIZE = 1000;
   // Paging without a deterministic total order is how you silently drop or
   // duplicate rows: Postgres makes no ordering promise between the separate
@@ -266,11 +266,16 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
   // just falls back to unknown-size paging — fire one page, then let the
   // existing safety-tail loop below keep going until a short page — instead
   // of failing the whole table.
-  const { count, error: countError } = await withSlot(() => {
+  //
+  // Only a table expected to run past one page asks for the count (loading
+  // plan step 3, 2026-10-10): for the rest it was a second request for a
+  // table that fits in one, about 13 extra at every load. One that has grown
+  // past a page still reads it all, through the safety tail below.
+  const { count, error: countError } = big ? await withSlot(() => {
     let q = narrow(supabase.from(table).select("*", { count: "exact", head: true }));
     if (excludeDeleted) q = q.is("deleted_at", null);
     return q;
-  });
+  }) : { count: null, error: true };
   const knownPages = countError ? 1 : Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
   const firstResults = await Promise.all(
     Array.from({ length: knownPages }, (_, i) => withSlot(() => fetchPage(i * PAGE_SIZE))));
@@ -340,7 +345,7 @@ export async function fetchOlderDoneTasks(scope: { clientId: string } | null): P
   const { data, error } = await fetchAllRows("tasks", "created_at", true, true, (q) => {
     const older = q.eq("status", "done").lt("updated_at", before);
     return scope ? older.eq("client_id", scope.clientId) : older;
-  });
+  }, !scope);
   if (error) { logErr({ error }); return []; }
   return (data ?? []).map(rowToTask);
 }
@@ -367,11 +372,11 @@ export async function fetchAll(since?: SyncMarks) {
   };
   const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, sg, dm] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true, changed("clients") ?? undefined),
-    fetchAllRows("contacts"),
+    fetchAllRows("contacts", undefined, true, false, undefined, true),
     fetchAllRows("projects", undefined, true, true),
     // Open tasks, and finished ones from the last 30 days: 1,980 rows at start
     // when about 120 were open.
-    fetchAllRows("tasks", "created_at", true, true, changed("tasks") ?? ((q) => q.or(`status.neq.done,updated_at.gte.${tasksSince}`))),
+    fetchAllRows("tasks", "created_at", true, true, changed("tasks") ?? ((q) => q.or(`status.neq.done,updated_at.gte.${tasksSince}`)), !changed("tasks")),
     // Every unread notification, and the newest read ones: 2,673 rows loaded
     // at start and on every return to the tab when about half were read.
     changed("notifications")
@@ -394,7 +399,7 @@ export async function fetchAll(since?: SyncMarks) {
     changed("messages")
       ? fetchAllRows("messages", "created_at", true, false, (q) => changed("messages")!(q).not("client_id", "is", null))
       : eitherOf(
-        fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince).not("client_id", "is", null)),
+        fetchAllRows("messages", "created_at", true, false, (q) => q.gte("created_at", messagesSince).not("client_id", "is", null), true),
         fetchAllRows("messages", "created_at", true, false, (q) => q.eq("read", false).not("client_id", "is", null)),
       ),
     fetchAllRows("task_templates", "created_at"),
