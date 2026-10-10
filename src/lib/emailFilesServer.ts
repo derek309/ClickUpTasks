@@ -37,8 +37,11 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
   let unfinished = false;
   // Uploads that end up not on the task (another copy got there first) are
   // deleted, not left in storage (audit 2026-10-10).
+  // Only files this run made: a file already in the task's folder is reused,
+  // not copied, and must never be deleted here (Fable audit 2026-10-10).
+  const made = new Set<string>();
   const removeStored = async (gone: Attachment[]) => {
-    const paths = gone.map((a) => a.path).filter((p): p is string => !!p && p.startsWith(`${taskId}/f_`));
+    const paths = gone.map((a) => a.path).filter((p): p is string => !!p && made.has(p));
     if (paths.length) await db.storage.from(TASK_FILES_BUCKET).remove(paths).catch(() => null);
   };
   try {
@@ -73,6 +76,7 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
             path = taskPath(taskId, name);
             const { error } = await db.storage.from(TASK_FILES_BUCKET).copy(file.path, path);
             if (error) { skipped.push(name); continue; }
+            made.add(path);
           }
         } else {
           if (!mailbox || !row.gmail_message_id) { skipped.push(name); continue; }
@@ -81,13 +85,19 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
           path = taskPath(taskId, name);
           const { error } = await db.storage.from(TASK_FILES_BUCKET).upload(path, buf, { contentType: file.mimeType || "application/octet-stream", upsert: false });
           if (error) { skipped.push(name); continue; }
+          made.add(path);
           bytes = buf.byteLength;
         }
         added.push({
           id: "a_" + randomUUID().slice(0, 12), name, size: bytes !== null ? sizeLabel(bytes) : file.size, kind: file.kind && file.kind !== "link" ? file.kind : kindOfName(name),
           path, ...(file.mimeType ? { mimeType: file.mimeType } : {}), emailSource: source,
         });
-      } catch { skipped.push(name); }
+      } catch {
+        // Gmail didn't hand it over (busy, a stale attachment id): try this
+        // email again next run rather than marking it done (Fable audit).
+        skipped.push(name);
+        if (!file.path) unfinished = true;
+      }
     }
     if (added.length) {
       // One statement that adds only what isn't there yet

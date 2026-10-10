@@ -38,6 +38,10 @@ async function extraTaskIds(threadKey: string): Promise<string[]> {
   return (data ?? []).map((r) => r.task_id as string);
 }
 
+// Linking brings the conversation's earlier files onto the task, after the
+// response; that can take a while for a long thread (Fable audit 2026-10-10).
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

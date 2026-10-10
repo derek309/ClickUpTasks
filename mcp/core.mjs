@@ -897,7 +897,10 @@ export function createServer(opts = {}) {
       // The same reply as a Gmail draft in that conversation, in the mailbox
       // it's in, when this server can reach Gmail (Derek, 2026-10-09).
       let gmailNote = "";
-      if (kind === "email" && box && opts.services?.gmailReplyDraft) {
+      // Only when the Drafts it goes in belong to the same person as the
+      // mailbox: otherwise nobody could remove the Gmail copy when the draft
+      // is sent from the Inbox, and it could go twice (Fable audit 2026-10-10).
+      if (kind === "email" && box && box === owner && opts.services?.gmailReplyDraft) {
         const g = await opts.services.gmailReplyDraft({ mailboxMemberId: box, answerId: draft.replyToMessageId, to: address, subject: subj, body });
         if (g.draftId) { draft.gmailDraftId = g.draftId; draft.gmailMailbox = g.mailbox; gmailNote = ` It's also a draft in ${g.mailbox}'s Gmail, in the conversation.`; }
         else gmailNote = ` (Not in Gmail: ${g.error}.)`;
@@ -938,7 +941,7 @@ export function createServer(opts = {}) {
       }
       if (!gone) return reply(`No draft ${id} in ${memberNames[owner] ?? owner}'s Inbox. Call list_drafts.`);
       await dropGmailCopies(owner, [gone]);
-      return reply(`Deleted draft ${id}${gone.gmailDraftId ? " and its copy in Gmail" : ""}.`);
+      return reply(`Deleted draft ${id}${gone.gmailDraftId && opts.services?.deleteGmailDraft ? " and its copy in Gmail" : ""}.`);
     });
 
   // Client reviews on a task: the client document (kind "doc"), the image review
