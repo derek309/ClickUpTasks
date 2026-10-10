@@ -286,45 +286,12 @@ export default function InboxView(p: InboxViewProps) {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {inbox.error && <div className="m-4 rounded-lg bg-danger-soft p-3 text-danger">{inbox.error}</div>}
                 {folder === "inbox" && !q && p.canAdmin && <RemindersGoingOut p={p} />}
-                {/* Drafts a Claude chat wrote for you (2026-10-06): open one to check and send it. */}
-                {folder === "drafts" && !q && queued.length > 0 && (
-                  <div className="space-y-2 border-b bg-background/60 p-3">
-                    {[...queued].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((d) => (
-                      <div key={d.id} className="flex items-center gap-3 rounded-lg bg-surface px-3 py-2.5 ring-1 ring-[var(--border)]">
-                        <span aria-hidden className="text-[20px]">{d.kind === "email" ? "✉️" : "💬"}</span>
-                        <button onClick={() => openQueued(d)} className="min-w-0 flex-1 text-left">
-                          <b className="block truncate">{d.kind === "email" ? "Email" : "Text"} to {d.name}{d.subject ? `: ${d.subject}` : ""}</b>
-                          <span className="block truncate text-[14px] text-muted">From {d.by ?? "Claude"} · {htmlToText(d.body).slice(0, 120)}</span>
-                        </button>
-                        <button onClick={() => p.setPrefs({ queuedDrafts: queued.filter((x) => x.id !== d.id) })} title="Delete this draft" className="shrink-0 rounded-md px-2 py-1 text-[14px] font-semibold text-muted hover:text-danger">Delete</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {/* Emails written on a task or a client and not sent (Derek, 2026-10-06:
-                    the Clients page's Drafts tab moved here). Opening one opens the
-                    task, where its email window is. */}
-                {folder === "drafts" && !q && workDrafts.length > 0 && (
-                  <div className="border-b">
-                    <div className="px-4 pb-1 pt-3 text-[13px] font-bold uppercase tracking-wide text-muted">On a task or client</div>
-                    {[...workDrafts].sort((a, b) => a.at.localeCompare(b.at)).map((d) => (
-                      <div key={d.id} className="group flex w-full items-start border-t hover:bg-background">
-                      <button onClick={() => (d.taskId ? p.onOpenTask(d.taskId, "Drafts") : p.onOpenClientDraft?.(d.clientId))}
-                        className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pl-4 text-left">
-                        <span aria-hidden className="mt-0.5 text-[18px]">📝</span>
-                        <span className="min-w-0 flex-1">
-                          <b className="block truncate">{d.subject || "(no subject)"}</b>
-                          <span className="block truncate text-[14px] text-muted">{[d.clientName, d.where ? `on ${d.where}` : "on the client"].filter(Boolean).join(" · ")}</span>
-                          {d.preview && <span className="block truncate text-[14px] text-muted">{d.preview}</span>}
-                        </span>
-                        <span className="shrink-0 text-[14px] text-muted">{new Date(d.at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
-                      </button>
-                      {/* Like a Claude draft's row (Derek, 2026-10-06: "how about these?"). */}
-                      {p.onDeleteWorkDraft && <button onClick={() => void p.onDeleteWorkDraft!(d)} title="Delete this draft"
-                        className="m-2 shrink-0 rounded-md px-2 py-1 text-[14px] font-semibold text-muted hover:text-danger">Delete</button>}
-                      </div>
-                    ))}
-                  </div>
+                {/* Every draft waiting on you in one list, one look, newest first
+                    (Derek, 2026-10-10: the Claude cards and the task rows "feel
+                    off or duplicates"): a Claude chat's, and an email written on a
+                    task or client. One you've written to them since is hidden. */}
+                {folder === "drafts" && !q && (queued.length > 0 || workDrafts.length > 0) && (
+                  <DraftList p={p} queued={queued} workDrafts={workDrafts} onOpenQueued={openQueued} />
                 )}
                 {/* Reviews a client sent changes back on: yours to act on (2026-10-06). */}
                 {folder === "inbox" && !q && reviewsBack.length > 0 && (
@@ -1449,6 +1416,69 @@ function FileImage({ a, m, p, className }: { a: Attachment; m: Message; p: Inbox
   }, [a.id, m.id]);
   // eslint-disable-next-line @next/next/no-img-element
   return src ? <img src={src} alt={a.name} className={className} /> : <span className={`grid place-items-center bg-background text-muted ${className ?? ""}`}>🖼️</span>;
+}
+
+type WorkDraft = NonNullable<InboxViewProps["workDrafts"]>[number];
+type QueuedDraftRow = NonNullable<InboxPrefs["queuedDrafts"]>[number];
+const titleCase = (n: string) => (n === n.toLowerCase() ? n.replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : n);
+function DraftList({ p, queued, workDrafts, onOpenQueued }: { p: InboxViewProps; queued: QueuedDraftRow[]; workDrafts: WorkDraft[]; onOpenQueued: (d: QueuedDraftRow) => void }) {
+  const [showOld, setShowOld] = useState(false);
+  // What we've sent, to tell a draft you've already gone past.
+  const sent = useMemo(() => p.inbox.threads.flatMap((t) => t.messages.filter((m) => m.direction === "outbound").map((m) => ({ key: t.key, to: (m.peerAddress ?? t.peerAddress ?? "").toLowerCase(), taskId: m.taskId ?? null, at: m.at }))), [p.inbox.threads]);
+  const nameFor = (d: QueuedDraftRow) => {
+    const c = (d.contactId && p.contacts.find((x) => x.id === d.contactId)) || p.contacts.find((x) => (x.email ?? "").toLowerCase() === d.to.toLowerCase());
+    return c?.name || titleCase(d.name || d.to);
+  };
+  const rows = [
+    ...queued.map((d) => ({
+      id: d.id, at: d.createdAt, icon: d.kind === "email" ? "✉️" : "💬", who: nameFor(d), subject: d.subject || (d.kind === "text" ? "Text" : "(no subject)"),
+      preview: htmlToText(d.body).slice(0, 160), tag: d.by && d.by !== "Claude" ? d.by : "Claude", claude: true,
+      old: sent.some((s) => s.at > d.createdAt && (d.threadKey ? s.key === d.threadKey : !!s.to && s.to === d.to.toLowerCase())),
+      open: () => onOpenQueued(d),
+      del: () => {
+        if (d.gmailDraftId) void authedFetch("/api/inbox/claude-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: d.id }) }).catch(() => null);
+        p.setPrefs({ queuedDrafts: queued.filter((x) => x.id !== d.id) });
+      },
+    })),
+    ...workDrafts.map((d) => ({
+      id: d.id, at: d.at, icon: "📝", who: d.clientName ?? "", subject: d.subject || "(no subject)", preview: d.preview,
+      tag: d.where ? `On ${d.where}` : "On the client", claude: false,
+      old: !!d.taskId && sent.some((s) => s.taskId === d.taskId && s.at > d.at),
+      open: () => (d.taskId ? p.onOpenTask(d.taskId, "Drafts") : p.onOpenClientDraft?.(d.clientId)),
+      del: p.onDeleteWorkDraft ? () => void p.onDeleteWorkDraft!(d) : null,
+    })),
+  ].sort((x, y) => y.at.localeCompare(x.at));
+  const fresh = rows.filter((r) => !r.old);
+  const old = rows.filter((r) => r.old);
+  const row = (r: (typeof rows)[number]) => (
+    <div key={r.id} className={`group flex w-full items-start border-t hover:bg-background ${r.old ? "opacity-60" : ""}`}>
+      <button onClick={r.open} className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pl-4 text-left">
+        <span aria-hidden className="mt-0.5 text-[18px]">{r.icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <b className="min-w-0 truncate">{r.who ? `${r.who}: ` : ""}{r.subject}</b>
+            <span className={`shrink-0 rounded-[5px] px-1.5 text-[13px] font-semibold ${r.claude ? "bg-[#f3efff] text-[#7c3aed]" : "bg-background text-muted ring-1 ring-[var(--border)]"}`}>{r.claude ? `✳ ${r.tag}` : r.tag}</span>
+          </span>
+          {r.preview && <span className="block truncate text-[14px] text-muted">{r.preview}</span>}
+        </span>
+        <span className="shrink-0 pr-1 text-[14px] text-muted">{new Date(r.at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+      </button>
+      {r.del && <button onClick={r.del} title="Delete this draft" className="m-2 shrink-0 rounded-md px-2 py-1 text-[14px] font-semibold text-muted hover:text-danger">Delete</button>}
+    </div>
+  );
+  return (
+    <div className="border-b">
+      {fresh.map(row)}
+      {old.length > 0 && (
+        <div className="border-t px-4 py-2 text-[14px] text-muted">
+          <button onClick={() => setShowOld(!showOld)} className="font-semibold hover:text-foreground">
+            {showOld ? "Hide" : "Show"} {old.length} older {old.length === 1 ? "draft" : "drafts"}
+          </button>{" "}you&apos;ve written to them since
+        </div>
+      )}
+      {showOld && old.map(row)}
+    </div>
+  );
 }
 
 // ── The reply box ─────────────────────────────────────────────────────────
