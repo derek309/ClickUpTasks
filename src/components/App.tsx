@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase, supabaseReady } from "@/lib/supabase";
 import { users, type Me, type Role } from "@/lib/data";
 import Cockpit from "./Cockpit";
@@ -19,7 +19,13 @@ export default function App() {
   // this takes priority over rendering Cockpit until they've done that.
   const [recoveryMode, setRecoveryMode] = useState(false);
 
+  // Once per signed-in person: the saved session and the first auth event
+  // both asked, and every hourly token refresh asked again (loading plan
+  // step 1, 2026-10-10).
+  const loadedFor = useRef<string | null>(null);
   async function loadProfile(id: string, email: string) {
+    if (loadedFor.current === id) return;
+    loadedFor.current = id;
     const { data } = await supabase.from("profiles").select("*").eq("id", id).maybeSingle();
     const roster = users.find((u) => u.id === data?.member_id);
     setMe({
@@ -45,7 +51,7 @@ export default function App() {
     const { data: sub } = supabase.auth.onAuthStateChange((e, session) => {
       if (e === "PASSWORD_RECOVERY") setRecoveryMode(true);
       if (session) loadProfile(session.user.id, session.user.email ?? "");
-      else { setMe(null); setChecking(false); }
+      else { loadedFor.current = null; setMe(null); setChecking(false); }
     });
     return () => sub.subscription.unsubscribe();
   }, []);

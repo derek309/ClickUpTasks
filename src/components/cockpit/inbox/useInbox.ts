@@ -35,11 +35,15 @@ export type UseInboxDeps = {
   /** Kinds kept out of the Inbox for this person (prefs.hideKinds). */
   hide?: string[];
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
+  /** False until the app's tasks are in: reading before that asked for your
+   *  task chats with no tasks, then read everything again (loading plan
+   *  step 1, 2026-10-10). */
+  ready?: boolean;
 };
 
 const rowToState = (r: any): InboxState => ({ threadKey: r.thread_key, readAt: r.read_at, snoozedUntil: r.snoozed_until, doneAt: r.done_at, trashedAt: r.trashed_at, starredAt: r.starred_at, updatedAt: r.updated_at });
 
-export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, allows, hide, pushToast }: UseInboxDeps) {
+export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tasks, nameOf, gmailSync, allows, hide, pushToast, ready = true }: UseInboxDeps) {
   const [loaded, setLoaded] = useState<Message[]>([]);
   const [convs, setConvs] = useState<Map<string, GhlConv>>(new Map());
   const [states, setStates] = useState<Map<string, InboxState>>(new Map());
@@ -77,10 +81,11 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const load = useCallback(() => fetchInbox(meMemberId, myTaskIds).then(apply, fail), [meMemberId, myTaskIds, apply, fail]);
 
   useEffect(() => {
+    if (!ready) return;
     let live = true;
     fetchInbox(meMemberId, myTaskIds).then((r) => { if (live) apply(r); }, (e) => { if (live) fail(e); });
     return () => { live = false; };
-  }, [meMemberId, myTaskIds, apply, fail]);
+  }, [meMemberId, myTaskIds, apply, fail, ready]);
   // A new GoHighLevel conversation is only known after the next read, and a
   // snooze ends with the clock: both are picked up every two minutes. Each
   // refresh reads only messages changed since the last read (a minute of
@@ -88,6 +93,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   // that became yours.
   const ticks = useRef(0);
   useEffect(() => {
+    if (!ready) return;
     const id = setInterval(() => {
       setNow(Date.now());
       const full = ++ticks.current % 10 === 0 || lastReadRef.current === null;
@@ -95,7 +101,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
       fetchInbox(meMemberId, myTaskIds, since).then(apply, fail);
     }, 120_000);
     return () => clearInterval(id);
-  }, [meMemberId, myTaskIds, apply, fail]);
+  }, [meMemberId, myTaskIds, apply, fail, ready]);
 
   // Live messages that belong here.
   const live = useMemo(() => liveMessages.filter((m) =>
@@ -302,11 +308,13 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSin
   for (let i = 0; i < ids.length; i += CHUNK) reads.push(allPages((from, to) => changed(supabase.from("messages").select("*").in("ghl_conversation_id", ids.slice(i, i + CHUNK)).gte("created_at", since)).order("created_at", { ascending: false }).range(from, to)));
   const taskIds = [...myTaskIds];
   for (let i = 0; i < taskIds.length; i += CHUNK) reads.push(allPages((from, to) => changed(supabase.from("messages").select("*").eq("channel", "chat").in("task_id", taskIds.slice(i, i + CHUNK)).gte("created_at", since)).order("created_at", { ascending: false }).range(from, to)));
-  const stateRes = await supabase.from("inbox_state").select("*").eq("member_id", meMemberId);
-  // Read on its own: a missing table (before inbox-blocks.sql) just means none.
-  const blockRes = await supabase.from("inbox_blocks").select("address").eq("member_id", meMemberId);
-
-  const results = await Promise.all(reads);
+  // Alongside the messages, not before them. A missing inbox_blocks table
+  // (before inbox-blocks.sql) just means none.
+  const [stateRes, blockRes, results] = await Promise.all([
+    supabase.from("inbox_state").select("*").eq("member_id", meMemberId),
+    supabase.from("inbox_blocks").select("address").eq("member_id", meMemberId),
+    Promise.all(reads),
+  ]);
   const firstErr = results.find((r) => r.error)?.error ?? stateRes.error;
   if (firstErr) throw firstErr;
   return {

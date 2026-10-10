@@ -169,7 +169,8 @@ const undoTooOld = (at: number) => Date.now() - at > 60_000;
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Your sign in address, which is your Gmail: shown as From in the Inbox.
   const [myEmail, setMyEmail] = useState<string | null>(null);
-  useEffect(() => { supabase.auth.getUser().then(({ data }) => setMyEmail(data.user?.email ?? null)).catch(() => {}); }, []);
+  // From the saved session, not a call to the server (loading plan step 1).
+  useEffect(() => { supabase.auth.getSession().then(({ data }) => setMyEmail(data.session?.user.email ?? null)).catch(() => {}); }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -989,37 +990,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     (async () => {
       try {
         if (!supabaseReady) { setDbError("Supabase env vars are missing."); return; }
-        await seedIfEmpty();
-        // Load the real team roster (every signed-up profile) before rendering
-        // data, so assignees/avatars resolve to real people — not demo seeds.
-        try {
-          const { data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color");
-          if (profs?.length) {
-            const seen = new Set<string>();
-            setUsers(profs.flatMap((p) => {
-              const id = p.member_id || p.id;
-              if (seen.has(id)) return [];
-              seen.add(id);
-              const name = p.name || p.email || "Teammate";
-              return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const }];
-            }));
-          }
-          // Avatar photos are a newer, optional column — fetched in a second,
-          // independently-failing pass so a deploy that lands before
-          // supabase/avatars.sql has run (no avatar_url column yet) can't
-          // take the whole roster fetch above down with it; PostgREST 400s
-          // the entire query for an unknown column, not just that field.
-          try {
-            const { data: withAvatars } = await supabase.from("profiles").select("id, member_id, avatar_url");
-            if (withAvatars?.length) {
-              setUsers(users.map((u) => {
-                const row = withAvatars.find((p) => (p.member_id || p.id) === u.id);
-                return row?.avatar_url ? { ...u, avatarUrl: row.avatar_url } : u;
-              }));
-            }
-          } catch { /* avatar enrichment is best-effort */ }
-        } catch { /* roster fetch is best-effort; founder fallback stays */ }
-        const d = await fetchAll();
+        // The team and everything else at once, not one after the other
+        // (loading plan step 1, 2026-10-10): the roster used to wait on a
+        // seed check, then two reads of profiles, before fetchAll started.
+        // Avatars ride in the same read; without that column yet (before
+        // supabase/avatars.sql) it's read again without it.
+        const roster = (async () => {
+          let { data: profs, error } = await supabase.from("profiles").select("id, name, email, role, member_id, color, avatar_url");
+          if (error) ({ data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color"));
+          if (!profs?.length) return;
+          const seen = new Set<string>();
+          setUsers(profs.flatMap((p: { id: string; name: string | null; email: string | null; role: string | null; member_id: string | null; color: string | null; avatar_url?: string | null }) => {
+            const id = p.member_id || p.id;
+            if (seen.has(id)) return [];
+            seen.add(id);
+            const name = p.name || p.email || "Teammate";
+            return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const, ...(p.avatar_url ? { avatarUrl: p.avatar_url } : {}) }];
+          }));
+        })().catch(() => { /* roster is best-effort; founder fallback stays */ });
+        let d = await fetchAll();
+        // A brand new, empty database gets the demo data, then reads again.
+        if (!d.clients.length) { await seedIfEmpty(); d = await fetchAll(); }
+        await roster;
         syncMarks.current = d.marks;
         // Merged, not replaced: a task or conversation fetched on its own while
         // this was in flight (an old task opened from a link) stays.
@@ -1890,7 +1882,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const { error } = await supabase.from("team_messages").insert({ id: row.id, author_id: row.author_id, body: row.body });
     if (error) { setTeamFeed((f) => f.filter((x) => x.id !== row.id)); throw new Error(error.message); }
   };
-  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, hide: inboxPrefs.hideKinds, pushToast });
+  const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, hide: inboxPrefs.hideKinds, pushToast, ready: !loading });
   // Updates don't count toward the badge or pop alerts: they are robots.
   const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length, [inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
