@@ -144,6 +144,19 @@ export default function InboxView(p: InboxViewProps) {
     return folder === "starred" ? list : [...list.filter((t) => t.starred), ...list.filter((t) => !t.starred)];
   }, [inbox.threads, folder, q, drafts, p.clientName, p.prefs.unreadOnly]); // eslint-disable-line react-hooks/exhaustive-deps -- only these props matter here
   const open = openKey ? inbox.threads.find((t) => t.key === openKey) ?? null : null;
+  // A link to a conversation that isn't among those loaded (older than 30
+  // days, or another mailbox): say so instead of a silent list (Fable audit).
+  const missingKey = openKey && !open && !inbox.loading && inbox.threads.length > 0 ? openKey : null;
+  const pushToast = p.pushToast;
+  // The Inbox loads in two passes, so a few seconds' grace first.
+  useEffect(() => {
+    if (!missingKey) return;
+    const id = setTimeout(() => {
+      pushToast("That conversation isn't in the Inbox here. Search for it by name or subject.");
+      setOpenKey(null);
+    }, 5000);
+    return () => clearTimeout(id);
+  }, [missingKey, pushToast, setOpenKey]);
   const cursor = cursorAt.key && visible.some((t) => t.key === cursorAt.key) ? cursorAt.key
     : cursorAt.key ? visible[Math.min(cursorAt.i, visible.length - 1)]?.key ?? null : null;
   const setCursor = (key: string | null) => setCursorAt({ key, i: Math.max(0, visible.findIndex((t) => t.key === key)) });
@@ -603,12 +616,25 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
   const claudeStale = !!claudeDraft && t.messages.some((m) => m.direction === "outbound" && m.at > claudeDraft.createdAt);
   // Whether the box holds Claude's words: only when you hadn't started your
   // own (audit 2026-10-10: the label sat over your own text).
-  const [claudeInBox] = useState(() => {
+  const [claudeInBox, setClaudeInBox] = useState(() => {
     const put = !!claudeDraft && !claudeStale && !readDraft(p.me.id, t.key);
     if (put) writeDraft(p.me.id, t.key, claudeDraft!.body);
     return put;
   });
   const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => (readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null));
+  // A reply Claude writes while this conversation is open (you copied it for
+  // Claude, then came back to the tab) goes in the box too, unless you've
+  // started your own (Fable audit 2026-10-10). Set while rendering, when the
+  // draft first shows up; the chat box is keyed on it so it reads it.
+  const [seenClaude, setSeenClaude] = useState(claudeDraft?.id ?? null);
+  if ((claudeDraft?.id ?? null) !== seenClaude) {
+    setSeenClaude(claudeDraft?.id ?? null);
+    if (claudeDraft && !claudeStale && !readDraft(p.me.id, t.key)) {
+      writeDraft(p.me.id, t.key, claudeDraft.body);
+      setClaudeInBox(true);
+      if (t.channel === "email" && !compose) setCompose({ mode: "reply", m: lastFromThem });
+    }
+  }
   // Sent or discarded here, or answered since: Claude's draft is done, and
   // its copy in Gmail goes too so it can't be sent twice. Not on every empty
   // box: Undo after Send, or clearing it to retype, kept nothing (audit
@@ -711,7 +737,7 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} onClaudeDone={claudeInBox ? dropClaude : undefined} emailInstead={emailInstead} onArchive={done} />
+          <ChatView key={claudeInBox ? seenClaude ?? "" : ""} p={p} t={t} typing={typing} onDraft={onDraft} onClaudeDone={claudeInBox ? dropClaude : undefined} emailInstead={emailInstead} onArchive={done} />
           <SideResizer p={p} />
           <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
         </div>
@@ -1187,7 +1213,10 @@ function EmailHtml({ m, p, asText = false, signer }: { m: Message; p: InboxViewP
     doc.querySelectorAll("a[href]").forEach((a) => { a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener noreferrer"); });
     // The body's own height, not the page's: the page is never shorter than
     // the frame, so a fold (••• hiding the signature) would leave the gap.
-    const size = () => setHeight(Math.min(6000, Math.max(60, Math.ceil(doc.body?.getBoundingClientRect().height ?? doc.documentElement.scrollHeight))));
+    // Our own wrapper's height: the page is never shorter than the frame (a
+    // fold would leave a gap), and a newsletter's body{height:100%} is only
+    // as tall as the frame (Fable audit 2026-10-10).
+    const size = () => setHeight(Math.min(6000, Math.max(60, Math.ceil(doc.getElementById("culm")?.getBoundingClientRect().height ?? doc.documentElement.scrollHeight))));
     size();
     doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", size, { once: true }));
   };
@@ -1207,7 +1236,7 @@ function EmailHtml({ m, p, asText = false, signer }: { m: Message; p: InboxViewP
     || (c.additionalEmails ?? []).some((e) => e.toLowerCase() === sender)));
   const showImages = !remote || m.direction !== "inbound" || imagesOn || fromContact || (!!sender && (p.prefs.imageSenders ?? []).includes(sender));
   const csp = showImages ? "" : `<meta http-equiv="Content-Security-Policy" content="img-src data: blob:">`;
-  const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS + SIG_CSS}</style></head><body>${html}</body></html>`;
+  const doc = `<!doctype html><html><head><meta charset="utf-8">${csp}<meta name="referrer" content="no-referrer"><base target="_blank"><style>html,body{margin:0;padding:0;background:#ffffff;color:#1c2030;font:16px/1.5 Inter,system-ui,-apple-system,sans-serif;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}${quoted ? "" : QUOTE_CSS + SIG_CSS}</style></head><body><div id="culm">${html}</div></body></html>`;
   return (
     <>
       {!showImages && (
@@ -1360,8 +1389,9 @@ async function copyImage(a: Attachment, m: Message, p: InboxViewProps) {
     const url = await fileUrl(a, m, p);
     if (!url) throw new Error();
     const png = (async () => {
-      const blob = await (await fetch(url)).blob();
-      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+      let blob: Blob;
+      try { blob = await (await fetch(url)).blob(); }
+      finally { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }
       if (blob.type === "image/png") return blob;
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
@@ -3134,9 +3164,10 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             <button onClick={() => {
               const gone = (p.prefs.queuedDrafts ?? []).find((d) => d.id === start.queuedId);
               if (gone) {
-                void retireQueuedDraft(p.setPrefs, gone.id);
-                // Back as a draft here; its Gmail copy is gone.
-                p.pushToast("Draft deleted", { label: "Undo", run: () => p.setPrefs((prev) => ({ queuedDrafts: [...(prev.queuedDrafts ?? []), { ...gone, gmailDraftId: undefined, gmailMailbox: undefined }] })) });
+                const retired = retireQueuedDraft(p.setPrefs, gone.id);
+                // Back as a draft here, its Gmail copy gone; once the delete
+                // has finished, or an early Undo is undone by it (Fable audit).
+                p.pushToast("Draft deleted", { label: "Undo", run: () => { void retired.then(() => p.setPrefs((prev) => ({ queuedDrafts: [...(prev.queuedDrafts ?? []), { ...gone, gmailDraftId: undefined, gmailMailbox: undefined }] }))); } });
               }
               onClose();
             }} title={start.queuedId ? "Delete this draft" : "Throw this message away"} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-danger">🗑 {start.queuedId ? "Delete draft" : "Discard"}</button>
