@@ -23,7 +23,7 @@ import {
   type ChatItem, type Folder, type InboxThread,
 } from "./inboxModel";
 import type { useInbox } from "./useInbox";
-import { draftKeys, draftSaver, readDraft, writeDraft, type InboxPrefs } from "./inboxPrefs";
+import { draftKeys, draftSaver, readDraft, retireQueuedDraft, writeDraft, type InboxPrefs, type SetInboxPrefs } from "./inboxPrefs";
 import { addPendingSend, removePendingSend, usePendingSends } from "./pendingSends";
 import { allowEntry } from "@/lib/inbox";
 import { isSignatureImage } from "@/lib/emailFiles";
@@ -39,7 +39,7 @@ export type InboxViewProps = {
   me: { id: string; name: string; email?: string | null };
   team: Member[];
   prefs: InboxPrefs;
-  setPrefs: (p: Partial<InboxPrefs>) => void;
+  setPrefs: SetInboxPrefs;
   clientName: (id: string | null) => string | null;
   tasks: Task[];
   /** from: what the task panel's "← back" says (the conversation). */
@@ -148,7 +148,9 @@ export default function InboxView(p: InboxViewProps) {
     : cursorAt.key ? visible[Math.min(cursorAt.i, visible.length - 1)]?.key ?? null : null;
   const setCursor = (key: string | null) => setCursorAt({ key, i: Math.max(0, visible.findIndex((t) => t.key === key)) });
 
-  const queued = p.prefs.queuedDrafts ?? [];
+  // A Claude reply already in its conversation's box shows there, as that
+  // conversation's draft, not twice (audit 2026-10-10).
+  const queued = (p.prefs.queuedDrafts ?? []).filter((d) => !(d.threadKey && drafts.has(d.threadKey)));
   const workDrafts = p.workDrafts ?? [];
   const reviewsBack = p.reviewsBack ?? [];
   // Gmail checked every minute while this Inbox is on screen (the 5 minute
@@ -599,18 +601,19 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
   // started your own or have written to them since it was drafted.
   const claudeDraft = (p.prefs.queuedDrafts ?? []).find((d) => d.threadKey === t.key) ?? null;
   const claudeStale = !!claudeDraft && t.messages.some((m) => m.direction === "outbound" && m.at > claudeDraft.createdAt);
-  const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => {
-    if (claudeDraft && !claudeStale && !readDraft(p.me.id, t.key)) writeDraft(p.me.id, t.key, claudeDraft.body);
-    return readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null;
+  // Whether the box holds Claude's words: only when you hadn't started your
+  // own (audit 2026-10-10: the label sat over your own text).
+  const [claudeInBox] = useState(() => {
+    const put = !!claudeDraft && !claudeStale && !readDraft(p.me.id, t.key);
+    if (put) writeDraft(p.me.id, t.key, claudeDraft!.body);
+    return put;
   });
-  // Sent or thrown away here, or answered since: Claude's draft is done, and
-  // its copy in Gmail goes too so it can't be sent twice.
-  const dropClaude = () => {
-    if (!claudeDraft) return;
-    void authedFetch("/api/inbox/claude-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: claudeDraft.id }) }).catch(() => null)
-      .finally(() => p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((x) => x.id !== claudeDraft.id) }));
-  };
-  const draftChanged = () => { onDraft(); if (claudeDraft && !readDraft(p.me.id, t.key)) dropClaude(); };
+  const [compose, setCompose] = useState<{ mode: ComposeMode; m: Message } | null>(() => (readDraft(p.me.id, t.key) ? { mode: "reply", m: lastFromThem } : null));
+  // Sent or discarded here, or answered since: Claude's draft is done, and
+  // its copy in Gmail goes too so it can't be sent twice. Not on every empty
+  // box: Undo after Send, or clearing it to retype, kept nothing (audit
+  // 2026-10-10).
+  const dropClaude = () => { if (claudeDraft) void retireQueuedDraft(p.setPrefs, claudeDraft.id); };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when it opens
   useEffect(() => { if (claudeStale) dropClaude(); }, []);
   const [blockOpen, setBlockOpen] = useState(false);
@@ -708,13 +711,13 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
         // Texts, social messages and task chats read like a phone chat
         // (Derek, 2026-10-01): newest at the bottom, the reply box under it.
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[100%] overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-          <ChatView p={p} t={t} typing={typing} onDraft={draftChanged} emailInstead={emailInstead} onArchive={done} />
+          <ChatView p={p} t={t} typing={typing} onDraft={onDraft} onClaudeDone={claudeInBox ? dropClaude : undefined} emailInstead={emailInstead} onArchive={done} />
           <SideResizer p={p} />
           <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
         </div>
       ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto @min-[1000px]:grid-cols-[minmax(0,1fr)_8px_var(--side-w)] @min-[1000px]:overflow-hidden" style={sideWidthStyle(p.prefs)}>
-        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={draftChanged} onArchive={done} claude={claudeDraft && !claudeStale ? claudeDraft : null} />
+        <EmailThread p={p} t={t} typing={typing} compose={compose} setCompose={setCompose} onDraft={onDraft} onArchive={done} claude={claudeInBox ? claudeDraft : null} onClaudeDone={claudeInBox ? dropClaude : undefined} />
         <SideResizer p={p} />
         <div className="hidden min-h-0 overflow-y-auto bg-background/40 @min-[1000px]:block">{t.channel === "team" ? <TeamPanel p={p} t={t} /> : <SidePanel p={p} t={t} linkSearchRef={linkSearchRef} onOpenOther={onOpenOther} />}</div>
       </div>
@@ -725,7 +728,8 @@ function ThreadView({ p, t, back, leave, done, del, snoozeOpen, setSnoozeOpen, l
 }
 
 // ── A text conversation as a chat ─────────────────────────────────────────
-function ChatView({ p, t, typing, onDraft, emailInstead, onArchive }: {
+function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive }: {
+  onClaudeDone?: () => void;
   p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; emailInstead: (to: string, body: string) => void; onArchive?: () => void;
 }) {
   const [shown, setShown] = useState(CHAT_PAGE);
@@ -769,7 +773,7 @@ function ChatView({ p, t, typing, onDraft, emailInstead, onArchive }: {
         {typing && <div className="mt-3 italic text-muted">{typing} is writing a reply…</div>}
       </div>
       <div className="border-t px-3 py-3 sm:px-4">
-        <Composer key={t.key} p={p} t={t} compact onSent={() => { onDraft(); }} onDraft={onDraft} emailInstead={emailInstead} onArchive={onArchive} />
+        <Composer key={t.key} p={p} t={t} compact onSent={() => { onDraft(); onClaudeDone?.(); }} onDraft={onDraft} onDiscard={onClaudeDone} emailInstead={emailInstead} onArchive={onArchive} />
       </div>
     </div>
   );
@@ -846,7 +850,8 @@ const fullTime = (iso: string) => new Date(iso).toLocaleString([], { month: "sho
 // ── An email conversation (Derek, 2026-10-01, mockup
 // https://claude.ai/artifact/Tei4W4znGdehdTpFJAxBP1): oldest first, older
 // emails folded to one line, the newest open at the bottom with Reply under it.
-function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive, claude = null }: {
+function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive, claude = null, onClaudeDone }: {
+  onClaudeDone?: () => void;
   claude?: NonNullable<InboxPrefs["queuedDrafts"]>[number] | null;
   p: InboxViewProps; t: InboxThread; typing: string | null; onDraft: () => void; onArchive?: () => void;
   compose: { mode: ComposeMode; m: Message } | null; setCompose: (c: { mode: ComposeMode; m: Message } | null) => void;
@@ -865,7 +870,7 @@ function EmailThread({ p, t, typing, compose, setCompose, onDraft, onArchive, cl
   const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const others = [...new Set(oldestFirst.filter((m) => m.direction === "inbound").map((m) => whoWrote(m, t, p).name))];
   const composer = (m: Message) => compose?.m.id === m.id
-    ? <div className="mt-3">{claude && <div className="mb-1.5 flex items-center gap-2 font-semibold text-[#7c3aed]">✳ Claude drafted this reply{claude.gmailDraftId ? <span className="font-normal text-muted">· also in your Gmail Drafts, sending here removes it there</span> : null}</div>}<Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); }} onDraft={onDraft} onUndone={() => { const back = compose; setCompose(back); }} onArchive={onArchive} /></div>
+    ? <div className="mt-3">{claude && <div className="mb-1.5 flex items-center gap-2 font-semibold text-[#7c3aed]">✳ Claude drafted this reply{claude.gmailDraftId ? <span className="font-normal text-muted">· also in your Gmail Drafts, sending here removes it there</span> : null}</div>}<Composer key={`${t.key}:${compose.mode}:${m.id}`} p={p} t={t} mode={compose.mode} answering={m} onClose={() => setCompose(null)} onSent={() => { onDraft(); setCompose(null); onClaudeDone?.(); }} onDraft={onDraft} onDiscard={onClaudeDone} onUndone={() => { const back = compose; setCompose(back); }} onArchive={onArchive} /></div>
     : null;
   return (
     <div className="min-w-0 px-4 py-4 sm:px-6 @min-[1000px]:overflow-y-auto">
@@ -1346,6 +1351,7 @@ async function saveFile(a: Attachment, m: Message, p: InboxViewProps) {
   if (href === url && !url.startsWith("blob:")) link.target = "_blank";
   link.click();
   if (href !== url) setTimeout(() => URL.revokeObjectURL(href), 10_000);
+  if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 // Puts the picture on the clipboard to paste into a task, a chat or Canva.
 // The clipboard only takes PNG, so anything else is redrawn as one.
@@ -1355,6 +1361,7 @@ async function copyImage(a: Attachment, m: Message, p: InboxViewProps) {
     if (!url) throw new Error();
     const png = (async () => {
       const blob = await (await fetch(url)).blob();
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       if (blob.type === "image/png") return blob;
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
@@ -1436,8 +1443,7 @@ function DraftList({ p, queued, workDrafts, onOpenQueued }: { p: InboxViewProps;
       old: sent.some((s) => s.at > d.createdAt && (d.threadKey ? s.key === d.threadKey : !!s.to && s.to === d.to.toLowerCase())),
       open: () => onOpenQueued(d),
       del: () => {
-        if (d.gmailDraftId) void authedFetch("/api/inbox/claude-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: d.id }) }).catch(() => null);
-        p.setPrefs({ queuedDrafts: queued.filter((x) => x.id !== d.id) });
+        void retireQueuedDraft(p.setPrefs, d.id, !!d.gmailDraftId);
       },
     })),
     ...workDrafts.map((d) => ({
@@ -1536,8 +1542,10 @@ function AiMenu({ busy, hasText, canDraft, canSuggest, meId, defaultId, hidden =
 let signatureCache: Promise<string> | null = null;
 const loadSignature = () => (signatureCache ??= authedFetch("/api/signature").then((r) => (r.ok ? r.json() : null)).then((j) => (typeof j?.signature === "string" ? j.signature : "")).catch(() => ""));
 
-function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, emailInstead, compact = false, onUndone, onArchive }: {
+function Composer({ p, t, onSent, onDraft, onDiscard, mode = "reply", answering, onClose, emailInstead, compact = false, onUndone, onArchive }: {
   p: InboxViewProps; t: InboxThread; onSent: () => void; onDraft: () => void;
+  /** Discard pressed (not just an empty box): a Claude draft is done. */
+  onDiscard?: () => void;
   mode?: ComposeMode; answering?: Message; onClose?: () => void; emailInstead?: (to: string, body: string) => void;
   /** Under a chat: two lines to start, Enter sends, Shift+Enter is a new line. */
   compact?: boolean;
@@ -1619,7 +1627,7 @@ function Composer({ p, t, onSent, onDraft, mode = "reply", answering, onClose, e
   // empties the box and the saved draft, with Undo, and closes an email reply.
   const discard = () => {
     const before = text, beforeFiles = files;
-    put(""); setFiles([]); setNote(null); saver.now(""); onDraft();
+    put(""); setFiles([]); setNote(null); saver.now(""); onDraft(); onDiscard?.();
     onClose?.();
     p.pushToast("Draft discarded", { label: "Undo", run: () => { put(before); setFiles(beforeFiles); saver.now(before); onDraft(); } });
   };
@@ -2356,6 +2364,7 @@ function ThreadFiles({ p, t }: { p: InboxViewProps; t: InboxThread }) {
       for (const { a, m } of saveable) {
         const url = await fileUrl(a, m, p, true);
         const res = url ? await fetch(url).catch(() => null) : null;
+        if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
         if (!res?.ok) { missed++; continue; }
         let name = a.name, i = 1;
         while (used.has(name)) name = a.name.replace(/(\.[^.]*)?$/, (ext) => ` (${i++})${ext}`);
@@ -3030,7 +3039,7 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
       if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
       p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
       // A Claude draft leaves Drafts once it has gone.
-      if (start.queuedId) p.setPrefs({ queuedDrafts: (p.prefs.queuedDrafts ?? []).filter((d) => d.id !== start.queuedId) });
+      if (start.queuedId) void retireQueuedDraft(p.setPrefs, start.queuedId);
       onClose();
     } catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't send it."); }
     finally { setBusy(null); }
@@ -3123,10 +3132,11 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
             {/* Throw it away from here, not only from the Drafts list (Derek, 2026-10-06:
                 "how do I cancel this draft?"). A Claude draft leaves Drafts; Undo puts it back. */}
             <button onClick={() => {
-              const was = p.prefs.queuedDrafts ?? [];
-              if (start.queuedId) {
-                p.setPrefs({ queuedDrafts: was.filter((d) => d.id !== start.queuedId) });
-                p.pushToast("Draft deleted", { label: "Undo", run: () => p.setPrefs({ queuedDrafts: was }) });
+              const gone = (p.prefs.queuedDrafts ?? []).find((d) => d.id === start.queuedId);
+              if (gone) {
+                void retireQueuedDraft(p.setPrefs, gone.id);
+                // Back as a draft here; its Gmail copy is gone.
+                p.pushToast("Draft deleted", { label: "Undo", run: () => p.setPrefs((prev) => ({ queuedDrafts: [...(prev.queuedDrafts ?? []), { ...gone, gmailDraftId: undefined, gmailMailbox: undefined }] })) });
               }
               onClose();
             }} title={start.queuedId ? "Delete this draft" : "Throw this message away"} className="h-10 rounded-lg px-3 font-semibold text-muted hover:bg-background hover:text-danger">🗑 {start.queuedId ? "Delete draft" : "Discard"}</button>

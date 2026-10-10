@@ -110,7 +110,7 @@ import { FolderRail } from "./cockpit/FolderRail";
 import InboxView from "./cockpit/inbox/InboxView";
 import { CalendarView } from "./cockpit/CalendarBoard";
 import { useInbox } from "./cockpit/inbox/useInbox";
-import { useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
+import { retireQueuedDraft, useInboxPrefs } from "./cockpit/inbox/inboxPrefs";
 import { isAppNotice, type InboxThread } from "./cockpit/inbox/inboxModel";
 import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
@@ -350,6 +350,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [dmUserId, setDmUserId] = useState<string | null>(null);
   // The conversation open in the Inbox, in the URL so it can be linked.
   const [mailThread, setMailThread] = useState<string | null>(null);
+  // Leaving the Inbox closes its conversation, so coming back shows the list
+  // (audit 2026-10-10: it reopened the last one). Set while rendering, when
+  // the view changes, not in an effect.
+  const [mailDir, setMailDir] = useState(dirView);
+  if (mailDir !== dirView) { setMailDir(dirView); if (dirView !== "inbox" && mailThread) setMailThread(null); }
   // Shared, admin-controlled — "we don't need DMs for now... make it so we
   // can turn it on and off in case we want it later" (Derek). Off by
   // default; see supabase/app-settings.sql. Fails soft to false (DMs hidden)
@@ -1838,7 +1843,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // A Claude draft opened from the client's page leaves the Inbox's queue once it goes.
   const afterQueuedSend = <T,>(queuedId: string | undefined, sent: T): T => {
     // Only once it actually went (audit 2026-10-07: a failed send dropped it too).
-    if (queuedId) void Promise.resolve(sent).then((ok) => { if (ok === true) setInboxPrefs({ queuedDrafts: (inboxPrefs.queuedDrafts ?? []).filter((x) => x.id !== queuedId) }); }, () => {});
+    // Its Gmail copy goes too, so it can't be sent a second time from Gmail.
+    if (queuedId) void Promise.resolve(sent).then((ok) => { if (ok === true) void retireQueuedDraft(setInboxPrefs, queuedId); }, () => {});
     return sent;
   };
   const inboxGmailSync = useMemo(() => ({ read: inboxPrefs.gmailRead, archive: inboxPrefs.gmailArchive }), [inboxPrefs.gmailRead, inboxPrefs.gmailArchive]);

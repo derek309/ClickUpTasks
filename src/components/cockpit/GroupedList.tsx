@@ -783,8 +783,9 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
   // window, and opened off the bottom of the screen (2026-10-09).
   return createPortal(
     <>
-      <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); onClose(); }} />
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-50 flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
+      {/* Above a full or slide-over task drawer (z-50), below the lightboxes. */}
+      <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); onClose(); }} />
+      <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-[61] flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
         <div className="w-full shrink-0 border-b p-1.5 sm:w-52 sm:border-b-0 sm:border-r">
           {quicks.map(({ label, date }) => (
             <button key={label} onClick={() => onSelect(date)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(date)}</span></button>

@@ -5,7 +5,7 @@
 // and the laptop agree, with this browser's copy as the instant start and the
 // fallback before that table exists. The email signature lives on the profile.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, authedFetch } from "@/lib/supabase";
 
 export type InboxPrefs = {
   byDay: boolean;
@@ -127,7 +127,11 @@ export function useInboxPrefs(member: string) {
       await supabase.from("inbox_prefs").upsert({ member_id: member, prefs: merged, updated_at: new Date().toISOString() }, { onConflict: "member_id" });
     }, 600);
   }, [member]);
-  const setPrefs = useCallback((patch: Partial<InboxPrefs>) => {
+  // A patch, or a function of the newest prefs: a change made after a
+  // network round trip (a Claude draft sent or dropped) must start from what
+  // is there now, not from the screen it began on (audit 2026-10-10).
+  const setPrefs = useCallback((input: Partial<InboxPrefs> | ((prev: InboxPrefs) => Partial<InboxPrefs>)) => {
+    const patch = typeof input === "function" ? input(latest.current) : input;
     const { queuedDrafts, ...rest } = patch;
     const before = latest.current.queuedDrafts ?? [];
     pending.current = { ...pending.current, ...rest };
@@ -189,4 +193,12 @@ export function draftKeys(member: string): Set<string> {
     for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith(prefix)) out.add(k.slice(prefix.length)); }
   } catch { /* ignore */ }
   return out;
+}
+
+export type SetInboxPrefs = (input: Partial<InboxPrefs> | ((prev: InboxPrefs) => Partial<InboxPrefs>)) => void;
+/** A Claude draft is done (sent, deleted, or answered another way): its Gmail
+ *  copy goes first (the server finds it in the list), then the draft. */
+export async function retireQueuedDraft(setPrefs: SetInboxPrefs, id: string, gmailCopy = true) {
+  if (gmailCopy) await authedFetch("/api/inbox/claude-draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => null);
+  setPrefs((prev) => ({ queuedDrafts: (prev.queuedDrafts ?? []).filter((x) => x.id !== id) }));
 }
