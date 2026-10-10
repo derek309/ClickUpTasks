@@ -292,8 +292,11 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSin
   const startedAt = Date.now();
   const since = new Date(Date.now() - DAYS * 86_400_000).toISOString();
   // Admins can read every conversation, so whose it is gets decided here.
+  // Yours and nobody's, asked of the database rather than filtered here: it
+  // sent all of them, up to 3,000 (loading plan step 6, 2026-10-10).
   const { data: convRows, error: cErr } = await supabase.from("ghl_conversations")
-    .select("id, assigned_member_id, contact_name, phone, email, location_id").gte("last_message_at", since).limit(3000);
+    .select("id, assigned_member_id, contact_name, phone, email, location_id").gte("last_message_at", since)
+    .or(`assigned_member_id.is.null,assigned_member_id.eq.${meMemberId}`).limit(3000);
   if (cErr) throw cErr;
   const mine = (convRows ?? []).filter((c: any) => !c.assigned_member_id || c.assigned_member_id === meMemberId);
   const convs = new Map<string, GhlConv>(mine.map((c: any) => [c.id, { id: c.id, assignedMemberId: c.assigned_member_id, contactName: c.contact_name, phone: c.phone, email: c.email, locationId: c.location_id }]));
