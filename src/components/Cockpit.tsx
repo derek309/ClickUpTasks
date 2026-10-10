@@ -1009,14 +1009,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const, ...(p.avatar_url ? { avatarUrl: p.avatar_url } : {}) }];
           }));
         })().catch(() => { /* roster is best-effort; founder fallback stays */ });
-        let d = await fetchAll();
+        let d = await fetchAll(undefined, { contacts: false });
         // A brand new, empty database gets the demo data, then reads again.
-        if (!d.clients.length) { await seedIfEmpty(); d = await fetchAll(); }
+        if (!d.clients.length) { await seedIfEmpty(); d = await fetchAll(undefined, { contacts: false }); }
+        // Contacts right after the first screen, not before it (loading plan
+        // step 4): what needs them (a client's page, the Inbox's people,
+        // search) is a click or two away.
+        void fetchContacts().then(setContacts, () => { /* the 15 minute refresh tries again */ });
         await roster;
         syncMarks.current = d.marks;
         // Merged, not replaced: a task or conversation fetched on its own while
         // this was in flight (an old task opened from a link) stays.
-        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks((prev) => mergeFetched(prev, d.tasks)); setNotifications(d.notifications);
+        setClients(d.clients); setProjects(d.projects); if (d.contacts) setContacts(d.contacts); setTasks((prev) => mergeFetched(prev, d.tasks)); setNotifications(d.notifications);
         setClientLinks(d.clientLinks); setClientNotes(d.clientNotes); setMessages((prev) => mergeFetched(prev, d.messages));
         setTaskTemplates(d.taskTemplates);
         setVaultFolders(d.vaultFolders);

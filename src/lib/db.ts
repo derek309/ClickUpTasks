@@ -360,7 +360,11 @@ export async function fetchTaskById(id: string): Promise<Task | null> {
 /** Everything the app loads. With `since`, the five tables that carry
  *  updated_at return only the rows changed after the marks, for the focus
  *  refetch; the rest are small and still come whole. */
-export async function fetchAll(since?: SyncMarks) {
+export async function fetchAll(since?: SyncMarks, opts: { contacts?: boolean } = {}) {
+  // All 4,200 contacts are the biggest read; the first screen and the
+  // 2 minute refresh go without them (loading plan step 4, 2026-10-10), and
+  // they load on their own (fetchContacts) just after.
+  const withContacts = opts.contacts !== false;
   const messagesSince = daysAgoIso(MESSAGE_START_DAYS);
   const tasksSince = daysAgoIso(TASK_START_DAYS);
   // A minute of overlap: now() is when a write's transaction began, so one
@@ -372,7 +376,7 @@ export async function fetchAll(since?: SyncMarks) {
   };
   const [c, ct, p, t, n, cl, cn, m, tt, vf, fd, sg, dm] = await Promise.all([
     fetchAllRows("clients", "created_at", true, true, changed("clients") ?? undefined),
-    fetchAllRows("contacts", undefined, true, false, undefined, true),
+    withContacts ? fetchAllRows("contacts", undefined, true, false, undefined, true) : Promise.resolve({ data: null as any[] | null, error: null as null | { message: string } }),
     fetchAllRows("projects", undefined, true, true),
     // Open tasks, and finished ones from the last 30 days: 1,980 rows at start
     // when about 120 were open.
@@ -432,7 +436,8 @@ export async function fetchAll(since?: SyncMarks) {
   return {
     marks,
     clients: (c.data ?? []).map(rowToClient),
-    contacts: (ct.data ?? []).map(rowToContact),
+    /** null when left out (opts.contacts false): keep what you have. */
+    contacts: withContacts ? (ct.data ?? []).map(rowToContact) : null,
     projects: (p.data ?? []).map(rowToProject),
     tasks: (t.data ?? []).map(rowToTask),
     notifications: (n.data ?? []).map(rowToNotif),
@@ -460,7 +465,7 @@ export const saveContactSaasUrl = (contactId: string, url: string) =>
   save(() => supabase.from("contacts").update({ saas_url: url || null }).eq("id", contactId));
 
 export async function fetchContacts(): Promise<Contact[]> {
-  const { data, error } = await fetchAllRows("contacts");
+  const { data, error } = await fetchAllRows("contacts", undefined, true, false, undefined, true);
   if (error) throw error;
   return (data ?? []).map(rowToContact);
 }

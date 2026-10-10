@@ -150,7 +150,7 @@ export function useClientAdmin({ subAccounts, setContacts, clients, setActiveCli
   // just those three is enough; no need for a full fetchAll()-and-replace-
   // everything reload.
   const refreshTrashables = async () => {
-    const d = await fetchAll();
+    const d = await fetchAll(undefined, { contacts: false });
     setClients(d.clients); setProjects(d.projects); setTasks(d.tasks);
   };
   const restoreClient = async (id: string) => { await restoreClientDb(id); await refreshTrashables(); pushToast("Client restored"); };
@@ -216,7 +216,7 @@ export function useClientAdmin({ subAccounts, setContacts, clients, setActiveCli
       try {
         const d = await fetchAll();
         syncMarks.current = d.marks; olderTasksLoaded.current.clear();
-        setClients(d.clients); setProjects(d.projects); setContacts(d.contacts); setTasks(d.tasks);
+        setClients(d.clients); setProjects(d.projects); if (d.contacts) setContacts(d.contacts); setTasks(d.tasks);
         setMessages(d.messages); resetConversations(); setClientLinks(d.clientLinks); setClientNotes(d.clientNotes);
         setFolders(d.folders); setVaultFolders(d.vaultFolders); setNotifications(d.notifications);
       } catch { /* leave optimistic state; a reload will reconcile */ }

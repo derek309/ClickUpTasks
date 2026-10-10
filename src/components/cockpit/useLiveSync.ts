@@ -167,6 +167,8 @@ export function useLiveSync({
   // which is what made a wholesale replace dangerous in the first place.
   useEffect(() => {
     let lastRefetch = 0;
+    // The start load fetches contacts just after the first screen.
+    let lastContacts = Date.now();
     let trashedSinceIso = new Date().toISOString();
     const refetch = async () => {
       if (document.visibilityState !== "visible") return;
@@ -185,9 +187,13 @@ export function useLiveSync({
       // (lib/localTaskWrites).
       const writesSince = Date.now() - WRITE_SETTLE_MS;
       try {
-        const d = await fetchAll(syncMarks.current);
+        // Contacts every 15 minutes, not every 2: all 4,200 of them on each
+        // return was most of what this read cost (loading plan step 4).
+        const withContacts = Date.now() - lastContacts >= 15 * 60_000;
+        const d = await fetchAll(syncMarks.current, { contacts: withContacts });
+        if (withContacts) lastContacts = Date.now();
         syncMarks.current = d.marks;
-        setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);
+        if (d.contacts) setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);
         setTasks((prev) => mergeFetched(prev, d.tasks, tasksWrittenSince(writesSince)));
         setClients((prev) => mergeFetched(prev, d.clients));
         setNotifications((prev) => mergeFetched(prev, d.notifications));
