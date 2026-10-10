@@ -164,6 +164,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const [pageTexts, setPageTexts] = useState<Record<string, string>>({});
   // Documents deleted from this task that can still be restored (30 days).
   const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [full, setFull] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [openEntry, setOpenEntry] = useState<string | null>(null);
@@ -860,7 +861,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     else pushToast("Could not open the file.");
   };
 
-  const deletedLine = deletedDocs.length > 0 ? (
+  // A small "1 deleted · Restore" until you ask for the list (Derek,
+  // 2026-10-10: it read as one more box on a busy page).
+  const deletedLine = deletedDocs.length > 0 ? (!showDeleted ? (
+    <button onClick={() => setShowDeleted(true)} className="mt-1.5 px-1 text-[15px] text-muted hover:text-foreground">
+      {deletedDocs.length} deleted · <span className="font-semibold text-accent">Restore</span>
+    </button>
+  ) : (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
       <span>Deleted {titleInSentence}:</span>
       {deletedDocs.map((d) => (
@@ -872,7 +879,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
         </span>
       ))}
     </div>
-  ) : null;
+  )) : null;
 
   const lastSent = [...versions].filter((v) => v.kind === "sent").sort((a, b) => b.version - a.version)[0];
   // Reminder emails while it sits with the client (reviewReminders.ts). The round

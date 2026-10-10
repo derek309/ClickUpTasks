@@ -1670,7 +1670,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {subMeta}
       {detailsSentence}
       {chipRow}
-      {slideOver && slideContext}
+      {/* Client and list as chips only in the narrow slide out, where there is
+          no top bar naming them (Derek, 2026-10-10: duplicate information). */}
+      {slideOver && !full && slideContext}
       {delegationRow}
       {nextStepCard}
       {clientResponseBlock}
@@ -1682,7 +1684,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {draftEmailBlock}
           {/* Links and files live in the client rail, under the contact card
               (Derek, 2026-09-14). A personal to do has no rail, so they stay here. */}
-          {(isPersonal || slideOver) && <div id="task-files">{attachmentsBlock}</div>}
+          {/* Files here only when there is no right column to hold them: the
+              full page from the Inbox showed them in both (Derek, 2026-10-10). */}
+          {(isPersonal || (slideOver && !full)) && <div id="task-files">{attachmentsBlock}</div>}
           {!hasDeliverables && !((isPersonal || slideOver) && showAttachments) && (
             <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. Drop a file anywhere on the task to attach it.</p>
           )}
@@ -1695,7 +1699,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="mt-6">{feedArea}</div>
       </section>
       {/* Over the Inbox there is no client rail: where the task lives sits here. */}
-      {slideOver && !isPersonal && <section className="mt-10"><h3 className="mb-2 text-[18px] font-semibold">Details</h3><div className="rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
+      {slideOver && !full && !isPersonal && <section className="mt-10"><h3 className="mb-2 text-[18px] font-semibold">Details</h3><div className="rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
     </>
   );
 
