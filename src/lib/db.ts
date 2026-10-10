@@ -302,7 +302,9 @@ async function fetchAllRows(table: string, orderCol?: string, ascending = true, 
 
 /** Messages from this many days back load at start; older ones load for a
  *  task or a client when its conversation opens (fetchMessagesFor). */
-export const MESSAGE_START_DAYS = 60;
+// 30, not 60 (Derek, 2026-10-10): the client messages were the biggest
+// start read, about 4.2 MB for 60 days. Unread ones load whatever their age.
+export const MESSAGE_START_DAYS = 30;
 /** Read notifications kept at start, newest first; every unread one loads. */
 export const READ_NOTIFICATION_START = 200;
 
@@ -320,7 +322,7 @@ async function eitherOf(a: PromiseLike<Rows>, b: PromiseLike<Rows>): Promise<Row
 const daysAgoIso = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 /** The whole conversation for one task or one client's contact, for when it
- *  opens and the start load only brought its last 60 days. */
+ *  opens and the start load only brought its last 30 days. */
 export async function fetchMessagesFor(scope: { taskId: string } | { contactId: string }): Promise<Message[]> {
   const { data, error } = "taskId" in scope
     ? await fetchAllRows("messages", "created_at", true, false, (q) => q.eq("task_id", scope.taskId))
@@ -399,7 +401,7 @@ export async function fetchAll(since?: SyncMarks, opts: { contacts?: boolean; me
     // so a not-yet-run migration must degrade to "nothing yet", not break the app.
     fetchAllRows("client_links", "position"),
     fetchAllRows("client_notes", "created_at", false, false, changed("client_notes") ?? undefined),
-    // The last 60 days, and anything unread whatever its age so the unread
+    // The last 30 days, and anything unread whatever its age so the unread
     // markers stay right. Every message for every client was 4 MB.
     // Client messages only: an Inbox email from someone who is not a contact
     // yet has no client, and the Inbox loads its own (supabase/inbox.sql).
