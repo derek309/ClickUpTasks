@@ -996,8 +996,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // Avatars ride in the same read; without that column yet (before
         // supabase/avatars.sql) it's read again without it.
         const roster = (async () => {
-          let { data: profs, error } = await supabase.from("profiles").select("id, name, email, role, member_id, color, avatar_url");
-          if (error) ({ data: profs } = await supabase.from("profiles").select("id, name, email, role, member_id, color"));
+          const first = await supabase.from("profiles").select("id, name, email, role, member_id, color, avatar_url");
+          const profs = first.error ? (await supabase.from("profiles").select("id, name, email, role, member_id, color")).data : first.data;
           if (!profs?.length) return;
           const seen = new Set<string>();
           setUsers(profs.flatMap((p: { id: string; name: string | null; email: string | null; role: string | null; member_id: string | null; color: string | null; avatar_url?: string | null }) => {
@@ -2298,6 +2298,30 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   );
+  // On a phone, group, sort, filters, columns and the link to this view in
+  // one small button, so the list starts one row under the title (Derek,
+  // 2026-10-10, mockup 1).
+  const viewControlPhone = (
+    <div className="relative">
+      <button onClick={() => setViewOpen((o) => !o)} title="Group, sort, filter and columns" aria-label="View options"
+        className={`${barButton} ${activeFilterCount > 0 ? "border-accent text-accent" : ""}`}>
+        <I.filter className="h-3.5 w-3.5" />
+        {activeFilterCount > 0 && <b className="font-semibold">{activeFilterCount}</b>}
+      </button>
+      {viewOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setViewOpen(false)} />
+        <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-72 max-w-[calc(100vw-1.5rem)] space-y-2.5 overflow-y-auto rounded-xl border bg-surface p-3 shadow-xl">
+          {groupSortPanel}
+          <div className="space-y-2.5 border-t pt-2.5">{filterPanel}</div>
+          <div className="border-t pt-2.5">{columnsPanel}</div>
+          {activeClient === "all" && canAdmin && (
+            <button onClick={() => { copyLink(currentNav()); setViewOpen(false); }}
+              className="flex w-full items-center gap-2 border-t pt-2.5 text-left text-[16px] font-medium text-accent"><I.link /> Copy a link to this view</button>
+          )}
+        </div>
+      </>)}
+    </div>
+  );
   // Just mine: one click shows only your tasks, another shows everyone's
   // (Derek, 2026-10-06). The same Assignee filter the View panel sets.
   // Everyone, Mine or Claude (Derek, 2026-10-07: "add everyone, me, and
@@ -2729,9 +2753,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {clientTab === "tasks" && (
                 <div className="flex items-center gap-1.5">
                   {followingControl}
-                  {groupSortControl}
-                  {filterMenuControl}
-                  {columnsControl}
+                  {viewControlPhone}
                 </div>
               )}
             </div>
@@ -2748,22 +2770,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               )}
             </div>
           ) : showFilterControl ? (
-            // Two rows by construction rather than by wrapping: who the list is
-            // for on its own line, the icons on theirs. Seven controls sharing
-            // one line ran off a 375px screen (Derek, 2026-09-22, twice).
-            <div className="flex flex-col gap-2">
-              {activeClient === "all" && !myWork && canAdmin && (
-                <div className="flex min-w-0 items-center gap-2">
-                  {scopeControls}
-                  <button onClick={() => copyLink(currentNav())} title="Copy a link to this exact Tasks view — same assignee, opens for anyone signed in"
-                    className="shrink-0 rounded-md border bg-background p-1.5 text-muted hover:bg-background hover:text-foreground"><I.link /></button>
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-1.5">
+            // One row: whose tasks and Finished, then one View button that holds
+            // group, sort, filters, columns and the link (Derek, 2026-10-10,
+            // mockup 1). Seven controls on one line ran off a 375px screen
+            // (2026-09-22), so the rest moved into that button, not a 2nd row.
+            <div className="flex min-w-0 items-center gap-2">
+              {activeClient === "all" && !myWork && canAdmin && scopeControls}
+              <div className="ml-auto flex shrink-0 items-center gap-1.5">
                 {followingControl}
-                {groupSortControl}
-                {filterMenuControl}
-                {columnsControl}
+                {viewControlPhone}
               </div>
             </div>
           ) : null}
