@@ -29,7 +29,7 @@ export function subscribeRealtime(handlers: {
   onClientNote: (p: Payload) => void;
   onDmMessage: (p: Payload) => void;
   onStatusChange?: (status: string) => void;
-}): () => void {
+}, opts: { meId?: string; dm?: boolean } = {}): () => void {
   let channel: ReturnType<typeof supabase.channel> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retries = 0;
@@ -40,10 +40,14 @@ export function subscribeRealtime(handlers: {
       .channel("rt:app")
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, handlers.onTask)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, handlers.onClient)
-      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, handlers.onNotification)
+      // Only your own notifications: the app shows nobody else's, and an
+      // admin's tab was sent the whole team's (loading plan step 5).
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", ...(opts.meId ? { filter: `recipient_id=eq.${opts.meId}` } : {}) }, handlers.onNotification)
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, handlers.onMessage)
-      .on("postgres_changes", { event: "*", schema: "public", table: "client_notes" }, handlers.onClientNote)
-      .on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, handlers.onDmMessage)
+      .on("postgres_changes", { event: "*", schema: "public", table: "client_notes" }, handlers.onClientNote);
+    // Direct messages only while they're switched on (app_settings).
+    if (opts.dm !== false) channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, handlers.onDmMessage);
+    channel = channel
       .subscribe((status) => {
         handlers.onStatusChange?.(status);
         if (status === "SUBSCRIBED") retries = 0;

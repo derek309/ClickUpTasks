@@ -360,7 +360,10 @@ export async function fetchTaskById(id: string): Promise<Task | null> {
 /** Everything the app loads. With `since`, the five tables that carry
  *  updated_at return only the rows changed after the marks, for the focus
  *  refetch; the rest are small and still come whole. */
-export async function fetchAll(since?: SyncMarks, opts: { contacts?: boolean } = {}) {
+export async function fetchAll(since?: SyncMarks, opts: { contacts?: boolean; me?: string } = {}) {
+  // Your own notifications only, when we know who you are: an admin read the
+  // whole team's, about 2,600 rows, and the app shows nobody else's.
+  const mine: Narrow = (q) => (opts.me ? q.eq("recipient_id", opts.me) : q);
   // All 4,200 contacts are the biggest read; the first screen and the
   // 2 minute refresh go without them (loading plan step 4, 2026-10-10), and
   // they load on their own (fetchContacts) just after.
@@ -384,10 +387,10 @@ export async function fetchAll(since?: SyncMarks, opts: { contacts?: boolean } =
     // Every unread notification, and the newest read ones: 2,673 rows loaded
     // at start and on every return to the tab when about half were read.
     changed("notifications")
-      ? fetchAllRows("notifications", "created_at", false, false, changed("notifications")!)
+      ? fetchAllRows("notifications", "created_at", false, false, (q) => mine(changed("notifications")!(q)))
       : eitherOf(
-        fetchAllRows("notifications", "created_at", false, false, (q) => q.eq("read", false)),
-        supabase.from("notifications").select("*").eq("read", true)
+        fetchAllRows("notifications", "created_at", false, false, (q) => mine(q.eq("read", false))),
+        mine(supabase.from("notifications").select("*").eq("read", true))
           .order("created_at", { ascending: false }).order("id").limit(READ_NOTIFICATION_START)
           .then((r) => ({ data: r.data, error: r.error })),
       ),

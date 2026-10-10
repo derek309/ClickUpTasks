@@ -15,7 +15,7 @@ type Set<T> = Dispatch<SetStateAction<T[]>>;
 export function useLiveSync({
   loading, meId, syncMarks, pushToast, isOwnClientEcho,
   setTasks, setClients, setProjects, setContacts, setNotifications, setMessages, setClientNotes,
-  setClientLinks, setVaultFolders, setFolders, setStages, setDmMessages, setActiveClient, setOpenTaskId,
+  setClientLinks, setVaultFolders, setFolders, setStages, setDmMessages, setActiveClient, setOpenTaskId, dmEnabled = true,
 }: {
   /** True until the first load lands; nothing subscribes before it. */
   loading: boolean;
@@ -30,6 +30,8 @@ export function useLiveSync({
   setDmMessages: Set<DmMessage>;
   setActiveClient: Dispatch<SetStateAction<string>>;
   setOpenTaskId: Dispatch<SetStateAction<string | null>>;
+  /** Direct messages switched on (app_settings): only then listen for them. */
+  dmEnabled?: boolean;
 }) {
   // Live sync — tasks/clients/notifications only (see supabase/realtime.sql
   // + the plan doc for why not all 7 tables). Gated on !loading so the
@@ -135,13 +137,13 @@ export function useLiveSync({
         setDmMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
       },
       onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
-    });
+    }, { meId, dm: dmEnabled });
     return unsub;
     // One subscription per sign in. The handlers only call state setters,
     // which never change, and two helpers Cockpit rebuilds each render;
     // listing those would tear the channel down and stand it up on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, meId]);
+  }, [loading, meId, dmEnabled]);
 
   // Fallback for the 2 tables without a live subscription (contacts/projects/
   // client_links), and a reconnection safety net for the 5 that do —
@@ -190,7 +192,7 @@ export function useLiveSync({
         // Contacts every 15 minutes, not every 2: all 4,200 of them on each
         // return was most of what this read cost (loading plan step 4).
         const withContacts = Date.now() - lastContacts >= 15 * 60_000;
-        const d = await fetchAll(syncMarks.current, { contacts: withContacts });
+        const d = await fetchAll(syncMarks.current, { contacts: withContacts, me: meId });
         if (withContacts) lastContacts = Date.now();
         syncMarks.current = d.marks;
         if (d.contacts) setContacts(d.contacts); setClientLinks(d.clientLinks); setProjects(d.projects);

@@ -1009,9 +1009,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             return [{ id, name, initials: initialsOf(name), color: p.color || "#a855f7", role: p.role === "admin" ? "admin" as const : "va" as const, ...(p.avatar_url ? { avatarUrl: p.avatar_url } : {}) }];
           }));
         })().catch(() => { /* roster is best-effort; founder fallback stays */ });
-        let d = await fetchAll(undefined, { contacts: false });
+        let d = await fetchAll(undefined, { contacts: false, me: me.id });
         // A brand new, empty database gets the demo data, then reads again.
-        if (!d.clients.length) { await seedIfEmpty(); d = await fetchAll(undefined, { contacts: false }); }
+        if (!d.clients.length) { await seedIfEmpty(); d = await fetchAll(undefined, { contacts: false, me: me.id }); }
         // Contacts right after the first screen, not before it (loading plan
         // step 4): what needs them (a client's page, the Inbox's people,
         // search) is a click or two away.
@@ -1127,7 +1127,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useLiveSync({
     loading, meId: me.id, syncMarks, pushToast, isOwnClientEcho,
     setTasks, setClients, setProjects, setContacts, setNotifications, setMessages, setClientNotes,
-    setClientLinks, setVaultFolders, setFolders, setStages, setDmMessages, setActiveClient, setOpenTaskId,
+    setClientLinks, setVaultFolders, setFolders, setStages, setDmMessages, setActiveClient, setOpenTaskId, dmEnabled,
   });
 
   const { hasUnreadReply, markTaskNotifsRead, notify, sendMentionEmail } = useNotify({ tasksRef, me, setNotifications, notifications });
