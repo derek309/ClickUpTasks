@@ -1166,7 +1166,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const items = [...(st.todos ?? []).filter((t) => t.done).map((t) => t.title), ...clientChanges.filter((c) => c.stepId === st.id && c.done).map((c) => c.title)];
     const now = new Date().toISOString();
     const list = items.length ? `<ul>${items.map((t) => `<li>${t.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</li>`).join("")}</ul>` : "";
-    return { subject: `${task.title}: your changes are done`, body: `${greetingHtml(messageDest?.name)}<p>All the changes you asked for are done:</p>${list}<p>Take a look and let me know if anything else needs a tweak.</p>`, replyTo: null, createdAt: now, updatedAt: now };
+    return { subject: `${task.title}: your changes are done`, body: `${greetingHtml(messageDest?.name)}${list ? `<p>All the changes you asked for are done:</p>${list}` : "<p>The changes you asked for are done.</p>"}<p>Take a look and let me know if anything else needs a tweak.</p>`, replyTo: null, createdAt: now, updatedAt: now };
   };
   // A review has just gone to the client. Until now that set nothing, so the
   // task sat in Waiting with no date on it. The client is emailed on each of
