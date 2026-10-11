@@ -1676,6 +1676,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: list });
     if (!deliverablePresent(key)) setPendingStart(key);
   };
+  // A follow up as a step of its own: on whoever adds it, due in three
+  // business days, finished by the client's reply (finishWhen).
+  const followUpStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Follow up with ${firstName}`, done: false, due: addBusinessDaysIso(TODAY, 3), finishWhen: "reply" as const, ...(meId ? { assigneeId: meId } : {}) }] });
+    setOpenStepPage({ taskId: task.id, id, full: false });
+  };
+  // Who does what: a handoff to a teammate (the delegate box) or a follow up.
+  const quickPeopleOptions = () => [
+    ...(onDelegate ? [{ key: "delegate", label: "Delegate to a teammate", disabled: false, note: undefined as string | undefined, onPick: () => askDock("delegate") }] : []),
+    { key: "followup", label: `Follow up with ${firstName}`, disabled: false, note: "in 3 days" as string | undefined, onPick: followUpStep },
+  ];
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, label: ({ doc: "Document", image: "Image", page: "HTML", video: "Video" } as const)[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
@@ -1737,7 +1750,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
           {/* Client work in one click, onto the current step (Derek, 2026-10-11:
               "a + at the other end to add client work, to make it faster"). */}
-          {(() => { const quickWork = quickStepOptions(); return quickWork.length > 0 && (
+          {(() => { const quickWork = [...quickStepOptions(), ...quickPeopleOptions()]; return quickWork.length > 0 && (
             <span className="relative shrink-0">
               <button onClick={() => setQuickWorkOpen((o) => !o)} aria-haspopup="menu" aria-expanded={quickWorkOpen}
                 title="Add a step that makes a document, image, HTML or video"
@@ -1745,7 +1758,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {quickWorkOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
                 <div role="menu" aria-label="Quick step" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
-                  <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">Adds a step that makes:</div>
+                  <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">Add a step:</div>
                   {quickWork.map((o) => (
                     <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
@@ -2285,8 +2298,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [topPanel, setTopPanel] = useState<"client" | "move" | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
   // The dock opens in Chat, Text or Call from here; n changes to ask again.
-  const [dockRequest, setDockRequest] = useState<{ mode: "note" | "chat" | "sms" | "call"; text?: string; n: number } | null>(null);
-  const askDock = (mode: "note" | "chat" | "sms" | "call", text?: string) => setDockRequest((r) => ({ mode, text, n: (r?.n ?? 0) + 1 }));
+  const [dockRequest, setDockRequest] = useState<{ mode: "note" | "chat" | "sms" | "call" | "delegate"; text?: string; n: number } | null>(null);
+  const askDock = (mode: "note" | "chat" | "sms" | "call" | "delegate", text?: string) => setDockRequest((r) => ({ mode, text, n: (r?.n ?? 0) + 1 }));
   const topIcon = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-accent transition hover:bg-background disabled:cursor-not-allowed disabled:text-muted disabled:opacity-50";
   const popover = (children: React.ReactNode, wide = false) => (<>
     <div className="fixed inset-0 z-30" onClick={() => setTopPanel(null)} />

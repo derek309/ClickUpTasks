@@ -76,7 +76,7 @@ export function ActionDock({
   replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null;
   /** The top bar's Chat, Text and Call, and a message's Add a note: open the
    *  box in that mode and focus it, with text to start from; n changes to ask again. */
-  openRequest?: { mode: "note" | "chat" | "sms" | "call"; text?: string; n: number } | null;
+  openRequest?: { mode: "note" | "chat" | "sms" | "call" | "delegate"; text?: string; n: number } | null;
   /** Opens the real booking window (BookAppointment). */
   onBook?: () => void;
 }) {
@@ -233,7 +233,7 @@ export function ActionDock({
     // Deferred a frame, like the reopen after a send below: it lands during
     // the drawer's own render.
     const r = requestAnimationFrame(() => {
-      if (mode === "call") { openPanelRef.current("call"); return; }
+      if (mode === "call" || mode === "delegate") { openPanelRef.current(mode); return; }
       setReplyTo(null);
       setChannel(mode);
       if (text) setQuickNote(text);
