@@ -665,7 +665,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Tinted blocks with 5px corners, no outlines, and colour only where it
   // means something (Derek, 2026-09-16: the page read "very flat"; "I don't
   // like pills so make them 5px").
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const chip = "inline-flex min-h-10 items-center gap-2 rounded-[5px] bg-background px-3 text-[16px]";
   const dueDays = task.due && task.status !== "done" ? daysUntilDue(task.due) : null;
   // Colour only when it means something: amber inside three days, red once late.
@@ -703,55 +702,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           toneClass={dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : "text-foreground"}
           onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>} />
       </span>
-      {/* What chases the client while it waits, which was its own chip. */}
-      {(reminders.length > 0 || task.waitingOnClient) && (
-        <span className="text-muted">. Reminders: {reminders.length === 1 ? reminders[0].summary : reminders.length > 1 ? `${reminders.length} reviews` : task.followUpAt ? `we follow up ${formatDue(task.followUpAt)}` : "none set"}</span>
-      )}
-      <button onClick={() => setDetailsOpen((o) => !o)} aria-expanded={detailsOpen} title="Time estimate, repeat, reminders"
-        className="ml-2 rounded px-1 text-[15px] text-muted hover:bg-background hover:text-foreground">{detailsOpen ? "Less ▴" : "More ▾"}</button>
+      {/* How long it takes: a small clock, a click to set it. */}
+      <span className="ml-1.5 inline-flex align-middle"><SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} /></span>
+      {/* What chases the client while it waits, a word to change like the
+          rest (Derek, 2026-10-11: "why can't we edit the reminders"). */}
+      {reminders.length > 0 ? (
+        <span>. Reminders:{" "}
+          <ActionMenu title="Reminder emails to the client" triggerClassName={`${word} rounded hover:bg-background`}
+            label={reminders.length === 1 ? reminders[0].summary : `${reminders.length} reviews`}
+            items={reminders.flatMap((r) => {
+              const pre = reminders.length > 1 ? `${r.name}: ` : "";
+              return [
+                { label: `${r.name}: ${r.summary}`, onClick: r.open },
+                r.everyDays !== 1 && { label: `${pre}Remind every business day`, onClick: () => r.setEvery(1) },
+                r.everyDays !== 2 && { label: `${pre}Remind every 2 business days`, onClick: () => r.setEvery(2) },
+                r.everyDays !== 0 && { label: `${pre}Turn reminders off`, onClick: () => r.setEvery(0) },
+                r.canRestart && { label: `${pre}Restart reminders`, onClick: r.restart },
+              ];
+            })} />
+        </span>
+      ) : task.waitingOnClient ? (
+        <span>. We follow up{" "}
+          <span className="inline-block">
+            <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => onPatch({ followUpAt: d })}
+              emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
+              className={`-mx-1 ${word} text-[16px] sm:text-[18px]`} />
+          </span>
+        </span>
+      ) : null}
     </div>
   );
+  // Only a custom repeat needs more room than a word: its own line below.
   const chipRow = (
-    <div className={`mt-3 flex-wrap items-center gap-2 ${detailsOpen ? "flex flex-col items-stretch rounded-xl bg-background/60 p-2 sm:flex-row sm:items-center" : "hidden"}`}>
-      {/* Status, owner and priority are words in the sentence above; here
-          is what has no word there: the time it takes, repeating, reminders. */}
-      <span className={`${chip} ${dueTone === "late" ? "!bg-danger-soft" : dueTone === "soon" ? "!bg-highlight-soft" : ""}`}>
-        <span className="text-muted">Due</span>
-        <InlineDue value={task.due} overdue={false} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday}
-          showRecurrenceLabel={task.recurrence !== "custom"} showCountdown={false} showSnooze={false} formatValue={formatDue}
-          textClass="-mx-1 text-[16px] font-medium" toneClass="text-foreground"
-          onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel="Not set" />
-        {task.due && task.status !== "done" && (
-          <span className={dueTone === "late" ? "font-semibold text-danger" : dueTone === "soon" ? "font-semibold text-highlight" : "text-muted"}>{dueCountdown(task.due)}</span>
-        )}
-        {/* How long it takes, as a small clock at the end of the due date. */}
-        <SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} />
-      </span>
-      {/* What is chasing this while the client has it (Derek, 2026-09-30:
-          "the other thing we're missing is reminders"). A review emails the
-          client by itself; a plain wait only has our own follow up date. Shown
-          only while something is with the client, so it is never an empty chip. */}
-      {(reminders.length > 0 || task.waitingOnClient) && (
-        <span className={chip}>
-          <span className="text-muted">Reminders</span>
-          {reminders.length > 0 ? (
-            <ActionMenu title="Reminder emails to the client" triggerClassName="-mx-1 rounded px-1 font-medium hover:bg-surface"
-              label={reminders.length === 1 ? reminders[0].summary : `${reminders.length} reviews`}
-              items={reminders.flatMap((r) => {
-                const pre = reminders.length > 1 ? `${r.name}: ` : "";
-                return [
-                  { label: `${r.name}: ${r.summary}`, onClick: r.open },
-                  r.everyDays !== 1 && { label: `${pre}Remind every business day`, onClick: () => r.setEvery(1) },
-                  r.everyDays !== 2 && { label: `${pre}Remind every 2 business days`, onClick: () => r.setEvery(2) },
-                  r.everyDays !== 0 && { label: `${pre}Turn reminders off`, onClick: () => r.setEvery(0) },
-                  r.canRestart && { label: `${pre}Restart reminders`, onClick: r.restart },
-                ];
-              })} />
-          ) : (
-            <span className="font-medium">{task.followUpAt ? `We follow up ${formatDue(task.followUpAt)}` : "None set"}</span>
-          )}
-        </span>
-      )}
+    <div className="mt-2 flex flex-wrap items-center gap-2">
       {task.recurrence === "custom" && (
         <span className={`${chip} flex-wrap py-1 text-muted`}>
           {task.recurrenceUnit === "nth-weekday" ? (
