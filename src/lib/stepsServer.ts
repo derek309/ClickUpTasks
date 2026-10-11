@@ -20,7 +20,7 @@ type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | n
 
 /** Reads the task, works out its new steps and writes them only if nobody
  *  changed the task in between (tries again a few times if they did). */
-async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: string) => Promise<Subtask[] | null> | Subtask[] | null): Promise<boolean> {
+async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: string) => Promise<Subtask[] | null> | Subtask[] | null, followUpFromNew = false): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data: row } = await supabaseAdmin.from("tasks").select("id, subtasks, assignee_id, client_id, updated_at").eq("id", taskId).maybeSingle();
     if (!row) return false;
@@ -28,8 +28,11 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
     const next = await change(row as TaskRow, firstName);
     if (!next) return false;
+    // A changes step just made: the task's follow up is its due date (Derek, 2026-10-11).
+    const before = new Set(((row as TaskRow).subtasks ?? []).map((x) => x.id));
+    const made = followUpFromNew ? next.find((x) => !before.has(x.id) && x.stage === "changes_requested" && x.due) : null;
     const { data: wrote } = await supabaseAdmin.from("tasks")
-      .update({ subtasks: next, updated_by: null }).eq("id", taskId).eq("updated_at", (row as TaskRow).updated_at).select("id");
+      .update({ subtasks: next, updated_by: null, ...(made ? { follow_up_at: made.due } : {}) }).eq("id", taskId).eq("updated_at", (row as TaskRow).updated_at).select("id");
     if (wrote?.length) return true;
   }
   return false;
@@ -66,7 +69,7 @@ export async function stepsOnReviewChanges(taskId: string, kind: ReviewKindKey, 
     const cur = currentStep(list);
     if (!cur) return null;
     return addChangesRound(list, cur.id, first, `${kind}:${version}`, () => newId("s_"), { review: kind as DeliverableKey, todos });
-  });
+  }, true);
 }
 
 /** A review was approved, by the client or by us: the step working on it is
@@ -109,7 +112,7 @@ export async function stepsOnClientChanges(taskId: string): Promise<boolean> {
     if (!loose.length) return null;
     const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
     return withStep.map((x) => (loose.includes(x.id) ? { ...x, stepId } : x));
-  });
+  }, true);
 }
 
 /** The client commented on a review already approved (Derek, 2026-10-11: "the
@@ -128,7 +131,7 @@ export async function stepsOnCommentAfterApproval(taskId: string, kind: ReviewKi
     const held = holdOnStep(withStep, stepId, kind);
     const todo: StepTodo = { id: newId("td_"), title: text.slice(0, 300), done: false, fromClient: true, commentId: comment.id };
     return held.map((x) => (x.id === stepId ? { ...x, todos: [...(x.todos ?? []), todo] } : x));
-  });
+  }, true);
 }
 
 /** A comment was deleted: its to-do goes too, wherever it sits. */

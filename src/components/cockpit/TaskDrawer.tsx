@@ -1120,7 +1120,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       if (!list) return;
       if (openStep) setNextStepDone(openStep.id, true);
       const status = statusForStep(task.status, "changes_requested");
-      onPatch({ subtasks: list, ...(status ? { status } : {}) });
+      const due = list.find((x) => x.addedFor === key)?.due ?? null;
+      onPatch({ subtasks: list, ...(status ? { status } : {}), ...(due ? { followUpAt: due } : {}) });
       pushToast(`Changes on ${name}: added "Make ${firstName}'s changes"${todos.length ? ` with ${todos.length} to ${todos.length === 1 ? "do" : "dos"}` : ""}`);
     });
     return () => { live = false; };
@@ -1136,7 +1137,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const next = list.map((x) => (ids.includes(x.id) ? { ...x, stepId } : x));
     const status = made ? statusForStep(task.status, "changes_requested") : null;
     if (made && openStep) setNextStepDone(openStep.id, true);
-    onPatch({ subtasks: next, ...(status ? { status } : {}) });
+    // Changes due in three business days, the task's follow up the same day.
+    const due = made ? next.find((x) => x.id === stepId)?.due ?? null : null;
+    onPatch({ subtasks: next, ...(status ? { status } : {}), ...(due ? { followUpAt: due } : {}) });
     if (made) pushToast(`${firstName} sent changes: added "Changes from ${firstName}"`);
   }, [looseClientIds]); // eslint-disable-line react-hooks/exhaustive-deps
   // A message we choose to count as changes: a to-do on the changes step.

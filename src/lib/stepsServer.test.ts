@@ -53,6 +53,9 @@ describe("steps added on the server", () => {
     expect(await stepsOnReviewChanges("t1", "doc", "d1", 1)).toBe(true);
     const made = steps().find((s) => s.title === "Make Brian's changes")!;
     expect(made.todos?.map((t) => t.title)).toEqual(["Change the headline"]);
+    // Due in three business days, and the task's follow up the same day.
+    expect(made.due).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(db.tasks[0].follow_up_at).toBe(made.due);
     expect(await stepsOnReviewChanges("t1", "doc", "d1", 1)).toBe(false);
   });
 

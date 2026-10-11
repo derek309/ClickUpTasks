@@ -2886,7 +2886,7 @@ export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clien
   // Sending it again from this step starts the client's next review step
   // (addClientReviewStep), so the loop needs no step of its own.
   const round: Subtask[] = [
-    { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key, startedAt: now,
+    { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key, startedAt: now, due: changesDue(now),
       ...(opts.review ? { holds: [opts.review] } : {}), ...(opts.todos?.length ? { todos: opts.todos } : {}) },
   ];
   let list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `${clientFirstName} sent changes` } : s));
@@ -2910,10 +2910,14 @@ export function addApprovedStep(subtasks: Subtask[], reviewStepId: string, clien
  *  in front of the current step (Derek, 2026-10-11: "it creates a stage if
  *  there's not one already"). Rounds of review changes have their own step
  *  and are not this one. */
+/** Changes are due in 72 business hours, three business days (Derek,
+ *  2026-10-11); the task's follow up is set to the same day. */
+export const changesDue = (nowIso: string) => addBusinessDaysIso(nowIso.slice(0, 10), 3);
+
 export function changesStepFor(subtasks: Subtask[], clientFirstName: string, makeId: () => string, now = new Date().toISOString()): { list: Subtask[]; stepId: string; made: boolean } {
   const open = planSteps(subtasks).find((s) => !s.done && s.stage === "changes_requested" && !s.addedFor?.includes(":"));
   if (open) return { list: subtasks, stepId: open.id, made: false };
-  const step: Subtask = { id: makeId(), title: `Changes from ${clientFirstName}`, done: false, stage: "changes_requested", addedFor: "changes", startedAt: now };
+  const step: Subtask = { id: makeId(), title: `Changes from ${clientFirstName}`, done: false, stage: "changes_requested", addedFor: "changes", startedAt: now, due: changesDue(now) };
   const current = currentStep(subtasks);
   const list = [...subtasks];
   const at = current ? list.findIndex((s) => s.id === current.id) : list.length;
