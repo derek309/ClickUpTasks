@@ -1657,13 +1657,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setSavePlan(null);
     pushToast(`Saved "${savePlan.trim()}" as a template${clientId ? ` for ${client.name}` : " for everyone"}`);
   };
-  // The step new client work goes on: the current one, unless it is the
-  // client's own (nothing is made there); with none, it goes on the task.
-  const workStep = activeStep && !activeStep.onClient ? activeStep : null;
-  const quickWorkFor = () => workStep ? stepAddOptions(workStep)
-    : [...(canHaveDocument ? (["doc", "image", "page", "video"] as const).map((k) => ({ key: k, label: KIND_LABEL[k], disabled: false, note: undefined as string | undefined })) : []),
-      ]
-      .map((o) => ({ ...o, onPick: () => (deliverablePresent(o.key) ? openWork(o.key) : setPendingStart(o.key)) }));
+  // A quick step from the end of the Add step bar (Derek, 2026-10-11: "quick
+  // step"): a new step named after the work, holding it (the one already made,
+  // or a new one started).
+  const quickStep = (key: DeliverableKey) => {
+    const what = ({ doc: "document", image: "image", page: "HTML", video: "video" } as Partial<Record<DeliverableKey, string>>)[key] ?? KIND_LABEL[key];
+    const id = newId("s_");
+    const list = holdOnStep([...taskRef.current.subtasks, { id, title: `Create ${what} for review`, done: false }], id, key);
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: list });
+    if (!deliverablePresent(key)) setPendingStart(key);
+  };
+  const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
+    key: k, label: KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "uses the one made" : undefined, onPick: () => quickStep(k),
+  }));
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1722,15 +1729,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
           {/* Client work in one click, onto the current step (Derek, 2026-10-11:
               "a + at the other end to add client work, to make it faster"). */}
-          {(() => { const quickWork = quickWorkFor(); return quickWork.length > 0 && (
+          {(() => { const quickWork = quickStepOptions(); return quickWork.length > 0 && (
             <span className="relative shrink-0">
               <button onClick={() => setQuickWorkOpen((o) => !o)} aria-haspopup="menu" aria-expanded={quickWorkOpen}
-                title={workStep ? `Add client work to "${workStep.title}"` : "Add client work"}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Client work</button>
+                title="Add a step that makes a document, image, HTML or video"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Quick step</button>
               {quickWorkOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
-                <div role="menu" aria-label="Add client work" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
-                  {workStep && <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">On {workStep.title}</div>}
+                <div role="menu" aria-label="Quick step" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
+                  <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">Adds a step that makes:</div>
                   {quickWork.map((o) => (
                     <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
