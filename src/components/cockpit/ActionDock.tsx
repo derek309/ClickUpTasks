@@ -466,6 +466,11 @@ export function ActionDock({
         nextStep: nextStep.trim() || null,
         nextStepDue: nextDue,
         nextStepDoneAt: null,
+        // After writing to the client, the follow up is waiting on their
+        // answer, so it finishes by itself when they write back (Derek,
+        // 2026-10-11: "if that's helpful then yes"). Only for a message that
+        // went out with a follow up set; anything else waits on nobody.
+        nextStepWatch: sent && scheduled && (kind === "email" || kind === "sms" || kind === "chat") ? "reply" : null,
       });
     }
 
