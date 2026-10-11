@@ -1708,7 +1708,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   {quickWork.map((o) => (
                     <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-                      <span className="min-w-0 flex-1">{o.label}</span>{o.note && <span className="shrink-0 text-muted">{o.note}</span>}
+                      <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
                     </button>
                   ))}
                 </div>

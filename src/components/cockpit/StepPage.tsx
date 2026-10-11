@@ -99,6 +99,15 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
   const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirSave = useRef<(() => void) | null>(null);
+  // Deleted directions can come back until the page closes.
+  const [dirRemoved, setDirRemoved] = useState<string | null>(null);
+  const removeDirections = () => {
+    if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; }
+    dirSave.current = null;
+    setDirRemoved(sub.notes ?? "");
+    onPatchSub({ notes: undefined });
+    setDirOpen(false);
+  };
   // Closing the page right after typing still saves what was typed.
   useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
   const [addOpen, setAddOpen] = useState(false);
@@ -113,6 +122,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   // Everything "Add client work" offers: a checklist, the task's documents and
   // reviews and an email (from the task page), and a text.
   const options = [
+    { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); } },
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
     ...(canText && onSendText ? [{ key: "text", label: "Send text", onPick: () => { setTalk("text"); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); } }] : []),
@@ -228,14 +238,14 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const addButton = (
     <div className="relative">
       <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen}
-        className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add client work</button>
+        className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add</button>
       {addOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
-        <div role="menu" aria-label="Add client work" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
+        <div role="menu" aria-label="Add to this step" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
           {options.map((o) => (
             <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(false); o.onPick(); }}
               className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-              <span className="min-w-0 flex-1">{o.label}</span>{o.note && <span className="shrink-0 text-muted">{o.note}</span>}
+              <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
             </button>
           ))}
         </div>
@@ -243,8 +253,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     </div>
   );
   const quickStart = (
-    <section aria-label="Add client work" className="flex flex-col gap-2">
-      <h3 className="text-[17px] font-bold">Add client work</h3>
+    <section aria-label="Add to this step" className="flex flex-col gap-2">
+      <h3 className="text-[17px] font-bold">Add</h3>
       <div className="flex flex-wrap gap-2">
         {options.map((o) => (
           <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.note}
@@ -339,12 +349,20 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 {controls}
                 {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>
-              {/* Directions: what we want on this step, like the task's
-                  description: a line until it is needed, then the editor
-                  (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
-              <section aria-label="Directions" className="flex flex-col gap-2">
-                {dirOpen ? (<>
-                  <h3 className="text-[17px] font-bold">Directions</h3>
+              {followBox}
+              {planBits}
+              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : <div>{addButton}</div>}
+              {/* Directions: what we want on this step, added from + Add like
+                  the rest (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
+              {!dirOpen && dirRemoved !== null && (
+                <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
+              )}
+              {dirOpen && (
+                <section aria-labelledby="step-directions" className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 id="step-directions" className="text-[17px] font-bold">Directions</h3>
+                    <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
+                  </div>
                   <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus={!sub.notes}
                     onChange={(html) => {
                       if (dirTimer.current) clearTimeout(dirTimer.current);
@@ -352,13 +370,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                       dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
                     }}
                     placeholder="What we want on this step: what to make, what to change, where things are…" />
-                </>) : (
-                  <button onClick={() => setDirOpen(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
-                )}
-              </section>
-              {followBox}
-              {planBits}
-              {outFor !== undefined ? outFor : empty ? quickStart : <div>{addButton}</div>}
+                </section>
+              )}
               {todoList}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
