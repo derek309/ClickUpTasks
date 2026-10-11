@@ -785,7 +785,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </label>
   );
   const detailsSentence = (
-    <div className="mt-2.5 text-[16px] leading-relaxed sm:text-[18px]">
+    <div className="mt-1 text-[16px] leading-snug sm:text-[18px]">
       {wordPick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />{STATUS_META[effectiveStatus(task)].label}</>,
         "Status", effectiveStatus(task), pickableStatuses(effectiveStatus(task)).map((st) => ({ value: st, label: STATUS_META[st].label })), (v) => onPatch({ status: v as TaskStatus }))}
       , on {wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
@@ -1724,7 +1724,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
   const renderPlan = () => (
-    <section className="mt-8" aria-labelledby="task-steps">
+    <section className="mt-6" aria-labelledby="task-steps">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 id="task-steps" className="flex items-center gap-2 text-[16px] font-bold text-foreground">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"><I.list className="h-4 w-4" /></span>
@@ -2467,7 +2467,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {subMeta}
         {detailsSentence}
         {chipRow}
-        <div className="mt-1.5">{descriptionBlock}</div>
+        <div className="mt-0.5">{descriptionBlock}</div>
       </div>
       {renderPlan()}
       {clientResponseBlock}
