@@ -1228,7 +1228,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">
           <I.comment />
           <span className="text-[16px]">{q ? "Nothing matches that search" : view === "changes" ? "No changes yet" : "Nothing here yet"}</span>
-          <span className="text-[16px]">{q ? "Try other words." : "Write a note or log what you did in the box above."}</span>
+          <span className="text-[16px]">{q ? "Try other words." : "Press Write to add a note or send a message."}</span>
         </div>
       )}
     </div>

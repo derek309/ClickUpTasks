@@ -733,15 +733,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               ];
             })} />
         </span>
-      ) : task.waitingOnClient ? (
-        <span>. We follow up{" "}
-          <span className="inline-block">
-            <InlineDate value={task.followUpAt ? task.followUpAt.slice(0, 10) : null} onChange={(d) => onPatch({ followUpAt: d })}
-              emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
-              className={`-mx-1 ${word} text-[16px] sm:text-[18px]`} />
-          </span>
-        </span>
       ) : null}
+      {/* The follow up is a date in the sentence (Derek, 2026-10-11: "we only
+          need a follow up date"); what it is for lives in the steps. */}
+      {(() => {
+        const fu = task.followUpAt ?? openStep?.nextStepDue ?? null;
+        const tone = stepDateLabel(fu).tone;
+        return (
+          <span title={openStep?.nextStep ?? undefined}>, follow up{" "}
+            <span className="inline-block">
+              <InlineDate value={fu ? fu.slice(0, 10) : null} onChange={(d) => moveStepDate(d)} onClear={() => moveStepDate(null)}
+                emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
+                formatValue={(d) => { const l = stepDateLabel(d); return l.tone === "late" ? l.label.split(",")[0] : l.tone === "soon" ? l.label.split(",")[0].toLowerCase() : formatDue(d); }}
+                className={`-mx-1 ${word} text-[16px] sm:text-[18px] ${tone === "late" ? "text-danger" : tone === "soon" ? "text-highlight" : ""}`} />
+            </span>
+          </span>
+        );
+      })()}
       {/* How long it takes: a small clock at the end, a click to set it. */}
       <span className="ml-2 inline-flex align-middle"><SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} /></span>
     </div>
@@ -1538,9 +1546,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
     ];
     const missing = !sub.done ? missingNeeds(sub) : [];
-    const followLabel = isActive && (openStep || followUp)
-      ? (stepDate.tone === "late" || stepDate.tone === "soon" ? `Follow up · ${stepDate.label.split(",")[0].toLowerCase()}` : `Follow up ${stepDate.label}`)
-      : null;
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
     return (
       <li key={sub.id} draggable={dragSub === sub.id}
@@ -1565,9 +1570,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>{sub.title}</span>
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
-              {followLabel && <span className={`font-semibold ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : "text-foreground"}`}>{followLabel}</span>}
               {sub.done && sub.doneAt && <span className="text-muted">Done {formatDue(sub.doneAt.slice(0, 10))}</span>}
-              {upcoming && sub.due && <span className="text-muted">Due {formatDue(sub.due)}</span>}
+              {/* Each step's own follow up date (Derek, 2026-10-11); the current
+                  step's is the task's, the one in the sentence. */}
+              {(() => {
+                const d = isActive ? (followUp ? followUp.slice(0, 10) : sub.due ?? null) : !sub.done ? sub.due ?? null : null;
+                if (!d) return null;
+                const t = stepDateLabel(d).tone;
+                return <span className={t === "late" ? "font-semibold text-danger" : t === "soon" ? "font-semibold text-highlight" : "text-muted"}>Follow up {t === "late" || t === "soon" ? stepDateLabel(d).label.split(",")[0].toLowerCase() : formatDue(d)}</span>;
+              })()}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
               {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
@@ -1652,14 +1663,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {closedHeld()}
       <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
         {steps.map(stepRow)}
-        {/* A follow up with no steps reads as the one step there is. */}
-        {steps.length === 0 && (openStep || followUp) && !asking && (
-          <li className="flex items-start gap-3 py-3 pl-2 pr-3 sm:pr-4">
-            <span aria-hidden className="w-4 shrink-0" />
-            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[effectiveStatus(task)].dot }} />
-            <div className="min-w-0 flex-1">{followBox}</div>
-          </li>
-        )}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
         <li className={`px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
@@ -2271,7 +2274,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <>
           {unheldBlocks}
           {!unheldPresent && (
-            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. With steps, add them from a step&apos;s +.</p>
+            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client reviews and draft emails on no step show here. Add them to a step from its page." : "Client reviews and draft emails show here."}</p>
           )}
         </>
       ), addMenu) : <div>{unheldBlocks}</div>}
