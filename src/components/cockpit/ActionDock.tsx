@@ -32,7 +32,7 @@ const ICON: Record<TaskActionKind, string> = {
 
 export function ActionDock({
   task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
-  onSendMessage, reachable, replyTarget, bar = false,
+  onSendMessage, reachable, replyTarget, openRequest, bar = false,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -73,6 +73,8 @@ export function ActionDock({
   reachable?: { chat: boolean; sms: boolean; email: boolean };
   /** A message picked to reply to in the conversation; n changes to ask again. */
   replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null;
+  /** The top bar's Chat, Text and Call: open the box in that mode and focus it; n changes to ask again. */
+  openRequest?: { mode: "chat" | "sms" | "call"; n: number } | null;
 }) {
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
@@ -216,6 +218,26 @@ export function ActionDock({
     setBarOpen(true);
     requestAnimationFrame(() => quickRef.current?.focus());
   }, [replyTarget]);
+
+  // The top bar asks for a mode. Chat and Text are the reply box; Call is
+  // the call log, with the number to tap at its top.
+  const seenOpen = useRef(0);
+  useEffect(() => {
+    if (!openRequest || openRequest.n === seenOpen.current) return;
+    seenOpen.current = openRequest.n;
+    const mode = openRequest.mode;
+    // Deferred a frame, like the reopen after a send below: it lands during
+    // the drawer's own render.
+    const r = requestAnimationFrame(() => {
+      if (mode === "call") { openPanelRef.current("call"); return; }
+      setReplyTo(null);
+      setChannel(mode);
+      setView("closed");
+      setBarOpen(true);
+      requestAnimationFrame(() => quickRef.current?.focus());
+    });
+    return () => cancelAnimationFrame(r);
+  }, [openRequest]);
 
   const suggest = (kind: TaskActionKind) => suggestFor(kind, body);
   // After a send, the box fills at once with a plain default (Derek,
@@ -724,14 +746,14 @@ export function ActionDock({
   // Floating over the bottom of the drawer, in reach from anywhere in a long
   // task. It went inline at the top of the conversation for a day and got
   // lost among the cards (Derek, 2026-09-14). Absolute, not fixed: the drawer
-  // is the containing block, and --dock-right keeps it clear of the client rail.
+  // is the containing block.
   return (
     // Lined up with the task's own column above it: the same side padding and
-    // the same 5xl width, so its edges meet the title and sections (Derek,
-    // 2026-09-16: "make it the same width as the top content box").
-    <div className={bar ? "absolute inset-x-0 bottom-0 z-30 border-t bg-surface px-3 pb-2 pt-1.5 sm:px-6" : "pointer-events-none absolute bottom-0 left-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"}
-      style={bar ? undefined : { right: "var(--dock-right, 0px)" }}>
-      <div className={bar ? "w-full" : "pointer-events-auto mx-auto w-full max-w-5xl rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md"}>
+    // the same 1280px width, so its edges meet the title and sections (Derek,
+    // 2026-09-16: "make it the same width as the top content box"; 1280 in the
+    // task detail redesign, 2026-10-11, with the client column gone).
+    <div className={bar ? "absolute inset-x-0 bottom-0 z-30 border-t bg-surface px-3 pb-2 pt-1.5 sm:px-6" : "pointer-events-none absolute inset-x-0 bottom-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"}>
+      <div className={bar ? "w-full" : "pointer-events-auto mx-auto w-full max-w-[1280px] rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md"}>
 
         {view === "closed" && (() => {
           const canChat = canMessageClient && !!onSendMessage && (reachable?.chat ?? false);

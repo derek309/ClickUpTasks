@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, meetings, description } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, meetings, description, createdLine } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -1198,7 +1198,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           history. Top-anchored on purpose — bottom-anchoring was tried and
           reverted (short threads looked broken); don't reintroduce it. */}
       {mergedFeedItems.length > 0 && (
-        <div className="pt-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}</div>
+        <div className="pt-3 text-center text-[16px] text-muted">Start of your conversation with {client.name}{createdLine ? ` · ${createdLine}` : ""}</div>
+      )}
+      {/* Who made the task and when sits at the start of its story (task
+          detail redesign, 2026-10-11), so an empty feed still says it. */}
+      {mergedFeedItems.length === 0 && createdLine && !q && (
+        <div className="pt-3 text-center text-[16px] text-muted">{createdLine}</div>
       )}
       {mergedFeedItems.length === 0 && (
         <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-7 text-center text-muted">

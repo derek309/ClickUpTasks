@@ -57,6 +57,9 @@ export const I = {
   // Two overlapping bubbles — distinct at a glance from the single-bubble
   // `comment` icon used for internal team chat, since they sit right next
   // to each other in the same tab bar.
+  note: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16"><path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/></svg>),
+  mobile: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/></svg>),
+  reply: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v5"/></svg>),
   chatBubbles: (p: { className?: string }) => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className={p.className} width="14" height="14"><path d="M8 10a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5h-1l-3 2.5V16h0a5 5 0 0 1-5-5z"/><path d="M8 17.5A4.5 4.5 0 0 1 3.5 13V8"/></svg>),
 };
 

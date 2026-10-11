@@ -36,6 +36,7 @@ import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
 import { QuickLinksBar } from "./ClientLinks";
+import { BookAppointment } from "./BookAppointment";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
@@ -605,9 +606,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
   // Completion checkbox to the title's left (item 4) — the fastest way to
   // close out a task without hunting for the Status chip.
-  // Comment/event timestamps already cover every field-change and message —
-  // the latest one is a true "last updated", not just a metadata guess.
-  const lastActivityAt = task.comments.reduce((max, c) => (c.at > max ? c.at : max), task.createdAt);
   const creatorName = task.createdBy === "u_claude" ? "Automated"
     : task.createdBy === "client" ? "the client"
     : task.createdBy ? (userById(task.createdBy)?.name ?? null) : null;
@@ -624,42 +622,38 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="min-w-0 flex-1">{titleBlock}</div>
     </div>
   );
-  // One quiet line under the title: who made it and when, then its labels.
-  // Created used to be the first of three tinted date cards with a runway bar
-  // under them, about 170px of the drawer for three dates (2026-09-14
-  // redesign). Due lives in the chips below; the follow up is the Next step
-  // card's date.
+  // Who made it and when sits at the start of the activity feed now, and
+  // Labels moved into the ⋯ menu (task detail redesign, 2026-10-11). Only the
+  // labels already on the task show here, each one a click to take off.
   const createdDay = task.createdAt.slice(0, 10);
-  const subMeta = (
+  const createdLine = `Created ${formatDue(createdDay)}${creatorName ? ` by ${creatorName}` : ""}`;
+  const subMeta = task.labelIds.length === 0 ? null : (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[16px] text-muted">
-      <span title={`Updated ${timeAgo(lastActivityAt)}`}>Created {formatDue(createdDay)}{creatorName ? ` by ${creatorName}` : ""}</span>
       {task.labelIds.map((id) => {
         const l = labelById(id);
         return l ? (
           <button key={id} onClick={() => onToggleLabel(id)} title="Remove this label"
-            className="group inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[16px] font-medium" style={{ background: l.color + "1a", color: l.color }}>
+            className="group inline-flex items-center gap-1 rounded-[5px] px-2.5 py-0.5 text-[16px] font-medium" style={{ background: l.color + "1a", color: l.color }}>
             {l.name} <span className="opacity-50 group-hover:opacity-100">×</span>
           </button>
         ) : null;
       })}
-      <div className="relative">
-        <button onClick={() => setLabelOpen((o) => !o)} className="rounded-md px-1.5 py-0.5 hover:bg-surface hover:text-foreground">+ Label</button>
-        {labelOpen && (<>
-          <div className="fixed inset-0 z-30" onClick={() => setLabelOpen(false)} />
-          <div className="absolute left-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1.5 shadow-lg">
-            {labels.map((l) => {
-              const on = task.labelIds.includes(l.id);
-              return (
-                <button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[16px] text-foreground hover:bg-background">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}
-                </button>
-              );
-            })}
-          </div>
-        </>)}
-      </div>
     </div>
   );
+  // The label picker, opened from Labels in the ⋯ menu.
+  const labelPicker = labelOpen && (<>
+    <div className="fixed inset-0 z-30" onClick={() => setLabelOpen(false)} />
+    <div className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border bg-surface p-1.5 text-left shadow-lg">
+      {labels.map((l) => {
+        const on = task.labelIds.includes(l.id);
+        return (
+          <button key={l.id} onClick={() => onToggleLabel(l.id)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[16px] text-foreground hover:bg-background">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: l.color }} /> {l.name}{on && <I.check className="ml-auto text-accent" />}
+          </button>
+        );
+      })}
+    </div>
+  </>);
 
   // Five fields with one look. Status, owner, priority, due and time were five
   // different kinds of control with their own borders and colours, and the
@@ -1053,31 +1047,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </div>
   );
 
-  // Where the task lives, always open in the rail. It was a dashed button
-  // that hid three facts behind a click (2026-09-14 redesign).
-  const detailsBlock = (
-    <dl className="space-y-3">
-      {/* Type-to-filter rather than a plain select: this list is every client
-          on the account, far past where scrolling a native dropdown is fast. */}
-      <Row label="Client" icon={<I.folder />}><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] transition hover:border-border hover:bg-background" /></Row>
-      <Row label="List" icon={<I.list />}>
-        <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }}
-          className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">
-          {[...clientProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
-          {clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "List"}</option>}
-          <option value="__new">+ New list…</option>
-        </select>
-      </Row>
-      {/* The task's contact, else the client's own (a client linked to a
-          contact by linked_contact_id was missed and read "None"); no row
-          while contacts are still loading (Derek, 2026-10-11). */}
-      {(() => {
-        const ct = contactById(task.contactId) || linkedContactInfo || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
-        // Hidden when it only repeats the client's name (Derek, 2026-10-11).
-        return ct && ct.name.trim().toLowerCase() !== client.name.trim().toLowerCase() ? <Row label="Contact" icon={<I.user />}><span className="block truncate px-2 py-1 text-[16px]">{ct.name}</span></Row> : null;
-      })()}
-    </dl>
-  );
   // The client's own reply, submitted through the public /waiting/[token]
   // page — surfaced prominently (its own bordered card, above Description)
   // since it's the reason this task just landed back on someone's plate.
@@ -1142,7 +1111,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setOpenSections((s) => (s.taskId === task.id ? { taskId: task.id, keys: [...s.keys, k] } : { taskId: task.id, keys: [k] }));
   const hasDescription = htmlToText(task.description).trim().length > 0;
   const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
-  const showAttachments = task.attachments.length > 0 || conversationFiles.length > 0 || sectionOpen("attachments");
   // A client document is for sharing, so a private task and the Personal client
   // never get one. Whether one exists is only known once TaskDocument loads it,
   // so it reports back; keyed by task id like openSections, because this drawer
@@ -1204,15 +1172,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           formatting toolbar and an AI prompt box in the rail on every task,
           which is most of why this column looked twice the weight of the
           mockup it came from. */}
-      {descEditing || !hasDescription ? (
+      {/* One line under the details until it is clicked, then the editor
+          (task detail redesign, 2026-10-11: no Description tab, no post at
+          the top of the feed). */}
+      {descEditing ? (
         <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       ) : (
-        <button onClick={() => setDescEditing(true)} title="Click to edit"
-          className="-mx-2 block w-full rounded-lg px-2 py-0.5 text-left text-[16px] leading-normal hover:bg-background">
-          {/* Its own tab now, so it has the room: folded only when it is long.
-              Full width and single blank lines, so it reads in less space
-              (Derek, 2026-10-07: "clean up the lost space"). */}
-          <CollapsibleText text={htmlToText(task.description).replace(/\n{3,}/g, "\n\n")} maxLines={30} maxChars={4000} />
+        <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add a description"} aria-label={hasDescription ? "Description, show all or edit" : "Add a description"}
+          className="-mx-1 flex min-h-8 w-full max-w-[760px] items-center gap-2 rounded-[5px] px-1 text-left text-[16px] text-muted hover:bg-background hover:text-foreground">
+          <span className="min-w-0 flex-1 truncate">{hasDescription ? htmlToText(task.description).replace(/\s+/g, " ").trim() : <span className="text-accent underline decoration-dotted underline-offset-4">Add a description</span>}</span>
+          {hasDescription && <I.chevron className="h-4 w-4 shrink-0 -rotate-90" />}
         </button>
       )}
       {descEditing && (
@@ -1256,8 +1225,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [pendingNextStep, setPendingNextStep] = useState<{ kind: TaskActionKind; body: string } | null>(null);
   // Reply on a client's chat or text: the dock's box switches to it (Derek, 2026-09-16).
   const [replyTarget, setReplyTarget] = useState<{ id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null>(null);
-  const { feedArea, composerFooter, openCompose, showDescription } = useTaskMessaging({
-    description: { node: descriptionBlock, has: hasDescription, onEdit: !descEditing && hasDescription ? () => setDescEditing(true) : undefined },
+  const { feedArea, composerFooter, openCompose } = useTaskMessaging({
+    createdLine,
     meetings: clientMeetings,
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
@@ -1439,13 +1408,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
   };
   const heading = (title: string, extra?: React.ReactNode) => (
-    <h2 className="flex items-center gap-2 text-[16px] font-bold uppercase tracking-wide text-foreground/70">
+    <h2 className="flex items-center gap-2 text-[16px] font-bold text-foreground">
       {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
       {title}{extra}
     </h2>
   );
-  const attachmentsBlock = !showAttachments ? null : (
-    <div className="mt-4 rounded-[5px] border bg-surface p-4 shadow-soft">
+  const attachmentsBlock = (
+    <div id="task-files" className="mt-8 rounded-[5px] border bg-surface p-4 shadow-soft">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         {heading("Links and files", task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>)}
         <span className="flex items-center gap-3">
@@ -1615,7 +1584,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
     <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
-      !hasDescription && { label: "Description", onClick: showDescription },
+      !hasDescription && { label: "Description", onClick: () => setDescEditing(true) },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
@@ -1664,78 +1633,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // ── Slid over the Inbox (Derek, 2026-10-01, mockup
   // https://claude.ai/artifact/1TH5ReGvyZ6r4TvadyTrEG): one column. The client
   // rail folds into a row of chips, and the header is back, full page, more, close.
-  const slideChip = "inline-flex h-9 items-center gap-1.5 rounded-full border bg-background px-3 text-[16px] text-muted transition hover:bg-surface hover:text-foreground";
-  const slideContext = (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {!isPersonal && <button onClick={onOpenClientList} title={`Open ${client.name}`} className={slideChip}>🏢 <b className="font-semibold text-foreground">{client.name}</b></button>}
-      {!isPersonal && <button onClick={onRenameProject} title="Rename list" className={slideChip}>📁 <b className="font-semibold text-foreground">{project.name}</b></button>}
-      {task.attachments.length > 0 && <button onClick={() => document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" })} className={slideChip}>📎 <b className="font-semibold text-foreground">{task.attachments.length} {task.attachments.length === 1 ? "file" : "files"}</b></button>}
-    </div>
-  );
-  const slideHeader = (
-    <div className="flex items-center gap-1 border-b px-3 py-2 text-[16px] text-muted">
-      <button onClick={onClose} title="Back (Esc)" className="min-w-0 truncate rounded-lg px-2 py-1.5 font-semibold hover:bg-background hover:text-foreground">← {slideBackLabel || "Inbox"}</button>
-      <span className="flex-1" />
-      <button onClick={onToggleFull} title="Open the task on its own page" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
-      <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
-      <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[
-        !!(messageDest?.phone && mayContactClient) && { label: `Call ${client.name}`, onClick: () => { window.location.href = `tel:${messageDest!.phone}`; } },
-        !!(hasMessaging && messageDest?.email) && { label: `Email ${client.name}`, onClick: () => startDraftEmail() },
-        !!onCopyClientLink && { label: "Copy client link", onClick: () => onCopyClientLink!() },
-        !!(ghlContactUrl && mayContactClient) && { label: "Open in GoHighLevel", onClick: () => window.open(ghlContactUrl!, "_blank", "noopener,noreferrer") },
-        { label: "Copy link to task", onClick: onCopyLink },
-        { label: "Duplicate here", onClick: () => onDuplicate() },
-        task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
-        { label: "Delete task", onClick: onDelete, danger: true },
-      ]} />
-      <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground"><I.close /></button>
-    </div>
-  );
-
-  const mainColumn = (
-    <>
-      {/* The top wears the client's colour, so whose task it is reads at a
-          glance (Derek, 2026-10-11: "it's very flat", mockup B). */}
-      <div className="rounded-[5px] border-t-4 px-4 pb-4 pt-3.5 sm:px-6"
-        style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 9%, var(--surface))` }}>
-        {titleRow}
-        {subMeta}
-        {detailsSentence}
-        {chipRow}
-      </div>
-      {/* Client and list as chips only in the narrow slide out, where there is
-          no top bar naming them (Derek, 2026-10-10: duplicate information). */}
-      {slideOver && !full && slideContext}
-      {delegationRow}
-      {nextStepCard}
-      {clientResponseBlock}
-      {section("Deliverables", (
-        <>
-          {documentBlock}
-          {briefBlock}
-          {reviewBlocks}
-          {draftEmailBlock}
-          {/* Links and files live in the client rail, under the contact card
-              (Derek, 2026-09-14). A personal to do has no rail, so they stay here. */}
-          {/* Files here only when there is no right column to hold them: the
-              full page from the Inbox showed them in both (Derek, 2026-10-10). */}
-          {(isPersonal || (slideOver && !full)) && <div id="task-files">{attachmentsBlock}</div>}
-          {!hasDeliverables && !((isPersonal || slideOver) && showAttachments) && (
-            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. Drop a file anywhere on the task to attach it.</p>
-          )}
-        </>
-      ), addMenu)}
-      {subtasksBlock && <div className="mt-7">{subtasksBlock}</div>}
-      <section className="mt-7">
-        {/* The composer the floating dock opens for a text, chat or note. */}
-        {composerFooter}
-        <div className="mt-6">{feedArea}</div>
-      </section>
-      {/* Over the Inbox there is no client rail: where the task lives sits here. */}
-      {slideOver && !full && !isPersonal && <section className="mt-10"><div className="mb-3">{heading("Where it lives")}</div><div className="rounded-[5px] border bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
-    </>
-  );
-
   // The client's SaaS URL, living in GoHighLevel as the contact's "SaaS"
   // custom field. Editable here because otherwise adding one means leaving
   // for GHL and coming back. Shown open in the rail, beside the contact's own
@@ -1769,71 +1666,178 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </div>
   );
 
-  // Client context only: who this is for, the three ways to reach them, and
-  // where the task lives (2026-09-14 redesign).
-  const railLink = "inline-flex items-center gap-1.5 font-semibold text-accent hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline";
-  const railCard = "mt-4 rounded-[5px] border bg-surface p-4 shadow-soft";
-  const clientRail = (
-    // Its own soft grey column with white cards, topped with the client's
-    // colour (Derek, 2026-10-11: "it's very flat", mockups A and B).
-    <aside aria-label="Client" className="w-full border-t bg-background px-5 pb-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:h-screen min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
-      <div className="-mx-5 border-t-4 px-5 pb-4 pt-5" style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 12%, var(--surface))` }}>
-        <div className="flex items-center gap-3">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-white shadow-soft" style={{ background: client.color }}>{initialsOf(client.name)}</span>
-          {/* The name alone. "Active Client" under every single client said the
-              same thing every time (Derek, 2026-09-29). */}
-          <div className="min-w-0 truncate text-[19px] font-bold">{client.name}</div>
-        </div>
-        {/* Call, Email and Client link as one line of links, not three
-            raised buttons (Derek, 2026-10-11, right column mockup). */}
-        {hasMessaging && (
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[16px]">
-            {messageDest?.phone && mayContactClient
-              ? <a href={`tel:${messageDest.phone}`} className={railLink}><I.phone className="h-4 w-4" />Call</a>
-              : <button disabled title="No phone on file" className={railLink}><I.phone className="h-4 w-4" />Call</button>}
-            <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} className={railLink}><I.mail className="h-4 w-4" />Email</button>
-            <button onClick={onCopyClientLink} disabled={!onCopyClientLink} title="Copy this client's link" className={railLink}><I.link className="h-4 w-4" />Client link</button>
-          </div>
-        )}
+  // ── Top bar (task detail redesign, 2026-10-11). Left: the client, which
+  // opens the client panel; the list; a small arrow to move the task or
+  // rename the list; then the client actions as icons. It replaces the client
+  // column, the quick link chips and "Where it lives".
+  const [topPanel, setTopPanel] = useState<"client" | "move" | null>(null);
+  const [bookOpen, setBookOpen] = useState(false);
+  // The dock opens in Chat, Text or Call from here; n changes to ask again.
+  const [dockRequest, setDockRequest] = useState<{ mode: "chat" | "sms" | "call"; n: number } | null>(null);
+  const askDock = (mode: "chat" | "sms" | "call") => setDockRequest((r) => ({ mode, n: (r?.n ?? 0) + 1 }));
+  const topIcon = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-accent transition hover:bg-background disabled:cursor-not-allowed disabled:text-muted disabled:opacity-50";
+  const popover = (children: React.ReactNode, wide = false) => (<>
+    <div className="fixed inset-0 z-30" onClick={() => setTopPanel(null)} />
+    <div className={`absolute left-0 top-full z-40 mt-1 ${wide ? "w-[min(380px,calc(100vw-32px))]" : "w-[min(320px,calc(100vw-32px))]"} rounded-lg border bg-surface text-left text-[16px] text-foreground shadow-lg`}>{children}</div>
+  </>);
+  const panelContact = (() => {
+    const ct = contactById(task.contactId) || linkedContactInfo || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+    // Hidden when it only repeats the client's name (Derek, 2026-10-11).
+    return ct && ct.name.trim().toLowerCase() !== client.name.trim().toLowerCase() ? ct : null;
+  })();
+  // The client panel: All tasks first, then what the client column held.
+  // "Contact: Open" is gone, it went to the same page as Open in GHL.
+  const clientPanel = popover(
+    <>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
+        <span className="min-w-0 flex-1 truncate text-[19px] font-bold">{client.name}</span>
+        <button onClick={() => { setTopPanel(null); onOpenClientList(); }} className="min-h-11 shrink-0 font-semibold text-accent hover:underline">All tasks</button>
       </div>
-      {(ghlContactUrl || linkedContactInfo?.ghlContactId) && (
-        <div className={railCard}>
-          <div className="mb-3">{heading("In GoHighLevel")}</div>
-          <div className="space-y-2.5">
-            {ghlContactUrl && (
-              <div className="flex items-center gap-2 text-[16px]">
-                <span className="w-28 shrink-0 text-muted">Contact</span>
-                <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
-                  className="min-w-0 truncate font-medium text-accent hover:underline">Open ↗</a>
-              </div>
-            )}
-            {linkedContactInfo?.ghlContactId && saasRow}
-            {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
-          </div>
+      {panelContact && (
+        <div className="flex items-center gap-2 border-t px-4 py-3"><span className="w-28 shrink-0 text-muted">Contact</span><span className="min-w-0 truncate font-medium">{panelContact.name}</span></div>
+      )}
+      {!!clientLinks?.length && (
+        <div className="border-t px-4 py-3">
+          <div className="mb-1 font-bold">Saved links</div>
+          <QuickLinksBar inline links={clientLinks} canEdit={false} onEdit={() => {}} onDelete={() => {}} onReorder={() => {}} />
         </div>
       )}
-      {attachmentsBlock}
-      <div className={railCard}>
-        <div className="mb-3">{heading("Where it lives")}</div>
-        {detailsBlock}
+      {linkedContactInfo?.ghlContactId && (
+        <div className="space-y-2.5 border-t px-4 py-3">
+          <div className="font-bold">In GoHighLevel</div>
+          {saasRow}
+          {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
+        </div>
+      )}
+    </>, true);
+  // Move to another client or list, and rename the list ("Where it lives").
+  const movePanel = popover(
+    <div className="space-y-3 p-3">
+      <dl className="space-y-3">
+        {/* Type-to-filter rather than a plain select: this list is every client
+            on the account, far past where scrolling a native dropdown is fast. */}
+        <Row label="Client" icon={<I.folder />}><SearchableSelect value={task.clientId} onChange={onMoveClient} options={clientSelectOptions} searchPlaceholder="Search clients…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] transition hover:border-border hover:bg-background" /></Row>
+        <Row label="List" icon={<I.list />}>
+          <select value={task.projectId} onChange={(e) => { if (e.target.value === "__new") onNewProject(); else onSetProject(e.target.value); }} aria-label="List"
+            className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition hover:border-border hover:bg-background focus:border-accent focus:bg-background">
+            {[...clientProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+            {clientProjects.every((p) => p.id !== task.projectId) && <option value={task.projectId}>{project?.name ?? "List"}</option>}
+            <option value="__new">+ New list…</option>
+          </select>
+        </Row>
+      </dl>
+      <button onClick={() => { setTopPanel(null); onRenameProject(); }} className="min-h-10 w-full rounded-md px-2 text-left font-medium text-accent hover:bg-background">Rename this list</button>
+    </div>);
+  const phone = messageDest?.phone && mayContactClient ? messageDest.phone : null;
+  const canBook = mayContactClient && !!messageDest?.ghlContactId;
+  // GHL and Client link, then the ways to reach the client. Chat and Email
+  // always stand beside the phone menu, never behind it: the team wants chat
+  // and email used more than calls and texts (Derek, 2026-10-11).
+  const clientActions = isPersonal ? null : (
+    <div role="group" aria-label="Client actions" className="flex flex-wrap items-center gap-0.5 sm:border-l sm:pl-2.5">
+      {ghlContactUrl && mayContactClient && (
+        <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open in GHL" aria-label="Open in GHL" className={topIcon}><I.bolt className="h-[18px] w-[18px]" /></a>
+      )}
+      {onCopyClientLink && <button onClick={onCopyClientLink} title="Copy the client link" aria-label="Copy the client link" className={topIcon}><I.link className="h-5 w-5" /></button>}
+      {hasMessaging && (<>
+        <span aria-hidden className="mx-1.5 h-5 w-px bg-border" />
+        <button onClick={() => askDock("chat")} title="Chat" aria-label="Chat" className={topIcon}><I.chatBubbles className="h-5 w-5" /></button>
+        <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} aria-label="Email" className={topIcon}><I.mail className="h-5 w-5" /></button>
+        <ActionMenu title={phone ? "Call or text" : "No phone on file"} triggerClassName="inline-flex h-10 shrink-0 items-center gap-0.5 rounded-lg pl-2.5 pr-1 text-accent transition hover:bg-background"
+          label={<><I.phone className="h-[18px] w-[18px]" /><I.chevron className="h-3.5 w-3.5 -rotate-90" /></>}
+          items={[
+            { label: "Call", onClick: () => askDock("call"), disabled: !phone },
+            { label: "Text", onClick: () => askDock("sms"), disabled: !phone },
+          ]} />
+        {canBook && <button onClick={() => setBookOpen(true)} title="Book" aria-label="Book" className={topIcon}><I.calendar className="h-5 w-5" /></button>}
+      </>)}
+    </div>
+  );
+  const topLeft = (<>
+    <nav aria-label="Where this task lives" className="flex min-w-0 items-center gap-1.5">
+      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
+      <span className="relative min-w-0">
+        <button onClick={() => setTopPanel((t) => (t === "client" ? null : "client"))} aria-expanded={topPanel === "client"} title={`About ${client.name}`}
+          className="-mx-1 max-w-full truncate rounded px-1 font-semibold text-foreground hover:bg-background hover:underline">{client.name}</button>
+        {topPanel === "client" && clientPanel}
+      </span>
+      <span className="shrink-0">/</span>
+      <span className="min-w-0 truncate">{project.name}</span>
+      <span className="relative shrink-0">
+        <button onClick={() => setTopPanel((t) => (t === "move" ? null : "move"))} aria-expanded={topPanel === "move"} title="Move to another client or list" aria-label="Move to another client or list"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition hover:bg-background hover:text-foreground"><I.chevron className="h-4 w-4 -rotate-90" /></button>
+        {topPanel === "move" && movePanel}
+      </span>
+    </nav>
+    {clientActions}
+  </>);
+  // Over the Inbox the header is narrow, so the client, list and client
+  // actions sit on their own row under it (2026-10-11, the move arrow there too).
+  const slideContext = <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">{topLeft}</div>;
+  const slideHeader = (
+    <div className="flex items-center gap-1 border-b px-3 py-2 text-[16px] text-muted">
+      <button onClick={onClose} title="Back (Esc)" className="min-w-0 truncate rounded-lg px-2 py-1.5 font-semibold hover:bg-background hover:text-foreground">← {slideBackLabel || "Inbox"}</button>
+      <span className="flex-1" />
+      <button onClick={onToggleFull} title="Open the task on its own page" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
+      <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
+      <div className="relative">
+      <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[
+        { label: "Labels", onClick: () => setLabelOpen(true) },
+        { label: "Copy link to task", onClick: onCopyLink },
+        { label: "Duplicate here", onClick: () => onDuplicate() },
+        task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
+        { label: "Delete task", onClick: onDelete, danger: true },
+      ]} />
+      {labelPicker}
       </div>
-    </aside>
+      <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground"><I.close /></button>
+    </div>
+  );
+
+  const mainColumn = (
+    <>
+      {slideOver && !full && slideContext}
+      {/* The top wears the client's colour, so whose task it is reads at a
+          glance (Derek, 2026-10-11: "it's very flat", mockup B). */}
+      <div className="rounded-[5px] border-t-4 px-4 pb-4 pt-3.5 sm:px-6"
+        style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 9%, var(--surface))` }}>
+        {titleRow}
+        {subMeta}
+        {detailsSentence}
+        {chipRow}
+        <div className="mt-1.5">{descriptionBlock}</div>
+      </div>
+      {delegationRow}
+      {nextStepCard}
+      {clientResponseBlock}
+      {section("Deliverables", (
+        <>
+          {documentBlock}
+          {briefBlock}
+          {reviewBlocks}
+          {draftEmailBlock}
+          {!hasDeliverables && (
+            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here.</p>
+          )}
+        </>
+      ), addMenu)}
+      {subtasksBlock && <div className="mt-7">{subtasksBlock}</div>}
+      {/* Links and files under the checklist, for every task: the client
+          column that held them is gone (task detail redesign, 2026-10-11). */}
+      {attachmentsBlock}
+      <section className="mt-7">
+        {/* The composer the floating dock opens for a text, chat or note. */}
+        {composerFooter}
+        <div className="mt-6">{feedArea}</div>
+      </section>
+    </>
   );
 
   const iconButton = "rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
   const headerBar = (
-        <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-[16px] text-muted">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
-            <button onClick={onOpenClientList} title={`Back to ${client.name}'s list`} className="-mx-1 truncate rounded px-1 font-medium text-foreground hover:bg-background hover:underline">{client.name}</button>
-            <span className="shrink-0">/</span>
-            <button onClick={onRenameProject} title="Rename list" className="-mx-1 truncate rounded px-1 hover:bg-background hover:text-foreground hover:underline">{project.name}</button>
-          </span>
-          {/* The client's quick links, as on their page, in reach from any of
-              their tasks (Derek, 2026-10-08). Edited on the client's page. */}
-          {!!clientLinks?.length && (
-            <QuickLinksBar inline links={clientLinks} canEdit={false} onEdit={() => {}} onDelete={() => {}} onReorder={() => {}} />
-          )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-5 py-2 text-[16px] text-muted">
+          {topLeft}
           <div className="ml-auto flex items-center gap-1">
             {navTotal > 1 && (
               <div className="mr-1 flex items-center">
@@ -1841,12 +1845,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <span className="min-w-[64px] text-center tabular-nums">{navIndex + 1} of {navTotal}</span>
                 <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className={iconButton}><I.chevron className="-rotate-90" /></button>
               </div>
-            )}
-            {ghlContactUrl && mayContactClient && (
-              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
-                className="mr-1 inline-flex h-10 items-center gap-1.5 rounded-lg border px-3 font-medium text-foreground transition hover:bg-background">
-                <I.bolt /> <span className="hidden sm:inline">Open in GHL</span>
-              </a>
             )}
             {/* Copy for Claude is used on most tasks, so it sits out here, one click
                 (Derek, 2026-09-16: "put the little star icon on the outside"). */}
@@ -1858,6 +1856,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 Delete right beside Close. */}
             <div className="relative">
               <ActionMenu label={<I.dots />} title="More actions" triggerClassName={iconButton} items={[
+                { label: "Labels", onClick: () => setLabelOpen(true) },
                 { label: "Copy link to task", onClick: onCopyLink },
                 { label: "Duplicate here", onClick: () => onDuplicate() },
                 { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
@@ -1887,6 +1886,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </div>
                 </>
               )}
+              {labelPicker}
             </div>
             <button onClick={onClose} title="Close" aria-label="Close" className={iconButton}><I.close /></button>
           </div>
@@ -1899,30 +1899,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           window's (Derek, 2026-08-26). --drawer-left is set by Cockpit and
           follows the sidebar; below md the sidebar is an overlay, so the
           drawer is full width. */}
-      {/* --dock-right keeps the floating dock over the task column, clear of
-          the client rail. Zero below 1100px, where the rail stacks under. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
-        className={`[--dock-right:0px] ${isPersonal || (slideOver && !full) ? "" : "min-[1100px]:[--dock-right:340px]"} ${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
+        className={`${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
         <div className="hidden sm:block">{slideOver && !full ? slideHeader : headerBar}</div>
 
-        {/* One scroll container. The client rail is sticky inside it at
-            1100px and up, and stacks under the task below that. A task with
-            no contact and no comments has no client context worth a rail, so
-            where it lives goes at the end of the page instead. */}
-        <div className="flex flex-1 flex-col overflow-y-auto bg-surface min-[1100px]:flex-row min-[1100px]:items-start">
+        {/* One scroll container and one column, 1280px at most, in every mode
+            (task detail redesign, 2026-10-11: the client column is gone). */}
+        <div className="flex flex-1 flex-col overflow-y-auto bg-surface">
           {/* All white, no boxed in sheet (Derek, 2026-09-16: "I don't like it
               boxed in so just make it all white"). */}
           <div className="min-w-0 flex-1 pb-32 sm:px-5 sm:pt-5">
             <div className="sm:hidden">{slideOver && !full ? slideHeader : headerBar}</div>
             <div className="px-2 pt-3 sm:px-0 sm:pt-0">
-            <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-10 sm:py-5">
+            <div className="mx-auto w-full max-w-[1280px] px-4 py-4 sm:px-10 sm:py-5">
               {mainColumn}
-              {isPersonal && section("List", detailsBlock)}
             </div>
             </div>
           </div>
-          {!isPersonal && !(slideOver && !full) && clientRail}
         </div>
         {/* Shown over the whole drawer while a file is being dragged in, so
             the target is obvious and it is clear the drop will land here
@@ -1964,10 +1958,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           } : undefined}
           reachable={{ chat: hasMessaging, sms: !!messageDest?.phone, email: !!messageDest?.email }}
           replyTarget={replyTarget}
+          openRequest={dockRequest}
           onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
           bar={!!slideOver && !full}
         />
+      {bookOpen && messageDest?.ghlContactId && (
+        <BookAppointment target={{ kind: "book", ghlContactId: messageDest.ghlContactId, name: messageDest.name || client.name }}
+          meId={meId} onClose={() => setBookOpen(false)} onDone={() => {}} pushToast={(m) => pushToast(m)} />
+      )}
       {lightbox !== null && galleryImages[lightbox] && (
         <ImageLightbox images={galleryImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)}
           onDownload={(img) => onDownloadFileAs(img.id, img.name)} />
