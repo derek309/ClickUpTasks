@@ -93,6 +93,8 @@ import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDate, friendlyDue } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
 import { TaskDrawer } from "./cockpit/TaskDrawer";
+import { FeedbackTab, FEEDBACK_TASK_ID } from "./cockpit/FeedbackTab";
+import { appendCommentDb } from "@/lib/db";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
 import { ClientJournal } from "./cockpit/ClientJournal";
 import { ClientsBoard, type WorkBoardGroup, type WorkItem } from "./cockpit/ClientsBoard";
@@ -3550,6 +3552,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             className="rounded-md bg-white/20 px-2.5 py-1 text-[13px] font-semibold hover:bg-white/30">Reload</button>
         </div>
       )}
+      <FeedbackTab where={openTask ? `the task "${openTask.title}" (${openTask.id})` : settingsView ? "Settings" : inboxView ? "the Inbox" : myWork ? "My work" : "the task list"}
+        onSend={(body) => {
+          // Straight to the database: the feedback task may not be in this
+          // teammate's loaded tasks, so addComment (which needs it) won't do.
+          appendCommentDb(FEEDBACK_TASK_ID, { id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString() });
+          if (me.id !== "u_derek") notify("u_derek", `${me.name} sent feedback on ClickUpTasks`, FEEDBACK_TASK_ID, { kind: "message" });
+          pushToast("Thanks, feedback sent");
+        }} />
       <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>
