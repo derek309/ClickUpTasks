@@ -906,7 +906,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="text-[16px] font-bold tracking-wide">FOLLOW UP</span>
         <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
       </div>
-      <div className="px-4 pt-2.5 text-[14px] font-bold tracking-wide text-muted sm:px-5">FOLLOW UP</div>
+      {/* How late it is, first thing you see (Derek, 2026-10-11). */}
+      <div className="px-4 pt-2.5 text-[14px] font-bold uppercase tracking-wide text-muted sm:px-5">
+        Follow up{(openStep || followUp) && (stepDate.tone === "late" || stepDate.tone === "soon") && (
+          <span className={stepDate.tone === "late" ? "text-danger" : "text-highlight"}> · {stepDate.label.split(",")[0]}</span>
+        )}
+      </div>
       <div className="flex items-start gap-3.5 px-4 pb-3 pt-1.5 sm:px-5">
       <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
         className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-default disabled:border-dashed disabled:opacity-50 ${asking ? "border-success bg-success text-white" : "border-accent bg-surface text-transparent hover:bg-accent-soft hover:text-accent"}`}>
@@ -965,7 +970,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {/* One sentence, each part a word to click (Derek, 2026-10-11,
                 follow up mockup A): the date, who it's on, and what finishes
                 it by itself. What set it is a grey line under it. */}
-            <p className="mt-1 text-[16px] leading-relaxed">
+            <div className="mt-1 text-[16px] leading-relaxed">
               <span className="group/d relative inline-flex items-baseline">
                 <InlineDate value={followUp} onChange={moveFollowUp} formatValue={() => stepDate.label} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
                   className={`-mx-1 font-semibold underline decoration-dotted underline-offset-4 ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : ""}`} />
@@ -981,22 +986,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </select>
                 </label>
               </>)}
-              {openStep && watchState ? (<>
-                .{" "}
-                <span className="font-semibold text-sky-700 dark:text-sky-300"><span className="mr-1 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-600 align-middle" />{watchState.waiting}</span>
-                <button onClick={() => patchStep({ nextStepWatch: null })} title="Stop waiting on this" aria-label="Stop waiting on this" className="ml-0.5 px-0.5 text-muted hover:text-danger">×</button>
-              </>) : openStep && !watch && suggestions.some((sg) => sg.watch) ? (<>
-                .{" "}
-                <ActionMenu label={<span className="font-medium text-muted underline decoration-dotted underline-offset-4">Done when…</span>} title="Finish this follow up by itself when something happens"
-                  triggerClassName="rounded hover:bg-background"
-                  items={suggestions.filter((sg) => sg.watch).map((sg) => ({ label: sg.hint.replace(/^Done when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) }))} />
-              </>) : null}
-            </p>
-            {openStep && (
-              <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
-                className="mt-0.5 block text-[15px] text-muted hover:text-foreground hover:underline">
-                {TASK_ACTION_META[openStep.kind].verb} · {timeAgo(openStep.at)}
-              </button>
+              {/* What finishes it by itself, in the same sentence: "or sooner if
+                  Brian replies" (Derek, 2026-10-11, follow up v2). */}
+              {openStep && (watch || suggestions.some((sg) => sg.watch)) && (<>
+                , <span className="text-muted">or sooner if</span>{" "}
+                <span className="inline-block">
+                  <ActionMenu title="Finish this follow up by itself when something happens"
+                    label={<span className={`font-semibold underline decoration-dotted underline-offset-4 ${watch ? (watchState?.met ? "text-success" : "text-sky-700 dark:text-sky-300") : "text-muted"}`}>
+                      {watch ? (suggestions.find((sg) => sg.watch === openStep.nextStepWatch)?.hint.replace(/^Done when /, "") ?? watchState?.waiting ?? "it happens") : "…"} ▾</span>}
+                    triggerClassName="rounded hover:bg-background"
+                    items={[
+                      ...suggestions.filter((sg) => sg.watch && sg.watch !== openStep.nextStepWatch).map((sg) => ({ label: sg.hint.replace(/^Done when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) })),
+                      watch && { label: "Nothing, I'll tick it myself", onClick: () => patchStep({ nextStepWatch: null }) },
+                    ]} />
+                </span>
+              </>)}
+            </div>
+            {/* One quiet line of history: what set it, and what came before. */}
+            {(openStep || finished.length > 0) && (
+              <p className="mt-1 text-[15px] text-muted">
+                {openStep && (
+                  <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set" className="hover:text-foreground hover:underline">
+                    {TASK_ACTION_META[openStep.kind].verb} {timeAgo(openStep.at)}
+                  </button>
+                )}
+                {finished.length > 0 && <>{openStep ? " · before that: " : "Before this: "}{finished.map((f) => `${f.text} (${formatDue(f.doneAt.slice(0, 10))})`).join(", ")}</>}
+              </p>
             )}
             {stepMoves >= 3 && (
               <div className="mt-2.5 rounded-lg bg-amber-50 px-3 py-2 text-[16px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
@@ -1007,14 +1022,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="mt-2.5 flex flex-wrap items-center gap-2.5 rounded-lg bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                 <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${client.name.split(" ")[0]} hasn't approved yet` : `${client.name.split(" ")[0]} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
                 <button onClick={nudge} className="rounded-[5px] bg-surface px-3 py-1.5 font-semibold text-foreground ring-1 ring-border hover:ring-accent">💬 Nudge {client.name.split(" ")[0]}</button>
-              </div>
-            )}
-            {finished.length > 0 && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[16px] text-muted">
-                <span>Done so far:</span>
-                {finished.map((f) => (
-                  <span key={`${f.doneAt}_${f.text}`} className="rounded-[5px] bg-background px-2 py-0.5"><span className="text-success">✓</span> {f.text} {formatDue(f.doneAt.slice(0, 10))}</span>
-                ))}
               </div>
             )}
           </>
