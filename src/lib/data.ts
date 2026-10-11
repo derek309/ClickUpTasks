@@ -3146,6 +3146,26 @@ export function quickStepName(key: DeliverableKey): string | null {
   return what ? `Create ${what} Review` : null;
 }
 
+/** Which round a review step is (Derek, 2026-10-11: "as the steps grow we
+ *  will want to see that"): the client's review steps count up, a changes
+ *  step says which round and the version it answered, an approval its version. */
+export function reviewRound(subtasks: Subtask[], sub: Subtask): string | null {
+  const plan = planSteps(subtasks);
+  const upTo = plan.slice(0, plan.findIndex((x) => x.id === sub.id) + 1);
+  const a = sub.addedFor ?? "";
+  if (sub.onClient && a.startsWith("sent:")) {
+    return `Review round ${upTo.filter((x) => x.onClient && x.addedFor?.startsWith("sent:")).length}`;
+  }
+  const changes = /^(doc|image|page|video):(\d+)$/.exec(a);
+  if (changes) {
+    const n = upTo.filter((x) => /^(doc|image|page|video):\d+$/.test(x.addedFor ?? "")).length;
+    return `Changes round ${n}${Number(changes[2]) > 0 ? ` · version ${changes[2]}` : ""}`;
+  }
+  const ok = /^ok:(doc|image|page|video):(\d+)$/.exec(a);
+  if (ok && Number(ok[2]) > 0) return `Approved version ${ok[2]}`;
+  return null;
+}
+
 /** What a finished step hands to the next: its client work still under way
  *  (a document or review not yet approved, instructions, a draft email).
  *  Links and files stay where they were used (Derek, 2026-10-11: "carry over

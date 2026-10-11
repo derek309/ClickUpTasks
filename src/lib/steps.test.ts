@@ -250,3 +250,26 @@ describe("a step's name goes back when its work comes off", () => {
     expect(release2([{ ...named, title: "Build it" }], "page")[0].title).toBe("Build it");
   });
 });
+
+import { reviewRound } from "./data";
+
+describe("the round a review step is", () => {
+  const list = [
+    s("a", "Create"),
+    s("w1", "Waiting on Derek", { onClient: true, addedFor: "sent:a" }),
+    s("c1", "Make Derek's changes", { addedFor: "doc:1" }),
+    s("w2", "Waiting on Derek", { onClient: true, addedFor: "sent:c1" }),
+    s("ok", "Approved", { addedFor: "ok:doc:2" }),
+  ];
+  it("counts the client's reviews", () => {
+    expect(reviewRound(list, list[1])).toBe("Review round 1");
+    expect(reviewRound(list, list[3])).toBe("Review round 2");
+  });
+  it("names the changes round and the version it answered", () => {
+    expect(reviewRound(list, list[2])).toBe("Changes round 1 · version 1");
+  });
+  it("names the approved version; other steps have none", () => {
+    expect(reviewRound(list, list[4])).toBe("Approved version 2");
+    expect(reviewRound(list, list[0])).toBeNull();
+  });
+});

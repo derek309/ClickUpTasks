@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -41,6 +41,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   stepNo?: { at: number; total: number };
   onPrev?: () => void;
   onNext?: () => void;
+  /** Which round of the review this is ("Review round 2"). */
+  round?: string | null;
   /** Copies this step, with the task around it, for Claude. */
   onCopyForClaude?: () => void;
   /** Opened from "Create Checklist": the to-do box is out and ready. */
@@ -349,9 +351,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                     onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                     className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
                 </div>
-                {(sub.done || !isCurrent) && (
+                {(sub.done || !isCurrent || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
-                    <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>
+                    {round && <span className="font-semibold text-foreground">{round}</span>}
+                    {(sub.done || !isCurrent) && <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>}
                   </div>
                 )}
                 {controls}
