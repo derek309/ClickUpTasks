@@ -690,7 +690,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </label>
   );
   const detailsSentence = (
-    <div className="mt-4 text-[16px] leading-relaxed sm:text-[18px]">
+    <div className="mt-2.5 text-[16px] leading-relaxed sm:text-[18px]">
       {wordPick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />{STATUS_META[effectiveStatus(task)].label}</>,
         "Status", effectiveStatus(task), pickableStatuses(effectiveStatus(task)).map((st) => ({ value: st, label: STATUS_META[st].label })), (v) => onPatch({ status: v as TaskStatus }))}
       , on {wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
@@ -899,7 +899,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     : stepDate.tone === "none" ? "No date yet"
     : stepDate.label;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
-    <div className={`mt-7 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
+    <div className={`mt-4 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
       {/* No coloured band: the date under the step says how late it is
           (Derek, 2026-10-10: "follow up is very clunky", desktop too). */}
       <div className={`hidden items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
@@ -1603,7 +1603,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
-    <section className="mt-10" id={title === "Deliverables" ? "task-deliverables" : undefined}>
+    <section className="mt-7" id={title === "Deliverables" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-[17px] font-bold sm:text-[19px] tracking-[-0.01em]">{title}</h2>
         {right}
@@ -1676,8 +1676,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           )}
         </>
       ), addMenu)}
-      {subtasksBlock && <div className="mt-10">{subtasksBlock}</div>}
-      <section className="mt-10">
+      {subtasksBlock && <div className="mt-7">{subtasksBlock}</div>}
+      <section className="mt-7">
         {/* The composer the floating dock opens for a text, chat or note. */}
         {composerFooter}
         <div className="mt-6">{feedArea}</div>
@@ -1860,7 +1860,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <div className="min-w-0 flex-1 pb-32 sm:px-5 sm:pt-5">
             <div className="sm:hidden">{slideOver && !full ? slideHeader : headerBar}</div>
             <div className="px-2 pt-3 sm:px-0 sm:pt-0">
-            <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-10 sm:py-9">
+            <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-10 sm:py-5">
               {mainColumn}
               {isPersonal && section("List", detailsBlock)}
             </div>
