@@ -1491,13 +1491,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       })()}
       {sub.onClient ? (
         <span className="inline-flex items-center gap-1.5 font-medium"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>On {client.name}</span>
-      ) : <InlineAssignee value={sub.assigneeId ?? null} size={24}
-        onChange={(a) => {
-          onPatchSub(sub.id, { assigneeId: a });
-          // Giving the current step to a teammate: the follow up finishes
-          // when they mark it done (brief, section 6).
-          if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
-        }} />}
+      ) : (
+        // Who has it, labelled like Due and Follow up (Derek, 2026-10-11).
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-muted">Assign</span>
+          <InlineAssignee value={sub.assigneeId ?? null} size={24}
+            onChange={(a) => {
+              onPatchSub(sub.id, { assigneeId: a });
+              // Giving the current step to a teammate: the follow up finishes
+              // when they mark it done (brief, section 6).
+              if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
+            }} />
+          {sub.assigneeId && <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span>}
+        </span>
+      )}
       {/* No stage to pick: the step is the stage (Derek, 2026-10-11). The task's
           follow up date, settable from the step it is about. */}
       {isActive && !sub.done && (
