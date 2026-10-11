@@ -257,7 +257,6 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   );
   const quickStart = (
     <section aria-label="Add to this step" className="flex flex-col gap-2">
-      <h3 className="text-[17px] font-bold">Add</h3>
       <div className="flex flex-wrap gap-2">
         {options.map((o) => (
           <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.note}
