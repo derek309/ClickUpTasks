@@ -974,6 +974,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // checklist, approval records itself and the next planned step starts.
   // Each is added once (addedFor), so reading the same stage again adds
   // nothing.
+  // Only something done to the document moves the steps: its stage changing
+  // while this task is open, or, on the client's own step, whatever the
+  // client did. Putting a document on a step, or saving a draft, does not
+  // (Derek, 2026-10-11: "it created the next step a little too fast").
+  const seenStage = useRef<Record<string, string>>({});
+  const [movedTo, setMovedTo] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const moved: Record<string, string> = {};
+    for (const k of ["page", "image", "video", "doc"] as const) {
+      const r = reviews[k];
+      if (!r) continue;
+      const id = `${task.id}:${k}`;
+      const prev = seenStage.current[id];
+      if (prev && prev !== r.status) moved[k] = r.status;
+      seenStage.current[id] = r.status;
+    }
+    if (Object.keys(moved).length) setMovedTo((m) => ({ ...m, ...moved }));
+  }, [reviewStates]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A change belongs to the step it happened on, never a later one.
+  const currentStepId = activeStep?.id ?? "";
+  useEffect(() => { setMovedTo({}); }, [currentStepId]);
   const stageKey = (() => {
     if (!activeStep || isHandoffStep(activeStep, task.assigneeId)) return "";
     const k = reviewOnStep(activeStep);
@@ -981,6 +1002,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!k || !r) return "";
     const working = activeStep.onClient || activeStep.holds?.includes(k) || stepStage(activeStep, task.assigneeId) === "review";
     if (!working) return "";
+    // Our own step moves only when the stage just changed, not on how it stood.
+    if (!activeStep.onClient && movedTo[k] !== r.status) return "";
     if (r.status === "with_client" && !activeStep.onClient) return `${activeStep.id}|${k}|sent|${r.id}|sent:${activeStep.id}`;
     if (r.status === "client_submitted") return `${activeStep.id}|${k}|changes|${r.id}|${k}:${r.version}`;
     if (r.status === "approved" || r.status === "completed") return `${activeStep.id}|${k}|ok|${r.id}|ok:${k}:${r.version}`;
@@ -990,6 +1013,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!stageKey) return;
     const [stepId, kind, what, docId, key] = stageKey.split("|");
     const k = kind as "page" | "image" | "video" | "doc";
+    setMovedTo((m) => { const n = { ...m }; delete n[k]; return n; });
     const name = reviews[k]?.title?.trim() || (k === "doc" ? "the document" : "the review");
     const from = task.subtasks.find((x) => x.id === stepId);
     if (what === "sent") {
