@@ -28,6 +28,7 @@ export async function clientAnsweredOnTask(taskId: string | null, what: string):
   // Follow up column is where people look for what needs them now.
   const today = todayPacific();
   await supabaseAdmin.from("tasks").update({ follow_up_at: today, updated_by: null }).eq("id", taskId).gt("follow_up_at", today);
-  // A step waiting on their reply ("Check in if they haven't replied") is done.
-  if (what === "reply") await stepsOnClientReply(taskId).catch(() => false);
+  // Any answer from them (a reply, an approval, sent changes) finishes a step
+  // waiting on their reply ("Check in if they haven't replied").
+  await stepsOnClientReply(taskId).catch(() => false);
 }

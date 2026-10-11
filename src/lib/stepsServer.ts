@@ -94,10 +94,12 @@ export async function stepsOnReviewApproved(taskId: string, kind: ReviewKindKey,
 export async function stepsOnClientReply(taskId: string): Promise<boolean> {
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
-    const cur = currentStep(list);
-    if (!cur || cur.finishWhen !== "reply") return null;
+    // Any open step waiting on their reply, current or not: a changes step
+    // their answer just made can sit in front of it.
+    const waiting = list.filter((x) => !x.done && x.finishWhen === "reply").map((x) => x.id);
+    if (!waiting.length) return null;
     const now = new Date().toISOString();
-    return list.map((x) => (x.id === cur.id ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+    return list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
   });
 }
 

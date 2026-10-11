@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stepsOnCommentAfterApproval, stepsOnCommentRemoved } from "@/lib/stepsServer";
+import { stepsOnClientReply, stepsOnCommentAfterApproval, stepsOnCommentRemoved } from "@/lib/stepsServer";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
@@ -57,6 +57,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // task's changes step (replies to a thread are part of that thread).
   const late = !asked && scope.documentStatus === "approved" && !payload.parentId && !!body
     ? await stepsOnCommentAfterApproval(scope.taskId, scope.kind, { id: r.comment.id as string, body }).catch(() => false) : false;
+  // A comment is them answering: a check-in waiting on their reply is done.
+  await stepsOnClientReply(scope.taskId).catch(() => false);
   await notifyOwnerOfClientDoc(scope, {
     always: asked || late,
     text: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} the ${noun}${reviewOnTask(scope)}.`,
