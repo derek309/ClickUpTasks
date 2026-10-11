@@ -1455,17 +1455,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           from the conversation (Derek, 2026-10-09: "same as in mail"). A
           click opens the lightbox; the name is on hover. */}
       {galleryTiles.length > 0 && (
-        <div className="mt-2 columns-2 gap-2">
+        // Small tiles now the files sit in the wide column, not a 340px rail.
+        <div className="mt-2 flex flex-wrap gap-2">
           {galleryTiles.map(({ a, own }) => (
             <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
               onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
               onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
-              className={`group relative mb-2 break-inside-avoid overflow-hidden rounded-lg bg-background ring-1 ring-[var(--border)] hover:ring-2 hover:ring-accent ${dragAttId === a.id ? "opacity-40" : ""}`}>
+              className={`group relative h-28 overflow-hidden rounded-lg bg-background ring-1 ring-[var(--border)] hover:ring-2 hover:ring-accent ${dragAttId === a.id ? "opacity-40" : ""}`}>
               <button onClick={() => openPreview(a)} title={a.name} aria-label={`Preview ${a.name}`} className="block w-full">
                 {a.path && attImageUrls[a.path]
                   // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={attImageUrls[a.path]} alt={a.name} className="block w-full" />
-                  : <span className="grid h-24 w-full place-items-center text-muted">🖼️</span>}
+                  ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-28 w-auto max-w-[240px] object-cover" />
+                  : <span className="grid h-28 w-40 place-items-center text-muted">🖼️</span>}
               </button>
               <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
                 {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>}
@@ -1755,11 +1756,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </div>
   );
   const topLeft = (<>
-    <nav aria-label="Where this task lives" className="flex min-w-0 items-center gap-1.5">
+    <nav aria-label="Where this task lives" className="flex min-w-0 max-w-full items-center gap-1.5">
       <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
       <span className="relative min-w-0">
         <button onClick={() => setTopPanel((t) => (t === "client" ? null : "client"))} aria-expanded={topPanel === "client"} title={`About ${client.name}`}
-          className="-mx-1 max-w-full truncate rounded px-1 font-semibold text-foreground hover:bg-background hover:underline">{client.name}</button>
+          className="block max-w-[24rem] truncate rounded px-1 font-semibold text-foreground hover:bg-background hover:underline">{client.name}</button>
         {topPanel === "client" && clientPanel}
       </span>
       <span className="shrink-0">/</span>
