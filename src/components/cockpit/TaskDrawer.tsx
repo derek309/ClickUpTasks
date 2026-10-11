@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1390,32 +1390,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the task's own steps in order, each with a foundation stage. Done steps
   // are one line, the current one is open with its follow up, upcoming ones
   // are muted and wait their turn.
-  const stageTag = (st: TaskStatus) => (
-    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] bg-background px-2 text-[16px] font-semibold">
-      <span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}
-    </span>
-  );
-  const stagePicker = (sub: Subtask, isActive: boolean) => {
-    const st = stepStage(sub, task.assigneeId);
-    // A teammate's step is Delegated because it is theirs, as with the task.
-    if (isHandoffStep(sub, task.assigneeId)) return stageTag("delegated");
-    return (
-      <label className="relative inline-flex shrink-0 cursor-pointer" title="Change this step's stage">
-        {stageTag(st)}
-        <select value={st} aria-label={`Stage for ${sub.title}`}
-          onChange={(e) => {
-            const next = e.target.value as TaskStatus;
-            onPatchSub(sub.id, { stage: next });
-            // The current step's stage is the task's status.
-            const status = isActive ? statusForStep(task.status, next) : null;
-            if (status) onPatch({ status });
-          }}
-          className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
-          {STEP_STAGES.map((x) => <option key={x} value={x}>{STATUS_META[x].label}</option>)}
-        </select>
-      </label>
-    );
-  };
   // What the client sent from their portal, under the step it belongs to.
   const clientItemsOf = (stepId: string | null) => clientChanges.filter((c) => (stepId ? c.stepId === stepId : !c.stepId));
   const clientChangesList = (items: Subtask[]) => items.length === 0 ? null : (
@@ -1461,7 +1435,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // when they mark it done (brief, section 6).
           if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
         }} />}
-      {!sub.done && stagePicker(sub, isActive)}
+      {/* No stage to pick: the step is the stage (Derek, 2026-10-11). The task's
+          follow up date, settable from the step it is about. */}
+      {isActive && !sub.done && (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-muted">Follow up</span>
+          <InlineDate value={followUp} onChange={(v) => moveStepDate(v)} onClear={() => moveStepDate(null)}
+            emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
+            className="font-semibold underline decoration-dotted underline-offset-4" />
+        </span>
+      )}
     </div>
   );
   // A step on the task: one line that says what is happening inside it, the
@@ -1590,8 +1573,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex shrink-0 items-center gap-2">
             {sub.onClient && <span title={`On ${client.name}`} className="flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>}
             {sub.assigneeId && <Avatar id={sub.assigneeId} size={22} />}
-            {/* A finished step shows how it ended, not a stage (Derek, 2026-10-11). */}
-            {!sub.done && <span className="hidden sm:inline-flex">{stageTag(st)}</span>}
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
           </span>
         </button>
