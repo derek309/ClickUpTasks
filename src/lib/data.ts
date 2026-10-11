@@ -847,6 +847,9 @@ export interface Subtask {
   doneAt?: string;
   /** On a client's own change request (fromClient): the step it belongs to. */
   stepId?: string;
+  /** What finishes this step's follow up by itself once it starts: "reply"
+   *  for a check-in that ends when the client writes back. */
+  finishWhen?: "reply";
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
@@ -2846,17 +2849,98 @@ export function statusForStep(current: TaskStatus, next: TaskStatus | null): Tas
 /** A client sent changes on a review: the review step is done, and two steps
  *  follow it, making the changes and a fresh client review. Returns the new
  *  list, or null when this round was already added. */
-export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clientFirstName: string, key: string, makeId: () => string): Subtask[] | null {
+export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clientFirstName: string, key: string, makeId: () => string,
+  opts: { review?: DeliverableKey; todos?: StepTodo[]; now?: string } = {}): Subtask[] | null {
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === reviewStepId);
   if (at < 0) return null;
+  const now = opts.now ?? new Date().toISOString();
+  // The review moves onto the changes step to be worked on, and the new client
+  // review makes it, so it follows there when the changes are done. The
+  // client's comments are the changes step's to-do list (Derek, 2026-10-11).
   const round: Subtask[] = [
-    { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key },
-    { id: makeId(), title: "Client review", done: false, stage: "review", addedFor: key },
+    { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key, startedAt: now,
+      ...(opts.review ? { holds: [opts.review] } : {}), ...(opts.todos?.length ? { todos: opts.todos } : {}) },
+    { id: makeId(), title: `Send to ${clientFirstName} again`, done: false, stage: "review", addedFor: key, ...(opts.review ? { makes: opts.review } : {}) },
   ];
-  const list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true } : s));
+  let list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  if (opts.review) list = releaseFromSteps(list, opts.review);
   list.splice(at + 1, 0, ...round);
   return list;
+}
+
+/** The client approved and nothing comes after the review step: a step that
+ *  says so and asks what's next (Derek, 2026-10-11). Null once added. */
+export function addApprovedStep(subtasks: Subtask[], reviewStepId: string, clientFirstName: string, name: string, key: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === reviewStepId);
+  if (at < 0) return null;
+  const list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  list.splice(at + 1, 0, { id: makeId(), title: `${clientFirstName} approved ${name}: what's next?`, done: false, stage: "approved", addedFor: key, startedAt: now });
+  return list;
+}
+
+/** Where the client's changes go: the open changes step, or a new one made
+ *  in front of the current step (Derek, 2026-10-11: "it creates a stage if
+ *  there's not one already"). Rounds of review changes have their own step
+ *  and are not this one. */
+export function changesStepFor(subtasks: Subtask[], clientFirstName: string, makeId: () => string, now = new Date().toISOString()): { list: Subtask[]; stepId: string; made: boolean } {
+  const open = planSteps(subtasks).find((s) => !s.done && s.stage === "changes_requested" && !s.addedFor?.includes(":"));
+  if (open) return { list: subtasks, stepId: open.id, made: false };
+  const step: Subtask = { id: makeId(), title: `Changes from ${clientFirstName}`, done: false, stage: "changes_requested", addedFor: "changes", startedAt: now };
+  const current = currentStep(subtasks);
+  const list = [...subtasks];
+  const at = current ? list.findIndex((s) => s.id === current.id) : list.length;
+  list.splice(at, 0, step);
+  return { list, stepId: step.id, made: true };
+}
+
+/** A changes step is done and no client review follows it: a step to tell
+ *  the client, holding the email drafted for us to read and send. */
+export function addTellClientStep(subtasks: Subtask[], doneId: string, clientFirstName: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  const key = `tell:${doneId}`;
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === doneId);
+  if (at < 0) return null;
+  let list = subtasks.map((s) => (s.id === doneId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  list = releaseFromSteps(list, "email");
+  list.splice(at + 1, 0, { id: makeId(), title: `Let ${clientFirstName} know the changes are done`, done: false, stage: "in_progress", addedFor: key, holds: ["email"], startedAt: now });
+  return list;
+}
+
+/** The email went: that step is done, and a check-in waits three business
+ *  days, finished by the client's reply. */
+export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstName: string, due: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  const key = `checkin:${sentId}`;
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === sentId);
+  if (at < 0) return null;
+  const list = subtasks.map((s) => (s.id === sentId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  list.splice(at + 1, 0, { id: makeId(), title: `Check in if ${clientFirstName} hasn't replied`, done: false, stage: "waiting", addedFor: key, due, finishWhen: "reply", startedAt: now });
+  return list;
+}
+
+/** What a changes step does about telling the client once it is done:
+ *  nothing when a client review comes right after it (a review round sends
+ *  the new version instead); "use" when the plan's next step already makes
+ *  the email (Derek: "it may already be there"); else "add" a step for it. */
+export function changesTelling(subtasks: Subtask[], doneId: string, taskOwnerId: string | null): "add" | "use" | null {
+  const s = subtasks.find((x) => x.id === doneId);
+  if (!s || stepStage(s, taskOwnerId) !== "changes_requested") return null;
+  const next = stepAfter(subtasks, doneId);
+  if (next && stepStage(next, taskOwnerId) === "review") return null;
+  return next?.makes === "email" ? "use" : "add";
+}
+export const changesNeedTelling = (subtasks: Subtask[], doneId: string, taskOwnerId: string | null) => changesTelling(subtasks, doneId, taskOwnerId) !== null;
+
+/** Why a step was added by itself, said on it. */
+export function addedReason(addedFor: string | undefined, clientFirstName: string): string | null {
+  if (!addedFor) return null;
+  if (addedFor === "changes") return `Added when ${clientFirstName} sent changes`;
+  if (addedFor.startsWith("tell:")) return "Added when the changes were marked done";
+  if (addedFor.startsWith("checkin:")) return "Added when the email went";
+  if (addedFor.startsWith("ok:")) return `Added when ${clientFirstName} approved`;
+  return `Added when ${clientFirstName} sent changes`;
 }
 
 // ── What a step holds (phase 4) ─────────────────────────────────────────────

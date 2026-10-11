@@ -7,14 +7,14 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, addApprovedStep, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
-import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
+import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
 import { ImageLightbox } from "./TaskWorkItem";
@@ -25,7 +25,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
-import { TaskDocument, type ReviewReminders } from "./TaskDocument";
+import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
 import { HandoffPage } from "./HandoffPage";
 import { StepPage } from "./StepPage";
 
@@ -118,6 +118,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     id: task.clientId, name: "Not shared with you", color: "#94a3b8",
     ghlLocationId: "", status: "active_client" as const, type: "client" as const, assignedTo: [],
   };
+  /** The client's first name, as the steps and their emails say it. */
+  const firstName = client.name.split(" ")[0];
   const project = projectById(task.projectId) ?? {
     id: task.projectId, clientId: task.clientId, name: "List", description: "",
   };
@@ -578,13 +580,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [autoDone, setAutoDone] = useState<{ taskId: string; text: string } | null>(null);
   // The task's reviews and where they stand, for steps that wait on an
   // approval and for suggesting what comes next.
-  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { title: string; status: string; approvedAt: string | null; version: number }>> }>({ taskId: "", reviews: {} });
+  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number }>> }>({ taskId: "", reviews: {} });
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}`;
   useEffect(() => {
     let live = true;
     void Promise.all((["doc", "image", "page", "video"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
       if (!live) return;
-      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { title: d!.title, status: d!.status, approvedAt: d!.approvedAt, version: d!.version }])) });
+      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { id: d!.id, title: d!.title, status: d!.status, approvedAt: d!.approvedAt, version: d!.version }])) });
     });
     return () => { live = false; };
   }, [reviewsKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -855,8 +857,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // teammate's handoff is done, or the client approved the review (Derek,
     // 2026-10-11: tick on approval). A reply only finishes the follow up.
     if (steps.length > 0) {
+      // Approval moves the plan on in its own effect below (approvedKey).
       if (watch?.kind === "handoff") advanceFrom(watch.subId);
-      else if (watch?.kind === "approved" && activeStep && stepStage(activeStep, task.assigneeId) === "review") { onToggleSub(activeStep.id); advanceFrom(activeStep.id); }
       return;
     }
     setAskNext(task.id);
@@ -891,7 +893,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // When it started, so its page shows what is said from here on.
     if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
     const handoff = isHandoffStep(next, task.assigneeId);
-    if (next.due || handoff) setNewStep(next.title, next.due ?? null, handoff ? `handoff:${next.id}` : null);
+    // The deliverable the next step makes follows it there from the step
+    // just finished ("Send to Brian again" gets the review back).
+    const done = task.subtasks.find((x) => x.id === doneId);
+    if (next.makes && done?.holds?.includes(next.makes)) {
+      const rest = done.holds.filter((k) => k !== next.makes);
+      onPatchSub(doneId, { holds: rest.length ? rest : undefined });
+      onPatchSub(next.id, { holds: [...(next.holds ?? []), next.makes] });
+    }
+    if (next.due || handoff) setNewStep(next.title, next.due ?? null, handoff ? `handoff:${next.id}` : next.finishWhen === "reply" ? "reply" : null);
     const patch: Partial<Task> = {};
     const status = statusForStep(task.status, stepStage(next, task.assigneeId));
     if (status) patch.status = status;
@@ -907,6 +917,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const openTodos = (sub?.todos ?? []).filter((t) => !t.done).length;
     const ask = [missing.length ? `still needs: ${missing.join(", ")}` : null, openTodos ? `has ${openTodos} ${openTodos === 1 ? "to do" : "to dos"} open` : null].filter(Boolean).join(", and ");
     if (ask && !window.confirm(`"${sub!.title}" ${ask}. Mark it done anyway?`)) return;
+    // Changes done and no client review next: the next step is telling the
+    // client, with the email drafted for us to read and send. Nothing goes to
+    // the client by itself (Derek, 2026-10-11).
+    const telling = sub && !isHandoffStep(sub, task.assigneeId) ? changesTelling(task.subtasks, sid, task.assigneeId) : null;
+    // The plan's next step already makes the email: it gets the draft and
+    // starts as usual (advanceFrom), no extra step.
+    if (telling === "use" && sub) {
+      if (!task.draftEmail) onPatch({ draftEmail: changesDoneEmail(sub) });
+      const next = stepAfter(task.subtasks, sid);
+      // Only when no step holds an email yet: each sits on one step.
+      if (next && !stepHolding(task.subtasks, "email")) onPatchSub(next.id, { holds: [...(next.holds ?? []), "email"] });
+    }
+    if (sub && telling === "add") {
+      const list = addTellClientStep(task.subtasks, sid, firstName, () => newId("s_"));
+      if (list) {
+        if (openStep) setNextStepDone(openStep.id, true);
+        const status = statusForStep(task.status, "in_progress");
+        onPatch({ subtasks: list, followUpAt: null, ...(status ? { status } : {}), ...(task.draftEmail ? {} : { draftEmail: changesDoneEmail(sub) }) });
+        setAutoDone(null);
+        pushToast(`Next: let ${firstName} know. The email is drafted for you to read.`);
+        return;
+      }
+    }
     onToggleSub(sid);
     onPatchSub(sid, { doneAt: new Date().toISOString() });
     if (openStep) setNextStepDone(openStep.id, true);
@@ -937,25 +970,93 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Review stage on purpose, never one read from its words, so opening an
   // older task never rewrites its list. Runs while the task is open, like the
   // follow up's own finish line; the server does neither yet (phase 4).
+  // The review a step is working on: the one it holds, else (a step given
+  // the Review stage on purpose) whichever is out with the client.
+  const reviewOnStep = (st: Subtask): "page" | "image" | "video" | "doc" | null => {
+    for (const k of ["page", "image", "video", "doc"] as const) if (st.holds?.includes(k) && reviews[k]) return k;
+    if (st.stage !== "review") return null;
+    for (const k of ["page", "image", "video", "doc"] as const) if (reviews[k]) return k;
+    return null;
+  };
   const roundKey = (() => {
-    if (!activeStep || activeStep.stage !== "review" || isHandoffStep(activeStep, task.assigneeId)) return "";
-    for (const k of ["page", "image", "video", "doc"] as const) {
-      const r = reviews[k];
-      if (r?.status === "client_submitted") return `${activeStep.id}|${k}:${r.version}`;
-    }
-    return "";
+    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || stepStage(activeStep, task.assigneeId) !== "review") return "";
+    const k = reviewOnStep(activeStep);
+    const r = k ? reviews[k] : null;
+    return k && r?.status === "client_submitted" ? `${activeStep.id}|${k}|${r.id}|${k}:${r.version}` : "";
   })();
   useEffect(() => {
     if (!roundKey) return;
-    const [stepId, key] = roundKey.split("|");
-    const first = client.name.split(" ")[0];
-    const list = addChangesRound(task.subtasks, stepId, first, key, () => newId("s_"));
-    if (!list) return;
-    if (openStep) setNextStepDone(openStep.id, true);
-    const status = statusForStep(task.status, "changes_requested");
-    onPatch({ subtasks: list, ...(status ? { status } : {}) });
-    pushToast(`${first} sent changes: added "Make ${first}'s changes" and a new client review`);
+    const [stepId, kind, docId, key] = roundKey.split("|");
+    let live = true;
+    void fetchTaskDocumentComments(docId).then((comments) => {
+      if (!live) return;
+      const todos = comments.filter((c) => c.fromClient && !c.completedAt && c.body.trim())
+        .map((c) => ({ id: newId("td_"), title: c.body.trim().slice(0, 300), done: false, fromClient: true, commentId: c.id }));
+      const list = addChangesRound(taskRef.current.subtasks, stepId, firstName, key, () => newId("s_"), { review: kind as DeliverableKey, todos });
+      if (!list) return;
+      if (openStep) setNextStepDone(openStep.id, true);
+      const status = statusForStep(task.status, "changes_requested");
+      onPatch({ subtasks: list, followUpAt: null, ...(status ? { status } : {}) });
+      pushToast(`${firstName} sent changes: added "Make ${firstName}'s changes"${todos.length ? ` with ${todos.length} to ${todos.length === 1 ? "do" : "dos"}` : ""}`);
+    });
+    return () => { live = false; };
   }, [roundKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The client approved the review the current step is working on: the step
+  // is done and the next one starts, or, with nothing after it, a step says so
+  // and asks what's next (Derek, 2026-10-11).
+  const approvedKey = (() => {
+    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || stepStage(activeStep, task.assigneeId) !== "review") return "";
+    const k = reviewOnStep(activeStep);
+    const r = k ? reviews[k] : null;
+    return k && r && (r.status === "approved" || r.status === "completed") ? `${activeStep.id}|${k}|ok:${k}:${r.version}` : "";
+  })();
+  useEffect(() => {
+    if (!approvedKey) return;
+    const [stepId, kind, key] = approvedKey.split("|");
+    if (openStep) setNextStepDone(openStep.id, true);
+    if (stepAfter(task.subtasks, stepId)) {
+      onPatchSub(stepId, { done: true, doneAt: new Date().toISOString() });
+      advanceFrom(stepId);
+      return;
+    }
+    const name = reviews[kind as "page" | "image" | "video" | "doc"]?.title?.trim() || "it";
+    const list = addApprovedStep(task.subtasks, stepId, firstName, name, key, () => newId("s_"));
+    if (!list) return;
+    const status = statusForStep(task.status, "approved");
+    onPatch({ subtasks: list, followUpAt: null, ...(status ? { status } : {}) });
+  }, [approvedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // What the client sends from their portal lands on the open changes step,
+  // made in front of the current step when there is none (Derek, 2026-10-11:
+  // "what counts as a change is when the client submits something").
+  const looseClientIds = steps.length > 0 ? clientChanges.filter((c) => !c.stepId && !c.done).map((c) => c.id).join(",") : "";
+  useEffect(() => {
+    if (!looseClientIds) return;
+    const ids = looseClientIds.split(",");
+    const { list, stepId, made } = changesStepFor(taskRef.current.subtasks, firstName, () => newId("s_"));
+    const next = list.map((x) => (ids.includes(x.id) ? { ...x, stepId } : x));
+    const status = made ? statusForStep(task.status, "changes_requested") : null;
+    if (made && openStep) setNextStepDone(openStep.id, true);
+    onPatch({ subtasks: next, ...(status ? { status } : {}) });
+    if (made) pushToast(`${firstName} sent changes: added "Changes from ${firstName}"`);
+  }, [looseClientIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A message we choose to count as changes: a to-do on the changes step.
+  const addToChanges = (text: string) => {
+    const title = text.replace(/\s+/g, " ").trim().slice(0, 300);
+    if (!title) return;
+    const { list, stepId, made } = changesStepFor(taskRef.current.subtasks, firstName, () => newId("s_"));
+    const next = list.map((x) => (x.id === stepId ? { ...x, todos: [...(x.todos ?? []), { id: newId("td_"), title, done: false, fromClient: true }] } : x));
+    const status = made ? statusForStep(task.status, "changes_requested") : null;
+    onPatch({ subtasks: next, ...(status ? { status } : {}) });
+    pushToast(made ? `Added "Changes from ${firstName}" with this as its first to do` : "Added to the changes");
+  };
+  // The email telling the client their changes are done, for us to read: the
+  // step's to-dos and the client's own requests, ticked off.
+  const changesDoneEmail = (st: Subtask) => {
+    const items = [...(st.todos ?? []).filter((t) => t.done).map((t) => t.title), ...clientChanges.filter((c) => c.stepId === st.id && c.done).map((c) => c.title)];
+    const now = new Date().toISOString();
+    const list = items.length ? `<ul>${items.map((t) => `<li>${t.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</li>`).join("")}</ul>` : "";
+    return { subject: `${task.title}: your changes are done`, body: `${greetingHtml(messageDest?.name)}<p>All the changes you asked for are done:</p>${list}<p>Take a look and let me know if anything else needs a tweak.</p>`, replyTo: null, createdAt: now, updatedAt: now };
+  };
   // A review has just gone to the client. Until now that set nothing, so the
   // task sat in Waiting with no date on it. The client is emailed on each of
   // the next three business days; the owner comes back the day after, and the
@@ -1288,6 +1389,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     onNoteInDock: (text) => askDock("note", text),
+    onAddToChanges: (text) => addToChanges(text),
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -1354,7 +1456,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the task's own steps in order, each with a foundation stage. Done steps
   // are one line, the current one is open with its follow up, upcoming ones
   // are muted and wait their turn.
-  const firstName = client.name.split(" ")[0];
   const stageTag = (st: TaskStatus) => (
     <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] bg-background px-2 text-[16px] font-semibold">
       <span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}
@@ -1382,11 +1483,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     );
   };
   // What the client sent from their portal, under the step it belongs to.
-  const clientChangesList = clientChanges.length === 0 ? null : (
+  const clientItemsOf = (stepId: string | null) => clientChanges.filter((c) => (stepId ? c.stepId === stepId : !c.stepId));
+  const clientChangesList = (items: Subtask[]) => items.length === 0 ? null : (
     <div className="rounded-[5px] border px-3 py-2">
-      <div className="font-semibold">Changes from {firstName} <span className="font-normal text-muted">· {clientChanges.filter((c) => c.done).length} of {clientChanges.length} done</span></div>
+      <div className="font-semibold">From {firstName}&apos;s portal <span className="font-normal text-muted">· {items.filter((c) => c.done).length} of {items.length} done</span></div>
       <ul className="mt-1 space-y-1">
-        {clientChanges.map((c) => (
+        {items.map((c) => (
           <li key={c.id} className="group/cc flex items-start gap-2.5">
             <button onClick={() => onToggleSub(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
               className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
@@ -1445,11 +1547,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/sub:opacity-100"><I.trash className="h-4 w-4" /></button>
             </span>
           </div>
-          {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">Added when {firstName} sent changes</span>}
+          {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">{addedReason(sub.addedFor, firstName)}</span>}
           {(() => {
             // The step at a glance (the dashboard, Derek 2026-10-11): when it
             // was done, its to-dos, and new words from the client while it ran.
-            const tp = todoProgress(sub.todos);
+            const own = todoProgress(sub.todos);
+            const fromPortal = clientItemsOf(sub.id);
+            const tp = { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length };
             const w = stepWindow(task.subtasks, sub.id, task.createdAt);
             const fresh = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read && inWindow(m.at, w)).length;
             const facts = [
@@ -1469,7 +1573,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {!sub.done && stepPlanBits(sub, isActive)}
             {stepHeld(sub, isActive)}
             {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
-            {isActive && clientChangesList}
+            {clientChangesList(clientItemsOf(sub.id))}
           </>)}
         </div>
       </li>
@@ -1543,7 +1647,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </li>
         )}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
-        {!activeStep && clientChangesList && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList}</li>}
+        {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
         <li className={`px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { addStep(subDraft); setSubDraft(""); } }}
             placeholder="+ Add step" aria-label="Add a step"
@@ -1703,6 +1807,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
       onSend={hasMessaging ? (email) => {
         onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
+        // Sent from the step that holds it: that step is done, and checking in
+        // waits three business days, finished by the client's reply.
+        const sentFrom = activeStep && activeStep.holds?.includes("email") ? activeStep : null;
+        if (sentFrom) {
+          const due = addBusinessDaysIso(TODAY, 3);
+          const list = addCheckInStep(task.subtasks, sentFrom.id, firstName, due, () => newId("s_"));
+          if (list) {
+            if (openStep) setNextStepDone(openStep.id, true);
+            const status = statusForStep(task.status, "waiting");
+            onPatch({ subtasks: list, ...(status ? { status } : {}) });
+            setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
+            return;
+          }
+        }
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
         // A due date inside that window already brings it back: no follow up then.
@@ -1869,10 +1987,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepPlanBits = (sub: Subtask, isActive: boolean) => {
     const makes = sub.makes && !(sub.holds ?? []).includes(sub.makes) && (sub.makes === "email" ? hasMessaging : canHaveDocument) ? sub.makes : null;
     const needs = sub.needs ?? [];
-    if ((!makes || !isActive) && !needs.length) return null;
+    // "Send to Brian again": the review is back on this step; open it to send.
+    const sendAgain = isActive && sub.makes && (sub.holds ?? []).includes(sub.makes) && sub.makes !== "email" && sub.makes !== "brief" ? sub.makes : null;
+    if ((!makes || !isActive) && !needs.length && !sendAgain) return null;
     const held = heldLabels(sub);
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[16px]">
+        {sendAgain && (
+          <button onClick={() => (sendAgain === "doc" ? setDocStartNonce((n) => n + 1) : setReviewStartNonce((r) => ({ ...r, [sendAgain]: r[sendAgain as FileKind] + 1 })))}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3 font-semibold text-white hover:opacity-90">Send to {firstName} again</button>
+        )}
         {makes && isActive && (deliverablePresent(makes)
           ? <button onClick={() => holdKey(sub.id, makes)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-surface px-3 font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Put {deliverableName(makes)} here</button>
           : <button onClick={() => { holdKey(sub.id, makes); setPendingStart(makes); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-surface px-3 font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Make the {KIND_LABEL[makes].toLowerCase()}</button>)}
@@ -2259,7 +2383,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               canChat={hasMessaging && !!onSendTaskMessage}
               onSendChat={onSendTaskMessage ? (body) => onSendTaskMessage("chat", "", body) : undefined}
               onAddNote={(body) => logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
-                body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })} />
+                body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })}
+              clientItems={clientItemsOf(ps.id)} onToggleClientItem={onToggleSub}
+              // A to-do that was the client's comment: the comment is done on the review too.
+              onTodoDone={(t) => { const k = reviewOnStep(ps); if (k && t.commentId) void docApi(task.id, k, "/comments", { method: "PATCH", body: JSON.stringify({ commentId: t.commentId, done: true }) }); }} />
           );
         })()}
         {(() => {

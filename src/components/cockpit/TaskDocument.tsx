@@ -74,7 +74,7 @@ const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v"
  *  or a moment in a video (t). Never both, the same rule as a stored pin. */
 type PinDraft = { fileId: string; x: number | null; y: number | null; anchor: PinAnchor | null; t: number | null; number: number };
 
-const docApi = (taskId: string, kind: TaskDocumentKind, path: string, init?: RequestInit) =>
+export const docApi = (taskId: string, kind: TaskDocumentKind, path: string, init?: RequestInit) =>
   authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/document${path}${kindQuery(kind)}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },

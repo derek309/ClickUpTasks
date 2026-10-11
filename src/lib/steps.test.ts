@@ -33,7 +33,7 @@ describe("steps", () => {
     let n = 0;
     const list = [s("a", "Draft", { done: true }), s("r", "Client review", { stage: "review" }), s("z", "Schedule")];
     const out = addChangesRound(list, "r", "Brian", "page:2", () => `n${++n}`)!;
-    expect(out.map((x) => [x.title, x.done])).toEqual([["Draft", true], ["Client review", true], ["Make Brian's changes", false], ["Client review", false], ["Schedule", false]]);
+    expect(out.map((x) => [x.title, x.done])).toEqual([["Draft", true], ["Client review", true], ["Make Brian's changes", false], ["Send to Brian again", false], ["Schedule", false]]);
     expect(addChangesRound(out, "r", "Brian", "page:2", () => "x")).toBeNull();
   });
 });
@@ -119,5 +119,54 @@ describe("step pages", () => {
     const w = stepWindow(subs, "c", "2026-10-01T00:00:00Z");
     expect(inWindow("2026-10-09T12:00:00Z", w)).toBe(true);
     expect(inWindow("2026-10-11T12:00:00Z", w)).toBe(false);
+  });
+});
+
+import { addApprovedStep, addCheckInStep, addTellClientStep, addedReason, changesNeedTelling, changesStepFor, changesTelling } from "./data";
+
+describe("steps added by what happens", () => {
+  let n = 0;
+  const id = () => `n${++n}`;
+  const now = "2026-10-11T10:00:00Z";
+  it("a round of changes takes the review and the client's comments", () => {
+    const list = [s("r", "Client review", { stage: "review", holds: ["page"] }), s("z", "Schedule")];
+    const out = addChangesRound(list, "r", "Brian", "page:2", id, { review: "page", todos: [{ id: "t1", title: "Fix the logo", done: false, fromClient: true, commentId: "c1" }], now })!;
+    expect(out[0]).toMatchObject({ done: true, doneAt: now });
+    expect(out[0].holds).toBeUndefined();
+    expect(out[1]).toMatchObject({ title: "Make Brian's changes", holds: ["page"], todos: [{ title: "Fix the logo" }] });
+    expect(out[2]).toMatchObject({ title: "Send to Brian again", makes: "page", stage: "review" });
+  });
+  it("approval with nothing after it asks what's next, once", () => {
+    const out = addApprovedStep([s("r", "Client review", { stage: "review" })], "r", "Brian", "the newsletter", "ok:page:2", id, now)!;
+    expect(out.map((x) => [x.title, x.done, x.stage])).toEqual([["Client review", true, "review"], ["Brian approved the newsletter: what's next?", false, "approved"]]);
+    expect(addApprovedStep(out, "r", "Brian", "x", "ok:page:2", id)).toBeNull();
+  });
+  it("client changes go to the open changes step, or a new one before the current step", () => {
+    const list = [s("a", "Draft", { done: true }), s("b", "Schedule")];
+    const made = changesStepFor(list, "Brian", id, now);
+    expect(made.made).toBe(true);
+    expect(made.list.map((x) => x.title)).toEqual(["Draft", "Changes from Brian", "Schedule"]);
+    const again = changesStepFor(made.list, "Brian", id, now);
+    expect(again).toMatchObject({ made: false, stepId: made.stepId });
+  });
+  it("finished changes tell the client unless a review comes next", () => {
+    const list = [s("c", "Changes from Brian", { stage: "changes_requested" }), s("z", "Schedule")];
+    expect(changesNeedTelling(list, "c", null)).toBe(true);
+    expect(changesNeedTelling([s("c", "Make changes", { stage: "changes_requested" }), s("r", "Send again", { stage: "review" })], "c", null)).toBe(false);
+    const out = addTellClientStep(list, "c", "Brian", id, now)!;
+    expect(out[1]).toMatchObject({ title: "Let Brian know the changes are done", holds: ["email"] });
+  });
+  it("uses the plan's own next step when it already makes the email", () => {
+    expect(changesTelling([s("c", "Changes", { stage: "changes_requested" }), s("t", "Tell Brian", { makes: "email" })], "c", null)).toBe("use");
+    expect(changesTelling([s("c", "Changes", { stage: "changes_requested" })], "c", null)).toBe("add");
+  });
+  it("says why a step was added", () => {
+    expect(addedReason("tell:s1", "Brian")).toBe("Added when the changes were marked done");
+    expect(addedReason("page:2", "Brian")).toBe("Added when Brian sent changes");
+    expect(addedReason(undefined, "Brian")).toBeNull();
+  });
+  it("sending the email starts a check-in that a reply finishes", () => {
+    const out = addCheckInStep([s("t", "Let Brian know")], "t", "Brian", "2026-10-14", id, now)!;
+    expect(out[1]).toMatchObject({ title: "Check in if Brian hasn't replied", stage: "waiting", due: "2026-10-14", finishWhen: "reply" });
   });
 });

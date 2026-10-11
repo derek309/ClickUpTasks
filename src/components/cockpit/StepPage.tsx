@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen,
-  followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone }: {
+  followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -45,11 +45,15 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onAddNote: (body: string) => void;
   /** A to-do ticked that came from a client's comment: the comment is done too. */
   onTodoDone?: (todo: StepTodo) => void;
+  /** What the client sent from their portal for this step: they see each one ticked off there. */
+  clientItems?: Subtask[];
+  onToggleClientItem?: (id: string) => void;
 }) {
   useEscapeToClose(onClose);
   const first = client.name.split(" ")[0];
   const todos = sub.todos ?? [];
-  const progress = todoProgress(todos);
+  const own = todoProgress(todos);
+  const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
   const [todoDraft, setTodoDraft] = useState("");
   const [talk, setTalk] = useState<"client" | "team">(canChat ? "client" : "team");
   const [draft, setDraft] = useState("");
@@ -148,6 +152,19 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   const todoList = (
     <section aria-labelledby="step-todo" className="flex flex-col gap-2">
       <h3 id="step-todo" className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}</h3>
+      {clientItems.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {clientItems.map((c) => (
+            <li key={c.id} className="flex items-start gap-2.5">
+              <button onClick={() => onToggleClientItem?.(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
+                className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
+              <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>
+                {c.title}<span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {todos.length > 0 && (
         <ul className="flex flex-col gap-1.5">
           {todos.map((t) => (

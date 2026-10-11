@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; onAddToChanges?: (text: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, meetings, description, createdLine } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, onAddToChanges, meetings, description, createdLine } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -870,6 +870,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         )}
         {onSendTaskMessage && hasMessaging && (
           <button onClick={() => { onMarkChannelRead?.("chat"); setComposingChannel(null); resetComposer(); setReplyingTo({ id: m.id, channel: "chat" }); }} title="Reply in chat" aria-label="Reply in chat" className={answerTool}><I.chatBubbles className="h-[18px] w-[18px]" /></button>
+        )}
+        {/* A client's message asking for changes: onto the changes step (Derek,
+            2026-10-11: "an email where we're adding something to it"). */}
+        {onAddToChanges && !mine && (cleanText || m.subject) && (
+          <button onClick={() => onAddToChanges(cleanText || m.subject || "")} title="Add to the changes" aria-label="Add to the changes" className={answerTool}><I.list className="h-[18px] w-[18px]" /></button>
         )}
         {onNoteInDock && (
           <button onClick={() => onNoteInDock(`About ${who.split(" ")[0]}'s ${email ? "email" : m.channel === "sms" ? "text" : "chat"}${m.subject ? ` "${m.subject}"` : ""}: `)} title="Add a note" aria-label="Add a note" className={answerTool}><I.note className="h-[18px] w-[18px]" /></button>
