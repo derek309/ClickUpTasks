@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-10 23:06:16",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.5.0.zip",
+  "last_updated": "2026-10-11 14:24:56",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.5.2.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* Content push: the pages, posts, Elementor templates, blocks, menus and new images changed on a local copy go up on their own, with addresses and links fixed, and nothing else in the database is touched. Anything edited on the live website since it was pulled is held back unless you choose to overwrite it.\n* Every content push is backed up first and can be undone."
+  "changelog": "* An \"Add to WebsitePusher\" button on this page opens the app with the website's address and connection code already filled in, so nobody has to copy the code by hand. The code is still shown underneath for when the app isn't installed yet."
 }
