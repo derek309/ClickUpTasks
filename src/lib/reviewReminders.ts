@@ -111,3 +111,11 @@ export function reminderDue(s: ReminderState): ReminderDecision {
   if (businessDaysBetween(since, s.now) < s.everyDays) return decide("not yet");
   return decide("due");
 }
+
+/** Business days from a review going to the client until its owner follows
+ *  up: the day after the last of the round's reminders, so 4 at the default
+ *  of every business day and 7 at every 2. With reminders off nobody else is
+ *  chasing, so 2, the same as any other wait (WAITING_FOLLOW_UP_DAYS). */
+export function reviewFollowUpDays(everyDays: number): number {
+  return everyDays > 0 ? MAX_REMINDERS * everyDays + 1 : 2;
+}

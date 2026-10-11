@@ -1171,7 +1171,7 @@ export function createServer(opts = {}) {
     "Tick (or untick) a checklist item on a task by matching its title text.",
     { id: z.string(), item: z.string().describe("checklist item title (substring)"), done: z.boolean().optional() },
     async ({ id, item, done }) => {
-      const t = await loadTask(id, "subtasks");
+      const t = await loadTask(id, "subtasks, assignee_id");
       if (!t) return noTask(id);
       const it = item.toLowerCase();
       const hit = (t.subtasks || []).find((s) => s.title.toLowerCase().includes(it)) ?? null;
@@ -1180,6 +1180,18 @@ export function createServer(opts = {}) {
       // teammate ticking another item at the same moment keeps their tick.
       // No author, so the change shows live for everyone.
       await sb("rpc/patch_subtask", "POST", { task_id: id, subtask_id: hit.id, patch: { done: done ?? true }, author: null });
+      // A handoff (an item given to someone other than the task's owner)
+      // ticked here finishes the follow up waiting on it, as the
+      // app does (task detail redesign): its date moves to the next open one.
+      if ((done ?? true) && hit.assigneeId && hit.assigneeId !== t.assignee_id) {
+        try {
+          const finished = await sb(`task_actions?task_id=eq.${enc(id)}&next_step_watch=eq.${enc(`handoff:${hit.id}`)}&next_step_done_at=is.null`, "PATCH", { next_step_done_at: new Date().toISOString() });
+          if (Array.isArray(finished) && finished.length) {
+            const open = await sb(`task_actions?task_id=eq.${enc(id)}&next_step=not.is.null&next_step_done_at=is.null&select=next_step_due&order=at.desc&limit=1`);
+            await sb(`tasks?id=eq.${enc(id)}`, "PATCH", { follow_up_at: open?.[0]?.next_step_due ?? null, updated_by: null });
+          }
+        } catch { /* the tick itself landed */ }
+      }
       return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
     });
 

@@ -26,7 +26,8 @@ import { PAGE_TOO_BIG, pageText, pageTooBig } from "./pageHtml";
 import { buildReviewEmail } from "./reviewEmail";
 import { placeDraftLink } from "./draftLink";
 import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
-import { REVIEW_FOLLOW_UP_DAYS, addBusinessDaysIso, htmlToText, todayPacific } from "./data";
+import { addBusinessDaysIso, htmlToText, todayPacific } from "./data";
+import { reviewFollowUpDays } from "./reviewReminders";
 import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
 import { MAX_SET_IMAGES, cleanImageLabel, imageLabel, parseImageSet, type ImageSetItem } from "./imageSet";
@@ -392,7 +393,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     },
 
     async sendForReview(taskId: string, kind: ReviewKind, email: { draftEmail: boolean; subject?: string; bodyHtml?: string }): Promise<string> {
-      const found = await reviewFor(taskId, kind, "id, title, version");
+      const found = await reviewFor(taskId, kind, "id, title, version, reminder_every_days");
       if (typeof found === "string") return found;
       const { task, doc } = found;
       const sent = await sendReview(task, kind, actor, Number(doc.version ?? 0), origin);
@@ -406,7 +407,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       // And the owner checks back once the client's reminders have run out,
       // unless a follow up further out is already set (data.ts waitingFollowUp).
       const today = todayPacific();
-      await supabaseAdmin.from("tasks").update({ follow_up_at: addBusinessDaysIso(today, REVIEW_FOLLOW_UP_DAYS), updated_by: null })
+      await supabaseAdmin.from("tasks").update({ follow_up_at: addBusinessDaysIso(today, reviewFollowUpDays(Number((doc as { reminder_every_days?: number }).reminder_every_days ?? 1))), updated_by: null })
         .eq("id", task.id).or(`follow_up_at.is.null,follow_up_at.lte.${today}`);
 
       let emailNote = "No email was drafted.";

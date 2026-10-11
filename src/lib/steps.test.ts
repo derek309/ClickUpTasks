@@ -37,3 +37,30 @@ describe("steps", () => {
     expect(addChangesRound(out, "r", "Brian", "page:2", () => "x")).toBeNull();
   });
 });
+
+import { holdOnStep, releaseFromSteps, stepHolding } from "./data";
+import { reviewFollowUpDays } from "./reviewReminders";
+
+describe("what a step holds", () => {
+  const list = [s("a", "Draft", { holds: ["doc"] }), s("b", "Review")];
+  it("puts a deliverable on one step only", () => {
+    const moved = holdOnStep(list, "b", "doc");
+    expect(moved[0].holds).toBeUndefined();
+    expect(moved[1].holds).toEqual(["doc"]);
+    expect(stepHolding(moved, "doc")?.id).toBe("b");
+  });
+  it("leaves a step that already holds it alone", () => {
+    expect(holdOnStep(list, "a", "doc")[0]).toBe(list[0]);
+  });
+  it("takes it off", () => {
+    expect(stepHolding(releaseFromSteps(list, "doc"), "doc")).toBeNull();
+  });
+});
+
+describe("review follow up", () => {
+  it("comes the day after the last reminder", () => {
+    expect(reviewFollowUpDays(1)).toBe(4);
+    expect(reviewFollowUpDays(2)).toBe(7);
+    expect(reviewFollowUpDays(0)).toBe(2);
+  });
+});

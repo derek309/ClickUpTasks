@@ -772,6 +772,18 @@ export const deleteStageDb = (id: string) => save(() => supabase.from("stages").
 export const insertTaskAction = (a: TaskAction) => save(() => supabase.from("task_actions").insert(taskActionToRow(a)));
 export const setNextStepDoneDb = (id: string, doneAt: string | null) =>
   save(() => supabase.from("task_actions").update({ next_step_done_at: doneAt }).eq("id", id));
+/** A teammate finished their handoff: the follow up waiting on it is done,
+ *  wherever the tick came from, not only while the task is open (task detail
+ *  redesign, brief section 10). Returns whether one was waiting, and the date
+ *  of the follow up still open after it, for the task's own follow up date. */
+export const finishHandoffWatchDb = async (taskId: string, subId: string): Promise<{ finished: boolean; followUpAt: string | null }> => {
+  const { data, error } = await supabase.from("task_actions").update({ next_step_done_at: new Date().toISOString() })
+    .eq("task_id", taskId).eq("next_step_watch", `handoff:${subId}`).is("next_step_done_at", null).select("id");
+  if (error || !data?.length) return { finished: false, followUpAt: null };
+  const { data: open } = await supabase.from("task_actions").select("next_step_due")
+    .eq("task_id", taskId).not("next_step", "is", null).is("next_step_done_at", null).order("at", { ascending: false }).limit(1);
+  return { finished: true, followUpAt: (open?.[0]?.next_step_due as string | null | undefined) ?? null };
+};
 export const deleteTaskActionDb = (id: string) => save(() => supabase.from("task_actions").delete().eq("id", id));
 // Same RLS as delete: an admin or the author may rewrite the body. Typos in a
 // note used to mean deleting it and typing it again (Derek: "I want to be

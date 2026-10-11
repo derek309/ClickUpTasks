@@ -85,7 +85,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -105,13 +105,16 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   onPresence: (exists: boolean) => void;
   /** Just sent to the client. The drawer sets the follow up from it; without
    *  it the task is only moved to Waiting. */
-  onSent?: (kind: TaskDocumentKind, name: string) => void;
+  onSent?: (kind: TaskDocumentKind, name: string, reminderEveryDays: number) => void;
   /** The client reminders on this review while it is with the client, or null.
    *  The drawer's Reminders chip shows and changes them from the task itself. */
   onReminders?: (r: ReviewReminders | null) => void;
   /** A Copy code button on the row, for whoever builds the email or page from
    *  it (a handoff page): a client document's HTML, or a web page review's page. */
   showCopyCode?: boolean;
+  /** Under the row, the words of each open comment: the review sits on the
+   *  task's current step, where its comments are the work (phase 4). */
+  showOpenComments?: boolean;
 }) {
   const image = kind === "image";
   const page = kind === "page";
@@ -645,7 +648,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     await load();
     // The drawer moves the task to Waiting and sets the follow up in one edit;
     // anywhere else the task is only moved.
-    if (onSent) onSent(kind, doc.title.trim() || task.title);
+    if (onSent) onSent(kind, doc.title.trim() || task.title, doc.reminderEveryDays);
     else if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
     const copied = !!url && await copy(url);
@@ -672,6 +675,29 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
     const url = await fetchLink();
     setBusy(null);
     if (url) pushToast(await copy(url) ? "Link copied." : `Share this link: ${url}`);
+  };
+
+  // Turn the client's link off, or make a new one (task detail redesign: there
+  // was no button for it, only Claude's revoke tool). A new link replaces the
+  // old one, so a link sent before stays dead.
+  const linkOff = async () => {
+    if (!window.confirm(`Turn the link to this ${titleInSentence} off? The client can't open it until you make a new one.`)) return;
+    setBusy("link");
+    const res = await api("/link", { method: "DELETE" });
+    setBusy(null);
+    if (!res.ok) { pushToast("Could not turn the link off."); return; }
+    setLink((l) => (l ? { ...l, live: false } : l));
+    pushToast("Link off. The client can't open it.");
+  };
+  const linkNew = async () => {
+    setBusy("link");
+    const res = await api("/link", { method: "POST", body: JSON.stringify({ action: "new" }) });
+    const j = await readJson(res);
+    setBusy(null);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not make a new link."); return; }
+    setLink({ live: true, copyable: true });
+    const url = j.url as string | undefined;
+    pushToast(url ? (await copy(url) ? "New link made and copied. The old one no longer works." : `New link: ${url}`) : "New link made.");
   };
 
   // Email the client about the document at any time (Derek, 2026-09-11: "if we
@@ -985,6 +1011,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
+  // Off when it is on, a new one when it is off (admins, as the server
+  // requires); only once it has been sent.
+  const linkToggleButton = !doc.version || !link ? null : link.live
+    ? <button onClick={() => void linkOff()} disabled={busy !== null} className={quiet}>Link off</button>
+    : canAdmin ? <button onClick={() => void linkNew()} disabled={busy !== null} className={quiet}>New link</button> : null;
   // The version the client approved, else the last one sent, else the draft:
   // the one someone scheduling the email should be pasting.
   const codeBody = kind === "doc"
@@ -1019,10 +1050,23 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, startNonc
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}</>}
+    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}{linkToggleButton}</>}
       onOpen={() => switchView({ full: true })} />
   );
-  if (!visible) return <>{row}{deletedLine}</>;
+  const openList = comments.filter((c) => !c.completedAt);
+  const openCommentsBlock = !showOpenComments || openList.length === 0 ? null : (
+    <div className="mt-1.5 space-y-1.5 border-l-2 pl-3">
+      {openList.slice(0, 6).map((c) => (
+        <div key={c.id} className="text-[16px]">
+          <span className="font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}:</span>{" "}
+          {c.quote && <span className="text-muted">“{c.quote.length > 80 ? `${c.quote.slice(0, 80)}…` : c.quote}” </span>}
+          <span className="[overflow-wrap:anywhere]">{c.body}</span>
+        </div>
+      ))}
+      {openList.length > 6 && <button onClick={() => switchView({ full: true })} className="text-[16px] font-semibold text-accent hover:underline">{openList.length - 6} more open</button>}
+    </div>
+  );
+  if (!visible) return <>{row}{openCommentsBlock}{deletedLine}</>;
 
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(doc.updatedAt)}`;
 

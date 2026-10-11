@@ -129,6 +129,15 @@ describe("what the MCP tools may see", () => {
     expect(writes[0].body).toMatchObject({ task_id: "t_1", items: [{ title: "Invoice", done: false }], author: null });
   });
 
+  // A teammate's handoff ticked by Claude finishes the follow up waiting on it.
+  it("finishes the follow up waiting on a handoff it ticks", async () => {
+    const withHandoff = task({ subtasks: [{ id: "s_9", title: "Schedule the send", done: false, assigneeId: "u_someone_else" }] });
+    fakeSupabase([...names, { table: "tasks", rows: [withHandoff] }]);
+    await call(await connect(), "check_item", { id: "t_1", item: "schedule" });
+    expect(writes[0].url).toContain("/rpc/patch_subtask");
+    expect(writes[1]).toMatchObject({ method: "PATCH", url: expect.stringContaining("next_step_watch=eq.handoff%3As_9") });
+  });
+
   // The app keeps a deleted task in Trash for 30 days; a chat must not be the
   // one way to lose a task for good.
   it("moves a deleted task to Trash rather than deleting it", async () => {

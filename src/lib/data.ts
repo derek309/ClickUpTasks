@@ -816,6 +816,12 @@ export interface Subtask {
   /** Set on the two steps added when a client sends changes on a review, to
    *  the review and its version ("page:2"), so the same round is added once. */
   addedFor?: string;
+  /** What this step holds (task detail redesign phase 4, Derek: "steps with
+   *  deliverables and assets"): the task's deliverables by kind ("doc",
+   *  "image", "page", "video", "brief", "email") and its links and files by
+   *  attachment id ("att:<id>"). Each sits on one step at most; whatever is on
+   *  no step shows under Deliverables or Links and files as before. */
+  holds?: string[];
 }
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
@@ -2824,4 +2830,36 @@ export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clien
   const list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true } : s));
   list.splice(at + 1, 0, ...round);
   return list;
+}
+
+// ── What a step holds (phase 4) ─────────────────────────────────────────────
+
+/** The task's deliverables a step can hold, by the key a step stores. */
+export type DeliverableKey = "doc" | "image" | "page" | "video" | "brief" | "email";
+export const attachmentKey = (id: string) => `att:${id}`;
+
+/** The step holding `key`, or null. */
+export function stepHolding<T extends Pick<Subtask, "holds">>(subtasks: T[], key: string): T | null {
+  return subtasks.find((s) => s.holds?.includes(key)) ?? null;
+}
+
+/** Puts `key` on step `stepId`, taking it off any other step first: one step
+ *  each (Derek, 2026-10-11). The rest of the list is untouched. */
+export function holdOnStep(subtasks: Subtask[], stepId: string, key: string): Subtask[] {
+  return subtasks.map((s) => {
+    const has = s.holds?.includes(key) ?? false;
+    if (s.id === stepId) return has ? s : { ...s, holds: [...(s.holds ?? []), key] };
+    if (!has) return s;
+    const holds = s.holds!.filter((k) => k !== key);
+    return { ...s, holds: holds.length ? holds : undefined };
+  });
+}
+
+/** Takes `key` off whichever step holds it. */
+export function releaseFromSteps(subtasks: Subtask[], key: string): Subtask[] {
+  return subtasks.map((s) => {
+    if (!s.holds?.includes(key)) return s;
+    const holds = s.holds.filter((k) => k !== key);
+    return { ...s, holds: holds.length ? holds : undefined };
+  });
 }

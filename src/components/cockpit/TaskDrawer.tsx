@@ -5,9 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, isOverdue, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, REVIEW_FOLLOW_UP_DAYS, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -37,6 +37,7 @@ import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
 import { QuickLinksBar } from "./ClientLinks";
+import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
 
 // The review lines a task can add beside its client document, in order.
@@ -158,6 +159,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
+  // The step a link being added goes on, when its + menu asked for it.
+  const [linkTarget, setLinkTarget] = useState<string | null>(null);
   // The task as it is NOW, not as it was when a callback was created.
   //
   // Every attachment edit rebuilds the whole array, so one built from a stale
@@ -183,6 +186,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // upgraded in place if the page has a real title. Doing it the other way
     // round would leave a blank row while a slow site thinks about it.
     onPatch({ attachments: [...taskRef.current.attachments, { id, name: typed || prettyLinkName(href), kind: "link", size: "", url: href }] });
+    // Asked for from a step's + menu: it goes on that step too (phase 4).
+    if (linkTarget) { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, linkTarget, attachmentKey(id)) }); setLinkTarget(null); }
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
     if (!typed) void fetchLinkTitle(id, href);
   };
@@ -600,6 +605,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const clientChanges = task.subtasks.filter((s) => s.fromClient);
   const activeStep = currentStep(task.subtasks);
   const progress = stepProgress(task.subtasks);
+  /** The step a deliverable or a link or file is on, by its title (phase 4). */
+  const stepTitleHolding = (key: string) => stepHolding(steps, key)?.title ?? null;
 
   // Bottom of the Escape stack: anything opened over the drawer closes first.
   useEscapeToClose(onClose);
@@ -941,14 +948,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the next three business days; the owner comes back the day after, and the
   // follow up finishes itself if the client approves first. An open follow up
   // keeps its own words and date and only gains the finish line.
-  const followUpOnReview = (kind: TaskDocumentKind, name: string) => {
+  const followUpOnReview = (kind: TaskDocumentKind, name: string, reminderEveryDays = 1) => {
     const watch = `approved:${kind}`;
     if (openStep) {
       if (task.status !== "waiting") onPatch({ status: "waiting" });
       if (!openStep.nextStepWatch) patchStep({ nextStepWatch: watch });
       return;
     }
-    const date = addBusinessDaysIso(TODAY, REVIEW_FOLLOW_UP_DAYS);
+    // The day after the review's last reminder (reviewFollowUpDays).
+    const date = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
     onPatch({ status: "waiting", followUpAt: date });
     setNewStep(`Get ${client.name.split(" ")[0]}'s approval on ${name}`, date, watch);
   };
@@ -1186,13 +1194,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
   );
 
-  const documentBlock = !canHaveDocument ? null : (
+  const documentBlock = (onCurrentStep = false) => !canHaveDocument ? null : (
     // Keyed apart from the draft email line beside it: two siblings sharing a
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
     <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
-      startNonce={docStartNonce}
+      startNonce={docStartNonce} showOpenComments={onCurrentStep}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   // Separate from the client document (Derek, 2026-09-30): its own line, link and files.
@@ -1419,19 +1427,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
                 }} />
               {stagePicker(sub, isActive)}
+              {stepAddMenu(sub)}
               <button onClick={() => onDeleteSub(sub.id)} title={handoff ? "Take this back" : "Delete this step"} aria-label={`Delete ${sub.title}`}
                 className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/sub:opacity-100"><I.trash className="h-4 w-4" /></button>
             </span>
           </div>
           {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">Added when {firstName} sent changes</span>}
           {isActive && followBox}
+          {stepHeld(sub, isActive)}
           {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
           {isActive && clientChangesList}
         </div>
       </li>
     );
   };
-  const planBlock = (
+  const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 id="task-steps" className="flex items-center gap-2 text-[16px] font-bold text-foreground">
@@ -1516,7 +1526,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <option value="type">Sort: Type</option>
             </select>
           )}
-          <button onClick={() => { setLinkOpen((o) => !o); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
+          <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
           <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
         </span>
       </div>
@@ -1552,7 +1562,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
               onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
               className={`group relative h-28 overflow-hidden rounded-lg bg-background ring-1 ring-[var(--border)] hover:ring-2 hover:ring-accent ${dragAttId === a.id ? "opacity-40" : ""}`}>
-              <button onClick={() => openPreview(a)} title={a.name} aria-label={`Preview ${a.name}`} className="block w-full">
+              <button onClick={() => openPreview(a)} title={stepTitleHolding(attachmentKey(a.id)) ? `${a.name}, on ${stepTitleHolding(attachmentKey(a.id))}` : a.name} aria-label={`Preview ${a.name}`} className="block w-full">
                 {a.path && attImageUrls[a.path]
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-28 w-auto max-w-[240px] object-cover" />
@@ -1604,7 +1614,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   title={isLink ? a.url! : a.name}
                   className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
-                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 [overflow-wrap:anywhere]">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
+                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 [overflow-wrap:anywhere]">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}{stepTitleHolding(attachmentKey(a.id)) && <span className="shrink-0 font-normal text-muted"> · on {stepTitleHolding(attachmentKey(a.id))}</span>}
                 </a>
                 )}
                 {!editing && isLink && (
@@ -1661,16 +1671,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Image and web page reviews (Derek, 2026-09-12): the same line and window as the
   // client document. Each has its own key, apart from the lines beside it; below
   // startReviewEmail so they never read it before it exists.
-  const reviewBlocks = !canHaveDocument ? null : REVIEW_LINES.map(({ kind }) => (
+  const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
     <TaskDocument key={`${kind}-${task.id}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
-      startNonce={reviewStartNonce[kind]}
+      startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep}
       onPresence={(exists) => setReviewPresence((p) => {
         const kinds = p.taskId === task.id ? p.kinds : [];
         if (p.taskId === task.id && kinds.includes(kind) === exists) return p;
         return { taskId: task.id, kinds: exists ? [...kinds, kind] : kinds.filter((k) => k !== kind) };
       })} />
-  ));
+  );
   // Everything a task can gain, in one menu beside Deliverables. It was a row
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
@@ -1684,7 +1694,125 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
   );
-  const hasDeliverables = showDocument || showBrief || REVIEW_LINES.some((l) => hasReview(l.kind)) || !!task.draftEmail;
+  // ── What a step holds (phase 4, Derek: "steps with deliverables and
+  // assets"). A deliverable or a link or file sits on one step at most; each
+  // deliverable block is drawn once, on its step or under Deliverables.
+  const DELIVERABLE_KEYS: DeliverableKey[] = ["doc", "brief", "image", "page", "video", "email"];
+  const deliverableBlock = (key: DeliverableKey, onCurrentStep: boolean) =>
+    key === "doc" ? documentBlock(onCurrentStep) : key === "brief" ? briefBlock : key === "email" ? draftEmailBlock : reviewBlock(key, onCurrentStep);
+  const deliverablePresent = (key: DeliverableKey) =>
+    key === "doc" ? showDocument : key === "brief" ? showBrief : key === "email" ? !!task.draftEmail : hasReview(key);
+  const deliverableName = (key: DeliverableKey) =>
+    key === "brief" ? "Project instructions"
+    : key === "email" ? (task.draftEmail?.subject?.trim() || "Draft email")
+    : reviews[key]?.title?.trim() || (key === "doc" ? "Client document" : REVIEW_LINES.find((l) => l.kind === key)?.label ?? key);
+  const unheldKeys = DELIVERABLE_KEYS.filter((k) => !stepHolding(steps, k));
+  const unheldPresent = unheldKeys.some(deliverablePresent);
+  const unheldBlocks = unheldKeys.map((k) => <div key={k}>{deliverableBlock(k, false)}</div>);
+  const holdKey = (stepId: string, key: string) => onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, stepId, key) });
+  const releaseKey = (key: string) => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, key) });
+  // A deliverable made from a step's menu goes on the step first; it is told
+  // to start once it has moved there (a block that mounts ignores a start it
+  // was already holding).
+  const [pendingStart, setPendingStart] = useState<DeliverableKey | null>(null);
+  useEffect(() => {
+    if (!pendingStart || !stepHolding(task.subtasks, pendingStart)) return;
+    const k = pendingStart;
+    setPendingStart(null);
+    if (k === "doc") setDocStartNonce((n) => n + 1);
+    else if (k === "brief") setBriefStartNonce((n) => n + 1);
+    else if (k === "email") startDraftEmail();
+    else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
+  }, [pendingStart, task.subtasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Files uploaded from a step's menu land on that step once they arrive.
+  const [fileTarget, setFileTarget] = useState<{ stepId: string; before: string[] } | null>(null);
+  useEffect(() => {
+    if (!fileTarget || uploadProgress) return;
+    const fresh = task.attachments.filter((a) => !fileTarget.before.includes(a.id));
+    if (!fresh.length) return;
+    let list = task.subtasks;
+    for (const a of fresh) list = holdOnStep(list, fileTarget.stepId, attachmentKey(a.id));
+    setFileTarget(null);
+    onPatch({ subtasks: list });
+  }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [stepMenuFor, setStepMenuFor] = useState<string | null>(null);
+  // The step's +: make a deliverable on it, add a new link or file, or put
+  // something the task already has on it (brief, section 6).
+  const stepAddMenu = (sub: Subtask) => {
+    const holds = sub.holds ?? [];
+    const item = "flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background";
+    const group = "px-2.5 pb-0.5 pt-2 text-[16px] font-semibold text-muted";
+    const close = () => setStepMenuFor(null);
+    const make = (key: DeliverableKey) => { close(); holdKey(sub.id, key); setPendingStart(key); };
+    type MenuMake = { key: DeliverableKey; label: string };
+    const reviewMake: MenuMake[] = !canHaveDocument ? [] : [
+      ...(showDocument ? [] : [{ key: "doc" as const, label: "Client document" }]),
+      ...REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l): MenuMake => ({ key: l.kind, label: l.label })),
+    ];
+    const otherMake: MenuMake[] = [
+      ...(canHaveDocument && !showBrief ? [{ key: "brief" as const, label: "Project instructions" }] : []),
+      ...(hasMessaging && !task.draftEmail ? [{ key: "email" as const, label: "Draft email" }] : []),
+    ];
+    const existing = [
+      ...DELIVERABLE_KEYS.filter((k) => deliverablePresent(k)).map((k) => ({ key: k as string, label: deliverableName(k) })),
+      ...task.attachments.map((a) => ({ key: attachmentKey(a.id), label: a.name })),
+    ].filter((x) => !holds.includes(x.key));
+    return (
+      <span className="relative">
+        <button onClick={() => setStepMenuFor((o) => (o === sub.id ? null : sub.id))} aria-haspopup="menu" aria-expanded={stepMenuFor === sub.id}
+          title="Attach a deliverable, link or file to this step" aria-label={`Attach to ${sub.title}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"><I.plus className="h-4 w-4" /></button>
+        {stepMenuFor === sub.id && (<>
+          <div className="fixed inset-0 z-30" onClick={close} />
+          <div role="menu" aria-label={`Attach to ${sub.title}`} className="absolute right-0 top-full z-40 mt-1 max-h-[60vh] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 text-left text-foreground shadow-lg">
+            {reviewMake.length > 0 && <div className={group}>For client review</div>}
+            {reviewMake.map((x) => <button key={x.key} role="menuitem" onClick={() => make(x.key)} className={item}>{x.label}</button>)}
+            {otherMake.length > 0 && <div className={group}>Other deliverables</div>}
+            {otherMake.map((x) => <button key={x.key} role="menuitem" onClick={() => make(x.key)} className={item}>{x.label}</button>)}
+            <div className={group}>Add new</div>
+            <button role="menuitem" className={item} onClick={() => { close(); setLinkTarget(sub.id); setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>Link</button>
+            <button role="menuitem" className={item} onClick={() => { close(); setFileTarget({ stepId: sub.id, before: task.attachments.map((a) => a.id) }); fileRef.current?.click(); }}>File</button>
+            {existing.length > 0 && <div className={group}>Assign from this task</div>}
+            {existing.map((x) => {
+              const on = stepTitleHolding(x.key);
+              return (
+                <button key={x.key} role="menuitem" onClick={() => { close(); holdKey(sub.id, x.key); }} className={item}>
+                  <span className="min-w-0 flex-1 truncate">{x.label}</span>
+                  {on && <span className="shrink-0 text-muted">on {on.length > 18 ? `${on.slice(0, 18)}…` : on}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>)}
+      </span>
+    );
+  };
+  // What a step holds, drawn on it: its deliverables as their own rows (the
+  // current step's reviews with their open comments), then its links and files.
+  const stepHeld = (sub: Subtask, isActive: boolean) => {
+    const keys = sub.holds ?? [];
+    const deliverables = keys.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k));
+    const assets = keys.filter((k) => k.startsWith("att:")).map((k) => task.attachments.find((a) => attachmentKey(a.id) === k)).filter((a): a is Attachment => !!a);
+    if (!deliverables.length && !assets.length) return null;
+    return (
+      <div className="flex flex-col gap-2">
+        {deliverables.map((k) => <div key={k}>{deliverableBlock(k, isActive)}</div>)}
+        {assets.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {assets.map((a) => (
+              <span key={a.id} className="group/asset inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
+                {a.url
+                  ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
+                  : <button onClick={() => (a.kind === "image" ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
+                <button onClick={() => releaseKey(attachmentKey(a.id))} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
+                  className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
   // The embedded sibling-task list used to live here — deleted (item 4):
   // the "N of M" pager (onPrev/onNext below) already does the same job of
   // moving between tasks in this list, without duplicating a whole list
@@ -1898,19 +2026,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {chipRow}
         <div className="mt-1.5">{descriptionBlock}</div>
       </div>
-      {planBlock}
+      {renderPlan()}
       {clientResponseBlock}
-      {section("Deliverables", (
+      {/* Deliverables on no step (Derek: they may sit outside a step). With
+          steps and nothing loose, there is no section, but the blocks stay
+          mounted so they can say whether they exist. */}
+      {steps.length === 0 || unheldPresent ? section("Deliverables", (
         <>
-          {documentBlock}
-          {briefBlock}
-          {reviewBlocks}
-          {draftEmailBlock}
-          {!hasDeliverables && (
-            <p className="rounded-xl border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here.</p>
+          {unheldBlocks}
+          {!unheldPresent && (
+            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">Client reviews and draft emails show here. With steps, add them from a step&apos;s +.</p>
           )}
         </>
-      ), addMenu)}
+      ), addMenu) : <div>{unheldBlocks}</div>}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {attachmentsBlock}

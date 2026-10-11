@@ -11,7 +11,7 @@ import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
 import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
 import { delegateeOf, delegationTitle, handoffDoneEvent, type Me, type NotificationKind, type Priority, type Subtask, type Task, type TaskSize, userById, users } from "@/lib/data";
-import { appendCommentDb, insertTaskAction } from "@/lib/db";
+import { appendCommentDb, finishHandoffWatchDb, insertTaskAction } from "@/lib/db";
 
 export type UseChecklistDeps = {
   tasks: Task[];
@@ -51,6 +51,12 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
       const ev = { id: newId("cm_"), authorId: me.id, kind: "event" as const, at: new Date().toISOString(), body: handoffDoneEvent(s.title) };
       setTasks((prev) => prev.map((x) => (x.id === taskId ? { ...x, comments: [...x.comments, ev] } : x)));
       void appendCommentDb(taskId, ev);
+      // The owner's follow up waiting on this handoff is done too, even with
+      // the task closed (it used to finish only while the task was open).
+      void finishHandoffWatchDb(taskId, subId).then((r) => {
+        const cur = tasksRef.current.find((x) => x.id === taskId);
+        if (r.finished && cur && (cur.followUpAt ?? null) !== r.followUpAt) update(taskId, { followUpAt: r.followUpAt });
+      });
     }
     // Completing a delegated item pings the task owner so they know it's handled.
     // Bell only — a checked-off checklist row is progress on work the owner is
