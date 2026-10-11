@@ -841,7 +841,7 @@ export interface Subtask {
    *  client's comment that became a to-do keeps its id, so ticking one can
    *  close the comment too. */
   todos?: StepTodo[];
-  /** What we want done on this step, in our words: the directions Claude or a
+  /** What we want done on this step (HTML, like the task description): the directions Claude or a
    *  teammate works from (Derek, 2026-10-11). Its links and files are the
    *  step's held attachments. */
   notes?: string;

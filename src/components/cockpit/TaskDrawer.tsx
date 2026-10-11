@@ -496,7 +496,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ``,
       `This step (${at + 1} of ${plan.length}): ${sub.title}`,
       `- ${sub.done ? `Done: ${sub.outcome ?? "Done"}` : cur?.id === sub.id ? "The current step" : "Comes later"}${owner ? ` · on ${owner}` : ""}${sub.due ? ` · due ${sub.due}` : ""}`,
-      sub.notes?.trim() ? `\nDirections:\n${sub.notes.trim()}` : "",
+      sub.notes && htmlToText(sub.notes).trim() ? `\nDirections:\n${htmlToText(sub.notes).trim()}` : "",
       sub.todos?.length ? `\nTo do on this step:\n${sub.todos.map((t) => `- [${t.done ? "x" : " "}] ${t.title}`).join("\n")}` : "",
       work.length ? `\nOn this step (client work, links and files):\n${work.join("\n")}` : "",
       sub.needs?.length ? `\nIt needs: ${sub.needs.join(", ")}` : "",

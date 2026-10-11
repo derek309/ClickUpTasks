@@ -15,6 +15,7 @@ import {
 import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
   controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
@@ -95,6 +96,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(canChat ? "client" : "team");
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(false);
+  const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
+  const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirSave = useRef<(() => void) | null>(null);
+  // Closing the page right after typing still saves what was typed.
+  useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
   const [addOpen, setAddOpen] = useState(false);
   const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
@@ -333,18 +339,22 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 {controls}
                 {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>
-              {/* Directions: what we want, so whoever does it (Claude included,
-                  with the copy button) has it all in one place (Derek, 2026-10-11). */}
-              <section aria-labelledby="step-directions" className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 id="step-directions" className="text-[17px] font-bold">Directions</h3>
-                  {onCopyForClaude && <button onClick={onCopyForClaude} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[16px] font-semibold hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>}
-                </div>
-                <textarea key={sub.id} defaultValue={sub.notes ?? ""} rows={3} aria-label="Directions for this step"
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (sub.notes ?? "")) onPatchSub({ notes: v || undefined }); }}
-                  placeholder="What we want on this step: what to make, what to change, where things are, how it should look…"
-                  className="w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none [field-sizing:content] focus:border-accent" />
-                <p className="text-[16px] text-muted">Paste or drop images, files and links anywhere on this page; they go on this step with the directions.</p>
+              {/* Directions: what we want on this step, like the task's
+                  description: a line until it is needed, then the editor
+                  (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
+              <section aria-label="Directions" className="flex flex-col gap-2">
+                {dirOpen ? (<>
+                  <h3 className="text-[17px] font-bold">Directions</h3>
+                  <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus={!sub.notes}
+                    onChange={(html) => {
+                      if (dirTimer.current) clearTimeout(dirTimer.current);
+                      dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
+                      dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
+                    }}
+                    placeholder="What we want on this step: what to make, what to change, where things are…" />
+                </>) : (
+                  <button onClick={() => setDirOpen(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
+                )}
               </section>
               {followBox}
               {planBits}
