@@ -3070,6 +3070,9 @@ export const inWindow = (at: string, w: { from: string; to: string | null }) => 
 export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, clientFirstName: string, name: string, review: DeliverableKey, due: string | null, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
   const from = subtasks.find((s) => s.id === fromStepId);
   if (!from || from.onClient) return null;
+  // Send for review, the review email and the document's own stage change can
+  // all report the same send: one waiting step per step sent from.
+  if (subtasks.some((s) => s.addedFor === `sent:${fromStepId}`)) return null;
   const at = subtasks.findIndex((s) => s.id === fromStepId);
   let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `Sent to ${clientFirstName} for review` } : s));
   // The review and the email that goes with it both sit on the client's step.

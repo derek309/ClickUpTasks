@@ -1472,7 +1472,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const tp = { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length };
     const w = stepWindow(task.subtasks, sub.id, task.createdAt);
     const fresh = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read && inWindow(m.at, w)).length;
-    const holds = sub.holds ?? [];
+    // The client's waiting step keeps its document and email in the task's
+    // Client work, not on the step (Derek, 2026-10-11: "just what needs to be
+    // completed").
+    const holds = sub.onClient ? [] : sub.holds ?? [];
     const heldNames = [
       ...holds.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k)).filter(deliverablePresent).map(deliverableName),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
@@ -2377,7 +2380,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </div>
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
-              held={stepHeld(ps) ?? undefined}
+              held={ps.onClient ? undefined : stepHeld(ps) ?? undefined}
               handoff={isHandoffStep(ps, task.assigneeId) && !ps.done ? handoffDetails(ps) : undefined}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}

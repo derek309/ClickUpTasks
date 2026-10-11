@@ -184,6 +184,10 @@ describe("a review going to the client", () => {
   it("adds nothing while the client's step is current", () => {
     expect(addClientReviewStep([s("c", "Derek reviews", { onClient: true })], "c", "Derek", "x", "doc", null, () => "n")).toBeNull();
   });
+  it("adds one waiting step even when the send is reported twice", () => {
+    const once = addClientReviewStep([s("a", "Create document")], "a", "Derek", "Newsletter", "doc", null, () => "n1")!;
+    expect(addClientReviewStep(once, "a", "Derek", "the document", "doc", null, () => "n2")).toBeNull();
+  });
 });
 
 import { addApprovalStep, addEmailSentRecord } from "./data";
