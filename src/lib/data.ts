@@ -851,6 +851,9 @@ export interface Subtask {
   /** Client work and files the directions point at ("use the document"):
    *  deliverable keys or att:<id>. Copy for Claude brings their content along. */
   uses?: string[];
+  /** On the client's waiting step: the review it waits on, wherever that
+   *  review sits afterwards (Derek, 2026-10-11: "the client work here"). */
+  waitsOn?: DeliverableKey;
   /** When the step became the current one, and when it was finished: what was
    *  said in between is the step's conversation. */
   startedAt?: string;
@@ -3102,7 +3105,7 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   list = releaseFromSteps(releaseFromSteps(list, review), "email")
     .map((s) => (s.id === fromStepId ? { ...s, holds: [...(s.holds ?? []), review, "email"] } : s));
   list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName} to review ${name}`, done: false, stage: "waiting", onClient: true,
-    addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
+    addedFor: `sent:${fromStepId}`, waitsOn: review, startedAt: now, ...(due ? { due } : {}) });
   return list;
 }
 

@@ -1531,8 +1531,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const sentReviews = (sub: Subtask): ("doc" | "image" | "page" | "video")[] => {
     if (!sub.onClient || !sub.addedFor?.startsWith("sent:")) return [];
     const home = task.subtasks.find((x) => x.id === sub.addedFor!.slice(5));
-    const keys = [...(home ? withSentHolds(home).holds ?? [] : []), ...(sub.holds ?? [])];
-    return (["doc", "image", "page", "video"] as const).filter((k) => keys.includes(k) && !!reviews[k]);
+    const keys = [...(sub.waitsOn ? [sub.waitsOn] : []), ...(home ? withSentHolds(home).holds ?? [] : []), ...(sub.holds ?? [])];
+    const found = (["doc", "image", "page", "video"] as const).filter((k) => keys.includes(k) && !!reviews[k]);
+    // An older waiting step that kept no note of it: the reviews that went out.
+    return found.length ? found : (["doc", "image", "page", "video"] as const).filter((k) => !!reviews[k] && reviews[k]!.status !== "draft");
   };
   const viewedLine = (k: "doc" | "image" | "page" | "video") => {
     const r = reviews[k];

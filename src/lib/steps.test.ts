@@ -178,7 +178,7 @@ describe("a review going to the client", () => {
     const list = [s("a", "Draft the newsletter", { holds: ["doc", "att:x"] }), s("b", "Schedule")];
     const out = addClientReviewStep(list, "a", "Derek", "the newsletter", "doc", "2026-10-15", () => "n1", "2026-10-11T10:00:00Z")!;
     expect(out[0]).toMatchObject({ done: true, holds: ["att:x", "doc", "email"] });
-    expect(out[1]).toMatchObject({ title: "Waiting on Derek to review the newsletter", onClient: true, stage: "waiting", due: "2026-10-15" });
+    expect(out[1]).toMatchObject({ title: "Waiting on Derek to review the newsletter", onClient: true, stage: "waiting", due: "2026-10-15", waitsOn: "doc" });
     expect(out[1].holds).toBeUndefined();
     expect(out[2].title).toBe("Schedule");
   });
