@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -45,6 +45,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   round?: string | null;
   /** Copies this step, with the task around it, for Claude. */
   onCopyForClaude?: () => void;
+  /** Who is looking, so their own messages read "You → Derek". */
+  meId?: string | null;
   /** Opened from "Create Checklist": the to-do box is out and ready. */
   startWithChecklist?: boolean;
   /** The client's waiting step: what is out with them, in place of adding work
@@ -164,6 +166,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     setDraft("");
   };
 
+  // The links in an email (the review link above all), kept clickable: the
+  // text alone lost them (Derek, 2026-10-11).
+  const linksOf = (html: string) => [...html.matchAll(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((x) => ({ href: x[1].replace(/&amp;/g, "&"), label: htmlToText(x[2]).trim() || x[1] }))
+    .filter((l) => /^https?:\/\//.test(l.href));
   const toneOf = (m: Message) => CHANNEL_TONE[m.channel === "sms" ? "sms" : m.channel === "email" ? "email" : "chat"];
   const conversation = (
     <section aria-labelledby="step-talk" className="flex min-w-0 flex-col gap-3">
@@ -181,7 +188,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           if (x.kind === "message") {
             const m = x.m;
             const mine = m.direction === "outbound";
-            const who = mine ? (m.createdBy ? userById(m.createdBy)?.name ?? "Us" : "Us") : client.name;
+            // Who wrote to whom, so our own messages never read as the client's.
+            const sender = mine ? (m.createdBy && m.createdBy === meId ? "You" : m.createdBy ? userById(m.createdBy)?.name.split(" ")[0] ?? "Us" : "Us") : first;
+            const who = mine ? `${sender} → ${first}` : `${first} → ${meId ? "You" : "us"}`;
             const text = htmlToText(m.body).trim();
             return (
               <div key={x.key} className="flex gap-2.5">
@@ -194,8 +203,18 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                     <span className={`rounded-[5px] px-2 font-medium ${toneOf(m).surface} ${toneOf(m).label}`}>{m.channel === "email" ? "Email" : m.channel === "sms" ? "Text" : "Chat"}</span>
                     <span className="text-muted">{timeAgo(m.at)}</span>
                   </div>
-                  {m.subject && <div className="text-[16px] font-medium">{m.subject}</div>}
-                  {text && <CollapsibleText text={text} className="text-[16px]" maxLines={6} maxChars={500} />}
+                  {m.subject && <div className="text-[16px] font-semibold">{m.subject}</div>}
+                  {/* The first lines, the rest one click away. */}
+                  {text && <CollapsibleText text={text} className="text-[16px]" maxLines={2} maxChars={180} />}
+                  {linksOf(m.body).length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {linksOf(m.body).map((l, i) => (
+                        <a key={i} href={l.href} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[16px] font-medium text-accent hover:bg-background">
+                          <span className="min-w-0 truncate">{l.label}</span><span aria-hidden>↗</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );
