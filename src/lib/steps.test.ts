@@ -33,7 +33,7 @@ describe("steps", () => {
     let n = 0;
     const list = [s("a", "Draft", { done: true }), s("r", "Client review", { stage: "review" }), s("z", "Schedule")];
     const out = addChangesRound(list, "r", "Brian", "page:2", () => `n${++n}`)!;
-    expect(out.map((x) => [x.title, x.done])).toEqual([["Draft", true], ["Client review", true], ["Make Brian's changes", false], ["Send to Brian again", false], ["Schedule", false]]);
+    expect(out.map((x) => [x.title, x.done])).toEqual([["Draft", true], ["Client review", true], ["Make Brian's changes", false], ["Schedule", false]]);
     expect(addChangesRound(out, "r", "Brian", "page:2", () => "x")).toBeNull();
   });
 });
@@ -134,7 +134,7 @@ describe("steps added by what happens", () => {
     expect(out[0]).toMatchObject({ done: true, doneAt: now });
     expect(out[0].holds).toBeUndefined();
     expect(out[1]).toMatchObject({ title: "Make Brian's changes", holds: ["page"], todos: [{ title: "Fix the logo" }] });
-    expect(out[2]).toMatchObject({ title: "Send to Brian again", makes: "page", stage: "review" });
+    expect(out[2].title).toBe("Schedule");
   });
   it("approval with nothing after it asks what's next, once", () => {
     const out = addApprovedStep([s("r", "Client review", { stage: "review" })], "r", "Brian", "the newsletter", "ok:page:2", id, now)!;
@@ -178,10 +178,29 @@ describe("a review going to the client", () => {
     const list = [s("a", "Draft the newsletter", { holds: ["doc", "att:x"] }), s("b", "Schedule")];
     const out = addClientReviewStep(list, "a", "Derek", "the newsletter", "doc", "2026-10-15", () => "n1", "2026-10-11T10:00:00Z")!;
     expect(out[0]).toMatchObject({ done: true, holds: ["att:x"] });
-    expect(out[1]).toMatchObject({ title: "Derek reviews the newsletter", onClient: true, stage: "waiting", holds: ["doc", "email"], due: "2026-10-15" });
+    expect(out[1]).toMatchObject({ title: "Waiting on Derek to review the newsletter", onClient: true, stage: "waiting", holds: ["doc", "email"], due: "2026-10-15" });
     expect(out[2].title).toBe("Schedule");
   });
   it("adds nothing while the client's step is current", () => {
     expect(addClientReviewStep([s("c", "Derek reviews", { onClient: true })], "c", "Derek", "x", "doc", null, () => "n")).toBeNull();
+  });
+});
+
+import { addApprovalStep, addEmailSentRecord } from "./data";
+
+describe("the document's stage as steps", () => {
+  it("records an approval and starts the next planned step", () => {
+    const out = addApprovalStep([s("a", "Create content", { holds: ["doc"] }), s("b", "Schedule")], "a", "Newsletter approved", "ok:doc:1", () => "n1", "2026-10-11T10:00:00Z")!;
+    expect(out.hasNext).toBe(true);
+    expect(out.list.map((x) => [x.title, x.done])).toEqual([["Create content", true], ["Newsletter approved", true], ["Schedule", false]]);
+    expect(addApprovalStep(out.list, "a", "x", "ok:doc:1", () => "n")).toBeNull();
+  });
+  it("with nothing planned, the approval asks what's next", () => {
+    const out = addApprovalStep([s("a", "Create content")], "a", "Derek approved the newsletter", "ok:doc:1", () => "n1")!;
+    expect(out.list[1]).toMatchObject({ title: "Derek approved the newsletter: what's next?", done: false, stage: "approved" });
+  });
+  it("records the review email just before the client's step", () => {
+    const out = addEmailSentRecord([s("a", "Create", { done: true }), s("c", "Waiting on Derek", { onClient: true })], "c", "Derek", () => "n1")!;
+    expect(out.map((x) => [x.title, x.done])).toEqual([["Create", true], ["Review email sent to Derek", true], ["Waiting on Derek", false]]);
   });
 });

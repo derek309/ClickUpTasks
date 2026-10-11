@@ -2863,10 +2863,11 @@ export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clien
   // The review moves onto the changes step to be worked on, and the new client
   // review makes it, so it follows there when the changes are done. The
   // client's comments are the changes step's to-do list (Derek, 2026-10-11).
+  // Sending it again from this step starts the client's next review step
+  // (addClientReviewStep), so the loop needs no step of its own.
   const round: Subtask[] = [
     { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key, startedAt: now,
       ...(opts.review ? { holds: [opts.review] } : {}), ...(opts.todos?.length ? { todos: opts.todos } : {}) },
-    { id: makeId(), title: `Send to ${clientFirstName} again`, done: false, stage: "review", addedFor: key, ...(opts.review ? { makes: opts.review } : {}) },
   ];
   let list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
   if (opts.review) list = releaseFromSteps(list, opts.review);
@@ -2944,8 +2945,9 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
   if (addedFor === "changes") return `Added when ${clientFirstName} sent changes`;
   if (addedFor.startsWith("tell:")) return "Added when the changes were marked done";
   if (addedFor.startsWith("checkin:")) return "Added when the email went";
-  if (addedFor.startsWith("ok:")) return `Added when ${clientFirstName} approved`;
+  if (addedFor.startsWith("ok:")) return "Added when it was approved";
   if (addedFor.startsWith("sent:")) return `Added when it went to ${clientFirstName}`;
+  if (addedFor.startsWith("emailed:")) return null;
   return `Added when ${clientFirstName} sent changes`;
 }
 
@@ -3069,7 +3071,35 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
   // The review and the email that goes with it both sit on the client's step.
   list = releaseFromSteps(releaseFromSteps(list, review), "email");
-  list.splice(at + 1, 0, { id: makeId(), title: `${clientFirstName} reviews ${name}`, done: false, stage: "waiting", onClient: true,
+  list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName} to review ${name}`, done: false, stage: "waiting", onClient: true,
     holds: [review, "email"], addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
+  return list;
+}
+
+/** The document was approved, by the client or by us: the step working on it
+ *  is done and an approval step records it (Derek, 2026-10-11: "there's an
+ *  approval"). When the plan has a next step, the approval is just a record
+ *  and the next step starts; with none, it is current and asks what's next. */
+export function addApprovalStep(subtasks: Subtask[], fromStepId: string, what: string, key: string, makeId: () => string, now = new Date().toISOString()): { list: Subtask[]; approvalId: string; hasNext: boolean } | null {
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === fromStepId);
+  if (at < 0) return null;
+  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  const id = makeId();
+  list.splice(at + 1, 0, { id, title: what, done: false, stage: "approved", addedFor: key, startedAt: now });
+  const hasNext = !!stepAfter(list, id);
+  if (hasNext) list = list.map((s) => (s.id === id ? { ...s, done: true, doneAt: now, title: what } : s));
+  else list = list.map((s) => (s.id === id ? { ...s, title: `${what}: what's next?` } : s));
+  return { list, approvalId: id, hasNext };
+}
+
+/** The review email went to the client while their step is current: a record
+ *  of it just before their step (Derek, 2026-10-11: "client review email
+ *  sent, waiting for response"). */
+export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, clientFirstName: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  const at = subtasks.findIndex((s) => s.id === clientStepId);
+  if (at < 0) return null;
+  const list = [...subtasks];
+  list.splice(at, 0, { id: makeId(), title: `Review email sent to ${clientFirstName}`, done: true, doneAt: now, stage: "waiting", addedFor: `emailed:${clientStepId}:${now}`, startedAt: now });
   return list;
 }

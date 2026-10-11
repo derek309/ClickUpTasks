@@ -39,7 +39,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
   canText?: boolean;
   onSendText?: (body: string) => void;
-  /** The current step's follow up, from the task page. */
+  /** A late client step's nudge, from the task page. */
   followBox?: React.ReactNode;
   /** What a plan's step makes and needs. */
   planBits?: React.ReactNode;
@@ -275,7 +275,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
                 <div>
                   {sub.done
                     ? <button onClick={onReopen} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Reopen this step</button>
-                    : isCurrent && !followBox && <button onClick={onMarkDone} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>}
+                    : isCurrent && <button onClick={onMarkDone} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>}
                 </div>
               </div>
               {followBox}
