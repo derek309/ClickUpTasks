@@ -961,16 +961,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     else onPatch({ followUpAt: d });
     if (activeStep) onPatchSub(activeStep.id, { due: d });
   };
-  // A new step. On a task with only a follow up, that follow up becomes step 1.
+  // A new step, just as typed: no date of its own until one is set (Derek,
+  // 2026-10-11: "when creating a step we don't need an auto follow up date").
   const addStep = (title: string) => {
     const t = title.trim();
     if (!t) return;
     // A new step answers "what happens next?".
     if (asking) setAskNext(null);
-    if (steps.length === 0 && (openStep || followUp)) {
-      const first: Subtask = { id: newId("s_"), title: openStep?.nextStep ?? "Check back on this task", done: false, due: followUp ? followUp.slice(0, 10) : null };
-      onPatch({ subtasks: [...task.subtasks, first, { id: newId("s_"), title: t, done: false }] });
-    } else onAddSub(t);
+    onAddSub(t);
   };
   // A client sent changes on a review while its review step is current: that
   // step is done, and "Make the changes" and a new client review follow it
