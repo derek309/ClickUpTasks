@@ -203,9 +203,10 @@ describe("the document's stage as steps", () => {
     const out = addApprovalStep([s("a", "Create content")], "a", "Derek approved the newsletter", "ok:doc:1", () => "n1")!;
     expect(out.list[1]).toMatchObject({ title: "Derek approved the newsletter: what's next?", done: false, stage: "approved" });
   });
-  it("records the review email just before the client's step", () => {
-    const out = addEmailSentRecord([s("a", "Create", { done: true }), s("c", "Waiting on Derek", { onClient: true })], "c", "Derek", () => "n1")!;
-    expect(out.map((x) => [x.title, x.done])).toEqual([["Create", true], ["Review email sent to Derek", true], ["Waiting on Derek", false]]);
+  it("records the review email on the client's step, not as a step of its own", () => {
+    const out = addEmailSentRecord([s("a", "Create", { done: true }), s("c", "Waiting on Derek", { onClient: true })], "c", "Derek", () => "n1", "2026-10-11T10:00:00Z")!;
+    expect(out.map((x) => x.title)).toEqual(["Create", "Waiting on Derek"]);
+    expect(out[1].emailedAt).toBe("2026-10-11T10:00:00Z");
   });
 });
 

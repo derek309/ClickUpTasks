@@ -1513,6 +1513,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 const t = stepDateLabel(d).tone;
                 return <span className={t === "late" ? "font-semibold text-danger" : t === "soon" ? "font-semibold text-highlight" : "text-muted"}>Due {t === "late" || t === "soon" ? stepDateLabel(d).label.split(",")[0].toLowerCase() : formatDue(d)}</span>;
               })()}
+              {sub.emailedAt && !sub.done && <span className="text-muted">Email sent {formatDue(sub.emailedAt.slice(0, 10))}</span>}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
               {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
@@ -1762,7 +1763,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         if (activeStep && reviewKind) {
           const name = reviews[reviewKind]?.title?.trim() || (reviewKind === "doc" ? "the document" : "the review");
           const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
-          const list = addClientReviewStep(task.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
+          const made = addClientReviewStep(task.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
+          // The email that started it shows on the waiting step itself.
+          const sentAt = new Date().toISOString();
+          const list = made?.map((x) => (x.addedFor === `sent:${activeStep.id}` ? { ...x, emailedAt: sentAt } : x));
           if (list) {
             onPatch({ subtasks: list, status: "waiting", followUpAt: due });
             return;

@@ -856,6 +856,9 @@ export interface Subtask {
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;
+  /** On the client's waiting step: when the review email went to them, shown
+   *  on the step instead of a step of its own (Derek, 2026-10-11). */
+  emailedAt?: string;
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
@@ -3102,12 +3105,9 @@ export function addApprovalStep(subtasks: Subtask[], fromStepId: string, what: s
 /** The review email went to the client while their step is current: a record
  *  of it just before their step (Derek, 2026-10-11: "client review email
  *  sent, waiting for response"). */
-export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, clientFirstName: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
-  const at = subtasks.findIndex((s) => s.id === clientStepId);
-  if (at < 0) return null;
-  const list = [...subtasks];
-  list.splice(at, 0, { id: makeId(), title: `Review email sent to ${clientFirstName}`, done: true, doneAt: now, stage: "waiting", addedFor: `emailed:${clientStepId}:${now}`, startedAt: now, outcome: "Sent" });
-  return list;
+export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, _clientFirstName: string, _makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  if (!subtasks.some((s) => s.id === clientStepId)) return null;
+  return subtasks.map((s) => (s.id === clientStepId ? { ...s, emailedAt: now } : s));
 }
 
 /** What a finished step hands to the next: its client work still under way
