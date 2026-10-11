@@ -174,11 +174,12 @@ describe("steps added by what happens", () => {
 import { addClientReviewStep } from "./data";
 
 describe("a review going to the client", () => {
-  it("finishes our step and starts the client's, holding the review", () => {
+  it("finishes our step, which keeps the review and email, and starts the client's", () => {
     const list = [s("a", "Draft the newsletter", { holds: ["doc", "att:x"] }), s("b", "Schedule")];
     const out = addClientReviewStep(list, "a", "Derek", "the newsletter", "doc", "2026-10-15", () => "n1", "2026-10-11T10:00:00Z")!;
-    expect(out[0]).toMatchObject({ done: true, holds: ["att:x"] });
-    expect(out[1]).toMatchObject({ title: "Waiting on Derek to review the newsletter", onClient: true, stage: "waiting", holds: ["doc", "email"], due: "2026-10-15" });
+    expect(out[0]).toMatchObject({ done: true, holds: ["att:x", "doc", "email"] });
+    expect(out[1]).toMatchObject({ title: "Waiting on Derek to review the newsletter", onClient: true, stage: "waiting", due: "2026-10-15" });
+    expect(out[1].holds).toBeUndefined();
     expect(out[2].title).toBe("Schedule");
   });
   it("adds nothing while the client's step is current", () => {

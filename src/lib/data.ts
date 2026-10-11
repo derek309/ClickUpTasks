@@ -3078,10 +3078,13 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   if (subtasks.some((s) => s.addedFor === `sent:${fromStepId}`)) return null;
   const at = subtasks.findIndex((s) => s.id === fromStepId);
   let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `Sent to ${clientFirstName} for review` } : s));
-  // The review and the email that goes with it both sit on the client's step.
-  list = releaseFromSteps(releaseFromSteps(list, review), "email");
+  // The review and the email that goes with it stay on the step that made
+  // them; the client's waiting step holds nothing of its own (Derek,
+  // 2026-10-11: "it should live there cause it was created in the task").
+  list = releaseFromSteps(releaseFromSteps(list, review), "email")
+    .map((s) => (s.id === fromStepId ? { ...s, holds: [...(s.holds ?? []), review, "email"] } : s));
   list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName} to review ${name}`, done: false, stage: "waiting", onClient: true,
-    holds: [review, "email"], addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
+    addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
   return list;
 }
 

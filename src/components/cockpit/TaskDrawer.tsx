@@ -1463,6 +1463,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // A step on the task: one line that says what is happening inside it, the
   // whole of it a click to open the step (Derek, 2026-10-11: "make the bar
   // clickable", "this is all informational").
+  // A review sent before 2026-10-11's change sits on the client's waiting
+  // step: show it on the step that made it, where it now lives.
+  const withSentHolds = (sub: Subtask): Subtask => {
+    const moved = task.subtasks.filter((x) => x.onClient && x.addedFor === `sent:${sub.id}`).flatMap((x) => x.holds ?? []);
+    return moved.length ? { ...sub, holds: [...new Set([...(sub.holds ?? []), ...moved])] } : sub;
+  };
   const stepRow = (sub: Subtask, i: number) => {
     const isActive = activeStep?.id === sub.id;
     const upcoming = !sub.done && !isActive;
@@ -1475,7 +1481,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The client's waiting step keeps its document and email in the task's
     // Client work, not on the step (Derek, 2026-10-11: "just what needs to be
     // completed").
-    const holds = sub.onClient ? [] : sub.holds ?? [];
+    const holds = sub.onClient ? [] : withSentHolds(sub).holds ?? [];
     const heldNames = [
       ...holds.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k)).filter(deliverablePresent).map(deliverableName),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
@@ -1772,12 +1778,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             return;
           }
         }
-        const sentFrom = activeStep && activeStep.holds?.includes("email") ? activeStep : null;
-        if (sentFrom?.onClient) {
-          const list = addEmailSentRecord(task.subtasks, sentFrom.id, firstName, () => newId("s_"));
+        // The client's step is current: the email went to them for it.
+        if (activeStep?.onClient) {
+          const list = addEmailSentRecord(task.subtasks, activeStep.id, firstName, () => newId("s_"));
           if (list) onPatch({ subtasks: list });
           return;
         }
+        const sentFrom = activeStep && activeStep.holds?.includes("email") ? activeStep : null;
         if (sentFrom) {
           const due = addBusinessDaysIso(TODAY, 3);
           const list = addCheckInStep(task.subtasks, sentFrom.id, firstName, due, () => newId("s_"));
@@ -1815,8 +1822,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
     onPatch({ draftEmail: { ...buildReviewEmail({ ...review, greetName: messageDest?.name }), createdAt: now, updatedAt: now } });
-    // Its email sits on the client's step, which holds "email" from the
-    // moment it is made (addClientReviewStep): no second write of the list
+    // Its email sits on the step that made the review (addClientReviewStep
+    // puts it there when the client's step starts): no second write of the list
     // here, which could carry an older copy over the new step.
     setEmailOpenNonce((n) => n + 1);
     return true;
@@ -2384,7 +2391,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </div>
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
-              held={ps.onClient ? undefined : stepHeld(ps) ?? undefined}
+              held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
               handoff={isHandoffStep(ps, task.assigneeId) && !ps.done ? handoffDetails(ps) : undefined}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}
