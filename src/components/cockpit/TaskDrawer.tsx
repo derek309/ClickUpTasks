@@ -904,9 +904,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ? [...(messages ?? [])].filter((m) => m.direction === "inbound" && m.at > openStep.at).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
     : null;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
-    // A quiet box like the others; only its left edge has colour, for how
-    // late it is (Derek, 2026-10-11, one box style).
-    <div className={`mt-4 overflow-hidden rounded-r-[5px] border border-l-[3px] bg-surface ${asking ? "border-l-success" : (openStep || followUp) && stepDate.tone === "late" ? "border-l-danger" : (openStep || followUp) && stepDate.tone === "soon" ? "border-l-highlight" : "border-l-accent"}`}>
+    // The thing you act on, so it stands out: filled amber when it's due
+    // today, red when late, raised either way (Derek, 2026-10-11: "it's very
+    // flat", mockup A).
+    <div className={`mt-6 overflow-hidden rounded-[5px] border border-l-4 shadow-soft ${asking ? "border-l-success bg-surface" : (openStep || followUp) && stepDate.tone === "late" ? "border-danger/30 border-l-danger bg-danger-soft" : (openStep || followUp) && stepDate.tone === "soon" ? "border-highlight/30 border-l-highlight bg-highlight-soft" : "border-l-accent bg-surface"}`}>
       {/* No coloured band: the date under the step says how late it is
           (Derek, 2026-10-10: "follow up is very clunky", desktop too). */}
       <div className={`hidden items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
@@ -914,10 +915,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
       </div>
       {/* How late it is, first thing you see (Derek, 2026-10-11). */}
-      <div className="px-4 pt-2.5 text-[16px] font-bold uppercase tracking-wide text-muted sm:px-5">
-        Follow up{(openStep || followUp) && (stepDate.tone === "late" || stepDate.tone === "soon") && (
-          <span className={stepDate.tone === "late" ? "text-danger" : "text-highlight"}> · {stepDate.label.split(",")[0]}</span>
-        )}
+      <div className={`flex items-center gap-2 px-4 pt-3 text-[16px] font-bold uppercase tracking-wide sm:px-5 ${(openStep || followUp) && stepDate.tone === "late" ? "text-danger" : (openStep || followUp) && stepDate.tone === "soon" ? "text-highlight" : "text-muted"}`}>
+        <I.clock className="h-4 w-4" />
+        <span>Follow up{(openStep || followUp) && (stepDate.tone === "late" || stepDate.tone === "soon") && (
+          <> · {stepDate.label.split(",")[0]}</>
+        )}</span>
       </div>
       <div className="flex items-start gap-3.5 px-4 pb-3 pt-1.5 sm:px-5">
       <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
@@ -1070,7 +1072,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           while contacts are still loading (Derek, 2026-10-11). */}
       {(() => {
         const ct = contactById(task.contactId) || linkedContactInfo || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
-        return ct ? <Row label="Contact" icon={<I.user />}><span className="block truncate px-2 py-1 text-[16px]">{ct.name}</span></Row> : null;
+        // Hidden when it only repeats the client's name (Derek, 2026-10-11).
+        return ct && ct.name.trim().toLowerCase() !== client.name.trim().toLowerCase() ? <Row label="Contact" icon={<I.user />}><span className="block truncate px-2 py-1 text-[16px]">{ct.name}</span></Row> : null;
       })()}
     </dl>
   );
@@ -1423,10 +1426,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...sortedAttachments.filter((a) => a.kind === "image").map((a) => ({ a, own: true })),
     ...conversationFiles.filter((a) => a.kind === "image").map((a) => ({ a, own: false })),
   ];
+  // Each heading gets a small coloured icon tile, so the sections tell apart
+  // at a glance without boxing the page in (Derek, 2026-10-11: "it's very
+  // flat", mockup A).
+  const HEAD_ICONS: Record<string, [React.ReactNode, string]> = {
+    Deliverables: [<I.clipboard key="i" className="h-4 w-4" />, "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"],
+    List: [<I.list key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
+    "In GoHighLevel": [<I.bolt key="i" className="h-4 w-4" />, "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"],
+    "Links and files": [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
+    "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
+  };
+  const heading = (title: string, extra?: React.ReactNode) => (
+    <h2 className="flex items-center gap-2 text-[16px] font-bold uppercase tracking-wide text-foreground/70">
+      {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
+      {title}{extra}
+    </h2>
+  );
   const attachmentsBlock = !showAttachments ? null : (
-    <div className={`mt-4 rounded-xl bg-surface p-4 ${!hasMessaging && task.comments.length === 0 ? "border" : "shadow-soft"}`}>
+    <div className="mt-4 rounded-[5px] border bg-surface p-4 shadow-soft">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[16px] font-semibold">Links and files {task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>}</span>
+        {heading("Links and files", task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>)}
         <span className="flex items-center gap-3">
           {/* Sorting two things is not a job. It earns its place at five. */}
           {task.attachments.length >= 5 && (
@@ -1523,7 +1542,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   title={isLink ? a.url! : a.name}
                   className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
-                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 truncate">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
+                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 [overflow-wrap:anywhere]">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}
                 </a>
                 )}
                 {!editing && isLink && (
@@ -1626,11 +1645,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
-    <section className="mt-7" id={title === "Deliverables" ? "task-deliverables" : undefined}>
+    <section className="mt-8" id={title === "Deliverables" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        {/* The same small label as FOLLOW UP and DESCRIPTION (Derek,
-            2026-10-11, one box style). */}
-        <h2 className="text-[16px] font-bold uppercase tracking-wide text-muted">{title}</h2>
+        {heading(title)}
         {right}
       </div>
       {children}
@@ -1675,10 +1692,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   const mainColumn = (
     <>
-      {titleRow}
-      {subMeta}
-      {detailsSentence}
-      {chipRow}
+      {/* The top wears the client's colour, so whose task it is reads at a
+          glance (Derek, 2026-10-11: "it's very flat", mockup B). */}
+      <div className="-mx-4 rounded-[5px] border-t-4 px-4 pb-4 pt-3.5 sm:-mx-6 sm:px-6"
+        style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 9%, var(--surface))` }}>
+        {titleRow}
+        {subMeta}
+        {detailsSentence}
+        {chipRow}
+      </div>
       {/* Client and list as chips only in the narrow slide out, where there is
           no top bar naming them (Derek, 2026-10-10: duplicate information). */}
       {slideOver && !full && slideContext}
@@ -1708,7 +1730,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="mt-6">{feedArea}</div>
       </section>
       {/* Over the Inbox there is no client rail: where the task lives sits here. */}
-      {slideOver && !full && !isPersonal && <section className="mt-10"><h3 className="mb-2 text-[18px] font-semibold">Details</h3><div className="rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
+      {slideOver && !full && !isPersonal && <section className="mt-10"><div className="mb-3">{heading("Where it lives")}</div><div className="rounded-[5px] border bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div></section>}
     </>
   );
 
@@ -1747,45 +1769,52 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
 
   // Client context only: who this is for, the three ways to reach them, and
   // where the task lives (2026-09-14 redesign).
-  const railButton = "flex flex-col items-center gap-1 rounded-xl bg-surface px-1 py-3 text-[16px] font-medium shadow-soft transition hover:shadow-soft-md disabled:cursor-not-allowed disabled:opacity-40";
+  const railLink = "inline-flex items-center gap-1.5 font-semibold text-accent hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline";
+  const railCard = "mt-4 rounded-[5px] border bg-surface p-4 shadow-soft";
   const clientRail = (
-    <aside aria-label="Client" className="w-full border-t bg-surface px-5 py-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:h-screen min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
-      <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>
-        {/* The name alone. "Active Client" under every single client said the
-            same thing every time and answered a question nobody was asking
-            (Derek, 2026-09-29). The status still lives in the Clients list,
-            where it is worth comparing one against another. */}
-        <div className="min-w-0">
-          <div className="truncate text-[18px] font-semibold">{client.name}</div>
+    // Its own soft grey column with white cards, topped with the client's
+    // colour (Derek, 2026-10-11: "it's very flat", mockups A and B).
+    <aside aria-label="Client" className="w-full border-t bg-background px-5 pb-6 min-[1100px]:sticky min-[1100px]:top-0 min-[1100px]:h-screen min-[1100px]:max-h-screen min-[1100px]:w-[340px] min-[1100px]:flex-none min-[1100px]:self-start min-[1100px]:overflow-y-auto min-[1100px]:border-l min-[1100px]:border-t-0">
+      <div className="-mx-5 border-t-4 px-5 pb-4 pt-5" style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 12%, var(--surface))` }}>
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[17px] font-bold text-white shadow-soft" style={{ background: client.color }}>{initialsOf(client.name)}</span>
+          {/* The name alone. "Active Client" under every single client said the
+              same thing every time (Derek, 2026-09-29). */}
+          <div className="min-w-0 truncate text-[19px] font-bold">{client.name}</div>
         </div>
+        {/* Call, Email and Client link as one line of links, not three
+            raised buttons (Derek, 2026-10-11, right column mockup). */}
+        {hasMessaging && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[16px]">
+            {messageDest?.phone && mayContactClient
+              ? <a href={`tel:${messageDest.phone}`} className={railLink}><I.phone className="h-4 w-4" />Call</a>
+              : <button disabled title="No phone on file" className={railLink}><I.phone className="h-4 w-4" />Call</button>}
+            <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} className={railLink}><I.mail className="h-4 w-4" />Email</button>
+            <button onClick={onCopyClientLink} disabled={!onCopyClientLink} title="Copy this client's link" className={railLink}><I.link className="h-4 w-4" />Client link</button>
+          </div>
+        )}
       </div>
-      {hasMessaging && (
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {messageDest?.phone && mayContactClient ? (
-            <a href={`tel:${messageDest.phone}`} className={railButton}><I.phone className="text-accent" />Call</a>
-          ) : (
-            <button disabled title="No phone on file" className={railButton}><I.phone />Call</button>
-          )}
-          <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} className={railButton}><I.mail className="text-accent" />Email</button>
-          <button onClick={onCopyClientLink} disabled={!onCopyClientLink} title="Copy this client's link" className={railButton}><I.link className="text-accent" />Client link</button>
-        </div>
-      )}
       {(ghlContactUrl || linkedContactInfo?.ghlContactId) && (
-        <div className="mt-5 space-y-2.5">
-          {ghlContactUrl && (
-            <div className="flex items-center gap-2 text-[16px]">
-              <span className="w-28 shrink-0 text-muted">GHL contact</span>
-              <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
-                className="inline-flex min-w-0 items-center gap-1.5 truncate font-medium text-accent hover:underline"><I.bolt /> Open contact</a>
-            </div>
-          )}
-          {linkedContactInfo?.ghlContactId && saasRow}
-          {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
+        <div className={railCard}>
+          <div className="mb-3">{heading("In GoHighLevel")}</div>
+          <div className="space-y-2.5">
+            {ghlContactUrl && (
+              <div className="flex items-center gap-2 text-[16px]">
+                <span className="w-28 shrink-0 text-muted">Contact</span>
+                <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
+                  className="min-w-0 truncate font-medium text-accent hover:underline">Open ↗</a>
+              </div>
+            )}
+            {linkedContactInfo?.ghlContactId && saasRow}
+            {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
+          </div>
         </div>
       )}
       {attachmentsBlock}
-      <div className="mt-6 rounded-xl bg-surface px-3 py-3 shadow-soft">{detailsBlock}</div>
+      <div className={railCard}>
+        <div className="mb-3">{heading("Where it lives")}</div>
+        {detailsBlock}
+      </div>
     </aside>
   );
 

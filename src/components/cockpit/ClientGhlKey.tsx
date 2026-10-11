@@ -35,7 +35,7 @@ export function ClientGhlKey({ clientId, saasUrl, pushToast }: { clientId: strin
   };
   return (
     <div className="flex items-center gap-2 text-[16px]">
-      <span className="w-28 shrink-0 leading-tight text-muted" title="Their website's Brain Box plugin asks for this when they press Connect GoHighLevel on its Setup page. Paste a Private Integration key from their own sub account (the one their SaaS link points to: Settings, Private Integrations). Checked with GoHighLevel, never shown again, kept apart from our own keys.">Their site&apos;s GoHighLevel key</span>
+      <span className="w-28 shrink-0 text-muted" title="Their website's Brain Box plugin asks for this when they press Connect GoHighLevel on its Setup page. Paste a Private Integration key from their own sub account (the one their SaaS link points to: Settings, Private Integrations). Checked with GoHighLevel, never shown again, kept apart from our own keys.">Website key</span>
       {state?.shared ? (
         <span className="text-muted" title="The SaaS link points at Agency or Directory">not their own account</span>
       ) : editing ? (

@@ -1192,7 +1192,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         {description && view !== "changes" && (description.has || descOpen) && (
           <article id="task-description-post" className="mb-3 scroll-mt-4 rounded-[5px] border bg-surface px-4 py-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-[14px] font-bold uppercase tracking-wide text-muted">Description</span>
+              <span className="text-[16px] font-bold uppercase tracking-wide text-foreground/70">Description</span>
               {description.onEdit && <button onClick={description.onEdit} className="ml-auto rounded-md px-2 py-0.5 text-[16px] font-medium text-accent hover:bg-accent-soft">Edit</button>}
             </div>
             {/* Folded to its first lines while reading (Derek, 2026-10-09: "the
