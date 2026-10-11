@@ -60,9 +60,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // A comment is them answering: a check-in waiting on their reply is done.
   await stepsOnClientReply(scope.taskId).catch(() => false);
   await notifyOwnerOfClientDoc(scope, {
-    always: asked || late,
-    text: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} the ${noun}${reviewOnTask(scope)}.`,
-    subject: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} "${scope.reviewName}"`,
+    // A comment after approval still emails at most once per 15 minutes
+    // (claimSubmitEmail); only the first ask for changes always does (audit).
+    always: asked,
+    text: `${scope.clientName} ${asked ? "asked for changes on" : late ? "asked for a change on the approved" : "commented on"} the ${noun}${reviewOnTask(scope)}.`.replace("the approved the ", "the approved "),
+    subject: `${scope.clientName} ${asked ? "asked for changes on" : late ? "asked for a change on" : "commented on"} "${scope.reviewName}"`,
   });
   return json({ comment: r.comment });
 }

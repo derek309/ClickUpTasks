@@ -72,7 +72,9 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     update(taskId, { subtasks: [...t.subtasks, sub] }, { append: [sub] });
   };
   const renameSub = (taskId: string, subId: string, title: string) => { const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }, { patch: subId, with: { title } }); };
-  const deleteSub = (taskId: string, subId: string) => {
+  // `after` reshapes the list once the delete is confirmed (the step page
+  // reopens an approval's "what's next?"), from the list as it is then.
+  const deleteSub = (taskId: string, subId: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => {
     const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     const s = t?.subtasks.find((x) => x.id === subId);
     if (!t || !s) return;
@@ -91,6 +93,12 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
       confirmLabel: isDelegation ? "Take it back" : "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
+        // Read the list now, not when the dialog opened: steps added meanwhile
+        // stay (audit 2026-10-11). The client's requests on the step become
+        // loose again, so they land on a changes step instead of vanishing.
+        const full = (tasksRef.current ?? tasks).find((x) => x.id === taskId)?.subtasks ?? t.subtasks;
+        let rest = full.filter((x) => x.id !== subId).map((x) => (x.stepId === subId ? { ...x, stepId: undefined } : x));
+        if (after) rest = after(rest, full);
         const patch: Partial<Task> = { subtasks: rest };
         // Nothing is delegated any more, so the task cannot stay in a stage
         // that means it is with someone else.

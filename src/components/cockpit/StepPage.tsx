@@ -85,12 +85,17 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   onToggleClientItem?: (id: string) => void;
 }) {
   useEscapeToClose(onClose);
+  const pageRef = useRef<HTMLDivElement>(null);
   // ← and → step through, unless typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      // Only while this page is in front: a document or handoff window open
+      // on top keeps its own keys (audit 2026-10-11).
+      const front = document.activeElement;
+      if (front && front !== document.body && !pageRef.current?.contains(front)) return;
       if (e.key === "ArrowLeft" && onPrev) { e.preventDefault(); onPrev(); }
       if (e.key === "ArrowRight" && onNext) { e.preventDefault(); onNext(); }
     };
@@ -243,7 +248,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
         <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? "Note for the team" : `Message ${first}`}</label>
         <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)}
           // An email is written in lines: Enter is a new line there, ⌘ Enter sends.
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (talk !== "email" || e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
+          // Enter adds a team note; anything to the client takes the Send
+          // button or ⌘ Enter, so one keypress never reaches them by mistake.
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (talk === "team" || e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
           rows={talk === "email" ? 5 : 2}
           placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
@@ -342,7 +349,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   return createPortal(
     <>
       {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={onClose} />}
-      <div role="dialog" aria-label={`Step: ${sub.title}`}
+      <div ref={pageRef} role="dialog" aria-label={`Step: ${sub.title}`}
         className={`fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-[16px]">
           <button onClick={onClose} className="min-w-0 max-w-[50%] truncate rounded-lg px-2 py-1.5 text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
