@@ -285,7 +285,10 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
             </span>
           )}
           <span className="flex-1" />
-          <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[stage].dot }} />{STATUS_META[stage].label}</span>
+          {/* A finished step says Done, not the stage it worked in (Derek, 2026-10-11). */}
+          {sub.done
+            ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
+            : <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[stage].dot }} />{STATUS_META[stage].label}</span>}
           <button onClick={onToggleFull} className="rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
           <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>

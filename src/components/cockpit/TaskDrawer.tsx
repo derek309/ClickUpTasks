@@ -1461,7 +1461,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // when they mark it done (brief, section 6).
           if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
         }} />}
-      {stagePicker(sub, isActive)}
+      {!sub.done && stagePicker(sub, isActive)}
     </div>
   );
   // A step on the task: one line that says what is happening inside it, the
