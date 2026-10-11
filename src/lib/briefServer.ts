@@ -51,7 +51,7 @@ export const briefUrl = (origin: string, raw: string) => `${origin}/brief/${raw}
 export const teamBriefAccess = teamDocAccess;
 
 export async function liveBrief(taskId: string): Promise<Row | null> {
-  const { data } = await supabaseAdmin.from("task_briefs").select("*").eq("task_id", taskId).maybeSingle();
+  const { data } = await supabaseAdmin.from("task_briefs").select("*").eq("task_id", taskId).is("deleted_at", null).maybeSingle();
   return (data as Row | null) ?? null;
 }
 
@@ -104,13 +104,24 @@ export async function deleteBriefStorage(briefId: string): Promise<void> {
   if (paths.length) await storage.remove(paths);
 }
 
-/** Deletes the instructions for good: the link stops, the files go. Nothing on
- *  the client's side ever pointed at them. */
+/** Deletes the instructions, restorable for 30 days like a task's reviews
+ *  (Derek, 2026-10-11): the link stops for good; the text and files wait.
+ *  Nothing on the client's side ever pointed at them. */
 export async function deleteBrief(taskId: string): Promise<void> {
   const brief = await liveBrief(taskId);
   if (!brief) return;
-  await deleteBriefStorage(brief.id as string);
-  await supabaseAdmin.from("task_briefs").delete().eq("id", brief.id as string);
+  await revokeBriefLink(brief.id as string);
+  await supabaseAdmin.from("task_briefs").update({ deleted_at: new Date().toISOString() }).eq("id", brief.id as string);
+}
+
+/** Brings deleted instructions back, while the task has none live. Its old
+ *  link stays off: make a new one to share them again. */
+export async function restoreBrief(taskId: string, briefId: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (await liveBrief(taskId)) return { ok: false, status: 409, error: "This task already has project instructions. Delete those first." };
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data } = await supabaseAdmin.from("task_briefs").update({ deleted_at: null })
+    .eq("id", briefId).eq("task_id", taskId).gt("deleted_at", since).select("id");
+  return data?.length ? { ok: true } : { ok: false, status: 404, error: "Those instructions can't be restored anymore." };
 }
 
 export type BriefLinkState = { live: boolean; url: string | null; expiresAt: string | null };
@@ -185,7 +196,7 @@ export async function resolveBriefToken(token: string): Promise<BriefScope | nul
   if (!link.expires_at || new Date(link.expires_at as string).getTime() <= Date.now()) return null;
 
   const [{ data: brief }, { data: task }] = await Promise.all([
-    supabaseAdmin.from("task_briefs").select("*").eq("id", link.brief_id as string).maybeSingle(),
+    supabaseAdmin.from("task_briefs").select("*").eq("id", link.brief_id as string).is("deleted_at", null).maybeSingle(),
     supabaseAdmin.from("tasks").select("id, title, assignee_id, project_id, client_id, is_private, deleted_at").eq("id", link.bound_task_id as string).maybeSingle(),
   ]);
   if (!brief || !task || brief.task_id !== task.id) return null;

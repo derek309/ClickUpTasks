@@ -985,10 +985,17 @@ export const rowToTaskBrief = (r: any): TaskBrief => ({
   showBusiness: r.show_business !== false, uploadsOpen: r.uploads_open !== false, viewedAt: r.viewed_at ?? null, updatedAt: r.updated_at,
 });
 export const fetchTaskBrief = async (taskId: string): Promise<TaskBrief | null> => {
-  const { data, error } = await supabase.from("task_briefs").select("*").eq("task_id", taskId).maybeSingle();
+  const { data, error } = await supabase.from("task_briefs").select("*").eq("task_id", taskId).is("deleted_at", null).maybeSingle();
   // Before supabase/task-briefs.sql is run the table is missing: no instructions, quietly.
   if (error) return null;
   return data ? rowToTaskBrief(data) : null;
+};
+/** A task's deleted instructions still in their 30 days to restore. */
+export const fetchDeletedTaskBriefs = async (taskId: string): Promise<{ id: string; title: string; deletedAt: string }[]> => {
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { data, error } = await supabase.from("task_briefs").select("id, title, deleted_at").eq("task_id", taskId).gt("deleted_at", since).order("deleted_at", { ascending: false });
+  if (error) return [];
+  return (data ?? []).map((r: { id: string; title: string | null; deleted_at: string }) => ({ id: r.id, title: r.title ?? "", deletedAt: r.deleted_at }));
 };
 export const fetchTaskBriefFiles = async (briefId: string): Promise<TaskBriefFile[]> => {
   const { data, error } = await supabase.from("task_brief_files").select("*").eq("brief_id", briefId).is("removed_at", null).order("created_at", { ascending: true });

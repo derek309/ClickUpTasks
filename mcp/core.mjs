@@ -346,7 +346,7 @@ export function createServer(opts = {}) {
       // any. Before that SQL is run the table is missing, which is simply none.
       // Always printed, "(none)" included, so Claude never has to guess whether
       // there are any. In the same markdown set_project_instructions takes.
-      const briefRow = await sb(`task_briefs?select=body&task_id=eq.${enc(id)}&limit=1`).then((r) => r?.[0] ?? null, () => null);
+      const briefRow = await sb(`task_briefs?select=body&task_id=eq.${enc(id)}&deleted_at=is.null&limit=1`).then((r) => r?.[0] ?? null, () => null);
       const instructions = docHtmlToText(briefRow?.body || "");
       const text = [
         brief(t),
@@ -407,7 +407,7 @@ export function createServer(opts = {}) {
       const html = body.trim() ? docTextToHtml(body) : "";
       if (html.length > 200_000) return { content: [{ type: "text", text: "These instructions are too long." }] };
       const now = new Date().toISOString();
-      const find = () => sb(`task_briefs?select=id&task_id=eq.${enc(task_id)}&limit=1`).then((r) => r?.[0] ?? null);
+      const find = () => sb(`task_briefs?select=id&task_id=eq.${enc(task_id)}&deleted_at=is.null&limit=1`).then((r) => r?.[0] ?? null);
       const update = (row) => sb(`task_briefs?id=eq.${enc(row.id)}`, "PATCH", { body: html, updated_by: ME, updated_at: now });
       const existing = await find();
       if (existing) await update(existing);

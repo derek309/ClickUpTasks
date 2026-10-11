@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { timeAgo, type Task } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import {
-  downloadUrlForFile, fetchTaskBrief, fetchTaskBriefFiles, rowToTaskBrief, type TaskBrief as Brief, type TaskBriefFile,
+  downloadUrlForFile, fetchTaskBrief, fetchDeletedTaskBriefs, fetchTaskBriefFiles, rowToTaskBrief, type TaskBrief as Brief, type TaskBriefFile,
 } from "@/lib/db";
 import { addDocFiles } from "@/lib/docFileUpload";
 import { formatFileSize, isPreviewableImage } from "@/lib/uploadTypes";
@@ -68,10 +68,12 @@ export function TaskBrief({ task, clientName, pushToast, startNonce, onPresence 
 
   const readJson = async (res: Response) => res.json().catch(() => ({} as Record<string, unknown>));
 
+  const [deleted, setDeleted] = useState<{ id: string; title: string; deletedAt: string }[]>([]);
   const load = useCallback(async () => {
     const fresh = await fetchTaskBrief(task.id);
     setBrief(fresh);
     setLoaded(true);
+    void fetchDeletedTaskBriefs(task.id).then(setDeleted);
     if (!fresh) return;
     void fetchTaskBriefFiles(fresh.id).then(setFiles);
     const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/brief/link`);
@@ -239,7 +241,7 @@ export function TaskBrief({ task, clientName, pushToast, startNonce, onPresence 
   };
 
   const deleteBrief = async () => {
-    if (!window.confirm("Delete these project instructions for good? The link stops working and every file here is deleted, including files sent back.")) return;
+    if (!window.confirm("Delete these project instructions? The link stops working. You can restore them, with their files, from this task for 30 days.")) return;
     commit.flush();
     titleCommit.flush();
     setBusy("delete");
@@ -250,9 +252,31 @@ export function TaskBrief({ task, clientName, pushToast, startNonce, onPresence 
     setBrief(null);
     setFiles([]);
     setLink(null);
+    void fetchDeletedTaskBriefs(task.id).then(setDeleted);
+  };
+  // Back from the delete (Derek, 2026-10-11: everything restorable).
+  const restoreBrief = async (id: string) => {
+    setBusy("restore");
+    const res = await api("", { method: "POST", body: JSON.stringify({ restore: id }) });
+    const j = await readJson(res);
+    setBusy(null);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not restore the instructions."); return; }
+    pushToast("Instructions restored. Make a new link to share them again.");
+    await load();
   };
 
-  if (!loaded || !brief) return null;
+  if (!loaded) return null;
+  if (!brief) return deleted.length ? (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[16px] text-muted">
+      <span>Deleted project instructions:</span>
+      {deleted.map((d) => (
+        <span key={d.id} className="flex items-center gap-2">
+          <span className="text-foreground">{d.title.trim() || "Project instructions"}</span><span>{timeAgo(d.deletedAt)}</span>
+          <button onClick={() => void restoreBrief(d.id)} disabled={busy !== null} className="font-semibold text-accent hover:underline disabled:opacity-50">Restore</button>
+        </span>
+      ))}
+    </div>
+  ) : null;
 
   const linkLine = link?.live ? `Link on until ${link.expiresAt ? until(link.expiresAt) : "turned off"}` : link ? "Not shared" : null;
   const meta = [
