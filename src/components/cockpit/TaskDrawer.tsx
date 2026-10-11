@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, addApprovedStep, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, addClientReviewStep, addApprovedStep, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -994,7 +994,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return null;
   };
   const roundKey = (() => {
-    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || stepStage(activeStep, task.assigneeId) !== "review") return "";
+    // The client's step, or one of ours given the Review stage.
+    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || (!activeStep.onClient && stepStage(activeStep, task.assigneeId) !== "review")) return "";
     const k = reviewOnStep(activeStep);
     const r = k ? reviews[k] : null;
     return k && r?.status === "client_submitted" ? `${activeStep.id}|${k}|${r.id}|${k}:${r.version}` : "";
@@ -1020,7 +1021,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // is done and the next one starts, or, with nothing after it, a step says so
   // and asks what's next (Derek, 2026-10-11).
   const approvedKey = (() => {
-    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || stepStage(activeStep, task.assigneeId) !== "review") return "";
+    // The client's step, or one of ours given the Review stage.
+    if (!activeStep || isHandoffStep(activeStep, task.assigneeId) || (!activeStep.onClient && stepStage(activeStep, task.assigneeId) !== "review")) return "";
     const k = reviewOnStep(activeStep);
     const r = k ? reviews[k] : null;
     return k && r && (r.status === "approved" || r.status === "completed") ? `${activeStep.id}|${k}|ok:${k}:${r.version}` : "";
@@ -1079,6 +1081,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // keeps its own words and date and only gains the finish line.
   const followUpOnReview = (kind: TaskDocumentKind, name: string, reminderEveryDays = 1) => {
     const watch = `approved:${kind}`;
+    // With steps, our step is done and the client's own step starts: on
+    // them, waiting, holding the review (Derek, 2026-10-11).
+    if (activeStep && !isHandoffStep(activeStep, task.assigneeId)) {
+      const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
+      const list = addClientReviewStep(taskRef.current.subtasks, activeStep.id, firstName, name, kind as DeliverableKey, due, () => newId("s_"));
+      if (list) onPatch({ subtasks: list });
+    }
     if (openStep) {
       if (task.status !== "waiting") onPatch({ status: "waiting" });
       if (!openStep.nextStepWatch) patchStep({ nextStepWatch: watch });
@@ -1521,13 +1530,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepControls = (sub: Subtask, isActive: boolean) => (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[16px]">
       {!isActive && <InlineDue value={sub.due ?? null} overdue={isOverdue(sub.due ?? null) && !sub.done} onChange={(d) => onPatchSub(sub.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" />}
-      <InlineAssignee value={sub.assigneeId ?? null} size={24}
+      {sub.onClient ? (
+        <span className="inline-flex items-center gap-1.5 font-medium"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>On {client.name}</span>
+      ) : <InlineAssignee value={sub.assigneeId ?? null} size={24}
         onChange={(a) => {
           onPatchSub(sub.id, { assigneeId: a });
           // Giving the current step to a teammate: the follow up finishes
           // when they mark it done (brief, section 6).
           if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
-        }} />
+        }} />}
       {stagePicker(sub, isActive)}
     </div>
   );
@@ -1586,10 +1597,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
               {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
-              {reason && <span className="text-muted">{reason}</span>}
+              {sub.onClient && !sub.done && <span className="font-semibold text-sky-700 dark:text-sky-300">Waiting on {firstName}</span>}
+              {reason && !sub.onClient && <span className="text-muted">{reason}</span>}
             </span>
           </span>
           <span className="flex shrink-0 items-center gap-2">
+            {sub.onClient && <span title={`On ${client.name}`} className="flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>}
             {sub.assigneeId && <Avatar id={sub.assigneeId} size={22} />}
             <span className="hidden sm:inline-flex">{stageTag(st)}</span>
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />

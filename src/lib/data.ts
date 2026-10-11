@@ -850,6 +850,9 @@ export interface Subtask {
   /** What finishes this step's follow up by itself once it starts: "reply"
    *  for a check-in that ends when the client writes back. */
   finishWhen?: "reply";
+  /** A step that is on the client, not the team: their review (Derek,
+   *  2026-10-11: "a new step assigned to the client, with waiting"). */
+  onClient?: boolean;
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
@@ -2812,8 +2815,10 @@ export const isHandoffStep = (s: Pick<Subtask, "assigneeId">, taskOwnerId: strin
   !!s.assigneeId && s.assigneeId !== taskOwnerId;
 
 /** The stage a step shows and sets. */
-export function stepStage(s: Pick<Subtask, "title" | "stage" | "assigneeId">, taskOwnerId: string | null): TaskStatus {
+export function stepStage(s: Pick<Subtask, "title" | "stage" | "assigneeId" | "onClient">, taskOwnerId: string | null): TaskStatus {
   if (isHandoffStep(s, taskOwnerId)) return "delegated";
+  // The client's own step: we are waiting on them.
+  if (s.onClient) return "waiting";
   return s.stage ?? guessStepStage(s.title);
 }
 
@@ -2940,6 +2945,7 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
   if (addedFor.startsWith("tell:")) return "Added when the changes were marked done";
   if (addedFor.startsWith("checkin:")) return "Added when the email went";
   if (addedFor.startsWith("ok:")) return `Added when ${clientFirstName} approved`;
+  if (addedFor.startsWith("sent:")) return `Added when it went to ${clientFirstName}`;
   return `Added when ${clientFirstName} sent changes`;
 }
 
@@ -3051,3 +3057,18 @@ export function stepWindow(subtasks: Subtask[], stepId: string, taskCreatedAt: s
 
 /** Whether an instant falls in a step's window. */
 export const inWindow = (at: string, w: { from: string; to: string | null }) => at >= w.from && (!w.to || at <= w.to);
+
+/** A review went to the client from the current step: that step is done and
+ *  the client's own step starts, holding the review, until they approve or
+ *  send changes (Derek, 2026-10-11). Null when the client's step is already
+ *  the current one (sending again while they review). */
+export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, clientFirstName: string, name: string, review: DeliverableKey, due: string | null, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  const from = subtasks.find((s) => s.id === fromStepId);
+  if (!from || from.onClient) return null;
+  const at = subtasks.findIndex((s) => s.id === fromStepId);
+  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  list = releaseFromSteps(list, review);
+  list.splice(at + 1, 0, { id: makeId(), title: `${clientFirstName} reviews ${name}`, done: false, stage: "waiting", onClient: true,
+    holds: [review], addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
+  return list;
+}
