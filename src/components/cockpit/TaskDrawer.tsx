@@ -1677,7 +1677,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!deliverablePresent(key)) setPendingStart(key);
   };
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
-    key: k, label: KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "uses the one made" : undefined, onPick: () => quickStep(k),
+    key: k, label: ({ doc: "Document", image: "Image", page: "HTML", video: "Video" } as const)[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
