@@ -74,8 +74,7 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelet
       </span>
       <span className="flex shrink-0 flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
         {actions}
-        {/* Quiet like its neighbours: the task's one filled button is Mark done on its next step. */}
-        <button onClick={onOpen} className="rounded-[5px] border bg-surface px-5 py-1.5 text-[16px] font-semibold text-foreground transition hover:bg-background">Open</button>
+        {/* No Open button: the whole box opens it (Derek, 2026-10-11). */}
         {onDelete && (
           <button onClick={onDelete} title={deleteLabel} aria-label={`${deleteLabel}: ${title}`}
             className="flex h-9 w-9 items-center justify-center rounded-[5px] text-muted transition hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /></button>

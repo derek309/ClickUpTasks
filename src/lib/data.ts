@@ -3168,10 +3168,13 @@ export function reviewRound(subtasks: Subtask[], sub: Subtask): string | null {
   const changes = /^(doc|image|page|video):(\d+)$/.exec(a);
   if (changes) {
     const n = upTo.filter((x) => (x.addedFor ?? "").startsWith(`${changes[1]}:`) && /^(doc|image|page|video):\d+$/.test(x.addedFor ?? "")).length;
-    return `Changes round ${n}${Number(changes[2]) > 0 ? ` · version ${changes[2]}` : ""}`;
+    // A document's version is the one its page shows; an image, page or video
+    // numbers its own files, so its steps name no version (Derek, 2026-10-11:
+    // "Version 1" on the review, "version 2" on its step).
+    return `Changes round ${n}${changes[1] === "doc" && Number(changes[2]) > 0 ? ` · version ${changes[2]}` : ""}`;
   }
   const ok = /^ok:(doc|image|page|video):(\d+)$/.exec(a);
-  if (ok && Number(ok[2]) > 0) return `Approved version ${ok[2]}`;
+  if (ok) return ok[1] === "doc" && Number(ok[2]) > 0 ? `Approved version ${ok[2]}` : "Approved";
   return null;
 }
 

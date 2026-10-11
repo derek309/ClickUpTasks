@@ -660,6 +660,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       return { taskId: p.taskId, reviews: { ...p.reviews, [k]: { ...d, clientViewedAt: d.clientViewedAt ?? cur?.clientViewedAt ?? null } } };
     });
   const [docNonce, setDocNonce] = useState(0);
+  // Every kind's deleted reviews in one "N deleted · Restore" (Derek, 2026-10-11).
+  const [deletedCounts, setDeletedCounts] = useState<Record<string, number>>({});
+  const [deletedOpen, setDeletedOpen] = useState(0);
+  const countDeleted = (k: string) => (n: number) => setDeletedCounts((c) => (c[k] === n ? c : { ...c, [k]: n }));
+  const deletedTotal = Object.values(deletedCounts).reduce((a, b) => a + b, 0);
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}:${task.status}:${task.comments.length}`;
   useEffect(() => {
     let live = true;
@@ -1320,7 +1325,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Keyed apart from the draft email line beside it: two siblings sharing a
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
-    <TaskDocument key={`doc-${task.id}-${docNonce}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
+    <TaskDocument key={`doc-${task.id}-${docNonce}`} task={task} onDeletedCount={countDeleted("doc")} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
       startNonce={docStartNonce} showOpenComments={onCurrentStep} onStage={reportStage("doc")}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
@@ -2039,7 +2044,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // client document. Each has its own key, apart from the lines beside it; below
   // startReviewEmail so they never read it before it exists.
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
-    <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
+    <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onDeletedCount={countDeleted(kind)} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
       startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
@@ -2082,7 +2087,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const on = deliverablePresent(k) ? homeOf(stepHolding(steps, k)) : null;
     return (
       <div key={k}>
-        {on && <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>}
+        {on ? <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>
+          // Said plainly, so a review on no step does not look like a mistake.
+          : deliverablePresent(k) && steps.length > 0 && <div className="mt-3 -mb-2 text-[16px] text-muted">Not on a step</div>}
         {deliverableBlock(k, !!on && on.id === activeStep?.id)}
       </div>
     );
@@ -2477,6 +2484,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {section("Client work", (
         <>
           {workBlocks}
+          {deletedTotal > 0 && deletedOpen === 0 && (
+            <button onClick={() => setDeletedOpen((n) => n + 1)} className="mt-2 px-1 text-[16px] text-muted hover:text-foreground">
+              {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
+            </button>
+          )}
           {!anyWork && (
             <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client documents, reviews and draft emails show here. Add them from a step's page." : "Client documents, reviews and draft emails show here."}</p>
           )}

@@ -286,6 +286,6 @@ describe("rounds are counted per review", () => {
     ];
     expect(reviewRound(list, list[3])).toBe("Review round 1");
     expect(reviewRound(list, list[5])).toBe("Review round 2");
-    expect(reviewRound(list, list[4])).toBe("Changes round 1 · version 1");
+    expect(reviewRound(list, list[4])).toBe("Changes round 1");
   });
 });

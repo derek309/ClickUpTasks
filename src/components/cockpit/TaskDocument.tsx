@@ -86,7 +86,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onDeletedCount, deletedOpenNonce = 0 }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -95,6 +95,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   canAdmin: boolean;
   /** The viewer's member id, the id a teammate's comment is saved under, so their own comments can be edited. */
   meId?: string | null;
+  /** How many of this kind are deleted, so the task shows one "N deleted ·
+   *  Restore" for all of them; with it this row draws no line of its own. */
+  onDeletedCount?: (n: number) => void;
+  /** Bumped by that line's Restore: shows this kind's deleted list. */
+  deletedOpenNonce?: number;
   /** Opens an email to the client with the review link, written with AI: after a
    *  send, or from the Email client button. `changes` sums up what changed since
    *  the version before. Returns true when it opened one (there is a contact to
@@ -177,6 +182,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   // Documents deleted from this task that can still be restored (30 days).
   const [deletedDocs, setDeletedDocs] = useState<DeletedTaskDocument[]>([]);
   const [showDeleted, setShowDeleted] = useState(false);
+  // The task gathers every kind's "N deleted" into one line (Derek,
+  // 2026-10-11); its Restore opens each kind's list here.
+  const showingDeleted = showDeleted || deletedOpenNonce > 0;
   const [full, setFull] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [openEntry, setOpenEntry] = useState<string | null>(null);
@@ -898,11 +906,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   // A small "1 deleted · Restore" until you ask for the list (Derek,
   // 2026-10-10: it read as one more box on a busy page).
-  const deletedLine = deletedDocs.length > 0 ? (!showDeleted ? (
+  const deletedCount = deletedDocs.length;
+  const reportDeleted = useRef(onDeletedCount);
+  useEffect(() => { reportDeleted.current = onDeletedCount; });
+  useEffect(() => { reportDeleted.current?.(deletedCount); }, [deletedCount]);
+  const deletedLine = deletedDocs.length > 0 ? (!showingDeleted ? (onDeletedCount ? null : (
     <button onClick={() => setShowDeleted(true)} className="mt-1.5 px-1 text-[15px] text-muted hover:text-foreground">
       {deletedDocs.length} deleted · <span className="font-semibold text-accent">Restore</span>
     </button>
-  ) : (
+  )) : (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[5px] border border-dashed px-4 py-2 text-[16px] text-muted">
       <span>Deleted {titleInSentence}:</span>
       {deletedDocs.map((d) => (
