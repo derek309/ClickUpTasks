@@ -309,20 +309,26 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           <div className={`mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-8 ${full ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:gap-10" : ""}`}>
             <div className="flex min-w-0 flex-col gap-5">
               <div className="flex flex-col gap-2">
-                <textarea value={sub.title} onChange={(e) => onRename(e.target.value)} rows={1} aria-label="Step"
-                  onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                  className="-mx-1 w-full resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
+                <div className="flex items-start gap-3">
+                  {/* The tick the step lines use, in place of a Mark done button
+                      (Derek, 2026-10-11). The client's own step is answered below instead. */}
+                  {(sub.done || (isCurrent && !doneActions)) && (
+                    <button onClick={sub.done ? onReopen : onMarkDone} aria-pressed={sub.done}
+                      title={sub.done ? "Done. Click to reopen this step" : "Mark this step done"} aria-label={sub.done ? "Reopen this step" : "Mark this step done"}
+                      className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "border-2 border-accent text-accent hover:bg-accent hover:text-white"}`}>
+                      <I.check className={`h-4 w-4 ${sub.done ? "" : "opacity-0 group-hover/tick:opacity-100"}`} />
+                    </button>
+                  )}
+                  <textarea value={sub.title} onChange={(e) => onRename(e.target.value)} rows={1} aria-label="Step"
+                    onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                    className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
+                </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                   <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : isCurrent ? "The current step" : "Comes later"}</span>
                   {sub.assigneeId && <span>· on {userById(sub.assigneeId)?.name ?? "a teammate"}</span>}
                 </div>
                 {controls}
-                <div>
-                  {sub.done
-                    ? <button onClick={onReopen} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Reopen this step</button>
-                    : isCurrent && doneActions ? doneActions
-                    : isCurrent && <button onClick={onMarkDone} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>}
-                </div>
+                {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>
               {followBox}
               {planBits}
