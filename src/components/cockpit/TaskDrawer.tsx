@@ -667,12 +667,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // like pills so make them 5px").
   const [detailsOpen, setDetailsOpen] = useState(false);
   const chip = "inline-flex min-h-10 items-center gap-2 rounded-[5px] bg-background px-3 text-[16px]";
-  const tint = (color: string) => ({ background: `${color}1f` });
-  // Each dropdown is only as wide as what it shows. Sized to their longest
-  // option ("Changes requested", "Michaella Pastrana") the row ran out of room
-  // and pushed the time estimate onto a line of its own (Derek, 2026-09-16:
-  // "move it up on the same line as the date").
-  const chipSelect = "min-w-0 cursor-pointer bg-transparent py-1 outline-none [field-sizing:content]";
   const dueDays = task.due && task.status !== "done" ? daysUntilDue(task.due) : null;
   // Colour only when it means something: amber inside three days, red once late.
   const dueTone = dueDays === null ? "" : dueDays < 0 ? "late" : dueDays <= 3 ? "soon" : "";
@@ -681,46 +675,46 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // 2026-10-10, mockup 2, then "clean up desktop too"): the chips wrapped
   // onto three rows on a phone and were a wall of boxes on a desktop.
   const ownerName = task.assigneeId ? userById(task.assigneeId)?.name?.split(/\s+/)[0] ?? "someone" : "nobody";
+  // Each word is its own control, edited where it sits (Derek, 2026-10-11:
+  // "should be able to just click and edit in line"): status, owner and
+  // priority open their list on the word (a phone's own picker on a phone),
+  // the date opens the date picker. More shows time and repeat.
+  const word = "font-semibold underline decoration-dotted underline-offset-4 group-hover/w:decoration-solid";
+  const wordPick = (label: React.ReactNode, aria: string, value: string, options: { value: string; label: string }[], onPick: (v: string) => void, tone = "") => (
+    <label className={`group/w relative inline-block cursor-pointer ${tone}`} title={`Change ${aria.toLowerCase()}`}>
+      <span className={word}>{label}</span>
+      <select value={value} onChange={(e) => onPick(e.target.value)} aria-label={aria}
+        className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
   const detailsSentence = (
-    <button onClick={() => setDetailsOpen((o) => !o)} aria-expanded={detailsOpen} title="Change status, owner, priority or due date"
-      className="mt-4 block w-full rounded-[5px] text-left text-[16px] leading-relaxed sm:text-[18px]">
-      <span className="font-semibold underline decoration-dotted underline-offset-4">
-        <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
-        {STATUS_META[effectiveStatus(task)].label}
+    <div className="mt-4 text-[16px] leading-relaxed sm:text-[18px]">
+      {wordPick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />{STATUS_META[effectiveStatus(task)].label}</>,
+        "Status", effectiveStatus(task), pickableStatuses(effectiveStatus(task)).map((st) => ({ value: st, label: STATUS_META[st].label })), (v) => onPatch({ status: v as TaskStatus }))}
+      , on {wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
+      , {wordPick(PRIORITY_META[task.priority].label, "Priority", task.priority, manualPriorityOptions(task.priority).map((pr) => ({ value: pr, label: PRIORITY_META[pr].label })), (v) => onPatch({ priority: v as Priority }), task.priority === "urgent" ? "text-danger" : "")}
+      , {task.due ? "due " : ""}
+      <span className="inline-block">
+        <InlineDue value={task.due} overdue={false} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday}
+          showRecurrenceLabel={false} showCountdown={false} showSnooze={false} formatValue={(d) => `${formatDue(d)}${task.status !== "done" ? `, ${dueCountdown(d)}` : ""}`}
+          textClass={`-mx-1 text-[16px] font-semibold underline decoration-dotted underline-offset-4 sm:text-[18px]`}
+          toneClass={dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : "text-foreground"}
+          onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>} />
       </span>
-      , on <span className="font-semibold underline decoration-dotted underline-offset-4">{ownerName}</span>
-      , <span className={`font-semibold underline decoration-dotted underline-offset-4 ${task.priority === "urgent" ? "text-danger" : ""}`}>{PRIORITY_META[task.priority].label}</span>
-      {task.due ? <>, due <span className={`font-semibold underline decoration-dotted underline-offset-4 ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`}>{formatDue(task.due)}{task.status !== "done" ? `, ${dueCountdown(task.due)}` : ""}</span></> : <>, <span className="font-semibold text-accent underline decoration-dotted underline-offset-4">no due date</span></>}
       {/* What chases the client while it waits, which was its own chip. */}
       {(reminders.length > 0 || task.waitingOnClient) && (
         <span className="text-muted">. Reminders: {reminders.length === 1 ? reminders[0].summary : reminders.length > 1 ? `${reminders.length} reviews` : task.followUpAt ? `we follow up ${formatDue(task.followUpAt)}` : "none set"}</span>
       )}
-      <span className="ml-1 text-muted">{detailsOpen ? "▴" : "▾"}</span>
-    </button>
+      <button onClick={() => setDetailsOpen((o) => !o)} aria-expanded={detailsOpen} title="Time estimate, repeat, reminders"
+        className="ml-2 rounded px-1 text-[15px] text-muted hover:bg-background hover:text-foreground">{detailsOpen ? "Less ▴" : "More ▾"}</button>
+    </div>
   );
   const chipRow = (
     <div className={`mt-3 flex-wrap items-center gap-2 ${detailsOpen ? "flex flex-col items-stretch rounded-xl bg-background/60 p-2 sm:flex-row sm:items-center" : "hidden"}`}>
-      <label className={chip} style={tint(STATUS_META[effectiveStatus(task)].dot)}>
-        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />
-        <select value={effectiveStatus(task)} onChange={(e) => onPatch({ status: e.target.value as TaskStatus })} aria-label="Status" className={`${chipSelect} font-medium`}>
-          {pickableStatuses(effectiveStatus(task)).map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}
-        </select>
-      </label>
-      {/* Waiting on the client is not an owner option. It is a stage, set from
-          the status chip, and it keeps the owner (Derek, 2026-09-10). */}
-      <label className={`${chip} max-w-[280px]`}>
-        <span className="hidden shrink-0 text-muted sm:inline">Owner</span>
-        <select value={task.assigneeId ?? ""} onChange={(e) => onPatch({ assigneeId: e.target.value || null })} aria-label="Owner" className={chipSelect}>
-          <option value="">Unassigned</option>
-          {assignableUsers().map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
-      </label>
-      <label className={`${chip} ${task.priority === "urgent" ? "text-danger" : ""}`} style={task.priority === "urgent" ? tint(PRIORITY_META.urgent.color) : undefined}>
-        <span className={`hidden sm:inline ${task.priority === "urgent" ? "" : "text-muted"}`}>Priority</span>
-        <select value={task.priority} onChange={(e) => onPatch({ priority: e.target.value as Priority })} aria-label="Priority" className={`${chipSelect} ${task.priority === "urgent" ? "font-semibold" : ""}`}>
-          {manualPriorityOptions(task.priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
-        </select>
-      </label>
+      {/* Status, owner and priority are words in the sentence above; here
+          is what has no word there: the time it takes, repeating, reminders. */}
       <span className={`${chip} ${dueTone === "late" ? "!bg-danger-soft" : dueTone === "soon" ? "!bg-highlight-soft" : ""}`}>
         <span className="text-muted">Due</span>
         <InlineDue value={task.due} overdue={false} recurrence={task.recurrence} recurrenceInterval={task.recurrenceInterval} recurrenceUnit={task.recurrenceUnit} recurrenceDaysOfMonth={task.recurrenceDaysOfMonth} recurrenceNth={task.recurrenceNth} recurrenceWeekday={task.recurrenceWeekday}
