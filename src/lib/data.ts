@@ -3067,8 +3067,9 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   if (!from || from.onClient) return null;
   const at = subtasks.findIndex((s) => s.id === fromStepId);
   let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
-  list = releaseFromSteps(list, review);
+  // The review and the email that goes with it both sit on the client's step.
+  list = releaseFromSteps(releaseFromSteps(list, review), "email");
   list.splice(at + 1, 0, { id: makeId(), title: `${clientFirstName} reviews ${name}`, done: false, stage: "waiting", onClient: true,
-    holds: [review], addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
+    holds: [review, "email"], addedFor: `sent:${fromStepId}`, startedAt: now, ...(due ? { due } : {}) });
   return list;
 }

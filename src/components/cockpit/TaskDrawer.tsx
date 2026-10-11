@@ -1880,10 +1880,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
     onPatch({ draftEmail: { ...buildReviewEmail({ ...review, greetName: messageDest?.name }), createdAt: now, updatedAt: now } });
-    // The review's email sits on the same step as the review (Derek, 2026-10-11).
-    const holder = stepHolding(task.subtasks, review.kind);
-    const emailOn = stepHolding(task.subtasks, "email");
-    if (holder && emailOn?.id !== holder.id) onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, holder.id, "email") });
+    // Its email sits on the client's step, which holds "email" from the
+    // moment it is made (addClientReviewStep): no second write of the list
+    // here, which could carry an older copy over the new step.
     setEmailOpenNonce((n) => n + 1);
     return true;
   };
