@@ -21,6 +21,7 @@ import { kindTitle } from "@/lib/reviewKinds";
 import { I, Avatar, LinkedText, newId } from "./ui";
 import { TaskDocument } from "./TaskDocument";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { InlineDate } from "./GroupedList";
 
 const KINDS: HandoffDeliverable[] = ["page", "image", "video", "doc"];
 const KIND_ICON: Record<HandoffDeliverable, string> = { doc: "📄", image: "🖼️", page: "🌐", video: "🎬" };
@@ -161,8 +162,8 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
   const input = "w-full rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent";
   const tile = "block rounded-xl bg-surface p-3.5 text-left ring-1 ring-border transition hover:ring-accent";
   const section = (title: string, count: number | null, children: React.ReactNode, show = true) => !show ? null : (
-    <section className="mt-9">
-      <h2 className="mb-3 flex items-baseline gap-2 text-[21px] font-bold">{title}{count !== null && <span className="text-[16px] font-medium text-muted">{count}</span>}</h2>
+    <section className="mt-7">
+      <h3 className="mb-2 flex items-baseline gap-2 text-[17px] font-bold">{title}{count !== null && <span className="text-[16px] font-medium text-muted">{count}</span>}</h3>
       {children}
     </section>
   );
@@ -174,7 +175,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
       <div className="hidden items-center gap-3 border-b bg-surface px-5 py-3.5 min-[900px]:flex">
         {other && <Avatar id={other} size={32} />}
         <div className="min-w-0">
-          <div className="font-bold">Chat with {otherUser?.name?.split(" ")[0] ?? "them"}</div>
+          <div className="text-[17px] font-bold">Conversation with {otherUser?.name?.split(" ")[0] ?? "them"}</div>
           <div className="text-[16px] text-muted">Type @ to bring in anyone else on the team</div>
         </div>
       </div>
@@ -250,8 +251,9 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
   return createPortal(
     <div className="fixed inset-0 z-[80] flex min-w-0 flex-col bg-surface" role="dialog" aria-label={`Handoff: ${sub.title}`}>
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-6">
-        <span className="rounded-[5px] bg-violet-100 px-2 py-0.5 text-[16px] font-bold tracking-wide text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">HANDOFF</span>
-        <span className="min-w-0 flex-1 truncate text-[16px] text-muted">from the task &quot;{task.title}&quot;</span>
+        <button onClick={onClose} className="min-w-0 max-w-[50%] truncate rounded-lg px-2 py-1.5 text-[16px] text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
+        <span className="text-[16px] font-semibold text-muted">· Handoff</span>
+        <span className="flex-1" />
         <button onClick={copyLink} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium hover:bg-background"><I.link /> Copy link</button>
         <button onClick={() => setEditing((e) => !e)} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium hover:bg-background">
           {editing ? <><I.check /> Done editing</> : <><I.pencil /> Edit</>}
@@ -271,54 +273,65 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
       <div className="grid min-h-0 flex-1 min-[900px]:grid-cols-[minmax(0,1fr)_400px]">
       <div className={`min-h-0 overflow-y-auto min-[900px]:block ${tab === "brief" ? "block" : "hidden"}`}>
         <div className="mx-auto w-full max-w-3xl px-4 pb-16 pt-8 sm:px-8">
-          {editing ? (
-            <textarea value={sub.title} onChange={(e) => onPatchSub(sub.id, { title: e.target.value })} rows={1} aria-label="Handoff name"
-              className="-mx-1 w-full resize-none rounded-md bg-transparent px-1 text-[32px] font-extrabold leading-tight outline-none [field-sizing:content] focus:bg-background" />
-          ) : (
-            <h1 className="text-[32px] font-extrabold leading-tight tracking-[-0.01em]">{sub.title || "Untitled handoff"}</h1>
-          )}
-
-          <div className="mt-4 flex flex-wrap gap-2 text-[16px]">
-            {editing && onHandTo ? (
-              <label className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-1">
-                {holder ? <Avatar id={holder.id} size={22} /> : <span className="font-semibold text-danger">For</span>}
-                <select value={sub.assigneeId ?? ""} onChange={(e) => e.target.value && onHandTo(e.target.value)} aria-label="Who this handoff is for"
-                  className="h-9 cursor-pointer bg-transparent text-[16px] font-semibold outline-none">
-                  {!sub.assigneeId && <option value="">Pick a teammate</option>}
-                  {users.filter((u) => u.id !== task.assigneeId).map((u) => <option key={u.id} value={u.id}>For {u.name}</option>)}
-                </select>
-              </label>
-            ) : holder && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={holder.id} size={22} /> For {holder.name}</span>}
-            {owner && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={owner.id} size={22} /> From {owner.name}</span>}
+          {/* Laid out like a step's page (Derek, 2026-10-11: "fall in line with
+              the new layout"): the tick, the title, then one line of who and when. */}
+          <div className="flex items-center gap-3">
+            <button onClick={() => setStatus(status === "done" ? "doing" : "done")} aria-pressed={status === "done"}
+              title={status === "done" ? "Done. Click to reopen" : "Mark this handoff done"} aria-label={status === "done" ? "Reopen this handoff" : "Mark this handoff done"}
+              className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${status === "done" ? "bg-accent text-white hover:opacity-80" : "border-2 border-accent text-accent hover:bg-accent hover:text-white"}`}>
+              <I.check className={`h-4 w-4 ${status === "done" ? "" : "opacity-0 group-hover/tick:opacity-100"}`} />
+            </button>
             {editing ? (
-              <label className="inline-flex items-center gap-2 rounded-[5px] bg-highlight-soft px-3 py-1 font-semibold text-highlight">
-                Due
-                <input type="date" value={sub.due ?? ""} onChange={(e) => onPatchSub(sub.id, { due: e.target.value || null })} aria-label="When it is due"
-                  className="h-9 bg-transparent text-[16px] font-semibold outline-none" />
-              </label>
-            ) : sub.due && <span className="rounded-[5px] bg-highlight-soft px-3 py-2 font-semibold text-highlight">Due {formatDue(sub.due)}</span>}
-            {total > 0 && <span className="rounded-[5px] bg-violet-50 px-3 py-2 font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">{done} of {total} steps done</span>}
+              <textarea value={sub.title} onChange={(e) => onPatchSub(sub.id, { title: e.target.value })} rows={1} aria-label="Handoff name"
+                className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
+            ) : (
+              <h1 className="min-w-0 flex-1 text-[24px] font-bold leading-tight">{sub.title || "Untitled handoff"}</h1>
+            )}
           </div>
 
-          {/* Where it stands, in view and one press to change (Derek,
-              2026-10-08: the top right menu "is getting lost"). */}
-          <div role="radiogroup" aria-label="Where this handoff stands" className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted">Due</span>
+              {editing ? (
+                <InlineDate value={sub.due ?? null} onChange={(v) => onPatchSub(sub.id, { due: v })} onClear={() => onPatchSub(sub.id, { due: null })}
+                  emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
+                  className="font-semibold underline decoration-dotted underline-offset-4" />
+              ) : <span className="font-semibold">{sub.due ? formatDue(sub.due) : "no date"}</span>}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className={holder ? "text-muted" : "font-semibold text-danger"}>For</span>
+              {holder && <Avatar id={holder.id} size={24} />}
+              {editing && onHandTo ? (
+                <select value={sub.assigneeId ?? ""} onChange={(e) => e.target.value && onHandTo(e.target.value)} aria-label="Who this handoff is for"
+                  className="cursor-pointer bg-transparent font-semibold underline decoration-dotted underline-offset-4 outline-none">
+                  {!sub.assigneeId && <option value="">pick a teammate</option>}
+                  {users.filter((u) => u.id !== task.assigneeId).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              ) : <span className="font-semibold">{holder?.name ?? "nobody yet"}</span>}
+            </span>
+            {owner && <span className="inline-flex items-center gap-1.5"><span className="text-muted">From</span><Avatar id={owner.id} size={24} /><span className="font-semibold">{owner.name}</span></span>}
+            {total > 0 && <span className="text-muted">{done} of {total} on the checklist</span>}
+          </div>
+
+          {/* Where it stands, one press to change (Derek, 2026-10-08), in the
+              same switcher as a step's conversation. */}
+          <div role="radiogroup" aria-label="Where this handoff stands" className="mt-4 inline-flex flex-wrap gap-1 rounded-lg bg-background p-1">
             {(Object.keys(STATUS) as Shown[]).map((k) => (
               <button key={k} role="radio" aria-checked={status === k} onClick={() => setStatus(k)}
-                className={`flex h-12 items-center justify-center gap-2 rounded-[5px] px-3 text-[16px] font-bold transition ${status === k ? `${STATUS[k].tone} ring-2 ring-current` : "bg-surface text-muted ring-1 ring-border hover:text-foreground"}`}>
-                <span className={`h-2.5 w-2.5 rounded-full ${status === k ? "bg-current" : "bg-border"}`} />{STATUS[k].label}
+                className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-[16px] font-semibold ${status === k ? "bg-surface shadow-soft" : "text-muted hover:text-foreground"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full ${status === k ? (k === "done" ? "bg-success" : k === "stuck" ? "bg-amber-500" : k === "doing" ? "bg-accent" : "bg-muted") : "bg-border"}`} />{STATUS[k].label}
               </button>
             ))}
           </div>
 
-          {section("The goal", null, editing ? (
+          {section("Directions", null, editing ? (
             <textarea value={h.goal} onChange={(e) => save({ goal: e.target.value })} rows={3} placeholder="What needs to happen, and what good looks like"
               className={`${input} min-h-[96px] resize-y [field-sizing:content]`} />
           ) : (
             <div className="whitespace-pre-wrap rounded-2xl bg-background px-5 py-4 text-[16px] leading-relaxed [overflow-wrap:anywhere]">{h.goal ? <LinkedText text={h.goal} chip /> : <span className="text-muted">No goal written yet.</span>}</div>
           ))}
 
-          {section("Steps", total ? total : null, (
+          {section("Checklist", total ? total : null, (
             <>
               <ol className="divide-y">
                 {h.steps.map((st, i) => (
@@ -362,7 +375,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
             </>
           ), editing || total > 0)}
 
-          {section("Deliverables", shownDocs.length || null, (
+          {section("Client work", shownDocs.length || null, (
             <>
               {/* The review itself, as a full row that opens right here, with its
                   code one click away for whoever builds the email from it. It
@@ -385,7 +398,7 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
                   );
                 })}
               </div>}
-              {editing && !KINDS.some((k) => docs[k]) && <p className="text-[16px] text-muted">This task has no reviews yet. Add one under Deliverables on the task, then pick it here.</p>}
+              {editing && !KINDS.some((k) => docs[k]) && <p className="text-[16px] text-muted">This task has no client work yet. Add a document or review on the task, then pick it here.</p>}
             </>
           ), editing || shownDocs.length > 0)}
 
