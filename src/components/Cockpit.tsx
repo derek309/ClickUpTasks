@@ -1826,6 +1826,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (Derek, 2026-10-07, the seats task showed Pamela's message twice).
   const openTaskMessages = useMemo(() => (openTaskId ? messages.filter((m) => m.taskId === openTaskId && !isAppNotice(m)) : []), [messages, openTaskId]);
   const openTaskClientLinks = useMemo(() => (openTaskClientId ? clientLinks.filter((l) => l.clientId === openTaskClientId) : []), [clientLinks, openTaskClientId]);
+  // The client's meetings (Granola and logged by hand) shown on each of
+  // their tasks (Derek, 2026-10-11).
+  const openTaskMeetings = useMemo(() => (openTaskClientId ? clientNotes.filter((n) => n.clientId === openTaskClientId && n.type === "meeting") : []), [clientNotes, openTaskClientId]);
   // Sending, editing and scheduling client messages, the GoHighLevel refresh,
   // and a conversation's older messages loading when it opens (cockpit/useMessaging).
   const conversationContact = (activeClient !== "all" && clientTab === "chat" && !activeProject ? activeClient : null) ?? clientEmail?.clientId ?? null;
@@ -3323,6 +3326,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientLinks={openTaskClientLinks}
+          clientMeetings={openTaskMeetings}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
       )}
 

@@ -13,7 +13,7 @@ import { authedFetch } from "@/lib/supabase";
 import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
-  type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
+  type Task, type Client, type Contact, type ClientNote, type Attachment, type MessageChannel, type Message, type Comment,
   TaskAction, TaskActionKind, TASK_ACTION_META, splitQuotedEmail, signatureCut, tidyEmailText, ghlConfirmState,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId, NotInGhlChip } from "./ui";
@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, description } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, meetings, description } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -502,7 +502,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // messages because they are the same story: what happened to this task,
     // in order. Keeping them in two lists forced you to read both and
     // interleave them yourself.
-    | { at: string; kind: "action"; channel: "activity"; action: TaskAction };
+    | { at: string; kind: "action"; channel: "activity"; action: TaskAction }
+    // A meeting with this client (a Granola summary or one logged by hand),
+    // from the client's Journal (Derek, 2026-10-11).
+    | { at: string; kind: "meeting"; channel: "activity"; note: ClientNote };
 
   // Two byte-identical sends (a genuine GHL double-send, not just a display
   // quirk — see the item-2 write-up) shouldn't read as two separate
@@ -537,12 +540,16 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     // Replies are actions too, but they belong under the entry they answer,
     // not loose in the feed at their own timestamp.
     ...(actions ?? []).filter((a) => !a.parentId).map((a) => ({ at: a.at, kind: "action" as const, channel: "activity" as const, action: a })),
+    // The client's meetings from the day this task was made: a meeting is
+    // about the client, not one task, so it shows on every task open then.
+    ...(meetings ?? []).filter((n) => n.at.slice(0, 10) >= task.createdAt.slice(0, 10)).map((n) => ({ at: n.at, kind: "meeting" as const, channel: "activity" as const, note: n })),
   ]
     .filter((item) => {
       if (!q) return true;
       if (item.kind === "message") return (item.message.subject ?? "").toLowerCase().includes(q) || htmlToText(item.message.body).toLowerCase().includes(q);
       if (item.kind === "comment") return item.comment.body.toLowerCase().includes(q);
       if (item.kind === "action") return item.action.body.toLowerCase().includes(q) || (item.action.nextStep ?? "").toLowerCase().includes(q);
+      if (item.kind === "meeting") return item.note.body.toLowerCase().includes(q);
       return false;
     })
     // Newest first, in every tab (Derek, 2026-09-30: "reverse the conversation
@@ -1043,6 +1050,30 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
   };
 
+  // A meeting: its title, when, the summary folded, and a link back to
+  // Granola. The synced note is "title, blank line, summary, View in
+  // Granola: url" (granolaSyncServer.noteBody).
+  const renderMeetingItem = (n: ClientNote, gap: string) => {
+    const link = n.body.match(/\n*View in Granola:\s*(\S+)\s*$/);
+    const rest = (link ? n.body.slice(0, link.index) : n.body).trim();
+    const [first, ...more] = rest.split("\n");
+    const summary = more.join("\n").trim();
+    return (
+      <div key={`meeting_${n.id}`} className={`flex gap-3 ${gap}`}>
+        <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"><I.calendar className="h-4 w-4" /></div>
+        <div className="min-w-0 flex-1 rounded-[5px] border bg-surface px-3.5 py-3 shadow-soft">
+          <div className="flex flex-wrap items-baseline gap-x-2 text-[16px]">
+            <span className="font-semibold text-sky-700 dark:text-sky-300">Meeting</span>
+            <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{summary ? first : "with " + client.name}</span>
+            <span className="text-muted">· {timeAgo(n.at)}</span>
+            {link && <a href={link[1]} target="_blank" rel="noopener noreferrer" className="ml-auto font-medium text-accent hover:underline">Open in Granola ↗</a>}
+          </div>
+          {(summary || rest) && <CollapsibleText text={summary || rest} className="mt-1 text-[16px]" />}
+        </div>
+      </div>
+    );
+  };
+
   // One row of the feed, in whichever order the tab reads.
   const renderRow = (item: (typeof displayRows)[number], i: number): React.ReactNode => {
         const gap = i === displayRows.length - 1 ? "" : "pb-3";
@@ -1081,6 +1112,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           return renderMessageItem(item.message, continued ? "pb-1" : gap, item.dupeCount, continued);
         }
         if (item.kind === "action") return renderActionItem(item.action, gap);
+        if (item.kind === "meeting") return renderMeetingItem(item.note, gap);
         if (item.kind === "event") return renderEventRow(item.comment, gap);
         const c = item.comment;
         const u = userById(c.authorId);
