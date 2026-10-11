@@ -130,3 +130,16 @@ export async function stepsOnCommentAfterApproval(taskId: string, kind: ReviewKi
     return held.map((x) => (x.id === stepId ? { ...x, todos: [...(x.todos ?? []), todo] } : x));
   });
 }
+
+/** A comment was deleted: its to-do goes too, wherever it sits. */
+export async function stepsOnCommentRemoved(taskId: string, commentId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    if (!list.some((x) => x.todos?.some((t) => t.commentId === commentId))) return null;
+    return list.map((x) => {
+      if (!x.todos?.some((t) => t.commentId === commentId)) return x;
+      const todos = x.todos.filter((t) => t.commentId !== commentId);
+      return { ...x, todos: todos.length ? todos : undefined };
+    });
+  });
+}

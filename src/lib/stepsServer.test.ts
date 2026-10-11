@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -88,5 +88,14 @@ describe("steps added on the server", () => {
     expect(made.todos?.map((t) => [t.title, t.commentId])).toEqual([["Actually change the date", "c9"]]);
     expect(made.holds).toEqual(["doc"]);
     expect(await stepsOnCommentAfterApproval("t1", "doc", { id: "c9", body: "Actually change the date" })).toBe(false);
+  });
+
+  it("a deleted comment takes its to-do with it", async () => {
+    setup([{ id: "a", title: "Write it", done: true, holds: ["doc"] }, { id: "b", title: "Schedule it", done: false }]);
+    await stepsOnCommentAfterApproval("t1", "doc", { id: "c9", body: "Change the date" });
+    await stepsOnCommentAfterApproval("t1", "doc", { id: "c10", body: "And the title" });
+    expect(await stepsOnCommentRemoved("t1", "c9")).toBe(true);
+    expect(steps().find((s) => s.title === "Changes from Brian")!.todos?.map((t) => t.commentId)).toEqual(["c10"]);
+    expect(await stepsOnCommentRemoved("t1", "c9")).toBe(false);
   });
 });

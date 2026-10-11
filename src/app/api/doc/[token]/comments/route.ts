@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stepsOnCommentAfterApproval } from "@/lib/stepsServer";
+import { stepsOnCommentAfterApproval, stepsOnCommentRemoved } from "@/lib/stepsServer";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
@@ -76,5 +76,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ t
   const o = await open(req, params);
   if (!o.ok) return o.res;
   const r = await deleteDocComment(o.scope.documentId, o.payload.commentId, clientActor(o.scope), false);
+  // Its to-do on a step goes with it.
+  if (r.ok) await stepsOnCommentRemoved(o.scope.taskId, String(o.payload.commentId)).catch(() => false);
   return r.ok ? json({ ok: true }) : json({ error: r.error }, r.status);
 }
