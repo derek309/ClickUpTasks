@@ -3156,12 +3156,14 @@ export function reviewRound(subtasks: Subtask[], sub: Subtask): string | null {
   const plan = planSteps(subtasks);
   const upTo = plan.slice(0, plan.findIndex((x) => x.id === sub.id) + 1);
   const a = sub.addedFor ?? "";
+  // Each review counts its own rounds: the HTML's first review is round 1
+  // even after the document had one.
   if (sub.onClient && a.startsWith("sent:")) {
-    return `Review round ${upTo.filter((x) => x.onClient && x.addedFor?.startsWith("sent:")).length}`;
+    return `Review round ${upTo.filter((x) => x.onClient && x.addedFor?.startsWith("sent:") && (x.waitsOn ?? null) === (sub.waitsOn ?? null)).length}`;
   }
   const changes = /^(doc|image|page|video):(\d+)$/.exec(a);
   if (changes) {
-    const n = upTo.filter((x) => /^(doc|image|page|video):\d+$/.test(x.addedFor ?? "")).length;
+    const n = upTo.filter((x) => (x.addedFor ?? "").startsWith(`${changes[1]}:`) && /^(doc|image|page|video):\d+$/.test(x.addedFor ?? "")).length;
     return `Changes round ${n}${Number(changes[2]) > 0 ? ` · version ${changes[2]}` : ""}`;
   }
   const ok = /^ok:(doc|image|page|video):(\d+)$/.exec(a);

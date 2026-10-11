@@ -273,3 +273,19 @@ describe("the round a review step is", () => {
     expect(reviewRound(list, list[0])).toBeNull();
   });
 });
+
+describe("rounds are counted per review", () => {
+  it("the HTML's first review is round 1 after the document's", () => {
+    const list = [
+      s("a", "Create"),
+      s("w1", "Waiting on Derek", { onClient: true, addedFor: "sent:a", waitsOn: "doc" }),
+      s("b", "Create HTML"),
+      s("w2", "Waiting on Derek", { onClient: true, addedFor: "sent:b", waitsOn: "page" }),
+      s("c1", "Make Derek's changes", { addedFor: "page:1" }),
+      s("w3", "Waiting on Derek", { onClient: true, addedFor: "sent:c1", waitsOn: "page" }),
+    ];
+    expect(reviewRound(list, list[3])).toBe("Review round 1");
+    expect(reviewRound(list, list[5])).toBe("Review round 2");
+    expect(reviewRound(list, list[4])).toBe("Changes round 1 · version 1");
+  });
+});
