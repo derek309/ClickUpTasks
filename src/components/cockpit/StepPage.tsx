@@ -261,10 +261,13 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const empty = !held && todos.length === 0 && clientItems.length === 0 && !showTodos;
   // The one way to add to a step (Derek, 2026-10-11): a quick list to start
   // with while it is empty, then a button.
-  const addButton = (
+  // Once the step holds client work, the + sits beside its heading instead
+  // (Derek, 2026-10-11: "reclaim that space").
+  const addMenu = (compact: boolean) => (
     <div className="relative">
-      <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen}
-        className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add</button>
+      <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen} title="Add to this step" aria-label="Add to this step"
+        className={compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
+          : "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{!compact && " Add"}</button>
       {addOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
         <div role="menu" aria-label="Add to this step" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
@@ -388,7 +391,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : <div>{addButton}</div>}
+              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : held ? null : <div>{addMenu(false)}</div>}
               {/* Directions: what we want on this step, added from + Add like
                   the rest (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
               {!dirOpen && dirRemoved !== null && (
@@ -412,7 +415,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {todoList}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
-                  <h3 id="step-works" className="text-[17px] font-bold">Client work</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 id="step-works" className="text-[17px] font-bold">Client work</h3>
+                    {outFor === undefined && addMenu(true)}
+                  </div>
                   {held}
                   {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}
                   <p className="text-[16px] text-muted">Paste a link or drop a file anywhere on this page to add it here.</p>
