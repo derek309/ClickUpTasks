@@ -2046,7 +2046,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const here = holds.includes(x.key);
       const on = !here && deliverablePresent(x.key) ? stepTitleHolding(x.key) : null;
       return { key: x.key, label: x.label, disabled: here, onPick: () => pick(x.key),
-        note: here ? "on this step" : deliverablePresent(x.key) ? (on ? `move from ${on.length > 14 ? `${on.slice(0, 14)}…` : on}` : "move here") : undefined };
+        // It already exists: picking it puts that one on this step, never a second one.
+        note: here ? "on this step" : deliverablePresent(x.key) ? (on ? `already on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : "already made") : undefined };
     });
   };
   // What a step holds, drawn on it: its deliverables as their own rows (the
