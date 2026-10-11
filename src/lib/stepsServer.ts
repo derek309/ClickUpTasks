@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, isHandoffStep, planSteps,
+  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, holdOnStep, isHandoffStep, planSteps,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -109,5 +109,24 @@ export async function stepsOnClientChanges(taskId: string): Promise<boolean> {
     if (!loose.length) return null;
     const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
     return withStep.map((x) => (loose.includes(x.id) ? { ...x, stepId } : x));
+  });
+}
+
+/** The client commented on a review already approved (Derek, 2026-10-11: "the
+ *  changes should come up as a checklist with the comments"): the comment is
+ *  a to-do on the open changes step, made when there is none, and the review
+ *  moves onto that step to be worked on. Ticking the to-do resolves the
+ *  comment on their page. Once per comment. */
+export async function stepsOnCommentAfterApproval(taskId: string, kind: ReviewKindKey, comment: { id: string; body: string }): Promise<boolean> {
+  const text = comment.body.trim();
+  if (!text) return false;
+  return rewriteSteps(taskId, (row, first) => {
+    const list = row.subtasks ?? [];
+    if (!planSteps(list).length) return null;
+    if (list.some((x) => x.todos?.some((t) => t.commentId === comment.id))) return null;
+    const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
+    const held = holdOnStep(withStep, stepId, kind);
+    const todo: StepTodo = { id: newId("td_"), title: text.slice(0, 300), done: false, fromClient: true, commentId: comment.id };
+    return held.map((x) => (x.id === stepId ? { ...x, todos: [...(x.todos ?? []), todo] } : x));
   });
 }

@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -79,5 +79,14 @@ describe("steps added on the server", () => {
     expect(steps().find((s) => s.id === "r1")!.stepId).toBe(made.id);
     expect(steps().map((s) => s.title).slice(0, 2)).toEqual(["Changes from Brian", "Write the newsletter"]);
     expect(await stepsOnClientChanges("t1")).toBe(false);
+  });
+
+  it("a comment after approval is a to-do on a changes step holding the review", async () => {
+    setup([{ id: "a", title: "Write it", done: true, holds: ["doc"] }, { id: "b", title: "Schedule it", done: false }]);
+    expect(await stepsOnCommentAfterApproval("t1", "doc", { id: "c9", body: "Actually change the date" })).toBe(true);
+    const made = steps().find((s) => s.title === "Changes from Brian")!;
+    expect(made.todos?.map((t) => [t.title, t.commentId])).toEqual([["Actually change the date", "c9"]]);
+    expect(made.holds).toEqual(["doc"]);
+    expect(await stepsOnCommentAfterApproval("t1", "doc", { id: "c9", body: "Actually change the date" })).toBe(false);
   });
 });

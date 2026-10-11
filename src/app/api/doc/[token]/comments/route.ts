@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { stepsOnCommentAfterApproval } from "@/lib/stepsServer";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { rateLimit } from "@/lib/rateLimit";
 import {
@@ -52,8 +53,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // The first comment on a sent review asks for changes: the review moves to
   // Changes and the task onto the owner's list, and the owner always hears.
   const asked = await clientCommentAsksForChanges(scope);
+  // After approval a comment is still a change they want: a to-do on the
+  // task's changes step (replies to a thread are part of that thread).
+  const late = !asked && scope.documentStatus === "approved" && !payload.parentId && !!body
+    ? await stepsOnCommentAfterApproval(scope.taskId, scope.kind, { id: r.comment.id as string, body }).catch(() => false) : false;
   await notifyOwnerOfClientDoc(scope, {
-    always: asked,
+    always: asked || late,
     text: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} the ${noun}${reviewOnTask(scope)}.`,
     subject: `${scope.clientName} ${asked ? "asked for changes on" : "commented on"} "${scope.reviewName}"`,
   });
