@@ -8,3 +8,8 @@ export function normalizeSaasUrl(raw: string): string {
   const v = raw.trim();
   return v && !/^https?:\/\//i.test(v) ? `https://${v}` : v;
 }
+
+/** The sub account in a client's SaaS link (".../v2/location/<id>/..."). */
+export function locationFromSaasUrl(url: string | null | undefined): string | null {
+  return (url ?? "").match(/\/location\/([A-Za-z0-9]{10,})/)?.[1] ?? null;
+}
