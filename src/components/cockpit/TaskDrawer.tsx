@@ -972,7 +972,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 it by itself. What set it is a grey line under it. */}
             <div className="mt-1 text-[16px] leading-relaxed">
               <span className="group/d relative inline-flex items-baseline">
-                <InlineDate value={followUp} onChange={moveFollowUp} formatValue={() => stepDate.label} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
+                <InlineDate value={followUp} onChange={moveFollowUp}
+                  // The label above says how late or soon ("FOLLOW UP · 6 DAYS
+                  // LATE"), so here just the date (Derek, 2026-10-11: duplicate).
+                  formatValue={() => ((stepDate.tone === "late" || stepDate.tone === "soon") && stepDate.label.includes(", ") ? stepDate.label.split(", ").slice(1).join(", ") : stepDate.label)} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
                   className={`-mx-1 font-semibold underline decoration-dotted underline-offset-4 ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : ""}`} />
                 {followUp && <button onClick={() => moveFollowUp(null)} title="Clear the date" aria-label="Clear the date" className="absolute -right-4 top-0 hidden px-0.5 text-muted hover:text-danger focus:inline group-hover/d:inline">×</button>}
               </span>
