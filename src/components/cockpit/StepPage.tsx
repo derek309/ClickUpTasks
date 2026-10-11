@@ -44,7 +44,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   /** Copies this step, with the task around it, for Claude. */
   onCopyForClaude?: () => void;
   /** The task's client work, links and files the directions can point at. */
-  useOptions?: { key: string; label: string; note?: string }[];
+  useOptions?: { key: string; label: string; note?: string; tone?: { chip: string; text: string } }[];
   /** The client's waiting step: what is out with them, in place of adding work
    *  (nothing gets made while it is with them). */
   outFor?: React.ReactNode;
@@ -391,7 +391,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                               onClick={() => { const cur = sub.uses ?? []; const next = on ? cur.filter((k) => k !== o.key) : [...cur, o.key]; onPatchSub({ uses: next.length ? next : undefined }); }}
                               className={`inline-flex min-h-10 max-w-full items-center gap-2 rounded-lg border px-3 text-left text-[16px] ${on ? "border-accent bg-accent-soft font-semibold" : "bg-surface hover:bg-background"}`}>
                               <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check className="h-3 w-3" />}</span>
-                              <span className="min-w-0 truncate">{o.label}</span>{o.note && <span className="shrink-0 font-normal text-muted">{o.note}</span>}
+                              <span className="min-w-0 truncate">{o.label}</span>{o.note && (o.tone
+                                ? <span className="shrink-0 rounded-[5px] px-1.5 font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.note}</span>
+                                : <span className="shrink-0 font-normal text-muted">{o.note}</span>)}
                             </button>
                           );
                         })}

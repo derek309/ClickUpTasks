@@ -1,6 +1,7 @@
 "use client";
 
 // The task detail window (sidebar or full-page "document" view).
+import { reviewTone } from "@/lib/reviewTone";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
@@ -1535,6 +1536,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const r = reviews[k];
     return r ? (r.clientViewedAt ? `Viewed ${timeAgo(r.clientViewedAt)}` : "Not viewed yet") : null;
   };
+  // A review's stage, in its color (lib/reviewTone).
+  const stageChip = (status: string) => {
+    const t = reviewTone(status);
+    return <span className="inline-flex shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold" style={{ background: t.chip, color: t.text }}><span aria-hidden className="h-2 w-2 rounded-full" style={{ background: t.dot }} />{t.label}</span>;
+  };
   const REVIEW_STATUS: Record<string, string> = { draft: "Draft", with_client: `With ${firstName}`, client_submitted: `${firstName} sent changes`, approved: "Approved", completed: "Completed" };
   // We mark it for them (they said so on a call, or by email): the document's
   // stage changes as if they had pressed it, and the steps follow.
@@ -1558,7 +1564,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <div key={k} className="flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[16px] font-semibold">{r.title.trim() || deliverableName(k)}</div>
-                <div className="text-[16px] text-muted">{[REVIEW_STATUS[r.status] ?? r.status, r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</div>
+                <div className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{stageChip(r.status)}<span>{[r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</span></div>
               </div>
               <button onClick={() => openWork(k)} className="h-9 shrink-0 rounded-lg border px-3 text-[16px] font-semibold hover:bg-background">Open</button>
             </div>
@@ -2061,7 +2067,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const workToUseFor = () => [
     ...DELIVERABLE_KEYS.filter(deliverablePresent).map((k) => {
       const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-      return { key: k as string, label: deliverableName(k), note: r ? REVIEW_STATUS[r.status] ?? r.status : KIND_LABEL[k] };
+      return { key: k as string, label: deliverableName(k), note: r ? reviewTone(r.status).label : KIND_LABEL[k], tone: r ? reviewTone(r.status) : undefined };
     }),
     ...task.attachments.map((a) => ({ key: attachmentKey(a.id), label: a.name, note: a.url ? "link" : "file" as string | undefined })),
   ];
@@ -2174,7 +2180,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     <span className="flex min-w-0 items-center gap-3 rounded-[5px] border bg-surface px-3 py-2">
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
-                        <span className="block text-[16px] text-muted">{KIND_LABEL[d]}{r ? ` · ${r.status === "with_client" ? "With the client" : r.status === "client_submitted" ? "Changes sent" : r.status === "approved" ? "Approved" : r.status === "completed" ? "Completed" : "Draft"}` : ""}</span>
+                        <span className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
                       <button onClick={() => openWork(d)} className="h-9 shrink-0 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Open</button>
                       <button onClick={() => releaseKey(d)} title="Take off this step (it stays under Client work)" aria-label={`Take ${deliverableName(d)} off this step`}

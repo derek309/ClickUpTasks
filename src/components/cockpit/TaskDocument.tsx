@@ -19,6 +19,7 @@
 // /api/tasks/[id]/document so the HTML is cleaned on the server and an approved
 // document stays locked. A client's send, approval or file lands on the task row
 // live (status and an event comment), and that is what makes this refetch.
+import { reviewTone } from "@/lib/reviewTone";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { STATUS_META, htmlToText, timeAgo, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
@@ -950,13 +951,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   if (!doc) return deletedLine;
 
   const view = STATUS_VIEW[doc.status];
-  const tone = STATUS_META[view.tone];
+  const tone = reviewTone(doc.status);
   const badge = <WorkItemBadge label={view.label} chip={tone.chip} dot={tone.dot} />;
   const completed = doc.status === "completed";
   const locked = !!doc.approvedAt || completed;
   const stageSelect = (
     <select value={doc.status} onChange={(e) => void setStage(e.target.value as TaskDocumentStatus)} aria-label={`${title} stage`}
-      className="cursor-pointer rounded-full border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.dot }}>
+      className="cursor-pointer rounded-full border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.text }}>
       {STAGES.map((s) => <option key={s} value={s}>{STATUS_VIEW[s].label}</option>)}
     </select>
   );
