@@ -808,6 +808,14 @@ export interface Subtask {
    *  (Derek, 2026-09-16). Absent on older delegations; read it through
    *  handoffOf, which fills the gaps. */
   handoff?: Partial<Handoff>;
+  /** The step's stage, one of the foundation stages (task detail redesign,
+   *  2026-10-11, Derek: "foundation stages, then we custom it per task"). Unset
+   *  on older items, which read their stage from the title (guessStepStage).
+   *  A step given to someone other than the task owner is always Delegated. */
+  stage?: TaskStatus;
+  /** Set on the two steps added when a client sends changes on a review, to
+   *  the review and its version ("page:2"), so the same round is added once. */
+  addedFor?: string;
 }
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
@@ -2742,4 +2750,78 @@ export const labelById = (id: string) => labels.find((l) => l.id === id) ?? null
 // essentially never do in practice.
 export function hasFreshClone(pool: Task[], src: Task, nextDue: string | null): boolean {
   return pool.some((t) => t.id !== src.id && t.clientId === src.clientId && t.projectId === src.projectId && t.title === src.title && t.due === nextDue && t.status !== "done");
+}
+
+// ── Steps (task detail redesign, 2026-10-11) ────────────────────────────────
+// A task's checklist is its plan: its own steps, in order, each tagged with a
+// foundation stage. The current step is the first one not done, and the
+// task's status follows its stage. Changes a client sends from their portal
+// (fromClient) are not steps: they sit under the current step.
+
+/** The stages a step can be given by hand. Delegated comes from giving the
+ *  step to a teammate, as with the task's own status. */
+export const STEP_STAGES: TaskStatus[] = ["in_progress", "review", "changes_requested", "waiting", "approved"];
+
+/** A stage for an item that was never given one, read from its words. */
+export function guessStepStage(title: string): TaskStatus {
+  const t = title.toLowerCase();
+  if (/\b(change|changes|revis|fix|edit)/.test(t)) return "changes_requested";
+  if (/\b(review|approv|feedback|sign off)/.test(t)) return "review";
+  if (/\bwait/.test(t)) return "waiting";
+  return "in_progress";
+}
+
+/** A step given to someone other than the task's owner: a handoff. */
+export const isHandoffStep = (s: Pick<Subtask, "assigneeId">, taskOwnerId: string | null): boolean =>
+  !!s.assigneeId && s.assigneeId !== taskOwnerId;
+
+/** The stage a step shows and sets. */
+export function stepStage(s: Pick<Subtask, "title" | "stage" | "assigneeId">, taskOwnerId: string | null): TaskStatus {
+  if (isHandoffStep(s, taskOwnerId)) return "delegated";
+  return s.stage ?? guessStepStage(s.title);
+}
+
+/** The plan's steps, in order: everything but the client's own change requests. */
+export const planSteps = <T extends Pick<Subtask, "fromClient">>(subtasks: T[]): T[] => subtasks.filter((s) => !s.fromClient);
+
+/** The current step: the first one not done. */
+export function currentStep<T extends Pick<Subtask, "done" | "fromClient">>(subtasks: T[]): T | null {
+  return planSteps(subtasks).find((s) => !s.done) ?? null;
+}
+
+/** The step that starts once `doneId` is finished: the first other step not done. */
+export function stepAfter<T extends Pick<Subtask, "id" | "done" | "fromClient">>(subtasks: T[], doneId: string): T | null {
+  return planSteps(subtasks).find((s) => !s.done && s.id !== doneId) ?? null;
+}
+
+/** Done and total steps. Handoffs count both ways: they used to count in the
+ *  total but never as finished. */
+export function stepProgress(subtasks: Pick<Subtask, "done" | "fromClient">[]): { done: number; total: number; pct: number } {
+  const steps = planSteps(subtasks);
+  const done = steps.filter((s) => s.done).length;
+  return { done, total: steps.length, pct: steps.length ? Math.round((done / steps.length) * 100) : 0 };
+}
+
+/** The status a task moves to when a step with stage `next` starts, or null
+ *  to leave it. On hold and Done are never changed by a step (Derek,
+ *  2026-10-11: status follows the step, a hand change still allowed). */
+export function statusForStep(current: TaskStatus, next: TaskStatus | null): TaskStatus | null {
+  if (!next || current === "on_hold" || current === "done" || current === next) return null;
+  return next;
+}
+
+/** A client sent changes on a review: the review step is done, and two steps
+ *  follow it, making the changes and a fresh client review. Returns the new
+ *  list, or null when this round was already added. */
+export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clientFirstName: string, key: string, makeId: () => string): Subtask[] | null {
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === reviewStepId);
+  if (at < 0) return null;
+  const round: Subtask[] = [
+    { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key },
+    { id: makeId(), title: "Client review", done: false, stage: "review", addedFor: key },
+  ];
+  const list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true } : s));
+  list.splice(at + 1, 0, ...round);
+  return list;
 }

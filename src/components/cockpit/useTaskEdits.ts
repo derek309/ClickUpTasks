@@ -76,6 +76,11 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
+    // The ref catches up now, not after the next render, so a second change
+    // in the same click builds on this one instead of a copy from before it
+    // (task detail redesign, 2026-10-11: ticking a step, then moving the
+    // status, put the tick back on screen).
+    tasksRef.current = tasksRef.current.map((t) => (t.id === id ? { ...t, ...synced } : t));
     // Only the columns this edit changed (saveTaskEdit), so a checklist tick
     // from this window can't carry stale comments or fields over newer ones.
     if (cur) {
@@ -205,6 +210,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     }
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
     setTasks((prev) => { let next = prev.map((x) => (x.id === id ? updated : x)); if (clone) next = [...next, clone]; return next; });
+    // As in update(): a second change in the same click builds on this one.
+    tasksRef.current = tasksRef.current.map((x) => (x.id === id ? updated : x));
     // Only the fields this edit changed, then each activity line appended on
     // its own (append_comment). Writing `comments` from `before` erased any
     // comment saved from another window, or by a teammate, in the meantime.

@@ -7,9 +7,10 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, REVIEW_FOLLOW_UP_DAYS, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
+  assignableUsers, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
+import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
@@ -141,7 +142,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
   // only re-renders this drawer, not the whole app; see useDebouncedCommit's
   // comment above for the sibling title/description fix to the same root
-  // cause. Reset per task the same way openSections is (this drawer isn't
+  // cause. Reset per task (this drawer isn't
   // remounted per task), so switching tasks doesn't leak a draft between them.
   const [comment, setComment] = useState("");
   const [commentTaskId, setCommentTaskId] = useState(task.id);
@@ -364,7 +365,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       setFileOverDrawer(false);
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
-      openSection("attachments");
       onAddFiles(e.dataTransfer.files);
     },
   };
@@ -570,13 +570,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [autoDone, setAutoDone] = useState<{ taskId: string; text: string } | null>(null);
   // The task's reviews and where they stand, for steps that wait on an
   // approval and for suggesting what comes next.
-  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page", { title: string; status: string; approvedAt: string | null }>> }>({ taskId: "", reviews: {} });
+  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { title: string; status: string; approvedAt: string | null; version: number }>> }>({ taskId: "", reviews: {} });
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}`;
   useEffect(() => {
     let live = true;
     void Promise.all((["doc", "image", "page", "video"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
       if (!live) return;
-      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { title: d!.title, status: d!.status, approvedAt: d!.approvedAt }])) });
+      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { title: d!.title, status: d!.status, approvedAt: d!.approvedAt, version: d!.version }])) });
     });
     return () => { live = false; };
   }, [reviewsKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -592,8 +592,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // of checklist and over under the stage selection ... with Michaella's
   // icon, who it's assigned to"). Split here, shown as its own row below the
   // stage chips, and left out of the checklist and its progress entirely.
-  const delegations = task.subtasks.filter((s) => !!s.assigneeId && s.assigneeId !== task.assigneeId);  const plainSubs = task.subtasks.filter((s) => !delegations.includes(s));
-  const doneSubs = plainSubs.filter((s) => s.done).length;
+  // Handoffs are steps again, in their place in the list (task detail
+  // redesign, 2026-10-11). The checklist is the task's plan: its steps in
+  // order, each with a stage; the client's own change requests sit under the
+  // current step instead of in the plan.
+  const steps = planSteps(task.subtasks);
+  const clientChanges = task.subtasks.filter((s) => s.fromClient);
+  const activeStep = currentStep(task.subtasks);
+  const progress = stepProgress(task.subtasks);
 
   // Bottom of the Escape stack: anything opened over the drawer closes first.
   useEscapeToClose(onClose);
@@ -818,7 +824,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const stepMoves = openStep ? followUpMoves(task.comments, openStep.at) : 0;
   const finished = doneSteps(actions);
-  const asking = askNext === task.id;
+  // Only while no step is left: a current step already says what happens next.
+  const asking = askNext === task.id && !activeStep;
   // Lands on the entry that set the step in the conversation, and flashes it.
   const jumpToAction = (id: string) => {
     const el = document.getElementById(`action-${id}`);
@@ -834,6 +841,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!metKey || !openStep) return;
     setNextStepDone(openStep.id, true);
     setAutoDone({ taskId: task.id, text: metText! });
+    // With steps, what finished the follow up moves the plan on: the
+    // teammate's handoff is done, or the client approved the review (Derek,
+    // 2026-10-11: tick on approval). A reply only finishes the follow up.
+    if (steps.length > 0) {
+      if (watch?.kind === "handoff") advanceFrom(watch.subId);
+      else if (watch?.kind === "approved" && activeStep && stepStage(activeStep, task.assigneeId) === "review") { onToggleSub(activeStep.id); advanceFrom(activeStep.id); }
+      return;
+    }
     setAskNext(task.id);
     setNextDraft("");
   }, [metKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -856,6 +871,71 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setAutoDone(null);
     setNextDraft("");
   };
+  // ── Moving through the steps ──
+  // The next step starts: the status follows its stage, and it becomes the
+  // follow up when it has a date or is a teammate's handoff. With no step
+  // left, "Done. What happens next?" asks.
+  const advanceFrom = (doneId: string) => {
+    const next = stepAfter(task.subtasks, doneId);
+    if (!next) { setAskNext(task.id); setNextDraft(""); return; }
+    const handoff = isHandoffStep(next, task.assigneeId);
+    if (next.due || handoff) setNewStep(next.title, next.due ?? null, handoff ? `handoff:${next.id}` : null);
+    const patch: Partial<Task> = {};
+    const status = statusForStep(task.status, stepStage(next, task.assigneeId));
+    if (status) patch.status = status;
+    if (!next.due && !handoff && task.followUpAt) patch.followUpAt = null;
+    if (Object.keys(patch).length) onPatch(patch);
+  };
+  // Mark done on the current step, or its tick: one action, not two.
+  const completeStep = (sid: string) => {
+    onToggleSub(sid);
+    if (openStep) setNextStepDone(openStep.id, true);
+    setAutoDone(null);
+    advanceFrom(sid);
+  };
+  // The current step's date is the follow up's: one date, written to both.
+  const moveStepDate = (d: string | null) => {
+    if (openStep) moveFollowUp(d);
+    else if (activeStep && d) setNewStep(activeStep.title, d, isHandoffStep(activeStep, task.assigneeId) ? `handoff:${activeStep.id}` : null);
+    else onPatch({ followUpAt: d });
+    if (activeStep) onPatchSub(activeStep.id, { due: d });
+  };
+  // A new step. On a task with only a follow up, that follow up becomes step 1.
+  const addStep = (title: string) => {
+    const t = title.trim();
+    if (!t) return;
+    // A new step answers "what happens next?".
+    if (asking) setAskNext(null);
+    if (steps.length === 0 && (openStep || followUp)) {
+      const first: Subtask = { id: newId("s_"), title: openStep?.nextStep ?? "Check back on this task", done: false, due: followUp ? followUp.slice(0, 10) : null };
+      onPatch({ subtasks: [...task.subtasks, first, { id: newId("s_"), title: t, done: false }] });
+    } else onAddSub(t);
+  };
+  // A client sent changes on a review while its review step is current: that
+  // step is done, and "Make the changes" and a new client review follow it
+  // (Derek, 2026-10-11: add steps on changes). Only for a step given the
+  // Review stage on purpose, never one read from its words, so opening an
+  // older task never rewrites its list. Runs while the task is open, like the
+  // follow up's own finish line; the server does neither yet (phase 4).
+  const roundKey = (() => {
+    if (!activeStep || activeStep.stage !== "review" || isHandoffStep(activeStep, task.assigneeId)) return "";
+    for (const k of ["page", "image", "video", "doc"] as const) {
+      const r = reviews[k];
+      if (r?.status === "client_submitted") return `${activeStep.id}|${k}:${r.version}`;
+    }
+    return "";
+  })();
+  useEffect(() => {
+    if (!roundKey) return;
+    const [stepId, key] = roundKey.split("|");
+    const first = client.name.split(" ")[0];
+    const list = addChangesRound(task.subtasks, stepId, first, key, () => newId("s_"));
+    if (!list) return;
+    if (openStep) setNextStepDone(openStep.id, true);
+    const status = statusForStep(task.status, "changes_requested");
+    onPatch({ subtasks: list, ...(status ? { status } : {}) });
+    pushToast(`${first} sent changes: added "Make ${first}'s changes" and a new client review`);
+  }, [roundKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // A review has just gone to the client. Until now that set nothing, so the
   // task sat in Waiting with no date on it. The client is emailed on each of
   // the next three business days; the owner comes back the day after, and the
@@ -873,88 +953,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setNewStep(`Get ${client.name.split(" ")[0]}'s approval on ${name}`, date, watch);
   };
   const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
-  // The card wears its state as a solid band across the top: colour for how
-  // urgent it is, and the state in words on the right, so a long drawer still
-  // has one thing the eye lands on (2026-09-22 mockup, Derek picked "banner").
-  // "Waiting on Brandon to approve the emails" is a sentence for the chip; the
-  // band only has room for who it is waiting on.
-  const waitingOn = openStep && watchState && !watchState.met
-    ? watchState.waiting.replace(/ to (reply|approve|finish).*$/, "")
-    : null;
-  const barTone = asking ? "bg-success text-white"
-    : !openStep && !followUp ? "bg-background text-muted"
-    : stepDate.tone === "late" ? "bg-danger text-white"
-    : stepDate.tone === "soon" ? "bg-highlight text-white"
-    : waitingOn ? "bg-sky-600 text-white"
-    : "bg-accent text-white";
-  const barState = asking ? "Just finished"
-    : !openStep && !followUp ? "Nothing set"
-    : stepDate.tone === "late" || stepDate.tone === "soon" ? stepDate.label.split(",")[0]
-    : waitingOn ? waitingOn
-    : stepDate.tone === "none" ? "No date yet"
-    : stepDate.label;
   // The client's newest message since the open follow up was set, when no
   // trigger already finished it.
   const repliedSince = openStep && !(watchState?.met)
     ? [...(messages ?? [])].filter((m) => m.direction === "inbound" && m.at > openStep.at).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
     : null;
-  const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
-    // The thing you act on, so it stands out: filled amber when it's due
-    // today, red when late, raised either way (Derek, 2026-10-11: "it's very
-    // flat", mockup A).
-    <div className={`mt-6 overflow-hidden rounded-[5px] border border-l-4 shadow-soft ${asking ? "border-l-success bg-surface" : (openStep || followUp) && stepDate.tone === "late" ? "border-danger/30 border-l-danger bg-danger-soft" : (openStep || followUp) && stepDate.tone === "soon" ? "border-highlight/30 border-l-highlight bg-highlight-soft" : "border-l-accent bg-surface"}`}>
-      {/* No coloured band: the date under the step says how late it is
-          (Derek, 2026-10-10: "follow up is very clunky", desktop too). */}
-      <div className={`hidden items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
-        <span className="text-[16px] font-bold tracking-wide">FOLLOW UP</span>
-        <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
-      </div>
-      {/* How late it is, first thing you see (Derek, 2026-10-11). */}
-      <div className={`flex items-center gap-2 px-4 pt-3 text-[16px] font-bold uppercase tracking-wide sm:px-5 ${(openStep || followUp) && stepDate.tone === "late" ? "text-danger" : (openStep || followUp) && stepDate.tone === "soon" ? "text-highlight" : "text-muted"}`}>
+  // ── The follow up, inside the current step (task detail redesign,
+  // 2026-10-11). It was its own card at the top; it is the current step's
+  // date, owner and finish line now, with one Mark done.
+  const followTone = (openStep || followUp) && stepDate.tone === "late" ? "late" : (openStep || followUp) && stepDate.tone === "soon" ? "soon" : "";
+  const followBox = (
+    <div className={`rounded-[5px] px-4 py-3 ${followTone === "late" ? "bg-danger-soft" : followTone === "soon" ? "bg-highlight-soft" : "bg-background"}`}>
+      <div className={`flex items-center gap-2 text-[16px] font-bold ${followTone === "late" ? "text-danger" : followTone === "soon" ? "text-highlight" : "text-muted"}`}>
         <I.clock className="h-4 w-4" />
-        <span>Follow up{(openStep || followUp) && (stepDate.tone === "late" || stepDate.tone === "soon") && (
-          <> · {stepDate.label.split(",")[0]}</>
-        )}</span>
+        <span>Follow up{followTone && <> · {stepDate.label.split(",")[0].toLowerCase()}</>}</span>
       </div>
-      <div className="flex items-start gap-3.5 px-4 pb-3 pt-1.5 sm:px-5">
-      <button onClick={tickStep} disabled={!openStep && !followUp} title="Mark done" aria-label="Mark done"
-        className={`group/tick mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-default disabled:border-dashed disabled:opacity-50 ${asking ? "border-success bg-success text-white" : "border-accent bg-surface text-transparent hover:bg-accent-soft hover:text-accent"}`}>
-        <I.check className="h-4 w-4" />
-      </button>
-      <div className="min-w-0 flex-1">
-        {asking ? (
-          // Done: what happens next, with the quick dates as the way to save it.
-          <div className="mt-2 rounded-xl bg-background p-3">
-            {autoDone?.taskId === task.id && (
-              <div className="mb-2 rounded-lg bg-success-soft px-3 py-2 text-[16px] font-semibold text-success">✓ {autoDone.text}, so this step is done.</div>
-            )}
-            <div className="font-semibold">Done. What happens next?</div>
-            {suggestions.length > 0 && (
-              <div className="mt-2 grid gap-1.5">
-                {suggestions.map((sg) => (
-                  <button key={sg.text} onClick={() => setNewStep(sg.text, sg.due, sg.watch)}
-                    className="flex w-full items-center gap-3 rounded-lg bg-surface px-3 py-2.5 text-left ring-1 ring-border hover:ring-accent">
-                    <span className="min-w-0 flex-1"><span className="block font-semibold [overflow-wrap:anywhere]">{sg.text}</span><span className="block text-[16px] text-muted">{sg.hint}</span></span>
-                    {sg.due && <span className="shrink-0 font-semibold text-accent">{stepDateLabel(sg.due).label.split(",")[0]} ›</span>}
-                  </button>
-                ))}
-                <div className="mt-1 text-[16px] text-muted">or write your own</div>
-              </div>
-            )}
-            <input autoFocus value={nextDraft} onChange={(e) => setNextDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") setNewStep(nextDraft, dateQuickPicks()[1].date); if (e.key === "Escape") { e.stopPropagation(); setAskNext(null); } }}
-              placeholder="Like: send the approved emails to Michaella" aria-label="Follow up"
-              className="mt-2 w-full rounded-lg bg-surface px-3 py-2 text-[16px] outline-none ring-1 ring-border focus:ring-2 focus:ring-accent" />
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {dateQuickPicks().slice(1, 4).map((q) => (
-                <button key={q.label} onClick={() => setNewStep(nextDraft, q.date)} className={quickChip}>{q.label}</button>
-              ))}
-              <InlineDate value={null} onChange={(d) => setNewStep(nextDraft, d)} emptyLabel="📅 Pick a date" className={quickChip} />
-              <button onClick={() => setAskNext(null)} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:text-foreground">Nothing for now</button>
-            </div>
-          </div>
-        ) : (
-          <>
+      {autoDone?.taskId === task.id && (
+        <div className="mt-1.5 rounded-lg bg-success-soft px-3 py-2 text-[16px] font-semibold text-success">✓ {autoDone.text}</div>
+      )}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-[1_1_320px]">
             {editingStep ? (
               <input autoFocus value={stepDraft.text} onChange={(e) => setStepDraft({ taskId: task.id, text: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") saveStepDraft(); if (e.key === "Escape") { e.stopPropagation(); setStepDraft(null); } }}
@@ -965,7 +983,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 className="-ml-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[19px] leading-snug [overflow-wrap:anywhere] hover:bg-background">
                 {openStep.nextStep}
               </button>
-            ) : (
+            ) : activeStep ? null : (
               <button onClick={() => { setAskNext(task.id); setNextDraft(""); }}
                 className="-ml-1.5 mt-0.5 block rounded-md px-1.5 py-0.5 text-left text-[17px] font-bold sm:text-[19px] leading-snug text-muted hover:bg-background">
                 {followUp ? "Check back on this task" : "What happens next? Click to write it"}
@@ -976,12 +994,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 it by itself. What set it is a grey line under it. */}
             <div className="mt-1 text-[16px] leading-relaxed">
               <span className="group/d relative inline-flex items-baseline">
-                <InlineDate value={followUp} onChange={moveFollowUp}
+                <InlineDate value={followUp} onChange={moveStepDate}
                   // The label above says how late or soon ("FOLLOW UP · 6 DAYS
                   // LATE"), so here just the date (Derek, 2026-10-11: duplicate).
                   formatValue={() => ((stepDate.tone === "late" || stepDate.tone === "soon") && stepDate.label.includes(", ") ? stepDate.label.split(", ").slice(1).join(", ") : stepDate.label)} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
                   className={`-mx-1 font-semibold underline decoration-dotted underline-offset-4 ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : ""}`} />
-                {followUp && <button onClick={() => moveFollowUp(null)} title="Clear the date" aria-label="Clear the date" className="absolute -right-4 top-0 hidden px-0.5 text-muted hover:text-danger focus:inline group-hover/d:inline">×</button>}
+                {followUp && <button onClick={() => moveStepDate(null)} title="Clear the date" aria-label="Clear the date" className="absolute -right-4 top-0 hidden px-0.5 text-muted hover:text-danger focus:inline group-hover/d:inline">×</button>}
               </span>
               {openStep && (<>
                 , on{" "}
@@ -1015,7 +1033,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             {repliedSince && (
               <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px]">
                 <span className="font-semibold text-success">{client.name.split(/\s+/)[0]} replied {timeAgo(repliedSince.at)}</span>
-                <button onClick={tickStep} className="rounded-[5px] px-2 py-0.5 font-semibold text-accent ring-1 ring-[var(--border)] hover:ring-accent">Mark done</button>
               </div>
             )}
             {/* One quiet line of history: what set it, and what came before. */}
@@ -1040,11 +1057,43 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <button onClick={nudge} className="rounded-[5px] bg-surface px-3 py-1.5 font-semibold text-foreground ring-1 ring-border hover:ring-accent">💬 Nudge {client.name.split(" ")[0]}</button>
               </div>
             )}
-          </>
-        )}
-      </div>
+        </div>
+        <button onClick={() => (activeStep ? completeStep(activeStep.id) : tickStep())} disabled={!activeStep && !openStep && !followUp}
+          className="h-10 shrink-0 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-40">Mark done</button>
       </div>
     </div>
+  );
+  // Done, and no step after it: what happens next.
+  const askingPanel = (
+          <div className="mt-2 rounded-xl bg-background p-3">
+            {autoDone?.taskId === task.id && (
+              <div className="mb-2 rounded-lg bg-success-soft px-3 py-2 text-[16px] font-semibold text-success">✓ {autoDone.text}, so this step is done.</div>
+            )}
+            <div className="font-semibold">Done. What happens next?</div>
+            {suggestions.length > 0 && (
+              <div className="mt-2 grid gap-1.5">
+                {suggestions.map((sg) => (
+                  <button key={sg.text} onClick={() => setNewStep(sg.text, sg.due, sg.watch)}
+                    className="flex w-full items-center gap-3 rounded-lg bg-surface px-3 py-2.5 text-left ring-1 ring-border hover:ring-accent">
+                    <span className="min-w-0 flex-1"><span className="block font-semibold [overflow-wrap:anywhere]">{sg.text}</span><span className="block text-[16px] text-muted">{sg.hint}</span></span>
+                    {sg.due && <span className="shrink-0 font-semibold text-accent">{stepDateLabel(sg.due).label.split(",")[0]} ›</span>}
+                  </button>
+                ))}
+                <div className="mt-1 text-[16px] text-muted">or write your own</div>
+              </div>
+            )}
+            <input autoFocus value={nextDraft} onChange={(e) => setNextDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") setNewStep(nextDraft, dateQuickPicks()[1].date); if (e.key === "Escape") { e.stopPropagation(); setAskNext(null); } }}
+              placeholder="Like: send the approved emails to Michaella" aria-label="Follow up"
+              className="mt-2 w-full rounded-lg bg-surface px-3 py-2 text-[16px] outline-none ring-1 ring-border focus:ring-2 focus:ring-accent" />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {dateQuickPicks().slice(1, 4).map((q) => (
+                <button key={q.label} onClick={() => setNewStep(nextDraft, q.date)} className={quickChip}>{q.label}</button>
+              ))}
+              <InlineDate value={null} onChange={(d) => setNewStep(nextDraft, d)} emptyLabel="📅 Pick a date" className={quickChip} />
+              <button onClick={() => setAskNext(null)} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:text-foreground">Nothing for now</button>
+            </div>
+          </div>
   );
 
   // The client's own reply, submitted through the public /waiting/[token]
@@ -1095,25 +1144,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (body) { onPatch({ description: plainTextToHtml(body) }); setDescFocusNonce((n) => n + 1); }
   };
 
-  // Description / Checklist / Attachments are empty on most tasks — the
-  // auto-created "Reply to <person>" conversation ones especially — but each
-  // still rendered a full card regardless: header, rich-text toolbar, empty
-  // input, dropzone. Three empty cards cost ~430px of pure scaffolding and
-  // pushed the actual work below the fold. Collapse them into one row of add
-  // chips until there's something to show, or until asked for.
-  //
-  // Keyed by task id rather than reset in an effect: this drawer isn't
-  // remounted per task (no key prop at the call site), so plain boolean state
-  // would leak one task's expanded sections onto the next one you open.
-  const [openSections, setOpenSections] = useState<{ taskId: string; keys: string[] }>({ taskId: task.id, keys: [] });
-  const sectionOpen = (k: string) => openSections.taskId === task.id && openSections.keys.includes(k);
-  const openSection = (k: string) =>
-    setOpenSections((s) => (s.taskId === task.id ? { taskId: task.id, keys: [...s.keys, k] } : { taskId: task.id, keys: [k] }));
   const hasDescription = htmlToText(task.description).trim().length > 0;
-  const showChecklist = task.subtasks.length > 0 || sectionOpen("checklist");
   // A client document is for sharing, so a private task and the Personal client
   // never get one. Whether one exists is only known once TaskDocument loads it,
-  // so it reports back; keyed by task id like openSections, because this drawer
+  // so it reports back; keyed by task id, because this drawer
   // is not remounted when the task changes.
   const canHaveDocument = !task.private && task.clientId !== PERSONAL_CLIENT_ID;
   const [docPresence, setDocPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
@@ -1244,53 +1278,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // they were asked for, and when they owe it. Sits directly under the stage
   // chips, because "Delegated" in that row and the person holding it are one
   // fact and were two screens apart.
-  const delegationRow = delegations.length === 0 ? null : (
-    <div className="mt-2 space-y-1.5">
-      {delegations.map((s) => (
-        // Purple, taken straight from the Delegated stage's own colour, so
-        // the chip above the box and the box itself are visibly the same
-        // fact (Derek: "make the box purple since the stage name is
-        // purple"). Read from STATUS_META rather than restated, so recolouring
-        // the stage recolours this with it.
-        <div key={s.id} className="group/deleg rounded-xl border px-3 py-2"
-          style={{ borderColor: STATUS_META.delegated.dot, background: STATUS_META.delegated.chip }}>
-          <div className="flex items-start gap-2.5">
-            <button onClick={() => onToggleSub(s.id)} title={s.done ? "Reopen this delegation" : "Mark this delegation done"}
-              aria-label={s.done ? "Reopen this delegation" : "Mark this delegation done"} aria-pressed={s.done}
-              className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 transition ${s.done ? "border-accent bg-accent text-white" : "border-border bg-surface hover:border-accent hover:bg-accent-soft"}`}>
-              {s.done && <I.check className="h-4 w-4" />}
-            </button>
-            <Avatar id={s.assigneeId!} size={22} />
-            <div className="min-w-0 flex-1">
-              {/* Editable in place: a handoff gets renamed as often as a
-                  task does, and the derived title is a first guess at what
-                  to call it (Derek: "I also want to be able to edit the task
-                  title"). */}
-              <textarea value={s.title} onChange={(e) => onPatchSub(s.id, { title: e.target.value })} rows={1}
-                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                className={`-mx-1 w-full resize-none rounded bg-transparent px-1 text-[16px] font-medium leading-snug outline-none [field-sizing:content] focus:bg-surface ${s.done ? "text-muted line-through" : ""}`} />
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] text-muted">
-                <span className="font-semibold uppercase tracking-wide text-accent">Delegated</span>
-                <span aria-hidden>·</span>
-                <span>{userById(s.assigneeId!)?.name ?? "a teammate"}</span>
-              </div>
-            </div>
-            {/* The due date once, here, where it can be changed (Derek,
-                2026-09-16: "we have due date twice"). */}
-            <InlineDate value={s.due ?? null} onChange={(d) => onPatchSub(s.id, { due: d })} onClear={() => onPatchSub(s.id, { due: null })}
-              className={`shrink-0 text-[16px] ${s.due && isOverdue(s.due) && !s.done ? "font-semibold text-danger" : "text-muted"}`} formatValue={(d) => `Due ${formatDue(d)}`} emptyLabel={<span className="text-[16px] text-muted">Set a due date</span>} />
-            {/* Taking it back. Confirmed in Cockpit's deleteSub, which names
-                the person and says they lose access, because this is the one
-                thing giving them the task at all. */}
-            <button onClick={() => onDeleteSub(s.id)} title="Take this back"
-              className="mt-0.5 shrink-0 rounded p-1 text-muted opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover/deleg:opacity-100">
-              <I.trash className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {/* The handoff, summed up: how far along it is and what is on it, one
-              click from the page itself (Derek, 2026-09-16). The instructions
-              live on that page now instead of in a tall box here. */}
-          {(() => {
+  // A teammate's step: how far along their handoff is and what is on it,
+  // one click from its page (Derek, 2026-09-16). Its Mark done is the step's.
+  const handoffDetails = (s: Subtask) => (
+    (() => {
             const h = handoffOf(s);
             const { done, total } = handoffProgress(h);
             const facts = [
@@ -1300,7 +1291,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               h.thread.length ? `${h.thread.length} ${h.thread.length === 1 ? "message" : "messages"}` : null,
             ].filter(Boolean);
             return (
-              <div className="mt-2.5 space-y-2 pl-[3.25rem]">
+              <div className="space-y-2">
                 {total > 0 && (
                   <div className="flex items-center gap-2.5 text-[16px] text-muted">
                     <span className="shrink-0">{done} of {total} steps</span>
@@ -1313,12 +1304,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   <div className="text-[16px] font-medium text-accent">All steps done. Mark it finished.</div>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
-                  {facts.map((f) => <span key={f} className="rounded-[5px] bg-surface px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
+                  {facts.map((f) => <span key={f} className="rounded-[5px] bg-background px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
                   <span className="ml-auto flex flex-wrap gap-2">
-                    <button onClick={() => onToggleSub(s.id)}
-                      className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[16px] font-semibold shadow-soft ${s.done ? "bg-surface text-muted hover:bg-background" : "bg-success text-white hover:opacity-90"}`}>
-                      {s.done ? "Reopen" : <><I.check className="h-4 w-4" /> Mark done</>}
-                    </button>
                     <button onClick={() => { const url = handoffLink(taskLink?.() ?? `?task=${task.id}`, s.id); navigator.clipboard?.writeText(url).then(() => pushToast("Handoff link copied"), () => pushToast(`Share this link: ${url}`)); }}
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-surface px-3 text-[16px] font-medium shadow-soft hover:bg-background"><I.link /> Copy link</button>
                     <button onClick={() => setOpenHandoff(s.id)}
@@ -1329,10 +1316,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </div>
               </div>
             );
-          })()}
-        </div>
-      ))}
-    </div>
+    })()
   );
   // Reorder: the dragged item goes where the one it was dropped on is,
   // everything else (handoffs included) keeps its place.
@@ -1345,20 +1329,125 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(to, 0, moved);
     onPatch({ subtasks: list });
   };
-  const subtasksBlock = !showChecklist ? null : (
-    <div className="rounded-xl border bg-surface p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-[18px] font-semibold">Checklist {plainSubs.length > 0 && <span className="text-[16px] font-normal text-muted">· {doneSubs}/{plainSubs.length} · {Math.round((doneSubs / task.subtasks.length) * 100)}%</span>}</span>
+  // ── Steps (task detail redesign, 2026-10-11, Derek picked option B):
+  // the task's own steps in order, each with a foundation stage. Done steps
+  // are one line, the current one is open with its follow up, upcoming ones
+  // are muted and wait their turn.
+  const firstName = client.name.split(" ")[0];
+  const stageTag = (st: TaskStatus) => (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] bg-background px-2 text-[16px] font-semibold">
+      <span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}
+    </span>
+  );
+  const stagePicker = (sub: Subtask, isActive: boolean) => {
+    const st = stepStage(sub, task.assigneeId);
+    // A teammate's step is Delegated because it is theirs, as with the task.
+    if (isHandoffStep(sub, task.assigneeId)) return stageTag("delegated");
+    return (
+      <label className="relative inline-flex shrink-0 cursor-pointer" title="Change this step's stage">
+        {stageTag(st)}
+        <select value={st} aria-label={`Stage for ${sub.title}`}
+          onChange={(e) => {
+            const next = e.target.value as TaskStatus;
+            onPatchSub(sub.id, { stage: next });
+            // The current step's stage is the task's status.
+            const status = isActive ? statusForStep(task.status, next) : null;
+            if (status) onPatch({ status });
+          }}
+          className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+          {STEP_STAGES.map((x) => <option key={x} value={x}>{STATUS_META[x].label}</option>)}
+        </select>
+      </label>
+    );
+  };
+  // What the client sent from their portal, under the step it belongs to.
+  const clientChangesList = clientChanges.length === 0 ? null : (
+    <div className="rounded-[5px] border px-3 py-2">
+      <div className="font-semibold">Changes from {firstName} <span className="font-normal text-muted">· {clientChanges.filter((c) => c.done).length} of {clientChanges.length} done</span></div>
+      <ul className="mt-1 space-y-1">
+        {clientChanges.map((c) => (
+          <li key={c.id} className="group/cc flex items-start gap-2.5">
+            <button onClick={() => onToggleSub(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
+              className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
+            <span className={`min-w-0 flex-1 [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>{c.title}</span>
+            <span className="shrink-0 rounded-[5px] bg-sky-50 px-2 text-[16px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">From client</span>
+            <button onClick={() => onDeleteSub(c.id)} title="Delete" aria-label={`Delete ${c.title}`} className="mt-1 shrink-0 text-muted opacity-0 hover:text-danger group-hover/cc:opacity-100 focus:opacity-100"><I.trash className="h-4 w-4" /></button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+  const stepRow = (sub: Subtask, i: number) => {
+    const isActive = activeStep?.id === sub.id;
+    const upcoming = !sub.done && !isActive;
+    const st = stepStage(sub, task.assigneeId);
+    const handoff = isHandoffStep(sub, task.assigneeId);
+    return (
+      <li key={sub.id} draggable={dragSub === sub.id}
+        onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", sub.id); }}
+        onDragEnd={() => { setDragSub(null); setDropSub(null); }}
+        onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
+        onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== sub.id) moveSub(dragSub, sub.id); setDragSub(null); setDropSub(null); }}
+        aria-current={isActive ? "step" : undefined}
+        className={`group/sub relative flex items-start gap-3 py-3 pl-3 pr-3 sm:pl-2 sm:pr-4 ${i > 0 ? "border-t" : ""} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
+        {/* Drag the grip to reorder (Derek, 2026-10-06). Only the grip starts
+            a drag, so selecting text in a step still works. */}
+        <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
+          className="mt-0.5 hidden w-4 shrink-0 cursor-grab select-none text-center text-[16px] leading-6 text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:block">⋮⋮</span>
+        {sub.done ? (
+          <button onClick={() => onToggleSub(sub.id)} title="Reopen this step" aria-label={`Reopen ${sub.title}`}
+            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:opacity-80"><I.check className="h-3.5 w-3.5" /></button>
+        ) : isActive ? (
+          <button onClick={() => completeStep(sub.id)} title="Mark done" aria-label={`Mark ${sub.title} done`}
+            className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface transition hover:border-[5px]" style={{ borderColor: STATUS_META[st].dot }} />
+        ) : (
+          // Steps run in order: a later one waits until the current one is done.
+          <span title="Steps run in order" aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2" />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+            <textarea value={sub.title} onChange={(e) => onRenameSub(sub.id, e.target.value)} rows={1} aria-label="Step"
+              onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+              className={`-mx-1 min-w-0 flex-[1_1_14rem] resize-none rounded bg-transparent px-1 text-[17px] leading-snug outline-none [field-sizing:content] focus:bg-background ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`} />
+            <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
+              {!isActive && <InlineDue value={sub.due ?? null} overdue={isOverdue(sub.due ?? null) && !sub.done} onChange={(d) => onPatchSub(sub.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" />}
+              <InlineAssignee value={sub.assigneeId ?? null} size={22}
+                onChange={(a) => {
+                  onPatchSub(sub.id, { assigneeId: a });
+                  // Giving the current step to a teammate: the follow up
+                  // finishes when they mark it done (brief, section 6).
+                  if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
+                }} />
+              {stagePicker(sub, isActive)}
+              <button onClick={() => onDeleteSub(sub.id)} title={handoff ? "Take this back" : "Delete this step"} aria-label={`Delete ${sub.title}`}
+                className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/sub:opacity-100"><I.trash className="h-4 w-4" /></button>
+            </span>
+          </div>
+          {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">Added when {firstName} sent changes</span>}
+          {isActive && followBox}
+          {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
+          {isActive && clientChangesList}
+        </div>
+      </li>
+    );
+  };
+  const planBlock = (
+    <section className="mt-8" aria-labelledby="task-steps">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 id="task-steps" className="flex items-center gap-2 text-[16px] font-bold text-foreground">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"><I.list className="h-4 w-4" /></span>
+          Steps{progress.total > 0 && <span className="font-normal text-muted">· {progress.done} of {progress.total} done</span>}
+        </h2>
         {templates.length > 0 && (
           <div className="relative">
-            <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.clipboard /> From template</button>
+            <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:bg-background"><I.clipboard /> From template</button>
             {templateOpen && (<>
               <div className="fixed inset-0 z-30" onClick={() => setTemplateOpen(false)} />
-              <div className="absolute right-0 z-40 mt-1 w-56 rounded-lg border bg-surface p-1 shadow-lg">
+              <div className="absolute right-0 z-40 mt-1 w-64 rounded-lg border bg-surface p-1 shadow-lg">
                 {templates.map((t) => (
                   <button key={t.id} onClick={() => { onApplyTemplate(t.id); setTemplateOpen(false); }} className="flex w-full flex-col items-start rounded px-2 py-1.5 text-left hover:bg-background">
                     <span className="truncate text-[16px] font-medium">{t.name}</span>
-                    <span className="text-[16px] text-muted">{t.checklistItems.length} item{t.checklistItems.length === 1 ? "" : "s"}</span>
+                    <span className="text-[16px] text-muted">{t.checklistItems.length} {t.checklistItems.length === 1 ? "step" : "steps"}</span>
                   </button>
                 ))}
               </div>
@@ -1366,28 +1455,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </div>
         )}
       </div>
-      {plainSubs.length > 0 && (<div className="mb-2 h-2 overflow-hidden rounded-full bg-background"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(doneSubs / task.subtasks.length) * 100}%` }} /></div>)}
-      {/* Drag the grip to reorder (Derek, 2026-10-06). Only the grip starts a
-          drag, so selecting text in an item still works. */}
-      <div className="space-y-1">{plainSubs.map((s) => (
-        <div key={s.id} draggable={dragSub === s.id}
-          onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); }}
-          onDragEnd={() => { setDragSub(null); setDropSub(null); }}
-          onDragOver={(e) => { if (dragSub && dragSub !== s.id) { e.preventDefault(); setDropSub(s.id); } }}
-          onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== s.id) moveSub(dragSub, s.id); setDragSub(null); setDropSub(null); }}
-          className={`${dropSub === s.id ? "rounded-md ring-2 ring-accent/50" : ""} ${dragSub === s.id ? "opacity-50" : ""}`}>
-          <div className="group/sub flex items-start gap-2 rounded-md px-1 py-1 hover:bg-background"><span onMouseDown={() => setDragSub(s.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
-            className="-ml-1 mt-0.5 w-3 shrink-0 cursor-grab select-none text-[14px] leading-none text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing">⋮⋮</span><button onClick={() => onToggleSub(s.id)} className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${s.done ? "border-accent bg-accent text-white" : "border-border"}`}>{s.done && <I.check />}</button><textarea value={s.title} onChange={(e) => onRenameSub(s.id, e.target.value)} rows={1} className={`-mx-1 mt-0.5 flex-1 resize-none rounded bg-transparent px-1 text-[16px] leading-snug outline-none [field-sizing:content] transition focus:bg-background ${s.done ? "text-muted line-through" : ""}`} /><InlineDue value={s.due ?? null} overdue={isOverdue(s.due ?? null) && !s.done} onChange={(d) => onPatchSub(s.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" /><InlineAssignee value={s.assigneeId ?? null} onChange={(a) => onPatchSub(s.id, { assigneeId: a })} size={20} /><button onClick={() => onDeleteSub(s.id)} title="Delete checklist item" className="mt-0.5 shrink-0 text-muted opacity-0 hover:text-red-500 group-hover/sub:opacity-100"><I.trash /></button></div>
-          {s.assigneeId && (
-            <div className="mb-1 ml-7 flex items-center gap-1.5">
-              <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[16px] font-medium uppercase tracking-wide text-accent">Delegated</span>
-              <input value={s.note ?? ""} onChange={(e) => onPatchSub(s.id, { note: e.target.value })} placeholder="What do you need done? (instructions)" className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-[16px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" />
-            </div>
-          )}
-        </div>
-      ))}</div>
-      <div className="mt-1.5"><input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onAddSub(subDraft); setSubDraft(""); } }} placeholder="+ Add a checklist item…" className="w-full rounded-md border border-transparent px-2 py-1 text-[16px] outline-none transition placeholder:text-muted hover:bg-background focus:border-accent focus:bg-background" /></div>
-    </div>
+      {progress.total > 0 && (
+        <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
+      )}
+      <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
+        {steps.map(stepRow)}
+        {/* A follow up with no steps reads as the one step there is. */}
+        {steps.length === 0 && (openStep || followUp) && !asking && (
+          <li className="flex items-start gap-3 py-3 pl-2 pr-3 sm:pr-4">
+            <span aria-hidden className="w-4 shrink-0" />
+            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[effectiveStatus(task)].dot }} />
+            <div className="min-w-0 flex-1">{followBox}</div>
+          </li>
+        )}
+        {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
+        {!activeStep && clientChangesList && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList}</li>}
+        <li className={`px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+          <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { addStep(subDraft); setSubDraft(""); } }}
+            placeholder="+ Add step" aria-label="Add a step"
+            className="w-full rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
+        </li>
+      </ol>
+    </section>
   );
   const sortedAttachments = useMemo(() => [...task.attachments].sort((a, b) => {
     if (attSort === "name") return a.name.localeCompare(b.name);
@@ -1591,8 +1680,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
       hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
-      !showChecklist && { label: "Checklist", onClick: () => openSection("checklist") },
-      { label: "Link", onClick: () => { openSection("attachments"); setLinkOpen(true); } },
+      { label: "Link", onClick: () => { setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); } },
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
   );
@@ -1810,8 +1898,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {chipRow}
         <div className="mt-1.5">{descriptionBlock}</div>
       </div>
-      {delegationRow}
-      {nextStepCard}
+      {planBlock}
       {clientResponseBlock}
       {section("Deliverables", (
         <>
@@ -1824,7 +1911,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           )}
         </>
       ), addMenu)}
-      {subtasksBlock && <div className="mt-7">{subtasksBlock}</div>}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {attachmentsBlock}
