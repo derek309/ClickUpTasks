@@ -171,8 +171,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
         </div>
       </div>
-      {said.length === 0 && <p className="text-[16px] text-muted">Nothing said on this step yet.</p>}
-      <div className="flex flex-col gap-3">
+      <div className={said.length ? "flex flex-col gap-3" : "hidden"}>
         {said.map((x) => {
           if (x.kind === "message") {
             const m = x.m;
