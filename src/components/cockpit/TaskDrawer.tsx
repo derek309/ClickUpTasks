@@ -587,6 +587,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number }>> }>({ taskId: "", reviews: {} });
   // Also when the task changes or logs something: approving or sending a
   // document does both, so its new status is read back at once.
+  // A document reports its stage as it changes (TaskDocument onStage), so the
+  // steps see a change made inside its window at once.
+  const reportStage = (k: "doc" | "image" | "page" | "video") => (d: { id: string; title: string; status: string; version: number; approvedAt: string | null }) =>
+    setReviewStates((p) => {
+      if (p.taskId !== task.id) return p;
+      const cur = p.reviews[k];
+      if (cur && cur.status === d.status && cur.version === d.version && cur.id === d.id) return p;
+      return { taskId: p.taskId, reviews: { ...p.reviews, [k]: d } };
+    });
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}:${task.status}:${task.comments.length}`;
   useEffect(() => {
     let live = true;
@@ -1234,7 +1243,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
     <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
-      startNonce={docStartNonce} showOpenComments={onCurrentStep}
+      startNonce={docStartNonce} showOpenComments={onCurrentStep} onStage={reportStage("doc")}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   // Separate from the client document (Derek, 2026-09-30): its own line, link and files.
@@ -1811,7 +1820,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
     <TaskDocument key={`${kind}-${task.id}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
-      startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep}
+      startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
         const kinds = p.taskId === task.id ? p.kinds : [];
         if (p.taskId === task.id && kinds.includes(kind) === exists) return p;

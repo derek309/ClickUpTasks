@@ -85,7 +85,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -115,6 +115,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   /** Under the row, the words of each open comment: the review sits on the
    *  task's current step, where its comments are the work (phase 4). */
   showOpenComments?: boolean;
+  /** Its stage, each time it changes: the task's steps follow it (Derek,
+   *  2026-10-11). Changing it here does not change the task itself. */
+  onStage?: (s: { id: string; title: string; status: string; version: number; approvedAt: string | null }) => void;
 }) {
   const image = kind === "image";
   const page = kind === "page";
@@ -127,6 +130,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const pageApi = (query: string, init?: RequestInit) =>
     authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/document/page${kindQuery("page")}${query}`, init);
   const [doc, setDoc] = useState<Doc | null>(null);
+  const onStageRef = useRef(onStage);
+  useEffect(() => { onStageRef.current = onStage; });
+  useEffect(() => {
+    if (doc) onStageRef.current?.({ id: doc.id, title: doc.title, status: doc.status, version: doc.version, approvedAt: doc.approvedAt ?? null });
+  }, [doc?.id, doc?.status, doc?.version]); // eslint-disable-line react-hooks/exhaustive-deps
   const [loaded, setLoaded] = useState(false);
   const [link, setLink] = useState<{ live: boolean; copyable: boolean } | null>(null);
   const [files, setFiles] = useState<TaskDocumentFile[]>([]);
