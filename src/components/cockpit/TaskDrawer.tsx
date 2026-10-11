@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, namedForWork, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -2034,9 +2034,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
     const pick = (key: DeliverableKey) => {
-      if (deliverablePresent(key)) { holdKey(sub.id, key); return; }
-      holdKey(sub.id, key);
-      setPendingStart(key);
+      // A step still named "…: what's next?" takes the name of what it makes.
+      const title = namedForWork(sub, key);
+      const list = holdOnStep(taskRef.current.subtasks, sub.id, key);
+      onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title } : x)) : list });
+      if (!deliverablePresent(key)) setPendingStart(key);
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML" }, { key: "video" as const, label: "Video" }] : []),

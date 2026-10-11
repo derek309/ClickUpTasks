@@ -222,3 +222,15 @@ describe("outcomes and carrying work forward", () => {
     expect(carryForward(["doc", "page", "att:1", "email"], (k) => k === "page")).toEqual(["doc", "email"]);
   });
 });
+
+import { namedForWork } from "./data";
+
+describe("a what's next step named by what it makes", () => {
+  it("takes the name of the work picked", () => {
+    expect(namedForWork(s("a", "Derek approved the document: what's next?", { addedFor: "ok:doc:1" }), "page")).toBe("Create HTML for review");
+  });
+  it("never renames a step someone named", () => {
+    expect(namedForWork(s("a", "Build the email", { addedFor: "ok:doc:1" }), "page")).toBeNull();
+    expect(namedForWork(s("a", "What's next?"), "doc")).toBeNull();
+  });
+});

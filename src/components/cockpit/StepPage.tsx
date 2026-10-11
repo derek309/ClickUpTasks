@@ -8,6 +8,7 @@
 // ordinary messages; they show here because they were sent while the step
 // ran (stepWindow), nothing is filed apart for the client.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
@@ -302,7 +303,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     </section>
   );
 
-  return (
+  // Drawn at the page level: inside the task drawer its own layer kept the
+  // app's sidebar on top of the full page (Derek, 2026-10-11).
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <>
       {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={onClose} />}
       <div role="dialog" aria-label={`Step: ${sub.title}`}
@@ -394,6 +398,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

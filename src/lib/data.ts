@@ -3117,6 +3117,16 @@ export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, _c
   return subtasks.map((s) => (s.id === clientStepId ? { ...s, emailedAt: now } : s));
 }
 
+/** A step still named by the app, waiting for what comes next ("Derek approved
+ *  the document: what's next?"): picking what it makes names it after that
+ *  (Derek, 2026-10-11: "the steps can rename dynamically"). A step someone
+ *  named is never renamed. */
+export function namedForWork(sub: Subtask, key: DeliverableKey): string | null {
+  if (!sub.addedFor || !/: what's next\?$/.test(sub.title)) return null;
+  const what = ({ doc: "document", image: "image", page: "HTML", video: "video" } as Partial<Record<DeliverableKey, string>>)[key];
+  return what ? `Create ${what} for review` : null;
+}
+
 /** What a finished step hands to the next: its client work still under way
  *  (a document or review not yet approved, instructions, a draft email).
  *  Links and files stay where they were used (Derek, 2026-10-11: "carry over
