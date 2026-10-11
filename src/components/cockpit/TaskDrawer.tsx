@@ -991,6 +991,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!cur || !htmlToText(cur.body).trim()) return true;
     return window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with the "changes are done" email?`);
   };
+  // The "changes are done" email carries the client's link to the review the
+  // changes were on, so they can look straight away (Derek, 2026-10-11).
+  const linkReviewInDraft = async (st: Subtask) => {
+    const k = reviewOnStep(st) ?? (["doc", "page", "image", "video"] as const).find((x) => st.holds?.includes(x) && reviews[x]) ?? null;
+    if (!k) return;
+    const res = await docApi(task.id, k, "/link", { method: "POST", body: JSON.stringify({ action: "copy" }) });
+    const j = await res.json().catch(() => ({})) as { url?: string };
+    const draft = taskRef.current.draftEmail;
+    if (!res.ok || !j.url || !draft) return;
+    const name = reviews[k]?.title?.trim() || deliverableName(k);
+    onPatch({ draftEmail: { ...draft, link: { url: j.url, label: `Open "${name}"` }, updatedAt: new Date().toISOString() } });
+  };
   const completeStep = (sid: string) => {
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
@@ -1006,7 +1018,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The plan's next step already makes the email: it gets the draft and
     // starts as usual (advanceFrom), no extra step.
     if (telling === "use" && sub) {
-      if (takeDraftForChanges()) onPatch({ draftEmail: changesDoneEmail(sub) });
+      if (takeDraftForChanges()) { onPatch({ draftEmail: changesDoneEmail(sub) }); void linkReviewInDraft(sub); }
       const next = stepAfter(task.subtasks, sid);
       // Only when no step holds an email yet: each sits on one step.
       if (next && !stepHolding(task.subtasks, "email")) onPatchSub(next.id, { holds: [...(next.holds ?? []), "email"] });
@@ -1015,7 +1027,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const list = addTellClientStep(task.subtasks, sid, firstName, () => newId("s_"));
       if (list) {
         const status = statusForStep(task.status, "in_progress");
-        onPatch({ subtasks: list, ...(status ? { status } : {}), ...(takeDraftForChanges() ? { draftEmail: changesDoneEmail(sub) } : {}) });
+        const drafting = takeDraftForChanges();
+        onPatch({ subtasks: list, ...(status ? { status } : {}), ...(drafting ? { draftEmail: changesDoneEmail(sub) } : {}) });
+        if (drafting) void linkReviewInDraft(sub);
         setAutoDone(null);
         pushToast(`Next: let ${firstName} know. The email is drafted for you to read.`);
         return;
