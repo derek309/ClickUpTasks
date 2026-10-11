@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -34,6 +34,11 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onDelete?: () => void;
   /** The step's date, who has it, its stage, attach and delete. */
   controls?: React.ReactNode;
+  /** Where it sits in the steps, and the arrows to the one before and after
+   *  (Derek, 2026-10-11: "can the arrows move them through the steps?"). */
+  stepNo?: { at: number; total: number };
+  onPrev?: () => void;
+  onNext?: () => void;
   /** What "Add client work" offers, besides a checklist and a text: a
    *  document, a review, an email (Derek, 2026-10-11). */
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
@@ -59,6 +64,18 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onToggleClientItem?: (id: string) => void;
 }) {
   useEscapeToClose(onClose);
+  // ← and → step through, unless typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (e.key === "ArrowLeft" && onPrev) { e.preventDefault(); onPrev(); }
+      if (e.key === "ArrowRight" && onNext) { e.preventDefault(); onNext(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onPrev, onNext]);
   const first = client.name.split(" ")[0];
   const todos = sub.todos ?? [];
   const own = todoProgress(todos);
@@ -255,6 +272,13 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
         className={`fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-[16px]">
           <button onClick={onClose} className="min-w-0 max-w-[50%] truncate rounded-lg px-2 py-1.5 text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
+          {stepNo && stepNo.total > 1 && (
+            <span className="inline-flex items-center gap-1 text-muted">
+              <button onClick={onPrev} disabled={!onPrev} title="Step before (←)" aria-label="Step before" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4" /></button>
+              <span className="tabular-nums">Step {stepNo.at} of {stepNo.total}</span>
+              <button onClick={onNext} disabled={!onNext} title="Step after (→)" aria-label="Step after" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4 rotate-180" /></button>
+            </span>
+          )}
           <span className="flex-1" />
           <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><span aria-hidden className="h-2.5 w-2.5 rounded-full" style={{ background: STATUS_META[stage].dot }} />{STATUS_META[stage].label}</span>
           <button onClick={onToggleFull} className="rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>

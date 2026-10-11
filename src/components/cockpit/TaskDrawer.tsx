@@ -626,7 +626,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const activeStep = currentStep(task.subtasks);
   const progress = stepProgress(task.subtasks);
   /** The step a deliverable or a link or file is on, by its title (phase 4). */
-  const stepTitleHolding = (key: string) => stepHolding(steps, key)?.title ?? null;
+  // A review sent before 2026-10-11 is held by the client's waiting step; it
+  // lives on the step that sent it.
+  const homeOf = (x: Subtask | null | undefined) => (x?.onClient && x.addedFor?.startsWith("sent:") ? steps.find((y) => y.id === x.addedFor!.slice(5)) ?? x : x ?? null);
+  const stepTitleHolding = (key: string) => homeOf(stepHolding(steps, key))?.title ?? null;
 
   // Bottom of the Escape stack: anything opened over the drawer closes first.
   useEscapeToClose(onClose);
@@ -1872,7 +1875,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // is drawn once, here; a step's page lists what is on it with Open.
   const anyWork = DELIVERABLE_KEYS.some(deliverablePresent);
   const workBlocks = DELIVERABLE_KEYS.map((k) => {
-    const on = deliverablePresent(k) ? stepHolding(steps, k) : null;
+    const on = deliverablePresent(k) ? homeOf(stepHolding(steps, k)) : null;
     return (
       <div key={k}>
         {on && <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>}
@@ -2374,8 +2377,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const ps = pageStepId ? task.subtasks.find((x) => x.id === pageStepId) : null;
           if (!ps || !openStepPage) return null;
           const isCur = activeStep?.id === ps.id;
+          const at = steps.findIndex((x) => x.id === ps.id);
+          const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
+            <StepPage task={task} sub={ps} key={ps.id}
+              stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
+              onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
