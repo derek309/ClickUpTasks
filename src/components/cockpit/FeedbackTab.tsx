@@ -63,8 +63,8 @@ export function FeedbackTab({ where, onSend }: {
       )}
       <button onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; }}
         title="Send feedback (drag to move)" aria-label="Send feedback"
-        className="touch-none select-none rounded-l-[5px] bg-accent px-[3px] py-3 text-[13px] font-semibold leading-none tracking-wide text-white opacity-80 shadow-md hover:opacity-100"
-        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", cursor: "grab" }}>
+        className="touch-none select-none rounded-l-[5px] bg-accent text-[13px] font-semibold leading-none tracking-wide text-white opacity-80 shadow-md hover:opacity-100"
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", cursor: "grab", padding: "12px 4px" }}>
         Feedback
       </button>
     </div>
