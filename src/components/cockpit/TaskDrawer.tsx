@@ -1415,7 +1415,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             const h = handoffOf(s);
             const { done, total } = handoffProgress(h);
             const facts = [
-              h.deliverables.length ? `${h.deliverables.length} ${h.deliverables.length === 1 ? "deliverable" : "deliverables"}` : null,
+              h.deliverables.length ? `${h.deliverables.length} ${h.deliverables.length === 1 ? "piece" : "pieces"} of client work` : null,
               h.links.length ? `${h.links.length} ${h.links.length === 1 ? "link" : "links"}` : null,
               h.fileIds.length ? `${h.fileIds.length} ${h.fileIds.length === 1 ? "file" : "files"}` : null,
               h.thread.length ? `${h.thread.length} ${h.thread.length === 1 ? "message" : "messages"}` : null,
@@ -1684,7 +1684,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // at a glance without boxing the page in (Derek, 2026-10-11: "it's very
   // flat", mockup A).
   const HEAD_ICONS: Record<string, [React.ReactNode, string]> = {
-    Deliverables: [<I.clipboard key="i" className="h-4 w-4" />, "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"],
+    "Client work": [<I.clipboard key="i" className="h-4 w-4" />, "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"],
     List: [<I.list key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
     "In GoHighLevel": [<I.bolt key="i" className="h-4 w-4" />, "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"],
     "Links and files": [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
@@ -1952,8 +1952,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l): MenuMake => ({ key: l.kind, label: l.label })),
     ];
     const otherMake: MenuMake[] = [
-      ...(canHaveDocument && !showBrief ? [{ key: "brief" as const, label: "Project instructions" }] : []),
       ...(hasMessaging && !task.draftEmail ? [{ key: "email" as const, label: "Draft email" }] : []),
+      ...(canHaveDocument && !showBrief ? [{ key: "brief" as const, label: "Project instructions" }] : []),
     ];
     const existing = [
       ...DELIVERABLE_KEYS.filter((k) => deliverablePresent(k)).map((k) => ({ key: k as string, label: deliverableName(k) })),
@@ -1962,19 +1962,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <span className="relative">
         <button onClick={() => setStepMenuFor((o) => (o === sub.id ? null : sub.id))} aria-haspopup="menu" aria-expanded={stepMenuFor === sub.id}
-          title="Attach a deliverable, link or file to this step" aria-label={`Attach to ${sub.title}`}
+          title="Add client work, a link or a file to this step" aria-label={`Attach to ${sub.title}`}
           className="flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"><I.plus className="h-4 w-4" /></button>
         {stepMenuFor === sub.id && (<>
           <div className="fixed inset-0 z-30" onClick={close} />
           <div role="menu" aria-label={`Attach to ${sub.title}`} className="absolute left-0 top-full z-40 mt-1 max-h-[60vh] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 text-left text-foreground shadow-lg">
-            {reviewMake.length > 0 && <div className={group}>For client review</div>}
+            {reviewMake.length > 0 && <div className={group}>For the client to review</div>}
             {reviewMake.map((x) => <button key={x.key} role="menuitem" onClick={() => make(x.key)} className={item}>{x.label}</button>)}
-            {otherMake.length > 0 && <div className={group}>Other deliverables</div>}
+            {otherMake.length > 0 && <div className={group}>To send</div>}
             {otherMake.map((x) => <button key={x.key} role="menuitem" onClick={() => make(x.key)} className={item}>{x.label}</button>)}
-            <div className={group}>Add new</div>
-            <button role="menuitem" className={item} onClick={() => { close(); setLinkTarget(sub.id); setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>Link</button>
-            <button role="menuitem" className={item} onClick={() => { close(); setFileTarget({ stepId: sub.id, before: task.attachments.map((a) => a.id) }); fileRef.current?.click(); }}>File</button>
-            {existing.length > 0 && <div className={group}>Assign from this task</div>}
+            <div className={group}>Links and files</div>
+            <button role="menuitem" className={item} onClick={() => { close(); setOpenStepPage(null); setLinkTarget(sub.id); setLinkOpen(true); requestAnimationFrame(() => document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" })); }}>New link</button>
+            <button role="menuitem" className={item} onClick={() => { close(); setFileTarget({ stepId: sub.id, before: task.attachments.map((a) => a.id) }); fileRef.current?.click(); }}>Upload a file</button>
+            {existing.length > 0 && <div className={group}>Already on this task</div>}
             {existing.map((x) => {
               const on = stepTitleHolding(x.key);
               return (
@@ -2072,7 +2072,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
-    <section className="mt-8" id={title === "Deliverables" ? "task-deliverables" : undefined}>
+    <section className="mt-8" id={title === "Client work" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
         {heading(title)}
         {right}
@@ -2268,11 +2268,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Deliverables on no step (Derek: they may sit outside a step). With
           steps and nothing loose, there is no section, but the blocks stay
           mounted so they can say whether they exist. */}
-      {steps.length === 0 || unheldPresent ? section("Deliverables", (
+      {steps.length === 0 || unheldPresent ? section("Client work", (
         <>
           {unheldBlocks}
           {!unheldPresent && (
-            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client reviews and draft emails on no step show here. Add them to a step from its page." : "Client reviews and draft emails show here."}</p>
+            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client documents, reviews and draft emails on no step show here. Add them to a step from its page." : "Client documents, reviews and draft emails show here."}</p>
           )}
         </>
       ), addMenu) : <div>{unheldBlocks}</div>}
