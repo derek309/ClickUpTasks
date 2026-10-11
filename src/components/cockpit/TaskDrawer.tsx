@@ -702,8 +702,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           toneClass={dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : "text-foreground"}
           onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>} />
       </span>
-      {/* How long it takes: a small clock, a click to set it. */}
-      <span className="ml-1.5 inline-flex align-middle"><SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} /></span>
       {/* What chases the client while it waits, a word to change like the
           rest (Derek, 2026-10-11: "why can't we edit the reminders"). */}
       {reminders.length > 0 ? (
@@ -730,6 +728,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </span>
         </span>
       ) : null}
+      {/* How long it takes: a small clock at the end, a click to set it. */}
+      <span className="ml-2 inline-flex align-middle"><SizePicker compact size={task.size} sizeHours={task.sizeHours} onChange={onPatch} /></span>
     </div>
   );
   // Only a custom repeat needs more room than a word: its own line below.
@@ -876,7 +876,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ status: "waiting", followUpAt: date });
     setNewStep(`Get ${client.name.split(" ")[0]}'s approval on ${name}`, date, watch);
   };
-  const dateTone = { late: "bg-danger-soft text-danger", soon: "bg-highlight-soft text-highlight", later: "bg-background text-foreground", none: "bg-background text-muted" }[stepDate.tone];
   const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
   // The card wears its state as a solid band across the top: colour for how
   // urgent it is, and the state in words on the right, so a long drawer still
@@ -962,42 +961,42 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {followUp ? "Check back on this task" : "What happens next? Click to write it"}
               </button>
             )}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <InlineDate value={followUp} onChange={moveFollowUp} onClear={followUp ? () => moveFollowUp(null) : undefined}
-                formatValue={() => `📅 ${stepDate.label}`} emptyLabel="📅 Set a date"
-                className={`rounded-[5px] !px-2.5 !py-1.5 text-[16px] font-semibold ${dateTone}`} />
-              {openStep && (
-                // The owner is a native picker laid over its chip.
-                <label className="relative inline-flex cursor-pointer items-center gap-1.5 rounded-[5px] bg-background py-1 pl-1 pr-2.5 text-[16px] font-semibold hover:ring-1 hover:ring-border" title="Who this step is for">
-                  {stepOwner ? <Avatar id={stepOwner.id} size={24} /> : <span className="h-6 w-6 rounded-full bg-border" />}
-                  {stepOwner ? (stepOwner.id === meId ? "You" : stepOwner.name) : "Nobody"}
+            {/* One sentence, each part a word to click (Derek, 2026-10-11,
+                follow up mockup A): the date, who it's on, and what finishes
+                it by itself. What set it is a grey line under it. */}
+            <p className="mt-1 text-[16px] leading-relaxed">
+              <span className="group/d relative inline-flex items-baseline">
+                <InlineDate value={followUp} onChange={moveFollowUp} formatValue={() => stepDate.label} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
+                  className={`-mx-1 font-semibold underline decoration-dotted underline-offset-4 ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : ""}`} />
+                {followUp && <button onClick={() => moveFollowUp(null)} title="Clear the date" aria-label="Clear the date" className="absolute -right-4 top-0 hidden px-0.5 text-muted hover:text-danger focus:inline group-hover/d:inline">×</button>}
+              </span>
+              {openStep && (<>
+                , on{" "}
+                <label className="group/w relative inline-block cursor-pointer" title="Who this step is for">
+                  <span className="font-semibold underline decoration-dotted underline-offset-4">{stepOwner ? (stepOwner.id === meId ? "you" : stepOwner.name.split(/\s+/)[0]) : "nobody"}</span>
                   <select value={stepOwnerId ?? ""} onChange={(e) => patchStep({ nextStepOwner: e.target.value && e.target.value !== task.assigneeId ? e.target.value : null })}
-                    aria-label="Who this step is for" className="absolute inset-0 cursor-pointer opacity-0">
+                    aria-label="Who this step is for" className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
                     {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
                 </label>
-              )}
-              {/* No time of day (Derek, 2026-09-30: "usually we don't need a time
-                  ... it's just going to be the date when we need to follow up").
-                  It was display only; nothing ever read it. */}
-              {openStep && watchState && (
-                <span className="inline-flex items-center gap-2 rounded-[5px] bg-sky-50 px-2.5 py-1.5 text-[16px] font-semibold text-sky-700 dark:bg-sky-500/10 dark:text-sky-300">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-sky-600" />{watchState.waiting}
-                  <button onClick={() => patchStep({ nextStepWatch: null })} title="Stop waiting on this" aria-label="Stop waiting on this" className="text-sky-700/60 hover:text-sky-900">×</button>
-                </span>
-              )}
-              {openStep && !watch && suggestions.some((sg) => sg.watch) && (
-                <ActionMenu label={<span className="text-[16px] font-medium text-muted">⚡ Done when…</span>} title="Finish this follow up by itself when something happens"
-                  triggerClassName="rounded-[5px] px-2 py-1.5 hover:bg-background"
+              </>)}
+              {openStep && watchState ? (<>
+                .{" "}
+                <span className="font-semibold text-sky-700 dark:text-sky-300"><span className="mr-1 inline-block h-2 w-2 animate-pulse rounded-full bg-sky-600 align-middle" />{watchState.waiting}</span>
+                <button onClick={() => patchStep({ nextStepWatch: null })} title="Stop waiting on this" aria-label="Stop waiting on this" className="ml-0.5 px-0.5 text-muted hover:text-danger">×</button>
+              </>) : openStep && !watch && suggestions.some((sg) => sg.watch) ? (<>
+                .{" "}
+                <ActionMenu label={<span className="font-medium text-muted underline decoration-dotted underline-offset-4">Done when…</span>} title="Finish this follow up by itself when something happens"
+                  triggerClassName="rounded hover:bg-background"
                   items={suggestions.filter((sg) => sg.watch).map((sg) => ({ label: sg.hint.replace(/^Done when /, ""), onClick: () => patchStep({ nextStepWatch: sg.watch }) }))} />
-              )}
-              {openStep && (
-                <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
-                  className="text-[16px] text-muted underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-current">
-                  {TASK_ACTION_META[openStep.kind].verb} · {timeAgo(openStep.at)}
-                </button>
-              )}
-            </div>
+              </>) : null}
+            </p>
+            {openStep && (
+              <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set"
+                className="mt-0.5 block text-[15px] text-muted hover:text-foreground hover:underline">
+                {TASK_ACTION_META[openStep.kind].verb} · {timeAgo(openStep.at)}
+              </button>
+            )}
             {stepMoves >= 3 && (
               <div className="mt-2.5 rounded-lg bg-amber-50 px-3 py-2 text-[16px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                 ⚠ Moved {stepMoves} times since it was set. Is it stuck?
