@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, currentStep, isHandoffStep,
+  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, isHandoffStep, planSteps,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -95,5 +95,19 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
     if (!cur || cur.finishWhen !== "reply") return null;
     const now = new Date().toISOString();
     return list.map((x) => (x.id === cur.id ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+  });
+}
+
+/** What the client sent from their portal goes on the open changes step,
+ *  made in front of the current step when there is none (the task page's
+ *  rule, now with nobody watching). Only on a task that has steps. */
+export async function stepsOnClientChanges(taskId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row, first) => {
+    const list = row.subtasks ?? [];
+    if (!planSteps(list).length) return null;
+    const loose = list.filter((x) => x.fromClient && !x.stepId && !x.done).map((x) => x.id);
+    if (!loose.length) return null;
+    const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
+    return withStep.map((x) => (loose.includes(x.id) ? { ...x, stepId } : x));
   });
 }

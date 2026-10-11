@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { stepsOnClientChanges } from "@/lib/stepsServer";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { type Attachment, clientAnswerPatch } from "@/lib/data";
@@ -75,6 +76,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
         .eq("id", taskId).eq("updated_at", cur?.updated_at as string).select("id");
       if (done?.length) break;
     }
+    // On the task's open changes step, whether or not anyone has it open.
+    await stepsOnClientChanges(taskId).catch(() => false);
   }
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({

@@ -1565,12 +1565,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {ks.map((k) => {
           const r = reviews[k]!;
           return (
-            <div key={k} className="flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5">
+            <div key={k} role="button" tabIndex={0} onClick={() => openWork(k)} onKeyDown={(e) => { if (e.key === "Enter") openWork(k); }}
+              style={{ background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot }}
+              className="flex cursor-pointer flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5 hover:border-accent hover:bg-background">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[16px] font-semibold">{r.title.trim() || deliverableName(k)}</div>
                 <div className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{stageChip(r.status)}<span>{[r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</span></div>
               </div>
-              <button onClick={() => openWork(k)} className="h-9 shrink-0 rounded-lg border px-3 text-[16px] font-semibold hover:bg-background">Open</button>
+              <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold leading-9">Open</span>
             </div>
           );
         })}
@@ -2223,13 +2225,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   if (!deliverablePresent(d)) return null;
                   const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
                   return (
-                    <span className="flex min-w-0 items-center gap-3 rounded-[5px] border bg-surface px-3 py-2">
+                    // The whole box opens it (Derek, 2026-10-11), not only its button.
+                    <span role="button" tabIndex={0} onClick={() => openWork(d)} onKeyDown={(e) => { if (e.key === "Enter") openWork(d); }}
+                      style={r ? { background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot } : undefined}
+                      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border bg-surface px-3 py-2 hover:border-accent hover:bg-background">
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
                         <span className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
-                      <button onClick={() => openWork(d)} className="h-9 shrink-0 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Open</button>
-                      <button onClick={() => releaseKey(d)} title="Take off this step (it stays under Client work)" aria-label={`Take ${deliverableName(d)} off this step`}
+                      <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-4 text-[16px] font-semibold leading-9">Open</span>
+                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title="Take off this step (it stays under Client work)" aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
                   );

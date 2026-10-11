@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -70,5 +70,14 @@ describe("steps added on the server", () => {
     setup([{ id: "k", title: "Check in if Brian hasn't replied", done: false, finishWhen: "reply" }]);
     expect(await stepsOnClientReply("t1")).toBe(true);
     expect(steps()[0]).toMatchObject({ done: true, outcome: "Brian replied" });
+  });
+
+  it("a portal request lands on a changes step made in front of the current one", async () => {
+    setup([{ id: "a", title: "Write the newsletter", done: false }, { id: "r1", title: "Make the logo bigger", done: false, fromClient: true }]);
+    expect(await stepsOnClientChanges("t1")).toBe(true);
+    const made = steps().find((s) => s.title === "Changes from Brian")!;
+    expect(steps().find((s) => s.id === "r1")!.stepId).toBe(made.id);
+    expect(steps().map((s) => s.title).slice(0, 2)).toEqual(["Changes from Brian", "Write the newsletter"]);
+    expect(await stepsOnClientChanges("t1")).toBe(false);
   });
 });

@@ -121,7 +121,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
     // The comments are still below this, and still worth reading, so the message
     // says the video went rather than that something is broken.
     return (
-      <div className="rounded-2xl border bg-surface p-6 text-center">
+      <div className="rounded-[5px] border bg-surface p-6 text-center">
         <p className="text-[18px] font-semibold">This video has been cleared.</p>
         <p className="mt-1 text-[16px] text-muted">We keep a video for 30 days after it is approved, then remove the file. Everything that was said about it is still here. Ask us if you need the video again.</p>
       </div>
@@ -132,7 +132,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
   }
   if (failed || !url) {
     return (
-      <div className="rounded-2xl border bg-surface p-6 text-center">
+      <div className="rounded-[5px] border bg-surface p-6 text-center">
         <p className="text-[18px] font-semibold">We couldn&apos;t load the video.</p>
         <p className="mt-1 text-[16px] text-muted">Please reload the page and try again.</p>
       </div>
@@ -148,7 +148,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
         aria-label={label} onError={onError} onLoadedMetadata={onLoaded}
         onTimeUpdate={(e) => setAt(e.currentTarget.currentTime)}
         onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
-        className="w-full rounded-2xl bg-black shadow-sm" style={{ maxHeight: "72dvh" }} />
+        className="w-full rounded-[5px] bg-black shadow-sm" style={{ maxHeight: "72dvh" }} />
 
       {/* The comments along the video, under the scrubber. The browser's own
           controls cannot carry markers, so they sit on a strip of their own at the
@@ -176,7 +176,7 @@ export function ReviewVideo({ load, label, poster, pins = [], onPinClick, canCom
           there and names the second it would be pinned to. */}
       {canComment && onPlace && paused && !pending && (
         <button onClick={() => onPlace(Math.round(at * 10) / 10)}
-          className="mt-2 min-h-[44px] rounded-xl px-4 text-[16px] font-semibold text-white"
+          className="mt-2 min-h-[44px] rounded-[5px] px-4 text-[16px] font-semibold text-white"
           style={{ background: color ?? "#1b3a5c" }}>
           Comment at {formatPinTime(at)}
         </button>

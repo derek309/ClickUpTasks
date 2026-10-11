@@ -240,7 +240,7 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
       {/* Something this page said about a click (text it can't edit, a link it
           followed). The toolbar's hint covers the rest, once for every page. */}
       <p className={`text-[16px] text-muted ${notice ? "mb-2" : "sr-only"}`} aria-live="polite">{notice ?? ""}</p>
-      <div className="relative mx-auto overflow-hidden rounded-lg border bg-white shadow-sm" style={{ width: Math.min(available || Infinity, size.width * scale), height: frameHeight * scale }}>
+      <div className="relative mx-auto overflow-hidden rounded-[5px] border bg-white shadow-sm" style={{ width: Math.min(available || Infinity, size.width * scale), height: frameHeight * scale }}>
         <div ref={pinMark} aria-hidden className="pointer-events-none absolute left-0 h-px w-px" style={{ top: 0 }} />
         {frameUrl ? (
           <iframe key={frameUrl} ref={frame} src={frameUrl} title={title ?? "The page under review"} sandbox={FRAME_SANDBOX} referrerPolicy="no-referrer" onLoad={onLoad}

@@ -8,6 +8,7 @@
 //
 // The draft stays on the task until the email really went out: it retires itself
 // once a matching outbound email exists, so a failed send never loses it.
+import { reviewTone } from "@/lib/reviewTone";
 import { useEffect, useState } from "react";
 import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type Task } from "@/lib/data";
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
@@ -59,7 +60,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
     <>
       {/* A new draft's subject starts as the task's title; the row says what it is
           until the subject says more (Derek, 2026-09-13). */}
-      <WorkItemRow tone="email" icon="✉️" title={draft.subject.trim() && draft.subject.trim() !== task.title.trim() ? draft.subject.trim() : "Draft email"} badge={badge} meta={meta}
+      <WorkItemRow tone="email" wash={reviewTone("draft")} icon="✉️" title={draft.subject.trim() && draft.subject.trim() !== task.title.trim() ? draft.subject.trim() : "Draft email"} badge={badge} meta={meta}
         onOpen={() => setFull(true)}
         // Deleted from the row with Undo, so a draft is never lost by a slip.
         onDelete={() => { const kept = draft; onPatch({ draftEmail: null }); pushToast("Draft email deleted", { label: "Undo", run: () => onPatch({ draftEmail: kept }) }); }} />

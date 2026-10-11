@@ -903,7 +903,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       {deletedDocs.length} deleted · <span className="font-semibold text-accent">Restore</span>
     </button>
   ) : (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed px-4 py-2 text-[16px] text-muted">
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[5px] border border-dashed px-4 py-2 text-[16px] text-muted">
       <span>Deleted {titleInSentence}:</span>
       {deletedDocs.map((d) => (
         <span key={d.id} className="flex flex-wrap items-center gap-x-2">
@@ -957,7 +957,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const locked = !!doc.approvedAt || completed;
   const stageSelect = (
     <select value={doc.status} onChange={(e) => void setStage(e.target.value as TaskDocumentStatus)} aria-label={`${title} stage`}
-      className="cursor-pointer rounded-full border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.text }}>
+      className="cursor-pointer rounded-[5px] border-0 px-3 py-1 text-[16px] font-semibold outline-none" style={{ background: tone.chip, color: tone.text }}>
       {STAGES.map((s) => <option key={s} value={s}>{STATUS_VIEW[s].label}</option>)}
     </select>
   );
@@ -1059,7 +1059,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}{linkToggleButton}</>}
+    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}{linkToggleButton}</>}
       onOpen={() => switchView({ full: true })} onDelete={() => void deleteDocument()} />
   );
   const openList = comments.filter((c) => !c.completedAt);
@@ -1122,18 +1122,18 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       onBlur={() => titleCommit.flush()}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
       placeholder={kindNewName(kind)} aria-label={`${title} name`} maxLength={200}
-      className="w-full rounded-md bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
+      className="w-full rounded-[5px] bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
   );
 
   const pasteSlotLabel = pasteOpen && pasteSlot !== null && shownItems[pasteSlot] ? itemLabel(shownItems, pasteSlot) : null;
   const pasteBox = (
-    <div className="mb-3 rounded-xl border bg-background p-3">
+    <div className="mb-3 rounded-[5px] border bg-background p-3">
       <textarea value={pasteDraft} onChange={(e) => setPasteDraft(e.target.value)} rows={8} spellCheck={false}
         placeholder={pasteSlotLabel ? `Paste the new code for ${pasteSlotLabel} here…` : "Paste the page code here…"} aria-label="Page code"
-        className="w-full resize-y rounded-lg border bg-surface px-3 py-2 font-mono text-[16px] outline-none focus:border-accent" />
+        className="w-full resize-y rounded-[5px] border bg-surface px-3 py-2 font-mono text-[16px] outline-none focus:border-accent" />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <button onClick={() => void pastePage()} disabled={adding || !pasteDraft.trim()}
-          className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">{adding ? "Adding…" : "Use this code"}</button>
+          className="rounded-[5px] bg-accent px-4 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">{adding ? "Adding…" : "Use this code"}</button>
         <button onClick={() => versionInput.current?.click()} disabled={adding} className={quiet}>{pasteSlotLabel ? "Upload an .html file" : "Upload .html files"}</button>
         {doc.body && <button onClick={() => { setPasteOpen(false); setPasteDraft(""); setPasteSlot(null); }} className={quiet}>Cancel</button>}
         <span className="text-[16px] text-muted">Up to 2 MB each. Link images by web address.{doc.body ? "" : " Two emails? Add the second one after this."}</span>
@@ -1179,7 +1179,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
             placeholder={itemLabel(shownItems.map((x, n) => (n === i ? { ...x, label: "" } : x)), i)}
             onBlur={(e) => void relabelImage(i, e.currentTarget.value.trim())}
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-            className="-ml-2 min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-surface hover:ring-1 hover:ring-border focus:bg-surface focus:ring-2 focus:ring-accent" />
+            className="-ml-2 min-w-0 flex-1 rounded-[5px] bg-transparent px-2 py-1 text-[16px] font-semibold outline-none placeholder:text-foreground hover:bg-surface hover:ring-1 hover:ring-border focus:bg-surface focus:ring-2 focus:ring-accent" />
         ) : (
           <h3 className="min-w-0 flex-1 text-[16px] font-semibold">{label}</h3>
         )}
@@ -1187,16 +1187,16 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
             on one, so how do I mark one approved and decline the others?"). */}
         {shownItems.length > 1 && (doc?.pick === item.file ? (
           <span className="inline-flex shrink-0 items-center gap-2">
-            <span className="rounded-full bg-success-soft px-2.5 py-0.5 text-[15px] font-bold text-success">✓ {doc.pickBy === "client" ? "Client's pick" : "Picked"}</span>
+            <span className="rounded-[5px] bg-success-soft px-2.5 py-0.5 text-[15px] font-bold text-success">✓ {doc.pickBy === "client" ? "Client's pick" : "Picked"}</span>
             <button onClick={() => void pickOption(null)} className="text-[15px] font-semibold text-muted hover:text-foreground">Undo</button>
           </span>
         ) : doc?.pick && shownItems.some((x) => x.file === doc.pick) ? (
           <span className="inline-flex shrink-0 items-center gap-2">
-            <span className="rounded-full bg-background px-2.5 py-0.5 text-[15px] font-semibold text-muted">Not picked</span>
+            <span className="rounded-[5px] bg-background px-2.5 py-0.5 text-[15px] font-semibold text-muted">Not picked</span>
             <button onClick={() => void pickOption(item.file)} className="text-[15px] font-semibold text-accent hover:underline">Pick this instead</button>
           </span>
         ) : (
-          <button onClick={() => void pickOption(item.file)} className="h-8 shrink-0 rounded-md bg-surface px-3 text-[15px] font-semibold text-success ring-1 ring-success/40 hover:bg-success-soft">✓ Pick this one</button>
+          <button onClick={() => void pickOption(item.file)} className="h-8 shrink-0 rounded-[5px] bg-surface px-3 text-[15px] font-semibold text-success ring-1 ring-success/40 hover:bg-success-soft">✓ Pick this one</button>
         ))}
         {menuItems.some(Boolean) && (
           <ActionMenu label="⋯" title={`${label} actions`}
@@ -1228,7 +1228,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   );
 
   const versionArticle = (
-    <article className={doc.body ? "min-w-0" : "rounded-2xl border bg-surface p-5 shadow-sm sm:p-8"}>
+    <article className={doc.body ? "min-w-0" : "rounded-[5px] border bg-surface p-5 shadow-sm sm:p-8"}>
       <input ref={versionInput} type="file" accept={page ? PAGE_ACCEPT : video ? VIDEO_ACCEPT : IMAGE_ACCEPT} className="hidden" multiple
         onChange={(e) => { if (e.target.files) void (page ? uploadPages(e.target.files, pasteOpen ? pasteSlot : slotRef.current) : video ? uploadVideos(e.target.files, slotRef.current) : uploadImages(e.target.files, slotRef.current)); e.target.value = ""; }} />
       {!doc.body ? (
@@ -1287,10 +1287,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
             </div>
           )}
           {page && !locked && shownEditCount > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-highlight/40 bg-highlight-soft/40 px-4 py-2.5 text-[16px]">
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[5px] border border-highlight/40 bg-highlight-soft/40 px-4 py-2.5 text-[16px]">
               <span className="min-w-0 flex-1">{shownEditCount === 1 ? "1 text change" : `${shownEditCount} text changes`} not saved yet.</span>
               <button onClick={() => void savePageEdits()} disabled={busy !== null}
-                className="rounded-lg bg-accent px-4 py-1.5 font-semibold text-white disabled:opacity-50">{busy === "page-edits" ? "Saving…" : "Save text changes"}</button>
+                className="rounded-[5px] bg-accent px-4 py-1.5 font-semibold text-white disabled:opacity-50">{busy === "page-edits" ? "Saving…" : "Save text changes"}</button>
               <button onClick={undoPageEdits} disabled={busy !== null} className={quiet}>Undo text changes</button>
             </div>
           )}
@@ -1300,7 +1300,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   );
 
   const historyPanel = historyOpen && (
-    <section className="mt-3 rounded-xl border bg-surface px-4 py-2.5">
+    <section className="mt-3 rounded-[5px] border bg-surface px-4 py-2.5">
       {timeline.length === 0 && <p className="text-[16px] text-muted">Sends, client answers, new versions and files show up here with who did them.</p>}
       <div className="mt-1.5 space-y-1.5">
         {shownTimeline.map((entry) => {
@@ -1315,7 +1315,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
           const changed = !!parts && parts.some((p) => p.type !== "same");
           const waiting = open && !!entry.pageFile && !!previous && !pageParts;
           return (
-            <div key={entry.key} className="rounded-lg border px-3 py-2">
+            <div key={entry.key} className="rounded-[5px] border px-3 py-2">
               <button onClick={() => openable(entry) && openHistoryEntry(entry, previous, open)}
                 className={`flex w-full flex-wrap items-center gap-x-2 text-left text-[16px] ${openable(entry) ? "" : "cursor-default"}`}>
                 <span className="font-semibold">{entry.title}</span>
@@ -1370,14 +1370,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     ? (doc.version ? "Changes not sent" : "Not sent yet")
     : [lastSent ? `Sent ${shortDate(lastSent.createdAt)}` : null, doc.clientViewedAt ? `Viewed ${timeAgo(doc.clientViewedAt)}` : null].filter(Boolean).join(" · ");
   const reviewBar = versioned && doc.body ? (
-    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border bg-surface px-4 py-2.5 shadow-sm">
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-4 py-2.5 shadow-sm">
       {versionOptions.length > 1 ? (
         <select value={shownFileId ?? ""} onChange={(e) => { setViewingVersion(e.target.value); setPinDraft(null); }} aria-label="Version shown"
-          className="cursor-pointer rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-semibold outline-none focus:border-accent">
+          className="cursor-pointer rounded-[5px] border bg-surface px-3 py-1.5 text-[16px] font-semibold outline-none focus:border-accent">
           {versionOptions.map((o) => <option key={o.fileId} value={o.fileId}>{o.label}</option>)}
         </select>
       ) : (
-        <span className="rounded-lg border px-3 py-1.5 text-[16px] font-semibold">{versionOptions[0]?.label ?? "Version 1"}</span>
+        <span className="rounded-[5px] border px-3 py-1.5 text-[16px] font-semibold">{versionOptions[0]?.label ?? "Version 1"}</span>
       )}
       {barStatus && (
         <span className="flex items-center gap-2 text-[16px] text-muted">
@@ -1403,7 +1403,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
         {moreActions}
         {needsSend && (
           <button onClick={send} disabled={busy !== null}
-            className="rounded-lg bg-accent px-5 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
+            className="rounded-[5px] bg-accent px-5 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
             {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
         )}
@@ -1420,14 +1420,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
       {!image && clientCrossed && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
           <span className="min-w-0 flex-1">{clientCrossed.authorLabel ?? "The client"} sent changes while you had unsent edits.</span>
           <button onClick={() => void patchDoc({ restoreVersion: clientCrossed.version }, "Their version is in. Send it when it's ready.")} className="font-semibold text-accent hover:underline">Use their version</button>
           <button onClick={() => setClientCrossed(null)} className="font-medium text-muted hover:underline">Keep mine</button>
         </div>
       )}
       {locked && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl px-4 py-3 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] px-4 py-3 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
           <span className="min-w-0 flex-1">
             {completed
               ? `This ${what} is completed. Reopen it to make changes.`
@@ -1442,14 +1442,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
           gone, and Restart for another round once it has run out (Derek,
           2026-09-21: "allow us to be able to log in and redo it"). */}
       {doc.status === "with_client" && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border bg-surface px-4 py-2.5 text-[16px]">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-4 py-2.5 text-[16px]">
           <span className="min-w-0 flex-1 text-muted">{reminderLine}</span>
           <select value={doc.reminderEveryDays} aria-label="How often to remind the client"
             onChange={(e) => {
               const every = Number(e.target.value);
               setReminderEvery(every);
             }}
-            className="cursor-pointer rounded-lg border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent">
+            className="cursor-pointer rounded-[5px] border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent">
             <option value={1}>Every business day</option>
             <option value={2}>Every 2 business days</option>
             <option value={0}>Off</option>
@@ -1459,7 +1459,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       )}
 
       {versioned ? versionArticle : (
-        <article className="rounded-2xl border bg-surface p-5 shadow-sm sm:p-8">
+        <article className="rounded-[5px] border bg-surface p-5 shadow-sm sm:p-8">
           <RichTextEditor key={`doc-${doc.id}-${nonce}`} value={seed ?? doc.body} editable={!locked} variant="doc"
             placeholder="Write the content for your client…"
             highlights={comments.filter((c) => c.quote && !c.completedAt).map((c) => ({ id: c.id, quote: c.quote as string }))}
@@ -1472,7 +1472,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {needsSend && (
           <button onClick={send} disabled={busy !== null}
-            className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
+            className="rounded-[5px] bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
             {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
         )}

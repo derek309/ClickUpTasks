@@ -13,10 +13,10 @@ import { ActionMenu } from "./ActionMenu";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { shortcut } from "@/lib/platform";
 
-export const quietButton = "rounded-lg border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
+export const quietButton = "rounded-[5px] border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
 export function WorkItemBadge({ label, chip, dot }: { label: string; chip: string; dot: string }) {
-  return <span className="shrink-0 rounded-full px-2.5 py-0.5 text-[16px] font-semibold" style={{ background: chip, color: dot }}>{label}</span>;
+  return <span className="shrink-0 rounded-[5px] px-2.5 py-0.5 text-[16px] font-semibold" style={{ background: chip, color: dot }}>{label}</span>;
 }
 
 /** The line in the task. Clicking the name opens it too. */
@@ -38,7 +38,7 @@ const ROW_TONE = {
   brief: { box: "border-l-accent", tile: "bg-highlight-soft" },
 } as const;
 
-export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelete, deleteLabel = "Delete", tone }: {
+export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelete, deleteLabel = "Delete", tone, wash }: {
   icon: string;
   title: string;
   badge?: React.ReactNode;
@@ -51,14 +51,19 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelet
   onDelete?: () => void;
   deleteLabel?: string;
   tone: keyof typeof ROW_TONE;
+  /** The box in its stage's color (lib/reviewTone), so where it stands shows at a glance. */
+  wash?: { chip: string; dot: string };
 }) {
   const colors = ROW_TONE[tone];
   return (
     // One quiet box like the rest of the page: thin border, 5px corners
     // (Derek, 2026-10-11, one box style). The tile keeps the kind's colour.
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[5px] border bg-surface px-4 py-3">
-      <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-        <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[22px] ${colors.tile}`}>{icon}</span>
+    // The whole box opens it (Derek, 2026-10-11); its buttons keep their own jobs.
+    <div role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) onOpen(); }}
+      style={wash ? { background: wash.chip, borderColor: wash.dot } : undefined}
+      className="mt-3 flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 rounded-[5px] border bg-surface px-4 py-3 transition hover:border-accent">
+      <span className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[5px] text-[22px] ${colors.tile}`}>{icon}</span>
         <span className="min-w-0">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="min-w-0 truncate text-[17px] font-semibold">{title}</span>
@@ -66,14 +71,14 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelet
           </span>
           {meta && <span className="block truncate text-[16px] text-muted">{meta}</span>}
         </span>
-      </button>
-      <span className="flex shrink-0 flex-wrap items-center gap-2">
+      </span>
+      <span className="flex shrink-0 flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
         {actions}
         {/* Quiet like its neighbours: the task's one filled button is Mark done on its next step. */}
-        <button onClick={onOpen} className="rounded-lg border bg-surface px-5 py-1.5 text-[16px] font-semibold text-foreground transition hover:bg-background">Open</button>
+        <button onClick={onOpen} className="rounded-[5px] border bg-surface px-5 py-1.5 text-[16px] font-semibold text-foreground transition hover:bg-background">Open</button>
         {onDelete && (
           <button onClick={onDelete} title={deleteLabel} aria-label={`${deleteLabel}: ${title}`}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /></button>
+            className="flex h-9 w-9 items-center justify-center rounded-[5px] text-muted transition hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /></button>
         )}
       </span>
     </div>
@@ -110,7 +115,7 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, c
         {badge}
         {status && <span className="text-[16px] text-muted">{status}</span>}
         {actions}
-        <button onClick={onClose} className="rounded-lg border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>
+        <button onClick={onClose} className="rounded-[5px] border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>
       </header>
       <div className="flex-1 overflow-y-auto px-4 pb-16 pt-6 sm:px-8">
         {/* 1280px, the width every ClickUpLocal page uses (Derek, 2026-09-11: "open up the full to 1280px"). */}
@@ -364,7 +369,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
     return (
       <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
         onMouseEnter={onHover && c.pin ? () => onHover(c.id) : undefined} onMouseLeave={onHover && c.pin ? () => onHover(null) : undefined}
-        className={`-mx-2 flex gap-3 rounded-lg px-2 py-3 transition-colors ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
+        className={`-mx-2 flex gap-3 rounded-[5px] px-2 py-3 transition-colors ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
         {c.pin ? (
           <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick}
             title={moment ? `Jump to ${moment}` : `Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
@@ -380,12 +385,12 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
               2026-09-14: the name was cut to "D…" beside the time). */}
           <div className="flex items-center gap-2 text-[16px]">
             <span className="min-w-0 break-words font-semibold">{c.authorLabel || (c.fromClient ? "Client" : "Team")}</span>
-            {chip && <span className="shrink-0 rounded-full bg-background px-2 text-[16px] text-muted">{place}</span>}
+            {chip && <span className="shrink-0 rounded-[5px] bg-background px-2 text-[16px] text-muted">{place}</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">
               {/* Said in words, so what it does is plain (Derek, 2026-09-14 redesign). */}
               <button aria-pressed={done} title={done ? "Open it again" : "Mark it resolved"}
                 onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
-                className={`whitespace-nowrap rounded-full px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
+                className={`whitespace-nowrap rounded-[5px] px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
                 {done ? "Resolved ✓" : "Resolve"}
               </button>
               {!isEditing && (mine || canDelete(c)) && (
@@ -412,7 +417,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
                   if (e.key === "Escape") { e.stopPropagation(); setEditing(null); }
                 }}
                 aria-label="Edit comment"
-                className="mt-1 w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+                className="mt-1 w-full resize-y rounded-[5px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
               <div className="mt-1 flex gap-4 text-[16px]">
                 <button onClick={() => void saveEdit()} disabled={busy || !editing.text.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
                 <button onClick={() => setEditing(null)} className="text-muted hover:underline">Cancel</button>
@@ -447,7 +452,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
               <textarea value={replyText} onChange={(e) => setReplyText(e.target.value)} rows={2} maxLength={4000} autoFocus aria-label="Reply"
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void sendReply(c.id); } if (e.key === "Escape") { e.stopPropagation(); setReplyFor(null); } }}
                 placeholder={viewer === "team" ? "Reply; they get it by email with a link back here" : "Write your reply"}
-                className="w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
+                className="w-full resize-y rounded-[5px] border bg-surface px-3 py-2 text-[16px] outline-none focus:border-accent" />
               <div className="mt-1 flex gap-4 text-[16px]">
                 <button onClick={() => void sendReply(c.id)} disabled={replying || !replyText.trim()} className="font-semibold text-accent hover:underline disabled:opacity-50">{replying ? "Sending…" : "Send reply"}</button>
                 <button onClick={() => setReplyFor(null)} className="text-muted hover:underline">Cancel</button>
@@ -466,7 +471,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-[16px] font-semibold">Comments</h3>
         {comments.length > 0 && (
-          <span className="rounded-full bg-background px-2.5 py-0.5 text-[16px] text-muted">{openOnes.length ? `${openOnes.length} open` : "All done"}</span>
+          <span className="rounded-[5px] bg-background px-2.5 py-0.5 text-[16px] text-muted">{openOnes.length ? `${openOnes.length} open` : "All done"}</span>
         )}
         {viewer === "team" && (
           <span title="The client sees these on their review page" aria-label="The client sees these on their review page" className="inline-flex text-muted">
@@ -485,7 +490,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
   const composer = (
     <>
       {(quote || pinDraft) && (
-        <div className="mt-2 flex items-center gap-2 rounded-lg border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
+        <div className="mt-2 flex items-center gap-2 rounded-[5px] border-l-4 border-highlight bg-highlight-soft/60 px-3 py-2 text-[16px]">
           <span className="flex min-w-0 flex-1 items-center gap-2 break-words">
             {pinDraft
               ? <><PinNumber number={pinDraft} color={pinColor} /><span className="text-muted">On this spot{pinDraftLabel ? `, ${pinDraftLabel}` : ""}</span></>
@@ -498,7 +503,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
           )}
         </div>
       )}
-      <div className="mt-2 flex items-end gap-1 rounded-lg border bg-background py-1 pl-3 pr-1 focus-within:border-accent">
+      <div className="mt-2 flex items-end gap-1 rounded-[5px] border bg-background py-1 pl-3 pr-1 focus-within:border-accent">
         <textarea ref={boxRef} value={draft} rows={2} maxLength={4000} data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
           onChange={(e) => { setDraft(e.target.value); fit(e.currentTarget); }}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
@@ -509,14 +514,14 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
           <>
             <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
             <button onClick={() => fileInput.current?.click()} disabled={attaching || posting} title={attaching ? "Adding the file…" : "Attach a file"} aria-label="Attach a file"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-surface hover:text-foreground disabled:opacity-50">
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground disabled:opacity-50">
               {attaching ? <span className="text-[16px]">…</span> : <I.clip />}
             </button>
           </>
         )}
         <button onClick={() => void post()} disabled={!canPost} title={`Post comment (${shortcut("Enter")})`} aria-label="Post comment"
           style={canPost ? buttonStyle : undefined}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[18px] font-semibold transition ${canPost ? "bg-accent text-white" : "bg-surface text-muted"}`}>
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[5px] text-[18px] font-semibold transition ${canPost ? "bg-accent text-white" : "bg-surface text-muted"}`}>
           {posting ? "…" : "↑"}
         </button>
       </div>
@@ -533,7 +538,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
   // The box for a pin just dropped on an image: roomy, with Post and Cancel said in
   // words, and Grammarly kept off it (its button sat on top of the old box).
   const writeBox = (
-    <div className="overflow-hidden rounded-xl border border-highlight bg-surface shadow-[0_0_0_4px_var(--highlight-soft)] focus-within:shadow-[0_0_0_4px_var(--highlight-soft),0_0_0_5px_var(--highlight)]">
+    <div className="overflow-hidden rounded-[5px] border border-highlight bg-surface shadow-[0_0_0_4px_var(--highlight-soft)] focus-within:shadow-[0_0_0_4px_var(--highlight-soft),0_0_0_5px_var(--highlight)]">
       <div className="flex items-center gap-2 px-3 pt-2.5 text-[16px] text-muted">
         {pinDraft && <PinNumber number={pinDraft} color={pinColor} />}
         <span className="min-w-0 flex-1">New comment on this spot</span>
@@ -555,15 +560,15 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
           <>
             <input ref={fileInput} type="file" className="hidden" onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = ""; }} />
             <button onClick={() => fileInput.current?.click()} disabled={attaching || posting} title={attaching ? "Adding the file…" : "Attach a file"} aria-label="Attach a file"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-background hover:text-foreground disabled:opacity-50">
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground disabled:opacity-50">
               {attaching ? <span className="text-[16px]">…</span> : <I.clip />}
             </button>
           </>
         )}
         {/* The ⌘ Enter hint lives in Post's tooltip: as text it wrapped onto two lines in a narrow card. */}
-        {onClearQuote && <button onClick={onClearQuote} className="ml-auto rounded-lg px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
+        {onClearQuote && <button onClick={onClearQuote} className="ml-auto rounded-[5px] px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Cancel</button>}
         <button onClick={() => void post()} disabled={!canPost} style={canPost ? buttonStyle : undefined} title={`Post (${shortcut("Enter")})`}
-          className="rounded-lg bg-accent px-4 py-1.5 text-[16px] font-semibold text-white transition disabled:opacity-40">
+          className="rounded-[5px] bg-accent px-4 py-1.5 text-[16px] font-semibold text-white transition disabled:opacity-40">
           {posting ? "Posting…" : "Post"}
         </button>
       </div>
@@ -581,7 +586,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
         {groups.map((g, gi) => {
           const open = g.items.filter((c) => !c.completedAt).length;
           return (
-            <section key={g.label} aria-label={`Comments on ${g.label}`} className="relative rounded-xl border bg-surface shadow-sm"
+            <section key={g.label} aria-label={`Comments on ${g.label}`} className="relative rounded-[5px] border bg-surface shadow-sm"
               ref={(el) => { if (el) groupBoxes.current.set(g.label, el); else groupBoxes.current.delete(g.label); }}>
               {railed && <span aria-hidden className="absolute -left-6 top-5 hidden h-3 w-3 rounded-full border-2 border-border bg-background lg:block" />}
               {gi === 0 && (
@@ -602,7 +607,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
               <div className="flex items-center gap-2 px-4 pb-2 pt-3">
                 <h4 className="min-w-0 break-words text-[16px] font-semibold">{g.label}</h4>
                 {g.items.length > 0 && (
-                  <span className={`ml-auto shrink-0 rounded-full px-2.5 text-[16px] tabular-nums ${open ? "bg-highlight-soft text-foreground" : "bg-success-soft text-success"}`}>
+                  <span className={`ml-auto shrink-0 rounded-[5px] px-2.5 text-[16px] tabular-nums ${open ? "bg-highlight-soft text-foreground" : "bg-success-soft text-success"}`}>
                     {open ? `${open} open` : "All resolved"}
                   </span>
                 )}
@@ -618,7 +623,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
     );
   }
   return (
-    <section className="rounded-xl border bg-surface px-4 py-3">
+    <section className="rounded-[5px] border bg-surface px-4 py-3">
       {header}
       {composer}
       {shown.length > 0 && <ul className="mt-3 divide-y border-t">{shown.map((c) => item(c, false))}</ul>}
@@ -658,7 +663,7 @@ export function ImageVersionPicker({ options, value, onChange }: {
     <div role="tablist" aria-label="Versions of the image" className="flex flex-wrap gap-2">
       {options.map((o) => (
         <button key={o.fileId} role="tab" aria-selected={o.fileId === value} onClick={() => onChange(o.fileId)}
-          className={`rounded-full border px-3 py-1 text-[16px] font-medium transition ${o.fileId === value ? "border-foreground bg-foreground text-background" : "bg-surface text-muted hover:text-foreground"}`}>
+          className={`rounded-[5px] border px-3 py-1 text-[16px] font-medium transition ${o.fileId === value ? "border-foreground bg-foreground text-background" : "bg-surface text-muted hover:text-foreground"}`}>
           {o.label}
         </button>
       ))}
@@ -701,7 +706,7 @@ export function ImagePinBoard({ src, alt, comments, fileId, pending, activeId, h
     <div className="relative mx-auto w-fit max-w-full select-none">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} onClick={place} draggable={false}
-        className={`block h-auto max-w-full rounded-xl shadow-[0_1px_2px_rgba(20,24,40,0.06),0_10px_28px_rgba(20,24,40,0.14)] ${onPlace ? "cursor-crosshair" : ""}`} />
+        className={`block h-auto max-w-full rounded-[5px] shadow-[0_1px_2px_rgba(20,24,40,0.06),0_10px_28px_rgba(20,24,40,0.14)] ${onPlace ? "cursor-crosshair" : ""}`} />
       {pins.map(({ c, spot }) => (
         <button key={c.id} onClick={() => onPinClick(c.id)} title={`Pin ${spot.number}`} aria-label={`Pin ${spot.number}`}
           onMouseEnter={onPinHover ? () => onPinHover(c.id) : undefined} onMouseLeave={onPinHover ? () => onPinHover(null) : undefined}
@@ -728,7 +733,7 @@ export function ImageThumbGrid({ images, onOpen }: { images: PreviewImage[]; onO
     <div className="mt-2 flex flex-wrap gap-2">
       {images.map((img, i) => (
         <button key={img.id} onClick={() => onOpen(i)} title={img.name} aria-label={`Preview ${img.name}`}
-          className="group h-24 w-24 overflow-hidden rounded-lg border bg-background transition hover:border-accent">
+          className="group h-24 w-24 overflow-hidden rounded-[5px] border bg-background transition hover:border-accent">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={img.url} alt="" className="h-full w-full object-cover transition group-hover:scale-105" />
         </button>
@@ -783,7 +788,7 @@ export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
   const img = images[index];
   if (!img) return null;
   const step = (delta: number) => (e: React.MouseEvent) => { e.stopPropagation(); onIndex((index + delta + images.length) % images.length); };
-  const control = "rounded-lg border border-white/40 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/10";
+  const control = "rounded-[5px] border border-white/40 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/10";
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={img.name} onClick={onClose} className="fixed inset-0 z-[110] flex flex-col bg-black/85">
       <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -791,17 +796,17 @@ export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
           {img.name}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
         </span>
         {onDownload
-          ? <button onClick={() => onDownload(img)} className="rounded-lg bg-white px-3 py-1.5 text-[16px] font-semibold text-black hover:bg-white/90">⬇ Download</button>
+          ? <button onClick={() => onDownload(img)} className="rounded-[5px] bg-white px-3 py-1.5 text-[16px] font-semibold text-black hover:bg-white/90">⬇ Download</button>
           : <a href={img.downloadUrl ?? img.url} target="_blank" rel="noopener noreferrer" className={control}>{img.downloadUrl ? "Download" : "Open original"}</a>}
         {typeof ClipboardItem !== "undefined" && <button onClick={() => copyPicture(img.url)} className={control}>Copy</button>}
         {onDownload && <a href={img.url} target="_blank" rel="noopener noreferrer" className={control}>Open in new tab</a>}
         <button onClick={onClose} className={control}>Close</button>
       </div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6">
-        {images.length > 1 && <button onClick={step(-1)} aria-label="Previous image" className="absolute left-3 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">‹</button>}
+        {images.length > 1 && <button onClick={step(-1)} aria-label="Previous image" className="absolute left-3 rounded-[5px] bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">‹</button>}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={img.url} alt={img.name} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
-        {images.length > 1 && <button onClick={step(1)} aria-label="Next image" className="absolute right-3 rounded-full bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">›</button>}
+        <img src={img.url} alt={img.name} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-[5px] object-contain shadow-2xl" />
+        {images.length > 1 && <button onClick={step(1)} aria-label="Next image" className="absolute right-3 rounded-[5px] bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">›</button>}
       </div>
     </div>,
     document.body,
@@ -835,14 +840,14 @@ export function FileDropLine({ label, count, busy, busyLabel, disabled, onFiles,
         e.preventDefault(); e.stopPropagation();
         if (!disabled) onFiles(e.dataTransfer.files);
       }}
-      className="rounded-xl border border-dashed bg-surface px-4 py-2.5 data-[drop]:border-2 data-[drop]:border-accent data-[drop]:bg-accent-soft/30">
+      className="rounded-[5px] border border-dashed bg-surface px-4 py-2.5 data-[drop]:border-2 data-[drop]:border-accent data-[drop]:bg-accent-soft/30">
       <div className="flex flex-wrap items-center gap-2 text-[16px]">
         <span className="font-semibold">{label}{count ? ` · ${count}` : ""}</span>
         {!disabled && (
           <span className="ml-auto flex items-center gap-2 text-muted">
             {busy ? busyLabel ?? "Adding…" : <span className="hidden sm:inline">Drop files here or</span>}
             <input ref={input} type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) onFiles(e.target.files); e.target.value = ""; }} />
-            <button onClick={() => input.current?.click()} disabled={busy} className="rounded-lg border px-2.5 py-0.5 font-medium hover:bg-background hover:text-foreground disabled:opacity-50">+ Add</button>
+            <button onClick={() => input.current?.click()} disabled={busy} className="rounded-[5px] border px-2.5 py-0.5 font-medium hover:bg-background hover:text-foreground disabled:opacity-50">+ Add</button>
           </span>
         )}
       </div>
