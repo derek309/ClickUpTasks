@@ -54,7 +54,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   doneActions?: React.ReactNode;
   /** What "Add client work" offers, besides a checklist and a text: a
    *  document, a review, an email (Derek, 2026-10-11). */
-  addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string } }[];
+  addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   canText?: boolean;
   onSendText?: (body: string) => void;
   /** Email the client from the step (Derek, 2026-10-11: "email, sms or chat,
@@ -132,7 +132,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); } },
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
-  ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string } }[];
+  ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   const [draft, setDraft] = useState("");
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
@@ -266,9 +266,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       <div className="flex flex-wrap gap-2">
         {options.map((o) => (
           <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.tone ? `Add ${o.label} to this step${o.note ? ` (${o.note})` : ""}` : o.note}
-            className="inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:border-accent hover:bg-background disabled:opacity-50">
-            <I.plus className="h-4 w-4 shrink-0 text-accent" /><span className="min-w-0 truncate">{o.label}</span>
-            {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 text-[16px] font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
+            // Work already made wears its stage's color, so it reads as "add this one".
+            style={o.tone ? { background: o.tone.chip, borderColor: o.tone.dot } : undefined}
+            className={`inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border px-3 text-[16px] font-medium disabled:opacity-50 ${o.tone ? "hover:brightness-95" : "bg-surface hover:border-accent hover:bg-background"}`}>
+            <span className={o.tone ? "" : "text-accent"} style={o.tone ? { color: o.tone.text } : undefined}><I.plus className="h-4 w-4 shrink-0" /></span><span className="min-w-0 truncate">{o.label}</span>
+            {o.tone && <span className="shrink-0 rounded-[5px] bg-surface/70 px-1.5 text-[16px] font-semibold" style={{ color: o.tone.text }}>{o.tone.label}</span>}
           </button>
         ))}
       </div>
