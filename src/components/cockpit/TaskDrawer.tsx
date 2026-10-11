@@ -8,7 +8,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1041,7 +1041,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // A new step answers "what happens next?".
     if (asking) setAskNext(null);
     // On whoever added it (Derek, 2026-10-11: "auto assign it to the creator").
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id: newId("s_"), title: t, done: false, ...(meId ? { assigneeId: meId } : {}) }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id: newId("s_"), title: t, done: false, ...stepOwnerFields() }] });
   };
   // A client sent changes on a review while its review step is current: that
   // step is done, and "Make the changes" and a new client review follow it
@@ -1670,6 +1670,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex shrink-0 items-center gap-2">
             {sub.onClient && <span title={`On ${client.name}`} className="flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>}
             {sub.assigneeId && <Avatar id={sub.assigneeId} size={22} />}
+            {!sub.assigneeId && sub.addedBy && <span title={`Added by ${userById(sub.addedBy)?.name ?? "a teammate"}`} className="opacity-70"><Avatar id={sub.addedBy} size={22} /></span>}
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
           </span>
         </button>
@@ -1691,17 +1692,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // or a new one started).
   const quickStep = (key: DeliverableKey) => {
     const id = newId("s_");
-    const list = holdOnStep([...taskRef.current.subtasks, { id, title: quickStepName(key) ?? KIND_LABEL[key], done: false, ...(meId ? { assigneeId: meId } : {}) }], id, key);
+    const list = holdOnStep([...taskRef.current.subtasks, { id, title: quickStepName(key) ?? KIND_LABEL[key], done: false, ...(deliverablePresent(key) ? {} : { madeHere: [key] }), ...stepOwnerFields() }], id, key);
     if (asking) setAskNext(null);
     onPatch({ subtasks: list });
     if (!deliverablePresent(key)) setPendingStart(key);
   };
+  // Who a new step is on: whoever added it, when that is the task's owner (or
+  // it has none). A teammate's step on someone else's task is noted as theirs
+  // (addedBy) rather than handed off to them (Derek, 2026-10-11).
+  const stepOwnerFields = (): Partial<Subtask> => !meId ? {} : !task.assigneeId || task.assigneeId === meId ? { assigneeId: meId } : { addedBy: meId };
   // A follow up as a step of its own: on whoever adds it, due in three
   // business days, finished by the client's reply (finishWhen).
   const followUpStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Follow up with ${firstName}`, done: false, due: addBusinessDaysIso(TODAY, 3), finishWhen: "reply" as const, ...(meId ? { assigneeId: meId } : {}) }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Follow up with ${firstName}`, done: false, due: addBusinessDaysIso(TODAY, 3), finishWhen: "reply" as const, ...stepOwnerFields() }] });
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
@@ -1709,7 +1714,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const checklistStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...(meId ? { assigneeId: meId } : {}) }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...stepOwnerFields() }] });
     setOpenStepPage({ taskId: task.id, id, full: false, checklist: true });
   };
   // A handoff straight to its page, where who, the name and the date are
@@ -1773,7 +1778,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         )}
         </span>
       </div>
-      {progress.total > 0 && (
+      {/* Hidden until a step is done: an empty bar says nothing (Derek, 2026-10-11). */}
+      {progress.done > 0 && (
         <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
       )}
       <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
@@ -2102,7 +2108,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
   };
   const holdKey = (stepId: string, key: string) => onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, stepId, key) });
-  const releaseKey = (key: string) => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, key) });
+  // Taken off a step, client work goes back to the step that made it (or sent
+  // it); with no such step it simply comes off (Derek, 2026-10-11).
+  const releaseKey = (key: string) => {
+    const list = taskRef.current.subtasks;
+    const off = stepHolding(list, key);
+    const home = off ? homeStepFor(list, key, off.id) : null;
+    onPatch({ subtasks: home ? holdOnStep(list, home.id, key) : releaseFromSteps(list, key) });
+    if (home) pushToast(`Back on "${home.title}"`);
+  };
   // A deliverable made from a step's menu goes on the step first; it is told
   // to start once it has moved there (a block that mounts ignores a start it
   // was already holding).
@@ -2138,7 +2152,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const pick = (key: DeliverableKey) => {
       // A step still named "…: what's next?" takes the name of what it makes.
       const title = namedForWork(sub, key);
-      const list = holdOnStep(taskRef.current.subtasks, sub.id, key);
+      const made = !deliverablePresent(key);
+      const list = holdOnStep(taskRef.current.subtasks, sub.id, key)
+        .map((x) => (x.id === sub.id && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
       onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
       if (!deliverablePresent(key)) setPendingStart(key);
     };
@@ -2252,7 +2268,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                         <span className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
                       <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-4 text-[16px] font-semibold leading-9">Open</span>
-                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title="Take off this step (it stays under Client work)" aria-label={`Take ${deliverableName(d)} off this step`}
+                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Client work)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
                   );
@@ -2612,7 +2628,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
-              onDelete={() => { setOpenStepPage(null); onDeleteSub(ps.id); }}
+              onDelete={() => {
+                setOpenStepPage(null);
+                const reopen = approvalToReopen(task.subtasks, ps.id);
+                onDeleteSub(ps.id);
+                if (reopen) onPatchSub(reopen.id, { done: false, title: reopen.title });
+              }}
               controls={stepControls(ps, isCur)}
               addOptions={stepAddOptions(ps)}
               canText={!!messageDest?.phone && !!onSendTaskMessage}

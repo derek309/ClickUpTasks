@@ -289,3 +289,29 @@ describe("rounds are counted per review", () => {
     expect(reviewRound(list, list[4])).toBe("Changes round 1");
   });
 });
+
+import { approvalToReopen } from "./data";
+
+describe("deleting the step an approval started", () => {
+  it("asks what's next again when nothing is left after it", () => {
+    const list = [s("ok", "Derek approved the newsletter", { done: true, addedFor: "ok:doc:1", outcome: "Next step started" }), s("x", "Checklist")];
+    expect(approvalToReopen(list, "x")).toEqual({ id: "ok", title: "Derek approved the newsletter: what's next?" });
+  });
+  it("leaves it when more steps follow, or the step before was not an approval", () => {
+    const list = [s("ok", "Approved", { done: true, addedFor: "ok:doc:1", outcome: "Next step started" }), s("x", "Checklist"), s("y", "Schedule")];
+    expect(approvalToReopen(list, "x")).toBeNull();
+    expect(approvalToReopen([s("a", "Write", { done: true }), s("x", "Checklist")], "x")).toBeNull();
+  });
+});
+
+import { homeStepFor } from "./data";
+
+describe("where client work goes back to", () => {
+  it("the step that made it, else the one that sent it", () => {
+    const list = [s("a", "Write", { madeHere: ["doc"] }), s("b", "Changes", { holds: ["doc"] })];
+    expect(homeStepFor(list, "doc", "b")?.id).toBe("a");
+    const sent = [s("a", "Build HTML"), s("w", "Waiting", { onClient: true, addedFor: "sent:a", waitsOn: "page" }), s("b", "Fix", { holds: ["page"] })];
+    expect(homeStepFor(sent, "page", "b")?.id).toBe("a");
+    expect(homeStepFor(list, "doc", "a")).toBeNull();
+  });
+});

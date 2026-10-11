@@ -854,6 +854,12 @@ export interface Subtask {
   /** On the client's waiting step: the review it waits on, wherever that
    *  review sits afterwards (Derek, 2026-10-11: "the client work here"). */
   waitsOn?: DeliverableKey;
+  /** Client work this step made: where it goes back to when it is taken off
+   *  a later step (Derek, 2026-10-11). */
+  madeHere?: string[];
+  /** The teammate who added this step to someone else's task: shown as
+   *  theirs without handing the task to them. */
+  addedBy?: string;
   /** When the step became the current one, and when it was finished: what was
    *  said in between is the step's conversation. */
   startedAt?: string;
@@ -3176,6 +3182,30 @@ export function reviewRound(subtasks: Subtask[], sub: Subtask): string | null {
   const ok = /^ok:(doc|image|page|video):(\d+)$/.exec(a);
   if (ok) return ok[1] === "doc" && Number(ok[2]) > 0 ? `Approved version ${ok[2]}` : "Approved";
   return null;
+}
+
+/** The step an approval had just started is deleted, and nothing is left to
+ *  do after the approval: it asks "what's next?" again, so the task always
+ *  has a next step (Derek, 2026-10-11). The approval step to reopen, or null. */
+export function approvalToReopen(subtasks: Subtask[], deletedId: string): { id: string; title: string } | null {
+  const plan = planSteps(subtasks);
+  const at = plan.findIndex((x) => x.id === deletedId);
+  if (at < 1) return null;
+  const before = plan[at - 1];
+  if (!before.done || !before.addedFor?.startsWith("ok:") || before.outcome !== "Next step started") return null;
+  if (plan.slice(at + 1).some((x) => !x.done)) return null;
+  return { id: before.id, title: /: what's next\?$/.test(before.title) ? before.title : `${before.title}: what's next?` };
+}
+
+/** Where a piece of client work belongs when it comes off a step: the step
+ *  that made it, else the step that sent it for review. Null when neither
+ *  is known, or that is the step it is coming off. */
+export function homeStepFor(subtasks: Subtask[], key: string, offId: string): Subtask | null {
+  const plan = planSteps(subtasks);
+  const made = plan.find((x) => x.madeHere?.includes(key));
+  const sentFrom = plan.find((x) => x.onClient && x.waitsOn === key && x.addedFor?.startsWith("sent:"));
+  const home = made ?? (sentFrom ? plan.find((x) => x.id === sentFrom.addedFor!.slice(5)) : undefined);
+  return home && home.id !== offId ? home : null;
 }
 
 /** What a finished step hands to the next: its client work still under way
