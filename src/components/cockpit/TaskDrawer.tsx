@@ -1600,6 +1600,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const offeredTemplates = templatesFor(templates, task.clientId);
   const [savePlan, setSavePlan] = useState<string | null>(null);
+  const [quickWorkOpen, setQuickWorkOpen] = useState(false);
   const savePlanAs = (clientId: string | null) => {
     if (!onSaveTemplate || !savePlan?.trim()) return;
     const nameOf = (k: string) => (k.startsWith("att:") ? task.attachments.find((a) => attachmentKey(a.id) === k)?.name ?? null : KIND_LABEL[k as DeliverableKey] ?? null);
@@ -1607,6 +1608,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setSavePlan(null);
     pushToast(`Saved "${savePlan.trim()}" as a template${clientId ? ` for ${client.name}` : " for everyone"}`);
   };
+  // The step new client work goes on: the current one, unless it is the
+  // client's own (nothing is made there); with none, it goes on the task.
+  const workStep = activeStep && !activeStep.onClient ? activeStep : null;
+  const quickWorkFor = () => workStep ? stepAddOptions(workStep)
+    : [...(canHaveDocument ? (["doc", "image", "page", "video"] as const).map((k) => ({ key: k, label: KIND_LABEL[k], disabled: false, note: undefined as string | undefined })) : []),
+       ...(hasMessaging ? [{ key: "email" as const, label: "Send email", disabled: false, note: undefined as string | undefined }] : [])]
+      .map((o) => ({ ...o, onPick: () => (deliverablePresent(o.key) ? openWork(o.key) : setPendingStart(o.key)) }));
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1659,10 +1667,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {steps.map(stepRow)}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
-        <li className={`px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+        <li className={`flex items-center gap-2 px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { addStep(subDraft); setSubDraft(""); } }}
             placeholder="+ Add step" aria-label="Add a step"
-            className="w-full rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
+            className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
+          {/* Client work in one click, onto the current step (Derek, 2026-10-11:
+              "a + at the other end to add client work, to make it faster"). */}
+          {(() => { const quickWork = quickWorkFor(); return quickWork.length > 0 && (
+            <span className="relative shrink-0">
+              <button onClick={() => setQuickWorkOpen((o) => !o)} aria-haspopup="menu" aria-expanded={quickWorkOpen}
+                title={workStep ? `Add client work to "${workStep.title}"` : "Add client work"}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Client work</button>
+              {quickWorkOpen && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
+                <div role="menu" aria-label="Add client work" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
+                  {workStep && <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">On {workStep.title}</div>}
+                  {quickWork.map((o) => (
+                    <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
+                      <span className="min-w-0 flex-1">{o.label}</span>{o.note && <span className="shrink-0 text-muted">{o.note}</span>}
+                    </button>
+                  ))}
+                </div>
+              </>)}
+            </span>
+          ); })()}
         </li>
       </ol>
     </section>
