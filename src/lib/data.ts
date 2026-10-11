@@ -845,6 +845,9 @@ export interface Subtask {
    *  teammate works from (Derek, 2026-10-11). Its links and files are the
    *  step's held attachments. */
   notes?: string;
+  /** Renamed after the work picked on it (namedForWork): its old name, so the
+   *  name goes back when that work comes off again (Derek, 2026-10-11). */
+  namedFrom?: { title: string; key: string; as: string };
   /** When the step became the current one, and when it was finished: what was
    *  said in between is the step's conversation. */
   startedAt?: string;
@@ -2980,8 +2983,15 @@ export function holdOnStep(subtasks: Subtask[], stepId: string, key: string): Su
     if (s.id === stepId) return has ? s : { ...s, holds: [...(s.holds ?? []), key] };
     if (!has) return s;
     const holds = s.holds!.filter((k) => k !== key);
-    return { ...s, holds: holds.length ? holds : undefined };
+    return unname({ ...s, holds: holds.length ? holds : undefined }, key);
   });
+}
+/** The work a step was named after came off it: its old name comes back,
+ *  unless someone has renamed it since. */
+function unname(s: Subtask, key: string): Subtask {
+  if (s.namedFrom?.key !== key) return s;
+  const { namedFrom, ...rest } = s;
+  return s.title === namedFrom.as ? { ...rest, title: namedFrom.title } : rest;
 }
 
 /** Takes `key` off whichever step holds it. */
@@ -2989,7 +2999,7 @@ export function releaseFromSteps(subtasks: Subtask[], key: string): Subtask[] {
   return subtasks.map((s) => {
     if (!s.holds?.includes(key)) return s;
     const holds = s.holds.filter((k) => k !== key);
-    return { ...s, holds: holds.length ? holds : undefined };
+    return unname({ ...s, holds: holds.length ? holds : undefined }, key);
   });
 }
 

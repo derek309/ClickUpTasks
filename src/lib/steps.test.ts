@@ -234,3 +234,19 @@ describe("a what's next step named by what it makes", () => {
     expect(namedForWork(s("a", "What's next?"), "doc")).toBeNull();
   });
 });
+
+import { holdOnStep as hold2, releaseFromSteps as release2 } from "./data";
+
+describe("a step's name goes back when its work comes off", () => {
+  const named = s("a", "Create HTML for review", { holds: ["page"], namedFrom: { title: "Derek approved the document: what's next?", key: "page", as: "Create HTML for review" } });
+  it("taken off: the old name returns", () => {
+    expect(release2([named], "page")[0]).toMatchObject({ title: "Derek approved the document: what's next?" });
+    expect(release2([named], "page")[0].namedFrom).toBeUndefined();
+  });
+  it("moved to another step: the old name returns", () => {
+    expect(hold2([named, s("b", "Other")], "b", "page")[0].title).toBe("Derek approved the document: what's next?");
+  });
+  it("renamed by hand since: keeps the new name", () => {
+    expect(release2([{ ...named, title: "Build it" }], "page")[0].title).toBe("Build it");
+  });
+});

@@ -2037,7 +2037,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // A step still named "…: what's next?" takes the name of what it makes.
       const title = namedForWork(sub, key);
       const list = holdOnStep(taskRef.current.subtasks, sub.id, key);
-      onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title } : x)) : list });
+      onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
       if (!deliverablePresent(key)) setPendingStart(key);
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
