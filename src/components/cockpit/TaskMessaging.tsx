@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; onAddToChanges?: (text: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; onAddToChanges?: (text: string) => void; onWrite?: () => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, onAddToChanges, meetings, description, createdLine } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, onAddToChanges, onWrite, meetings, description, createdLine } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -653,8 +653,15 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
             Description{description.has && <span className="h-2 w-2 shrink-0 rounded-full bg-accent" title="This task has a description" />}
           </button>
         )}
+        {/* The box to write in opens from here (Derek, 2026-10-11: the dock
+            was in the way, so it waits to be asked for). */}
+        {onWrite && (
+          <button onClick={onWrite} className="mb-1.5 ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90">
+            <I.pencil className="h-4 w-4" /> Write
+          </button>
+        )}
         <button onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))} title="Search this task's history" aria-label="Search this task's history"
-          className={`mb-1.5 ml-auto shrink-0 rounded-lg p-2 ${searchOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.search /></button>
+          className={`mb-1.5 ${onWrite ? "" : "ml-auto"} shrink-0 rounded-lg p-2 ${searchOpen ? "bg-accent-soft text-accent" : "text-muted hover:bg-background hover:text-foreground"}`}><I.search /></button>
       </div>
       {searchOpen && (
         <input autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}

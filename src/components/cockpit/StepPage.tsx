@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen,
-  followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -30,6 +30,8 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
   onReopen: () => void;
+  /** The step's date, who has it, its stage, attach and delete. */
+  controls?: React.ReactNode;
   /** The current step's follow up, from the task page. */
   followBox?: React.ReactNode;
   /** What a plan's step makes and needs. */
@@ -209,6 +211,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
                   <span>{sub.done ? `Done${sub.doneAt ? ` ${timeAgo(sub.doneAt)}` : ""}` : isCurrent ? "The current step" : "Comes later"}</span>
                   {sub.assigneeId && <span>· on {userById(sub.assigneeId)?.name ?? "a teammate"}</span>}
                 </div>
+                {controls}
                 <div>
                   {sub.done
                     ? <button onClick={onReopen} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Reopen this step</button>

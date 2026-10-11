@@ -333,6 +333,7 @@ export function ActionDock({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && view !== "closed") { e.stopPropagation(); setView("closed"); return; }
+      if (e.key === "Escape" && barOpen) { e.stopPropagation(); setBarOpen(false); return; }
       // Only on the menu itself, and never while something is being typed
       // into — a "3" in a note is a 3, not a shortcut.
       if (view !== "menu" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -346,7 +347,7 @@ export function ActionDock({
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [view]);
+  }, [view, barOpen]);
 
 
   // Reads the transcript, keeps the record, throws the transcript away. Four
@@ -756,6 +757,11 @@ export function ActionDock({
   // on every render.
   useEffect(() => { menuOrderRef.current = menuOrder; });
 
+  // Nothing on screen until it is asked for (Derek, 2026-10-11: "it's in the
+  // way"): Write in the conversation's tab row, the top bar's Chat, Text and
+  // Call, a message's Add a note, or a reply open it.
+  if (view === "closed" && !barOpen) return null;
+
   // Floating over the bottom of the drawer, in reach from anywhere in a long
   // task. It went inline at the top of the conversation for a day and got
   // lost among the cards (Derek, 2026-09-14). Absolute, not fixed: the drawer
@@ -788,19 +794,10 @@ export function ActionDock({
                   <button onClick={() => setReplyTo(null)} title="Stop replying" aria-label="Stop replying" className="shrink-0 rounded px-1 hover:text-foreground">✕</button>
                 </div>
               )}
-              {!barOpen && (
-                <div className="flex items-center gap-1.5 sm:hidden">
-                  <button onClick={() => openPanel("menu")} title="Log action" aria-label="Log action"
-                    className="h-10 w-10 shrink-0 rounded-xl text-[20px] text-muted hover:bg-background hover:text-foreground">＋</button>
-                  <button onClick={() => openBar("note")} className={`min-w-0 flex-1 truncate rounded-xl py-2.5 text-[16px] font-semibold ${CHANNEL_TONE.note.surface} ${CHANNEL_TONE.note.tab}`}>🔒 Note</button>
-                  {canChat && <button onClick={() => openBar("chat")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Chat</button>}
-                  {canEmail && <button onClick={() => onOpenCompose?.("email")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Email</button>}
-                </div>
-              )}
               {/* One chat field, like iMessage or Slack: who it goes to as tabs
                   across its top, the words and the send arrow inside it, and Log
                   action on its own beside it (Derek, 2026-09-16, option B). */}
-              <div className={`${barOpen ? "flex" : "hidden sm:flex"} items-end gap-2.5`}>
+              <div className="flex items-end gap-2.5">
                 <div className={`min-w-0 flex-1 rounded-2xl p-1 transition sm:p-1.5 ${tone.surface}`}>
                   {/* Every action is a tab in this one row, the client ones then
                       the team ones, instead of a second Log action menu that
@@ -834,6 +831,10 @@ export function ActionDock({
                         </span>
                       )}
                       <button onClick={() => openPanel("askTask")} className={`${tabBtn} ${tabOff} hidden sm:ml-auto sm:inline`}>✦ Ask AI</button>
+                      {/* On a phone the rest are one tap in. */}
+                      <button onClick={() => openPanel("menu")} className={`${tabBtn} ${tabOff} sm:hidden`}>More</button>
+                      <button onClick={() => { setBarOpen(false); setReplyTo(null); }} title="Close (Esc)" aria-label="Close the box"
+                        className="ml-auto rounded-lg p-1 text-muted hover:bg-background hover:text-foreground sm:ml-0"><I.close className="h-4 w-4" /></button>
                     </div>
                   )}
                   <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">

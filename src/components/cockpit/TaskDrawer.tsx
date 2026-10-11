@@ -10,7 +10,7 @@ import {
   assignableUsers, addApprovedStep, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
-import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
+import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
@@ -1390,6 +1390,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     onNoteInDock: (text) => askDock("note", text),
     onAddToChanges: (text) => addToChanges(text),
+    onWrite: () => askDock("note"),
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -1500,11 +1501,47 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </ul>
     </div>
   );
+  // A step's controls, on its page (Derek, 2026-10-11: "move all the actions
+  // into the step"): its date, who has it, its stage, attach, delete.
+  const stepControls = (sub: Subtask, isActive: boolean) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[16px]">
+      {!isActive && <InlineDue value={sub.due ?? null} overdue={isOverdue(sub.due ?? null) && !sub.done} onChange={(d) => onPatchSub(sub.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" />}
+      <InlineAssignee value={sub.assigneeId ?? null} size={24}
+        onChange={(a) => {
+          onPatchSub(sub.id, { assigneeId: a });
+          // Giving the current step to a teammate: the follow up finishes
+          // when they mark it done (brief, section 6).
+          if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
+        }} />
+      {stagePicker(sub, isActive)}
+      {stepAddMenu(sub)}
+      <span className="flex-1" />
+      <button onClick={() => { setOpenStepPage(null); onDeleteSub(sub.id); }} title={isHandoffStep(sub, task.assigneeId) ? "Take this back" : "Delete this step"}
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>
+    </div>
+  );
+  // A step on the task: one line that says what is happening inside it, the
+  // whole of it a click to open the step (Derek, 2026-10-11: "make the bar
+  // clickable", "this is all informational").
   const stepRow = (sub: Subtask, i: number) => {
     const isActive = activeStep?.id === sub.id;
     const upcoming = !sub.done && !isActive;
     const st = stepStage(sub, task.assigneeId);
-    const handoff = isHandoffStep(sub, task.assigneeId);
+    const own = todoProgress(sub.todos);
+    const fromPortal = clientItemsOf(sub.id);
+    const tp = { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length };
+    const w = stepWindow(task.subtasks, sub.id, task.createdAt);
+    const fresh = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read && inWindow(m.at, w)).length;
+    const holds = sub.holds ?? [];
+    const heldNames = [
+      ...holds.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k)).filter(deliverablePresent).map(deliverableName),
+      ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
+    ];
+    const missing = !sub.done ? missingNeeds(sub) : [];
+    const followLabel = isActive && (openStep || followUp)
+      ? (stepDate.tone === "late" || stepDate.tone === "soon" ? `Follow up · ${stepDate.label.split(",")[0].toLowerCase()}` : `Follow up ${stepDate.label}`)
+      : null;
+    const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
     return (
       <li key={sub.id} draggable={dragSub === sub.id}
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", sub.id); }}
@@ -1512,73 +1549,49 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
         onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== sub.id) moveSub(dragSub, sub.id); setDragSub(null); setDropSub(null); }}
         aria-current={isActive ? "step" : undefined}
-        className={`group/sub relative flex items-start gap-3 py-3 pl-3 pr-3 sm:pl-2 sm:pr-4 ${i > 0 ? "border-t" : ""} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
-        {/* Drag the grip to reorder (Derek, 2026-10-06). Only the grip starts
-            a drag, so selecting text in a step still works. */}
+        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
+        {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
-          className="mt-0.5 hidden w-4 shrink-0 cursor-grab select-none text-center text-[16px] leading-6 text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:block">⋮⋮</span>
-        {sub.done ? (
-          <button onClick={() => onToggleSub(sub.id)} title="Reopen this step" aria-label={`Reopen ${sub.title}`}
-            className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:opacity-80"><I.check className="h-3.5 w-3.5" /></button>
-        ) : isActive ? (
-          <button onClick={() => completeStep(sub.id)} title="Mark done" aria-label={`Mark ${sub.title} done`}
-            className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface transition hover:border-[5px]" style={{ borderColor: STATUS_META[st].dot }} />
-        ) : (
-          // Steps run in order: a later one waits until the current one is done.
-          <span title="Steps run in order" aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2" />
-        )}
-        <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-            <textarea value={sub.title} onChange={(e) => onRenameSub(sub.id, e.target.value)} rows={1} aria-label="Step"
-              onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-              className={`-mx-1 min-w-0 flex-[1_1_14rem] resize-none rounded bg-transparent px-1 text-[17px] leading-snug outline-none [field-sizing:content] focus:bg-background ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`} />
-            <span className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
-              {!isActive && <InlineDue value={sub.due ?? null} overdue={isOverdue(sub.due ?? null) && !sub.done} onChange={(d) => onPatchSub(sub.id, { due: d })} textClass="text-[16px]" emptyLabel="Set date" />}
-              <InlineAssignee value={sub.assigneeId ?? null} size={22}
-                onChange={(a) => {
-                  onPatchSub(sub.id, { assigneeId: a });
-                  // Giving the current step to a teammate: the follow up
-                  // finishes when they mark it done (brief, section 6).
-                  if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
-                }} />
-              {stagePicker(sub, isActive)}
-              {stepAddMenu(sub)}
-              <button onClick={() => onDeleteSub(sub.id)} title={handoff ? "Take this back" : "Delete this step"} aria-label={`Delete ${sub.title}`}
-                className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/sub:opacity-100"><I.trash className="h-4 w-4" /></button>
+          className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
+        <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
+          className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pl-1 sm:pr-4">
+          {sub.done ? (
+            <span aria-hidden className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white"><I.check className="h-3.5 w-3.5" /></span>
+          ) : isActive ? (
+            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[st].dot }} />
+          ) : (
+            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2" />
+          )}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>{sub.title}</span>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
+              {followLabel && <span className={`font-semibold ${stepDate.tone === "late" ? "text-danger" : stepDate.tone === "soon" ? "text-highlight" : "text-foreground"}`}>{followLabel}</span>}
+              {sub.done && sub.doneAt && <span className="text-muted">Done {formatDue(sub.doneAt.slice(0, 10))}</span>}
+              {upcoming && sub.due && <span className="text-muted">Due {formatDue(sub.due)}</span>}
+              {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
+              {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
+              {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
+              {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
+              {reason && <span className="text-muted">{reason}</span>}
             </span>
-          </div>
-          {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">{addedReason(sub.addedFor, firstName)}</span>}
-          {(() => {
-            // The step at a glance (the dashboard, Derek 2026-10-11): when it
-            // was done, its to-dos, and new words from the client while it ran.
-            const own = todoProgress(sub.todos);
-            const fromPortal = clientItemsOf(sub.id);
-            const tp = { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length };
-            const w = stepWindow(task.subtasks, sub.id, task.createdAt);
-            const fresh = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read && inWindow(m.at, w)).length;
-            const facts = [
-              sub.done && sub.doneAt ? `Done ${formatDue(sub.doneAt.slice(0, 10))}` : null,
-              tp.total ? `${tp.done} of ${tp.total} to do` : null,
-            ].filter(Boolean);
-            return (
-              <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px]">
-                {facts.map((f) => <span key={f} className="text-muted">{f}</span>)}
-                {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
-                <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} className="font-semibold text-accent hover:underline">Open ›</button>
-              </div>
-            );
-          })()}
-          {pageStepId !== sub.id && (<>
-            {isActive && followBox}
-            {!sub.done && stepPlanBits(sub, isActive)}
-            {stepHeld(sub, isActive)}
-            {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
-            {clientChangesList(clientItemsOf(sub.id))}
-          </>)}
-        </div>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {sub.assigneeId && <Avatar id={sub.assigneeId} size={22} />}
+            <span className="hidden sm:inline-flex">{stageTag(st)}</span>
+            <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
+          </span>
+        </button>
       </li>
     );
   };
+  // What closed steps hold stays loaded (so it still says whether it exists,
+  // and its window still opens from elsewhere, like Reminders), drawn in a
+  // holder with no height; the open step's page draws its own.
+  const closedHeld = () => (
+    <div className="h-0 overflow-hidden">
+      {steps.filter((x) => x.id !== pageStepId).map((x) => <div key={x.id}>{stepHeld(x, activeStep?.id === x.id)}</div>)}
+    </div>
+  );
   const offeredTemplates = templatesFor(templates, task.clientId);
   const [savePlan, setSavePlan] = useState<string | null>(null);
   const savePlanAs = (clientId: string | null) => {
@@ -1636,6 +1649,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {progress.total > 0 && (
         <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
       )}
+      {closedHeld()}
       <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
         {steps.map(stepRow)}
         {/* A follow up with no steps reads as the one step there is. */}
@@ -2375,6 +2389,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
+              controls={stepControls(ps, isCur)}
               followBox={isCur ? followBox : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={stepHeld(ps, isCur) ?? undefined}
