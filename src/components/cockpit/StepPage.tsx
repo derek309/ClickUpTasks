@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -39,6 +39,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   stepNo?: { at: number; total: number };
   onPrev?: () => void;
   onNext?: () => void;
+  /** Copies this step, with the task around it, for Claude. */
+  onCopyForClaude?: () => void;
   /** The client's waiting step: what is out with them, in place of adding work
    *  (nothing gets made while it is with them). */
   outFor?: React.ReactNode;
@@ -302,6 +304,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           {sub.done
             ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
  : null}
+          {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
           <button onClick={onToggleFull} className="rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
           <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>

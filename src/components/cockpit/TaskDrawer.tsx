@@ -467,6 +467,47 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       pushToast("Copied for Claude");
     } catch { pushToast("Couldn't copy to the clipboard."); }
   };
+  // One step, for Claude (Derek, 2026-10-11: "a Claude copy button for each
+  // step, so it knows what we're doing and what step"): the task, where the
+  // step sits among the others, what it holds and what was said during it.
+  const copyStepForClaude = async (sub: Subtask) => {
+    const taskUrl = new URL(taskLink?.() ?? "", window.location.origin).href;
+    const plan = planSteps(task.subtasks);
+    const at = plan.findIndex((x) => x.id === sub.id);
+    const cur = currentStep(task.subtasks);
+    const ct = contactById(task.contactId) || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+    const owner = sub.onClient ? `${client.name} (the client)` : sub.assigneeId ? userById(sub.assigneeId)?.name ?? "a teammate" : task.assigneeId ? userById(task.assigneeId)?.name ?? null : null;
+    const holds = [...new Set([...(withSentHolds(sub).holds ?? []), ...sentReviews(sub)])];
+    const work = holds.flatMap((k) => {
+      if (k.startsWith("att:")) { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? [`- ${a.name}${a.url ? ` (${a.url})` : ""}`] : []; }
+      const d = k as DeliverableKey;
+      if (!deliverablePresent(d)) return [];
+      const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
+      return [`- ${KIND_LABEL[d]}: ${deliverableName(d)}${r ? ` (${REVIEW_STATUS[r.status] ?? r.status}, version ${r.version})` : ""}`];
+    });
+    const w = stepWindow(task.subtasks, sub.id, task.createdAt);
+    const said = (messages ?? []).filter((m) => inWindow(m.at, w)).slice(-6)
+      .map((m) => `- ${m.direction === "inbound" ? client.name : "Us"} (${m.channel}): ${htmlToText(m.body).replace(/\s+/g, " ").slice(0, 400)}`);
+    const brief = [
+      `Work on one step of a task in ClickUpTasks (${taskUrl}):`,
+      ``,
+      `Task: ${task.title} [${task.id}]`,
+      `Client: ${client.name}${ct?.email ? ` (${ct.email})` : ""}`,
+      ``,
+      `This step (${at + 1} of ${plan.length}): ${sub.title}`,
+      `- ${sub.done ? `Done: ${sub.outcome ?? "Done"}` : cur?.id === sub.id ? "The current step" : "Comes later"}${owner ? ` · on ${owner}` : ""}${sub.due ? ` · due ${sub.due}` : ""}`,
+      sub.todos?.length ? `\nTo do on this step:\n${sub.todos.map((t) => `- [${t.done ? "x" : " "}] ${t.title}`).join("\n")}` : "",
+      work.length ? `\nClient work on this step:\n${work.join("\n")}` : "",
+      sub.needs?.length ? `\nIt needs: ${sub.needs.join(", ")}` : "",
+      said.length ? `\nSaid during this step:\n${said.join("\n")}` : "",
+      `\nAll the steps:\n${plan.map((x, i) => `${i + 1}. [${x.done ? "x" : x.id === cur?.id ? ">" : " "}] ${x.title}${x.done && x.outcome ? ` (${x.outcome})` : ""}`).join("\n")}`,
+      `\nUse the ClickUpTasks connection (get_task ${task.id}) for the rest. Nothing goes to the client without our review.`,
+    ].filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(brief);
+      pushToast("Step copied for Claude");
+    } catch { pushToast("Couldn't copy to the clipboard."); }
+  };
   // Pasting a FILE anywhere in the drawer (title, description, a comment
   // draft — doesn't matter which field has focus) attaches it to the task,
   // same upload pipeline as drag-drop onto the Attachments block. Only
@@ -2447,7 +2488,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
