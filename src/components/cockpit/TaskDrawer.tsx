@@ -1966,7 +1966,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           className="flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"><I.plus className="h-4 w-4" /></button>
         {stepMenuFor === sub.id && (<>
           <div className="fixed inset-0 z-30" onClick={close} />
-          <div role="menu" aria-label={`Attach to ${sub.title}`} className="absolute right-0 top-full z-40 mt-1 max-h-[60vh] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 text-left text-foreground shadow-lg">
+          <div role="menu" aria-label={`Attach to ${sub.title}`} className="absolute left-0 top-full z-40 mt-1 max-h-[60vh] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 text-left text-foreground shadow-lg">
             {reviewMake.length > 0 && <div className={group}>For client review</div>}
             {reviewMake.map((x) => <button key={x.key} role="menuitem" onClick={() => make(x.key)} className={item}>{x.label}</button>)}
             {otherMake.length > 0 && <div className={group}>Other deliverables</div>}
