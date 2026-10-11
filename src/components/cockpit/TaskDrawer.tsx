@@ -1636,7 +1636,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const workStep = activeStep && !activeStep.onClient ? activeStep : null;
   const quickWorkFor = () => workStep ? stepAddOptions(workStep)
     : [...(canHaveDocument ? (["doc", "image", "page", "video"] as const).map((k) => ({ key: k, label: KIND_LABEL[k], disabled: false, note: undefined as string | undefined })) : []),
-       ...(hasMessaging ? [{ key: "email" as const, label: "Send email", disabled: false, note: undefined as string | undefined }] : [])]
+      ]
       .map((o) => ({ ...o, onPick: () => (deliverablePresent(o.key) ? openWork(o.key) : setPendingStart(o.key)) }));
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
@@ -2040,7 +2040,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML" }, { key: "video" as const, label: "Video" }] : []),
-      ...(hasMessaging ? [{ key: "email" as const, label: "Send email" }] : []),
+      // Messages go through the conversation, not + Add (Derek, 2026-10-11).
     ];
     return kinds.map((x) => {
       const here = holds.includes(x.key);
@@ -2501,6 +2501,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               canText={!!messageDest?.phone && !!onSendTaskMessage}
               onSendText={onSendTaskMessage ? (body) => onSendTaskMessage("sms", "", body) : undefined}
               canEmail={!!messageDest?.email && !!onSendTaskMessage}
+              onFullEmail={(subject, body) => {
+                // What was typed in the step goes into the email window; with
+                // nothing typed, the task's draft (if any) opens as it is.
+                if (body.trim()) {
+                  const now = new Date().toISOString();
+                  onPatch({ draftEmail: { subject: subject.trim() || task.title, body: plainTextToHtml(body), createdAt: now, updatedAt: now } });
+                  setEmailOpenNonce((n) => n + 1);
+                } else startDraftEmail();
+              }}
               onSendEmail={onSendTaskMessage ? (subject, body) => onSendTaskMessage("email", subject, plainTextToHtml(body)) : undefined}
               followBox={isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">

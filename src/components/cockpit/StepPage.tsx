@@ -18,7 +18,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -56,6 +56,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
    *  we need all the options"). */
   canEmail?: boolean;
   onSendEmail?: (subject: string, body: string) => void;
+  /** The full email window (cc, files, AI), with what was typed here. */
+  onFullEmail?: (subject: string, body: string) => void;
   /** A late client step's nudge, from the task page. */
   followBox?: React.ReactNode;
   /** What a plan's step makes and needs. */
@@ -125,7 +127,6 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); } },
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
-    ...(canText && onSendText ? [{ key: "text", label: "Send text", onPick: () => { setTalk("text"); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); } }] : []),
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
   const [draft, setDraft] = useState("");
 
@@ -224,7 +225,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
-          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows under this step here."}</span>
+          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows under this step here."}
+            {talk === "email" && onFullEmail && <> <button onClick={() => { onFullEmail(subject, draft); setDraft(""); }} className="font-semibold text-accent underline decoration-dotted underline-offset-4">Full email</button></>}
+          </span>
           <button onClick={send} disabled={!draft.trim()} className="h-9 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-40">Send</button>
         </div>
       </div>
