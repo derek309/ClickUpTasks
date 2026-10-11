@@ -3,8 +3,8 @@
 // A small "Feedback" tab on the right edge (Derek, 2026-10-11): a teammate
 // clicks it, types what they noticed, and it lands as a comment on one task,
 // "Team feedback on ClickUpTasks" in CUL Tasks, with the task or page they
-// were on. Drag the tab up or down if it is in the way; the spot is remembered
-// per browser.
+// were on. Drag the tab up, down or to the other edge if it is in the way (the
+// spot is remembered per browser); its × hides it until the page reloads.
 import { useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 
@@ -15,26 +15,32 @@ export function FeedbackTab({ where, onSend }: {
   onSend: (body: string) => void;
 }) {
   const [savedTop, saveTop] = usePersisted("feedbackTabTop", 60, (v) => typeof v === "number" && v > 0 && v < 100);
-  const [dragTop, setDragTop] = useState<number | null>(null);
-  const top = dragTop ?? savedTop;
+  const [side, saveSide] = usePersisted<"left" | "right">("feedbackTabSide", "right", (v) => v === "left" || v === "right");
+  const [dragAt, setDragAt] = useState<{ top: number; x: number } | null>(null);
+  const top = dragAt?.top ?? savedTop;
   const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [text, setText] = useState("");
-  const drag = useRef<{ y: number; top: number; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; top: number; moved: boolean } | null>(null);
 
   const topAt = (d: { y: number; top: number }, y: number) => Math.min(92, Math.max(8, d.top + ((y - d.y) / window.innerHeight) * 100));
   const onDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    drag.current = { y: e.clientY, top, moved: false };
+    drag.current = { x: e.clientX, y: e.clientY, top, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = (e: React.PointerEvent) => {
     const d = drag.current; if (!d) return;
-    if (Math.abs(e.clientY - d.y) > 4) d.moved = true;
-    if (d.moved) setDragTop(topAt(d, e.clientY));
+    if (Math.abs(e.clientY - d.y) > 4 || Math.abs(e.clientX - d.x) > 4) d.moved = true;
+    if (d.moved) setDragAt({ top: topAt(d, e.clientY), x: e.clientX });
   };
   const onUp = (e: React.PointerEvent) => {
     const d = drag.current; drag.current = null;
     if (!d) return;
-    if (d.moved) { saveTop(Math.round(topAt(d, e.clientY))); setDragTop(null); return; }
+    if (d.moved) {
+      saveTop(Math.round(topAt(d, e.clientY)));
+      saveSide(e.clientX < window.innerWidth / 2 ? "left" : "right");
+      setDragAt(null); return;
+    }
     setOpen((o) => !o);
   };
   const send = () => {
@@ -43,30 +49,45 @@ export function FeedbackTab({ where, onSend }: {
     setText(""); setOpen(false);
   };
 
-  return (
-    <div className="fixed right-0 z-[90] flex items-start" style={{ top: `${top}%`, transform: "translateY(-50%)" }}>
-      {open && (
-        <div className="mr-1 w-[300px] max-w-[calc(100vw-48px)] rounded-[5px] border bg-surface p-3 shadow-lg">
-          <div className="flex items-center justify-between">
-            <span className="text-[16px] font-semibold">Feedback</span>
-            <button onClick={() => setOpen(false)} aria-label="Close feedback" className="rounded px-1.5 text-[16px] text-muted hover:bg-background">×</button>
-          </div>
-          <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={4}
-            onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
-            placeholder="What's working, what's broken, what you'd change…"
-            className="mt-2 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-          <div className="mt-1 truncate text-[16px] text-muted">On {where}</div>
-          <div className="mt-2 flex justify-end">
-            <button onClick={send} disabled={!text.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
-          </div>
-        </div>
-      )}
-      <button onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; }}
+  if (hidden) return null;
+  const left = side === "left";
+  // While dragging it follows the pointer; let go and it settles on the nearer edge.
+  const place: React.CSSProperties = dragAt
+    ? { left: Math.min(window.innerWidth - 24, Math.max(0, dragAt.x - 11)) }
+    : left ? { left: 0 } : { right: 0 };
+  const panel = open && (
+    <div className={`${left ? "ml-1" : "mr-1"} w-[300px] max-w-[calc(100vw-48px)] rounded-[5px] border bg-surface p-3 shadow-lg`}>
+      <div className="flex items-center justify-between">
+        <span className="text-[16px] font-semibold">Feedback</span>
+        <button onClick={() => setOpen(false)} aria-label="Close feedback" className="rounded px-1.5 text-[16px] text-muted hover:bg-background">×</button>
+      </div>
+      <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={4}
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
+        placeholder="What's working, what's broken, what you'd change…"
+        className="mt-2 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+      <div className="mt-1 truncate text-[16px] text-muted">On {where}</div>
+      <div className="mt-2 flex justify-end">
+        <button onClick={send} disabled={!text.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
+      </div>
+    </div>
+  );
+  const tab = (
+    <div className="group relative">
+      <button onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setDragAt(null); }}
         title="Send feedback (drag to move)" aria-label="Send feedback"
-        className="touch-none select-none rounded-l-[5px] bg-accent text-[13px] font-semibold leading-none tracking-wide text-white opacity-80 shadow-md hover:opacity-100"
-        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", cursor: "grab", padding: "12px 4px" }}>
+        className="block touch-none select-none bg-accent text-[13px] font-semibold leading-none tracking-wide text-white opacity-80 shadow-md hover:opacity-100"
+        // Turned 180° so it reads bottom to top, which flips its corners too:
+        // round the side that ends up facing the page.
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", cursor: dragAt ? "grabbing" : "grab", padding: "12px 4px", borderRadius: left ? "5px 0 0 5px" : "0 5px 5px 0" }}>
         Feedback
       </button>
+      <button onClick={() => setHidden(true)} title="Hide until the page reloads" aria-label="Hide the feedback tab"
+        className={`absolute -top-2 ${left ? "-right-2" : "-left-2"} hidden h-4 w-4 items-center justify-center rounded-full bg-foreground text-[11px] leading-none text-[color:var(--surface)] group-hover:flex`}>×</button>
+    </div>
+  );
+  return (
+    <div className="fixed z-[90] flex items-start" style={{ top: `${top}%`, transform: "translateY(-50%)", ...place }}>
+      {left ? <>{tab}{panel}</> : <>{panel}{tab}</>}
     </div>
   );
 }
