@@ -64,3 +64,43 @@ describe("review follow up", () => {
     expect(reviewFollowUpDays(0)).toBe(2);
   });
 });
+
+import { compactTemplateStep, needMet, planFromSteps, stepsFromTemplate, templatesFor, templateSteps } from "./data";
+
+describe("plans", () => {
+  it("reads old templates of plain titles", () => {
+    expect(templateSteps({ checklistItems: ["Draft", { title: "Review", stage: "review" }, " "] })).toEqual([{ title: "Draft" }, { title: "Review", stage: "review" }]);
+  });
+  it("makes a task's steps from a plan", () => {
+    let n = 0;
+    const out = stepsFromTemplate({ checklistItems: ["Draft", { title: "Review", stage: "review", makes: "page", needs: ["store list link"] }] }, () => `s${++n}`);
+    expect(out).toEqual([{ id: "s1", title: "Draft", done: false }, { id: "s2", title: "Review", done: false, stage: "review", makes: "page", needs: ["store list link"] }]);
+  });
+  it("saves a plain step as a plain title", () => {
+    expect(compactTemplateStep({ title: " Draft ", needs: [" "] })).toBe("Draft");
+  });
+  it("saves a task's steps as a plan, leaving rounds of changes out", () => {
+    const subs = [
+      s("a", "Write the email", { done: true, holds: ["email", "att:x1"] }),
+      s("b", "Client review", { stage: "review", holds: ["page"] }),
+      s("c", "Make Brian's changes", { addedFor: "page:2", stage: "changes_requested" }),
+      s("d", "Schedule the send", { assigneeId: "u_m" }),
+      s("e", "Swap the logo", { fromClient: true }),
+    ];
+    const names: Record<string, string> = { email: "Draft email", "att:x1": "Store list", page: "HTML review" };
+    expect(planFromSteps(subs, "u_d", (k) => names[k] ?? null)).toEqual([
+      { title: "Write the email", stage: "in_progress", makes: "email", needs: ["Draft email", "Store list"] },
+      { title: "Client review", stage: "review", makes: "page", needs: ["HTML review"] },
+      "Schedule the send",
+    ]);
+  });
+  it("meets a need by name, loosely", () => {
+    expect(needMet("store list link", ["Store list"])).toBe(true);
+    expect(needMet("Draft email", ["draft email"])).toBe(true);
+    expect(needMet("product photos", ["Store list"])).toBe(false);
+  });
+  it("offers a client's templates first, never another client's", () => {
+    const all = [{ name: "A", clientId: "cl_x" }, { name: "B", clientId: null }, { name: "C", clientId: "cl_y" }];
+    expect(templatesFor(all, "cl_x").map((t) => t.name)).toEqual(["A", "B"]);
+  });
+});

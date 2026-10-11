@@ -60,7 +60,7 @@ export default function SettingsHub({
   clients: Client[];
   templates: TaskTemplate[];
   projects: Project[];
-  onSaveTemplate: (id: string | undefined, spec: { name: string; checklistItems: string[] }) => void;
+  onSaveTemplate: (id: string | undefined, spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => void;
   onDeleteTemplate: (id: string) => void;
   onUseTemplateAsTask: (templateId: string, clientId: string, projectId: string) => void;
   // Shared, workspace-wide — whether the sidebar's DM list is on. Lives here

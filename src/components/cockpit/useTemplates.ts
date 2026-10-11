@@ -8,7 +8,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { type Me, type Subtask, type Task, type TaskTemplate } from "@/lib/data";
+import { stepsFromTemplate, type Me, type Subtask, type Task, type TaskTemplate } from "@/lib/data";
 import { deleteTaskTemplateDb, upsertTask, upsertTaskTemplate } from "@/lib/db";
 
 export type UseTemplatesDeps = {
@@ -23,7 +23,7 @@ export type UseTemplatesDeps = {
 };
 
 export function useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks }: UseTemplatesDeps) {
-  const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: string[] }) => {
+  const saveTemplate = (id: string | undefined, spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => {
     const t: TaskTemplate = { id: id ?? newId("tmpl_"), ...spec };
     setTaskTemplates((ts) => (id ? ts.map((x) => (x.id === id ? t : x)) : [...ts, t]));
     upsertTaskTemplate(t);
@@ -48,9 +48,10 @@ export function useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog
     const tpl = taskTemplates.find((t) => t.id === templateId);
     const t = tasks.find((x) => x.id === taskId);
     if (!tpl || !t) return;
-    const added: Subtask[] = tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false }));
+    // Steps keep their stage, what they make and what they need (phase 5).
+    const added: Subtask[] = stepsFromTemplate(tpl, () => newId("s_"));
     update(taskId, { subtasks: [...t.subtasks, ...added] }, { append: added });
-    pushToast(`Added ${added.length} checklist item${added.length === 1 ? "" : "s"} from "${tpl.name}"`);
+    pushToast(`Added ${added.length} ${added.length === 1 ? "step" : "steps"} from "${tpl.name}"`);
   };
   // Creates a brand-new task from a template — title defaults to the
   // template name, checklist pre-filled — to quickly populate a project.
@@ -62,7 +63,7 @@ export function useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
       due: null, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
-      subtasks: tpl.checklistItems.map((title) => ({ id: newId("s_"), title, done: false })),
+      subtasks: stepsFromTemplate(tpl, () => newId("s_")),
       attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);

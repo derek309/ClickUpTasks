@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -53,7 +53,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, slideBackLabel, openEmail }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, slideBackLabel, openEmail, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -66,6 +66,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
+  /** Saves this task's steps as a plan (admins: templates are admin-written). */
+  onSaveTemplate?: (spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => void;
   onUploadCommentImage: (file: File) => Promise<Attachment | null>;
   onCopyAttachmentLink: (path: string) => void;
   onGetSignedUrl: (path: string) => Promise<string | null>;
@@ -895,6 +897,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Mark done on the current step, or its tick: one action, not two.
   const completeStep = (sid: string) => {
+    // A step from a plan says what it needs; missing any, it asks first but
+    // never blocks (Derek, 2026-10-11: "warn only").
+    const sub = task.subtasks.find((x) => x.id === sid);
+    const missing = sub ? missingNeeds(sub) : [];
+    if (missing.length && !window.confirm(`"${sub!.title}" still needs: ${missing.join(", ")}. Mark it done anyway?`)) return;
     onToggleSub(sid);
     if (openStep) setNextStepDone(openStep.id, true);
     setAutoDone(null);
@@ -1434,12 +1441,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </div>
           {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">Added when {firstName} sent changes</span>}
           {isActive && followBox}
+          {!sub.done && stepPlanBits(sub, isActive)}
           {stepHeld(sub, isActive)}
           {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
           {isActive && clientChangesList}
         </div>
       </li>
     );
+  };
+  const offeredTemplates = templatesFor(templates, task.clientId);
+  const [savePlan, setSavePlan] = useState<string | null>(null);
+  const savePlanAs = (clientId: string | null) => {
+    if (!onSaveTemplate || !savePlan?.trim()) return;
+    const nameOf = (k: string) => (k.startsWith("att:") ? task.attachments.find((a) => attachmentKey(a.id) === k)?.name ?? null : KIND_LABEL[k as DeliverableKey] ?? null);
+    onSaveTemplate({ name: savePlan.trim(), checklistItems: planFromSteps(task.subtasks, task.assigneeId, nameOf), ...(clientId ? { clientId } : {}) });
+    setSavePlan(null);
+    pushToast(`Saved "${savePlan.trim()}" as a template${clientId ? ` for ${client.name}` : " for everyone"}`);
   };
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
@@ -1448,22 +1465,43 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"><I.list className="h-4 w-4" /></span>
           Steps{progress.total > 0 && <span className="font-normal text-muted">· {progress.done} of {progress.total} done</span>}
         </h2>
-        {templates.length > 0 && (
+        <span className="flex flex-wrap items-center gap-2">
+        {/* Save these steps as a plan for this client or everyone (phase 5). */}
+        {onSaveTemplate && progress.total > 0 && (
+          <div className="relative">
+            <button onClick={() => { setSavePlan((o) => (o === null ? task.title : null)); }} className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:bg-background">Save as template</button>
+            {savePlan !== null && (<>
+              <div className="fixed inset-0 z-30" onClick={() => setSavePlan(null)} />
+              <div className="absolute right-0 z-40 mt-1 w-[min(320px,calc(100vw-32px))] space-y-2 rounded-lg border bg-surface p-3 shadow-lg">
+                <label htmlFor="save-plan-name" className="block text-[16px] font-semibold">Template name</label>
+                <input id="save-plan-name" autoFocus value={savePlan} onChange={(e) => setSavePlan(e.target.value)}
+                  className="w-full rounded-md border bg-background px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                <p className="text-[16px] text-muted">Saves each step with its stage, what it makes and what it holds as what it needs. Rounds of changes are left out.</p>
+                <div className="flex flex-wrap gap-2">
+                  {!isPersonal && <button onClick={() => savePlanAs(task.clientId)} disabled={!savePlan.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">For {firstName}</button>}
+                  <button onClick={() => savePlanAs(null)} disabled={!savePlan.trim()} className="rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background disabled:opacity-40">For everyone</button>
+                </div>
+              </div>
+            </>)}
+          </div>
+        )}
+        {offeredTemplates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:bg-background"><I.clipboard /> From template</button>
             {templateOpen && (<>
               <div className="fixed inset-0 z-30" onClick={() => setTemplateOpen(false)} />
-              <div className="absolute right-0 z-40 mt-1 w-64 rounded-lg border bg-surface p-1 shadow-lg">
-                {templates.map((t) => (
+              <div className="absolute right-0 z-40 mt-1 max-h-[60vh] w-72 overflow-y-auto rounded-lg border bg-surface p-1 shadow-lg">
+                {offeredTemplates.map((t) => (
                   <button key={t.id} onClick={() => { onApplyTemplate(t.id); setTemplateOpen(false); }} className="flex w-full flex-col items-start rounded px-2 py-1.5 text-left hover:bg-background">
                     <span className="truncate text-[16px] font-medium">{t.name}</span>
-                    <span className="text-[16px] text-muted">{t.checklistItems.length} {t.checklistItems.length === 1 ? "step" : "steps"}</span>
+                    <span className="text-[16px] text-muted">{t.checklistItems.length} {t.checklistItems.length === 1 ? "step" : "steps"}{t.clientId ? ` · for ${firstName}` : ""}</span>
                   </button>
                 ))}
               </div>
             </>)}
           </div>
         )}
+        </span>
       </div>
       {progress.total > 0 && (
         <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
@@ -1698,6 +1736,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // assets"). A deliverable or a link or file sits on one step at most; each
   // deliverable block is drawn once, on its step or under Deliverables.
   const DELIVERABLE_KEYS: DeliverableKey[] = ["doc", "brief", "image", "page", "video", "email"];
+  const KIND_LABEL: Record<DeliverableKey, string> = { doc: "Client document", image: "Image review", page: "HTML review", video: "Video review", brief: "Project instructions", email: "Draft email" };
   const deliverableBlock = (key: DeliverableKey, onCurrentStep: boolean) =>
     key === "doc" ? documentBlock(onCurrentStep) : key === "brief" ? briefBlock : key === "email" ? draftEmailBlock : reviewBlock(key, onCurrentStep);
   const deliverablePresent = (key: DeliverableKey) =>
@@ -1789,6 +1828,36 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // What a step holds, drawn on it: its deliverables as their own rows (the
   // current step's reviews with their open comments), then its links and files.
+  // A step's needs, and which of them what it holds already meets.
+  const heldLabels = (sub: Subtask) => (sub.holds ?? []).flatMap((k) => {
+    if (k.startsWith("att:")) { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? [a.name] : []; }
+    const d = k as DeliverableKey;
+    return [KIND_LABEL[d], deliverableName(d)];
+  });
+  const missingNeeds = (sub: Subtask) => (sub.needs ?? []).filter((n) => !needMet(n, heldLabels(sub)));
+  // What a plan's step makes, one click away on it, and what it needs.
+  const stepPlanBits = (sub: Subtask, isActive: boolean) => {
+    const makes = sub.makes && !(sub.holds ?? []).includes(sub.makes) && (sub.makes === "email" ? hasMessaging : canHaveDocument) ? sub.makes : null;
+    const needs = sub.needs ?? [];
+    if ((!makes || !isActive) && !needs.length) return null;
+    const held = heldLabels(sub);
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[16px]">
+        {makes && isActive && (deliverablePresent(makes)
+          ? <button onClick={() => holdKey(sub.id, makes)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-surface px-3 font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Put {deliverableName(makes)} here</button>
+          : <button onClick={() => { holdKey(sub.id, makes); setPendingStart(makes); }} className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-surface px-3 font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Make the {KIND_LABEL[makes].toLowerCase()}</button>)}
+        {needs.length > 0 && (
+          <span className={isActive ? "" : "text-muted"}>
+            Needs:{" "}
+            {needs.map((n, i) => {
+              const ok = needMet(n, held);
+              return <span key={n}>{i > 0 && ", "}<span className={ok ? "text-success" : isActive ? "font-medium" : ""}>{ok ? "✓ " : ""}{n}</span></span>;
+            })}
+          </span>
+        )}
+      </div>
+    );
+  };
   const stepHeld = (sub: Subtask, isActive: boolean) => {
     const keys = sub.holds ?? [];
     const deliverables = keys.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k));

@@ -536,8 +536,17 @@ export interface Contact {
 export interface TaskTemplate {
   id: string;
   name: string;
-  checklistItems: string[];
+  /** Its steps. A plain title on templates from before steps had stages; a
+   *  step on newer ones (phase 5: "save the steps as a plan, reuse it"). */
+  checklistItems: (string | TemplateStep)[];
+  /** Saved for one client (supabase/task-template-client.sql). Unset means
+   *  everyone's; null is only written to make a client's template everyone's. */
+  clientId?: string | null;
 }
+
+/** One step of a saved plan: its stage, the deliverable it makes, and what it
+ *  needs before it is finished (Derek, 2026-10-11: warn, never block). */
+export type TemplateStep = { title: string; stage?: TaskStatus; makes?: DeliverableKey; needs?: string[] };
 
 
 // GHL contacts store state inconsistently — full name ("California"), abbreviation
@@ -822,6 +831,11 @@ export interface Subtask {
    *  attachment id ("att:<id>"). Each sits on one step at most; whatever is on
    *  no step shows under Deliverables or Links and files as before. */
   holds?: string[];
+  /** The deliverable this step makes, from its plan: one click makes it on the step. */
+  makes?: DeliverableKey;
+  /** What the step needs before it is done, from its plan. Mark done warns
+   *  when something is missing and never blocks. */
+  needs?: string[];
 }
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
@@ -2862,4 +2876,58 @@ export function releaseFromSteps(subtasks: Subtask[], key: string): Subtask[] {
     const holds = s.holds.filter((k) => k !== key);
     return { ...s, holds: holds.length ? holds : undefined };
   });
+}
+
+// ── Plans (phase 5) ─────────────────────────────────────────────────────────
+
+/** A template's steps, older plain titles included. */
+export const templateSteps = (t: Pick<TaskTemplate, "checklistItems">): TemplateStep[] =>
+  t.checklistItems.map((x) => (typeof x === "string" ? { title: x } : x)).filter((x) => x.title?.trim());
+
+/** A template's steps as a task's, ready to add. */
+export function stepsFromTemplate(t: Pick<TaskTemplate, "checklistItems">, makeId: () => string): Subtask[] {
+  return templateSteps(t).map((x) => ({
+    id: makeId(), title: x.title.trim(), done: false,
+    ...(x.stage ? { stage: x.stage } : {}),
+    ...(x.makes ? { makes: x.makes } : {}),
+    ...(x.needs?.length ? { needs: x.needs } : {}),
+  }));
+}
+
+/** A step for saving: a plain title when it carries nothing else, so a plan
+ *  with no stages reads the same as the templates before them. */
+export function compactTemplateStep(x: TemplateStep): string | TemplateStep {
+  const needs = (x.needs ?? []).map((n) => n.trim()).filter(Boolean);
+  if (!x.stage && !x.makes && !needs.length) return x.title.trim();
+  return { title: x.title.trim(), ...(x.stage ? { stage: x.stage } : {}), ...(x.makes ? { makes: x.makes } : {}), ...(needs.length ? { needs } : {}) };
+}
+
+/** A task's steps as a plan: each step's stage, the deliverable it holds, and
+ *  what it holds as what it needs. Done or not does not matter; the client's
+ *  own change requests and the rounds of changes added for them are left
+ *  out, since the next task starts without them. */
+export function planFromSteps(subtasks: Subtask[], taskOwnerId: string | null, nameOf: (key: string) => string | null): (string | TemplateStep)[] {
+  return planSteps(subtasks).filter((s) => !s.addedFor).map((s) => {
+    const keys = s.holds ?? [];
+    const makes = (["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).find((k) => keys.includes(k)) ?? s.makes;
+    const needs = keys.map(nameOf).filter((n): n is string => !!n);
+    return compactTemplateStep({ title: s.title, stage: isHandoffStep(s, taskOwnerId) ? undefined : stepStage(s, taskOwnerId), makes, needs: needs.length ? needs : s.needs });
+  });
+}
+
+/** Whether a need is met by what the step holds, by name: "store list link"
+ *  is met by a link called "Store list". Loose on purpose, since a need is
+ *  only ever a warning. */
+export function needMet(need: string, held: string[]): boolean {
+  const n = need.trim().toLowerCase().replace(/\s+(link|file|photo|photos|image|images)$/, "");
+  if (!n) return true;
+  return held.some((h) => { const l = h.trim().toLowerCase(); return !!l && (l.includes(n) || n.includes(l)); });
+}
+
+/** Templates to offer on a task: the ones for its client first, then
+ *  everyone's; other clients' are left out. */
+export function templatesFor<T extends Pick<TaskTemplate, "clientId" | "name">>(all: T[], clientId: string): T[] {
+  const mine = all.filter((t) => t.clientId === clientId);
+  const shared = all.filter((t) => !t.clientId);
+  return [...mine, ...shared];
 }

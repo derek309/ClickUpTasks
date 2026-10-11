@@ -124,8 +124,11 @@ export const rowToDmMessage = (r: any): DmMessage => ({ id: r.id, conversationId
 const vaultFolderToRow = (f: VaultFolder) => ({ id: f.id, client_id: f.clientId, project_id: f.projectId, name: f.name, created_at: f.createdAt });
 const rowToVaultFolder = (r: any): VaultFolder => ({ id: r.id, clientId: r.client_id, projectId: r.project_id ?? null, name: r.name, createdAt: r.created_at });
 
-const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems });
-const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [] });
+// client_id only when it was set (a client's id, or null to make a client's
+// template everyone's again), so saving a new everyone template still works
+// before supabase/task-template-client.sql has run.
+const taskTemplateToRow = (t: TaskTemplate) => ({ id: t.id, name: t.name, checklist_items: t.checklistItems, ...(t.clientId !== undefined ? { client_id: t.clientId } : {}) });
+const rowToTaskTemplate = (r: any): TaskTemplate => ({ id: r.id, name: r.name, checklistItems: r.checklist_items ?? [], ...(r.client_id ? { clientId: r.client_id } : {}) });
 
 
 const messageToRow = (m: Message) => ({
