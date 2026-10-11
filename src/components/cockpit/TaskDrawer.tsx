@@ -584,24 +584,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [autoDone, setAutoDone] = useState<{ taskId: string; text: string } | null>(null);
   // The task's reviews and where they stand, for steps that wait on an
   // approval and for suggesting what comes next.
-  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number }>> }>({ taskId: "", reviews: {} });
+  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number; clientViewedAt?: string | null }>> }>({ taskId: "", reviews: {} });
   // Also when the task changes or logs something: approving or sending a
   // document does both, so its new status is read back at once.
   // A document reports its stage as it changes (TaskDocument onStage), so the
   // steps see a change made inside its window at once.
-  const reportStage = (k: "doc" | "image" | "page" | "video") => (d: { id: string; title: string; status: string; version: number; approvedAt: string | null }) =>
+  const reportStage = (k: "doc" | "image" | "page" | "video") => (d: { id: string; title: string; status: string; version: number; approvedAt: string | null; clientViewedAt?: string | null }) =>
     setReviewStates((p) => {
       if (p.taskId !== task.id) return p;
       const cur = p.reviews[k];
       if (cur && cur.status === d.status && cur.version === d.version && cur.id === d.id) return p;
-      return { taskId: p.taskId, reviews: { ...p.reviews, [k]: d } };
+      return { taskId: p.taskId, reviews: { ...p.reviews, [k]: { ...d, clientViewedAt: d.clientViewedAt ?? cur?.clientViewedAt ?? null } } };
     });
+  const [docNonce, setDocNonce] = useState(0);
   const reviewsKey = `${task.id}:${askNext === task.id}:${openNextStep(actions)?.nextStepWatch ?? ""}:${task.status}:${task.comments.length}`;
   useEffect(() => {
     let live = true;
     void Promise.all((["doc", "image", "page", "video"] as const).map(async (k) => [k, await fetchTaskDocument(task.id, k)] as const)).then((pairs) => {
       if (!live) return;
-      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { id: d!.id, title: d!.title, status: d!.status, approvedAt: d!.approvedAt, version: d!.version }])) });
+      setReviewStates({ taskId: task.id, reviews: Object.fromEntries(pairs.filter((p) => !!p[1]).map(([k, d]) => [k, { id: d!.id, title: d!.title, status: d!.status, approvedAt: d!.approvedAt, version: d!.version, clientViewedAt: d!.clientViewedAt }])) });
     });
     return () => { live = false; };
   }, [reviewsKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1244,7 +1245,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Keyed apart from the draft email line beside it: two siblings sharing a
     // key made React mount a new document line on every render and never drop
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
-    <TaskDocument key={`doc-${task.id}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
+    <TaskDocument key={`doc-${task.id}-${docNonce}`} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
       startNonce={docStartNonce} showOpenComments={onCurrentStep} onStage={reportStage("doc")}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
@@ -1472,6 +1473,60 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const moved = task.subtasks.filter((x) => x.onClient && x.addedFor === `sent:${sub.id}`).flatMap((x) => x.holds ?? []);
     return moved.length ? { ...sub, holds: [...new Set([...(sub.holds ?? []), ...moved])] } : sub;
   };
+  // The client's waiting step: the reviews out with them, from the step that sent them.
+  const sentReviews = (sub: Subtask): ("doc" | "image" | "page" | "video")[] => {
+    if (!sub.onClient || !sub.addedFor?.startsWith("sent:")) return [];
+    const home = task.subtasks.find((x) => x.id === sub.addedFor!.slice(5));
+    const keys = [...(home ? withSentHolds(home).holds ?? [] : []), ...(sub.holds ?? [])];
+    return (["doc", "image", "page", "video"] as const).filter((k) => keys.includes(k) && !!reviews[k]);
+  };
+  const viewedLine = (k: "doc" | "image" | "page" | "video") => {
+    const r = reviews[k];
+    return r ? (r.clientViewedAt ? `Viewed ${timeAgo(r.clientViewedAt)}` : "Not viewed yet") : null;
+  };
+  const REVIEW_STATUS: Record<string, string> = { draft: "Draft", with_client: `With ${firstName}`, client_submitted: `${firstName} sent changes`, approved: "Approved", completed: "Completed" };
+  // We mark it for them (they said so on a call, or by email): the document's
+  // stage changes as if they had pressed it, and the steps follow.
+  const markReview = async (k: "doc" | "image" | "page" | "video", status: "approved" | "client_submitted") => {
+    const res = await docApi(task.id, k, "", { method: "PATCH", body: JSON.stringify({ status }) });
+    const j = await res.json().catch(() => ({})) as { document?: Record<string, unknown>; error?: string };
+    if (!res.ok || !j.document) { pushToast(j.error ?? "Could not change the review."); return; }
+    const d = j.document;
+    reportStage(k)({ id: String(d.id), title: String(d.title ?? ""), status: String(d.status), version: Number(d.version ?? 0), approvedAt: (d.approved_at as string | null) ?? null, clientViewedAt: (d.client_viewed_at as string | null) ?? null });
+    setDocNonce((n) => n + 1);
+  };
+  const outFor = (sub: Subtask) => {
+    const ks = sentReviews(sub);
+    if (!ks.length && !sub.emailedAt) return null;
+    return (
+      <section aria-labelledby="step-out" className="flex flex-col gap-2">
+        <h3 id="step-out" className="text-[17px] font-bold">Out with {firstName} for review</h3>
+        {ks.map((k) => {
+          const r = reviews[k]!;
+          return (
+            <div key={k} className="flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[16px] font-semibold">{r.title.trim() || deliverableName(k)}</div>
+                <div className="text-[16px] text-muted">{[REVIEW_STATUS[r.status] ?? r.status, r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</div>
+              </div>
+              <button onClick={() => openWork(k)} className="h-9 shrink-0 rounded-lg border px-3 text-[16px] font-semibold hover:bg-background">Open</button>
+            </div>
+          );
+        })}
+        {sub.emailedAt && <p className="text-[16px] text-muted">The review email went to {firstName} {formatDue(sub.emailedAt.slice(0, 10))}; it is in the conversation below.</p>}
+      </section>
+    );
+  };
+  const reviewAnswer = (sub: Subtask) => {
+    const k = sentReviews(sub)[0];
+    if (!k || sub.done) return null;
+    return (
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => void markReview(k, "approved")} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{firstName} approved</button>
+        <button onClick={() => void markReview(k, "client_submitted")} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">{firstName} sent changes</button>
+      </div>
+    );
+  };
   const stepRow = (sub: Subtask, i: number) => {
     const isActive = activeStep?.id === sub.id;
     const upcoming = !sub.done && !isActive;
@@ -1523,6 +1578,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 return <span className={t === "late" ? "font-semibold text-danger" : t === "soon" ? "font-semibold text-highlight" : "text-muted"}>Due {t === "late" || t === "soon" ? stepDateLabel(d).label.split(",")[0].toLowerCase() : formatDue(d)}</span>;
               })()}
               {sub.emailedAt && !sub.done && <span className="text-muted">Email sent {formatDue(sub.emailedAt.slice(0, 10))}</span>}
+              {!sub.done && sentReviews(sub).map((k) => <span key={k} className="text-muted">{viewedLine(k)}</span>)}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
               {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
@@ -1534,7 +1590,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex shrink-0 items-center gap-2">
             {sub.onClient && <span title={`On ${client.name}`} className="flex h-[22px] w-[22px] items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>}
             {sub.assigneeId && <Avatar id={sub.assigneeId} size={22} />}
-            <span className="hidden sm:inline-flex">{stageTag(st)}</span>
+            {/* A finished step shows how it ended, not a stage (Derek, 2026-10-11). */}
+            {!sub.done && <span className="hidden sm:inline-flex">{stageTag(st)}</span>}
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
           </span>
         </button>
@@ -1835,7 +1892,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // client document. Each has its own key, apart from the lines beside it; below
   // startReviewEmail so they never read it before it exists.
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
-    <TaskDocument key={`${kind}-${task.id}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
+    <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
       startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
@@ -2380,7 +2437,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id}
+            <StepPage task={task} sub={ps} key={ps.id} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

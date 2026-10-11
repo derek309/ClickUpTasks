@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, outFor, doneActions, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -39,6 +39,11 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   stepNo?: { at: number; total: number };
   onPrev?: () => void;
   onNext?: () => void;
+  /** The client's waiting step: what is out with them, in place of adding work
+   *  (nothing gets made while it is with them). */
+  outFor?: React.ReactNode;
+  /** In place of Mark done: how it ended, like "Derek approved" or "sent changes". */
+  doneActions?: React.ReactNode;
   /** What "Add client work" offers, besides a checklist and a text: a
    *  document, a review, an email (Derek, 2026-10-11). */
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
@@ -299,12 +304,13 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
                 <div>
                   {sub.done
                     ? <button onClick={onReopen} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Reopen this step</button>
+                    : isCurrent && doneActions ? doneActions
                     : isCurrent && <button onClick={onMarkDone} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Mark done</button>}
                 </div>
               </div>
               {followBox}
               {planBits}
-              {empty ? quickStart : <div>{addButton}</div>}
+              {outFor !== undefined ? outFor : empty ? quickStart : <div>{addButton}</div>}
               {todoList}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
