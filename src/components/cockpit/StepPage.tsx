@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, outFor, doneActions, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -49,6 +49,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
   canText?: boolean;
   onSendText?: (body: string) => void;
+  /** Email the client from the step (Derek, 2026-10-11: "email, sms or chat,
+   *  we need all the options"). */
+  canEmail?: boolean;
+  onSendEmail?: (subject: string, body: string) => void;
   /** A late client step's nudge, from the task page. */
   followBox?: React.ReactNode;
   /** What a plan's step makes and needs. */
@@ -86,7 +90,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const own = todoProgress(todos);
   const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
   const [todoDraft, setTodoDraft] = useState("");
-  const [talk, setTalk] = useState<"client" | "text" | "team">(canChat ? "client" : "team");
+  const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(canChat ? "client" : "team");
+  const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const todoRef = useRef<HTMLInputElement>(null);
@@ -129,6 +134,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     const body = draft.trim();
     if (!body) return;
     if (talk === "client" && onSendChat) onSendChat(body);
+    else if (talk === "email" && onSendEmail) { if (!subject.trim()) return; onSendEmail(subject.trim(), body); }
     else if (talk === "text" && onSendText) onSendText(body);
     else onAddNote(body);
     setDraft("");
@@ -140,8 +146,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id="step-talk" className="text-[17px] font-bold">Conversation on this step</h3>
         <div role="group" aria-label="Who to talk to" className="flex gap-1 rounded-lg bg-background p-1">
-          {canChat && <button onClick={() => setTalk("client")} aria-pressed={talk === "client"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "client" ? "bg-surface shadow-soft" : "text-muted"}`}>With {first}</button>}
-          {talk === "text" && <button aria-pressed className="h-9 rounded-md bg-surface px-3 text-[16px] font-semibold shadow-soft">Text</button>}
+          {canChat && <button onClick={() => setTalk("client")} aria-pressed={talk === "client"} title={`Chat with ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "client" ? "bg-surface shadow-soft" : "text-muted"}`}>Chat</button>}
+          {canEmail && onSendEmail && <button onClick={() => setTalk("email")} aria-pressed={talk === "email"} title={`Email ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "email" ? "bg-surface shadow-soft" : "text-muted"}`}>Email</button>}
+          {canText && onSendText && <button onClick={() => setTalk("text")} aria-pressed={talk === "text"} title={`Text ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "text" ? "bg-surface shadow-soft" : "text-muted"}`}>Text</button>}
           <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
         </div>
       </div>
@@ -186,11 +193,17 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           );
         })}
       </div>
-      <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : talk === "text" ? CHANNEL_TONE.sms.surface : CHANNEL_TONE.chat.surface}`}>
+      <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : talk === "text" ? CHANNEL_TONE.sms.surface : talk === "email" ? CHANNEL_TONE.email.surface : CHANNEL_TONE.chat.surface}`}>
+        {talk === "email" && (
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" placeholder="Subject"
+            className="mb-1 w-full border-b bg-transparent px-2 py-1 text-[16px] font-semibold outline-none" />
+        )}
         <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? "Note for the team" : `Message ${first}`}</label>
-        <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
-          placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : `Message ${first} about this step`}
+        <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)}
+          // An email is written in lines: Enter is a new line there, ⌘ Enter sends.
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (talk !== "email" || e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
+          rows={talk === "email" ? 5 : 2}
+          placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
           <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows under this step here."}</span>

@@ -2458,6 +2458,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               addOptions={stepAddOptions(ps)}
               canText={!!messageDest?.phone && !!onSendTaskMessage}
               onSendText={onSendTaskMessage ? (body) => onSendTaskMessage("sms", "", body) : undefined}
+              canEmail={!!messageDest?.email && !!onSendTaskMessage}
+              onSendEmail={onSendTaskMessage ? (subject, body) => onSendTaskMessage("email", subject, plainTextToHtml(body)) : undefined}
               followBox={isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                   <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${firstName} hasn't approved yet` : `${firstName} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
