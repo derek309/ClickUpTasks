@@ -848,6 +848,9 @@ export interface Subtask {
   /** Renamed after the work picked on it (namedForWork): its old name, so the
    *  name goes back when that work comes off again (Derek, 2026-10-11). */
   namedFrom?: { title: string; key: string; as: string };
+  /** Client work and files the directions point at ("use the document"):
+   *  deliverable keys or att:<id>. Copy for Claude brings their content along. */
+  uses?: string[];
   /** When the step became the current one, and when it was finished: what was
    *  said in between is the step's conversation. */
   startedAt?: string;

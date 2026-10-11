@@ -470,6 +470,30 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // One step, for Claude (Derek, 2026-10-11: "a Claude copy button for each
   // step, so it knows what we're doing and what step"): the task, where the
   // step sits among the others, what it holds and what was said during it.
+  // The content of what the directions point at: a document's text, an
+  // email's words, a link's address, a file's id to open it with.
+  const usedForClaude = async (keys: string[]) => {
+    const out: string[] = [];
+    for (const k of keys) {
+      if (k.startsWith("att:")) {
+        const a = task.attachments.find((x) => attachmentKey(x.id) === k);
+        if (a) out.push(a.url ? `- ${a.name}: ${a.url}` : `- ${a.name} (${a.kind}; open it with view_task_file, file: ${a.id})`);
+        continue;
+      }
+      const d = k as DeliverableKey;
+      if (!deliverablePresent(d)) continue;
+      if (d === "email" && task.draftEmail) { out.push(`- Draft email "${task.draftEmail.subject}":\n${htmlToText(task.draftEmail.body).trim()}`); continue; }
+      if (d === "brief") { out.push(`- Project instructions (read them with get_project_instructions ${task.id})`); continue; }
+      if (d === "doc" || d === "image" || d === "page" || d === "video") {
+        const doc = await fetchTaskDocument(task.id, d);
+        if (!doc) continue;
+        const head = `- ${KIND_LABEL[d]} "${doc.title.trim() || deliverableName(d)}" (${REVIEW_STATUS[doc.status] ?? doc.status}, version ${doc.version})`;
+        const text = d === "doc" ? htmlToText(doc.body ?? "").trim() : "";
+        out.push(text ? `${head}:\n${text.slice(0, 12000)}${text.length > 12000 ? "\n…" : ""}` : `${head}; see it with get_review ${task.id} kind ${d}`);
+      }
+    }
+    return out;
+  };
   const copyStepForClaude = async (sub: Subtask) => {
     const taskUrl = new URL(taskLink?.() ?? "", window.location.origin).href;
     const plan = planSteps(task.subtasks);
@@ -485,6 +509,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
       return [`- ${KIND_LABEL[d]}: ${deliverableName(d)}${r ? ` (${REVIEW_STATUS[r.status] ?? r.status}, version ${r.version})` : ""}`];
     });
+    const used = await usedForClaude(sub.uses ?? []);
     const w = stepWindow(task.subtasks, sub.id, task.createdAt);
     const said = (messages ?? []).filter((m) => inWindow(m.at, w)).slice(-6)
       .map((m) => `- ${m.direction === "inbound" ? client.name : "Us"} (${m.channel}): ${htmlToText(m.body).replace(/\s+/g, " ").slice(0, 400)}`);
@@ -497,6 +522,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       `This step (${at + 1} of ${plan.length}): ${sub.title}`,
       `- ${sub.done ? `Done: ${sub.outcome ?? "Done"}` : cur?.id === sub.id ? "The current step" : "Comes later"}${owner ? ` · on ${owner}` : ""}${sub.due ? ` · due ${sub.due}` : ""}`,
       sub.notes && htmlToText(sub.notes).trim() ? `\nDirections:\n${htmlToText(sub.notes).trim()}` : "",
+      used.length ? `\nUse these with the directions:\n${used.join("\n\n")}` : "",
       sub.todos?.length ? `\nTo do on this step:\n${sub.todos.map((t) => `- [${t.done ? "x" : " "}] ${t.title}`).join("\n")}` : "",
       work.length ? `\nOn this step (client work, links and files):\n${work.join("\n")}` : "",
       sub.needs?.length ? `\nIt needs: ${sub.needs.join(", ")}` : "",
@@ -2031,6 +2057,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
+  // What a step's directions can point at: the task's client work, links and files.
+  const workToUseFor = () => [
+    ...DELIVERABLE_KEYS.filter(deliverablePresent).map((k) => {
+      const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
+      return { key: k as string, label: deliverableName(k), note: r ? REVIEW_STATUS[r.status] ?? r.status : KIND_LABEL[k] };
+    }),
+    ...task.attachments.map((a) => ({ key: attachmentKey(a.id), label: a.name, note: a.url ? "link" : "file" as string | undefined })),
+  ];
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
     const pick = (key: DeliverableKey) => {
@@ -2492,7 +2526,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} useOptions={workToUseFor()} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

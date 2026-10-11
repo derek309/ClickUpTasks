@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, useOptions = [], outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -43,6 +43,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   onNext?: () => void;
   /** Copies this step, with the task around it, for Claude. */
   onCopyForClaude?: () => void;
+  /** The task's client work, links and files the directions can point at. */
+  useOptions?: { key: string; label: string; note?: string }[];
   /** The client's waiting step: what is out with them, in place of adding work
    *  (nothing gets made while it is with them). */
   outFor?: React.ReactNode;
@@ -376,6 +378,26 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                       dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
                     }}
                     placeholder="What we want on this step: what to make, what to change, where things are…" />
+                  {/* Work already made, ticked to go with the directions (Derek,
+                      2026-10-11: "use the document, which I checked"). */}
+                  {useOptions.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[16px] font-medium text-muted">Use with these directions</span>
+                      <div className="flex flex-wrap gap-2">
+                        {useOptions.map((o) => {
+                          const on = (sub.uses ?? []).includes(o.key);
+                          return (
+                            <button key={o.key} aria-pressed={on}
+                              onClick={() => { const cur = sub.uses ?? []; const next = on ? cur.filter((k) => k !== o.key) : [...cur, o.key]; onPatchSub({ uses: next.length ? next : undefined }); }}
+                              className={`inline-flex min-h-10 max-w-full items-center gap-2 rounded-lg border px-3 text-left text-[16px] ${on ? "border-accent bg-accent-soft font-semibold" : "bg-surface hover:bg-background"}`}>
+                              <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on && <I.check className="h-3 w-3" />}</span>
+                              <span className="min-w-0 truncate">{o.label}</span>{o.note && <span className="shrink-0 font-normal text-muted">{o.note}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </section>
               )}
               {todoList}
