@@ -2085,10 +2085,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const mainColumn = (
     <>
       {slideOver && !full && slideContext}
-      {/* The top wears the client's colour, so whose task it is reads at a
-          glance (Derek, 2026-10-11: "it's very flat", mockup B). */}
-      <div className="rounded-[5px] border-t-4 px-4 pb-4 pt-3.5 sm:px-6"
-        style={{ borderTopColor: client.color, background: `color-mix(in srgb, ${client.color} 9%, var(--surface))` }}>
+      {/* A plain title area, as in the mockup (Derek, 2026-10-11: remove the
+          client colour tint; the dot in the top bar says whose task it is). */}
+      <div>
         {titleRow}
         {subMeta}
         {detailsSentence}

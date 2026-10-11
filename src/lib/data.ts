@@ -836,7 +836,20 @@ export interface Subtask {
   /** What the step needs before it is done, from its plan. Mark done warns
    *  when something is missing and never blocks. */
   needs?: string[];
+  /** The step's own to-do list (step pages, 2026-10-11, Derek: "click on that
+   *  step and there's a list of all the tasks that need to be completed"). A
+   *  client's comment that became a to-do keeps its id, so ticking one can
+   *  close the comment too. */
+  todos?: StepTodo[];
+  /** When the step became the current one, and when it was finished: what was
+   *  said in between is the step's conversation. */
+  startedAt?: string;
+  doneAt?: string;
+  /** On a client's own change request (fromClient): the step it belongs to. */
+  stepId?: string;
 }
+
+export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
 export type HandoffLink = { id: string; label: string; url: string };
@@ -2931,3 +2944,26 @@ export function templatesFor<T extends Pick<TaskTemplate, "clientId" | "name">>(
   const shared = all.filter((t) => !t.clientId);
   return [...mine, ...shared];
 }
+
+// ── Step pages (2026-10-11) ─────────────────────────────────────────────────
+
+/** A step's to-dos, done and total. */
+export function todoProgress(todos: StepTodo[] | undefined): { done: number; total: number } {
+  const list = todos ?? [];
+  return { done: list.filter((t) => t.done).length, total: list.length };
+}
+
+/** When a step's conversation starts and ends: from when it started, else
+ *  from when the step before it finished, else from the task's start; up to
+ *  when it finished, or now. */
+export function stepWindow(subtasks: Subtask[], stepId: string, taskCreatedAt: string): { from: string; to: string | null } {
+  const steps = planSteps(subtasks);
+  const i = steps.findIndex((s) => s.id === stepId);
+  const s = steps[i];
+  if (!s) return { from: taskCreatedAt, to: null };
+  const before = [...steps.slice(0, i)].reverse().find((x) => x.doneAt)?.doneAt;
+  return { from: s.startedAt ?? before ?? taskCreatedAt, to: s.doneAt ?? null };
+}
+
+/** Whether an instant falls in a step's window. */
+export const inWindow = (at: string, w: { from: string; to: string | null }) => at >= w.from && (!w.to || at <= w.to);

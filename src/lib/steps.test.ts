@@ -104,3 +104,20 @@ describe("plans", () => {
     expect(templatesFor(all, "cl_x").map((t) => t.name)).toEqual(["A", "B"]);
   });
 });
+
+import { inWindow, stepWindow, todoProgress } from "./data";
+
+describe("step pages", () => {
+  it("counts a step's to-dos", () => {
+    expect(todoProgress([{ id: "a", title: "x", done: true }, { id: "b", title: "y", done: false }])).toEqual({ done: 1, total: 2 });
+    expect(todoProgress(undefined)).toEqual({ done: 0, total: 0 });
+  });
+  it("finds a step's conversation window", () => {
+    const subs = [s("a", "Draft", { done: true, doneAt: "2026-10-05T10:00:00Z" }), s("b", "Review"), s("c", "Send", { startedAt: "2026-10-09T09:00:00Z", doneAt: "2026-10-10T09:00:00Z" })];
+    expect(stepWindow(subs, "a", "2026-10-01T00:00:00Z")).toEqual({ from: "2026-10-01T00:00:00Z", to: "2026-10-05T10:00:00Z" });
+    expect(stepWindow(subs, "b", "2026-10-01T00:00:00Z")).toEqual({ from: "2026-10-05T10:00:00Z", to: null });
+    const w = stepWindow(subs, "c", "2026-10-01T00:00:00Z");
+    expect(inWindow("2026-10-09T12:00:00Z", w)).toBe(true);
+    expect(inWindow("2026-10-11T12:00:00Z", w)).toBe(false);
+  });
+});
