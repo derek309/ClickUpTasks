@@ -50,7 +50,9 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }:
 }) {
   const colors = ROW_TONE[tone];
   return (
-    <div className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-l-4 bg-surface px-4 py-3 ${colors.box}`}>
+    // One quiet box like the rest of the page: thin border, 5px corners
+    // (Derek, 2026-10-11, one box style). The tile keeps the kind's colour.
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[5px] border bg-surface px-4 py-3">
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[22px] ${colors.tile}`}>{icon}</span>
         <span className="min-w-0">

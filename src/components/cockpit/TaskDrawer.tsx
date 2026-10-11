@@ -904,7 +904,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ? [...(messages ?? [])].filter((m) => m.direction === "inbound" && m.at > openStep.at).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
     : null;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
-    <div className={`mt-4 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
+    // A quiet box like the others; only its left edge has colour, for how
+    // late it is (Derek, 2026-10-11, one box style).
+    <div className={`mt-4 overflow-hidden rounded-r-[5px] border border-l-[3px] bg-surface ${asking ? "border-l-success" : (openStep || followUp) && stepDate.tone === "late" ? "border-l-danger" : (openStep || followUp) && stepDate.tone === "soon" ? "border-l-highlight" : "border-l-accent"}`}>
       {/* No coloured band: the date under the step says how late it is
           (Derek, 2026-10-10: "follow up is very clunky", desktop too). */}
       <div className={`hidden items-center gap-3 px-4 py-2.5 sm:px-5 ${barTone}`}>
@@ -1626,7 +1628,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
     <section className="mt-7" id={title === "Deliverables" ? "task-deliverables" : undefined}>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-[17px] font-bold sm:text-[19px] tracking-[-0.01em]">{title}</h2>
+        {/* The same small label as FOLLOW UP and DESCRIPTION (Derek,
+            2026-10-11, one box style). */}
+        <h2 className="text-[16px] font-bold uppercase tracking-wide text-muted">{title}</h2>
         {right}
       </div>
       {children}
