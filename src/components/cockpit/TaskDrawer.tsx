@@ -503,14 +503,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const ct = contactById(task.contactId) || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
     const owner = sub.onClient ? `${client.name} (the client)` : sub.assigneeId ? userById(sub.assigneeId)?.name ?? "a teammate" : task.assigneeId ? userById(task.assigneeId)?.name ?? null : null;
     const holds = [...new Set([...(withSentHolds(sub).holds ?? []), ...sentReviews(sub)])];
-    const work = holds.flatMap((k) => {
-      if (k.startsWith("att:")) { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? [a.url ? `- ${a.name}: ${a.url}` : `- ${a.name} (${a.kind}, see it with view_task_file, file: ${a.id})`] : []; }
-      const d = k as DeliverableKey;
-      if (!deliverablePresent(d)) return [];
-      const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
-      return [`- ${KIND_LABEL[d]}: ${deliverableName(d)}${r ? ` (${REVIEW_STATUS[r.status] ?? r.status}, version ${r.version})` : ""}`];
-    });
-    const used = await usedForClaude(sub.uses ?? []);
+    // What is on the step comes with its content (Derek, 2026-10-11: "I can
+    // just add it to the step").
+    const used = await usedForClaude(holds);
     const w = stepWindow(task.subtasks, sub.id, task.createdAt);
     const said = (messages ?? []).filter((m) => inWindow(m.at, w)).slice(-6)
       .map((m) => `- ${m.direction === "inbound" ? client.name : "Us"} (${m.channel}): ${htmlToText(m.body).replace(/\s+/g, " ").slice(0, 400)}`);
@@ -523,9 +518,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       `This step (${at + 1} of ${plan.length}): ${sub.title}`,
       `- ${sub.done ? `Done: ${sub.outcome ?? "Done"}` : cur?.id === sub.id ? "The current step" : "Comes later"}${owner ? ` · on ${owner}` : ""}${sub.due ? ` · due ${sub.due}` : ""}`,
       sub.notes && htmlToText(sub.notes).trim() ? `\nDirections:\n${htmlToText(sub.notes).trim()}` : "",
-      used.length ? `\nUse these with the directions:\n${used.join("\n\n")}` : "",
+      used.length ? `\nOn this step (client work, links and files):\n${used.join("\n\n")}` : "",
       sub.todos?.length ? `\nTo do on this step:\n${sub.todos.map((t) => `- [${t.done ? "x" : " "}] ${t.title}`).join("\n")}` : "",
-      work.length ? `\nOn this step (client work, links and files):\n${work.join("\n")}` : "",
       sub.needs?.length ? `\nIt needs: ${sub.needs.join(", ")}` : "",
       said.length ? `\nSaid during this step:\n${said.join("\n")}` : "",
       `\nAll the steps:\n${plan.map((x, i) => `${i + 1}. [${x.done ? "x" : x.id === cur?.id ? ">" : " "}] ${x.title}${x.done && x.outcome ? ` (${x.outcome})` : ""}`).join("\n")}`,
@@ -2063,14 +2057,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
-  // What a step's directions can point at: the task's client work, links and files.
-  const workToUseFor = () => [
-    ...DELIVERABLE_KEYS.filter(deliverablePresent).map((k) => {
-      const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-      return { key: k as string, label: deliverableName(k), note: r ? reviewTone(r.status).label : KIND_LABEL[k], tone: r ? reviewTone(r.status) : undefined };
-    }),
-    ...task.attachments.map((a) => ({ key: attachmentKey(a.id), label: a.name, note: a.url ? "link" : "file" as string | undefined })),
-  ];
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
     const pick = (key: DeliverableKey) => {
@@ -2532,7 +2518,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} useOptions={workToUseFor()} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
