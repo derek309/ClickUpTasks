@@ -17,6 +17,7 @@ import { fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskAction
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
 import { ImageLightbox } from "./TaskWorkItem";
+import { ClientGhlKey } from "./ClientGhlKey";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
 import { RichTextEditor } from "./RichTextEditor";
@@ -1748,6 +1749,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </div>
           )}
           {linkedContactInfo?.ghlContactId && saasRow}
+          {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
         </div>
       )}
       {attachmentsBlock}

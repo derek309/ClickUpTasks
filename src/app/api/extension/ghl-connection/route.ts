@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
-import { ownTokenForLocation } from "@/lib/ghlTokens";
 import { locationFromSaasUrl } from "@/lib/saasUrl";
 
 // A client's own GoHighLevel sub account and its key, for the Brain Box
@@ -15,7 +14,8 @@ import { locationFromSaasUrl } from "@/lib/saasUrl";
 //   agency's;
 // - never a shared sub account (Agency, Directory: the client rows whose id
 //   doesn't start "cl_"), whatever the SaaS link says;
-// - never the shared GHL_TOKEN fallback (ownTokenForLocation).
+// - only a key an admin set for this client (client_ghl_keys), never the
+//   team's own keys (ghl_tokens) or the shared GHL_TOKEN.
 // No sub account, or no key stored for it: 404, which the plugin shows as
 // "not yet". Never cached.
 const noStore = { "Cache-Control": "no-store" };
@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
   const { data: shared } = await supabaseAdmin.from("clients").select("id").not("id", "like", "cl_%").eq("ghl_location_id", locationId).limit(1);
   if (shared?.length) return notYet("That SaaS link points at a shared sub account.");
 
-  const token = await ownTokenForLocation(locationId);
-  if (!token) return notYet(`No GoHighLevel key stored for ${client.name}'s sub account yet.`);
-  return NextResponse.json({ location_id: locationId, token }, { headers: noStore });
+  // Only from client_ghl_keys (supabase/client-ghl-keys.sql), set by an
+  // admin for this client and this sub account; never ghl_tokens, whose
+  // keys are the team's own.
+  const { data: key } = await supabaseAdmin.from("client_ghl_keys").select("location_id, token").eq("client_id", clientId).maybeSingle();
+  if (!key || key.location_id !== locationId) return notYet(`No GoHighLevel key stored for ${client.name}'s sub account yet.`);
+  return NextResponse.json({ location_id: locationId, token: key.token }, { headers: noStore });
 }

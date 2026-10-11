@@ -65,17 +65,6 @@ export async function tokenForLocation(locationId: string): Promise<string | nul
   return process.env.GHL_TOKEN || null;
 }
 
-/** A location's own stored key, and only that: no fall back to the shared
- *  GHL_TOKEN the way tokenForLocation does. For handing a key to a client's
- *  website, which must only ever get its own sub account's (2026-10-10). */
-export async function ownTokenForLocation(locationId: string): Promise<string | null> {
-  const db = await readDb();
-  if (db[locationId]) return db[locationId];
-  const file = readFile();
-  if (file[locationId]) return file[locationId];
-  return readEnv()[locationId] ?? null;
-}
-
 export async function configuredLocations(): Promise<string[]> {
   const db = await readDb();
   return Array.from(new Set([...Object.keys(db), ...Object.keys(readFile()), ...Object.keys(readEnv())]));
