@@ -1684,7 +1684,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
+  // A checklist as a step of its own: its page opens with the to-do box ready.
+  const checklistStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...(meId ? { assigneeId: meId } : {}) }] });
+    setOpenStepPage({ taskId: task.id, id, full: false, checklist: true });
+  };
   const quickPeopleOptions = () => [
+    { key: "checklist", label: "Create Checklist", disabled: false, note: undefined as string | undefined, onPick: checklistStep },
     { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
     ...(onDelegate ? [{ key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: () => askDock("delegate") }] : []),
   ];
@@ -2090,7 +2098,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step whose own page is open, and whether full page (Derek: a slide
   // out to look quickly, full page to work in, like a handoff).
-  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean } | null>(null);
+  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean } | null>(null);
   const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
@@ -2553,9 +2561,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           if (!ps || !openStepPage) return null;
           const isCur = activeStep?.id === ps.id;
           const at = steps.findIndex((x) => x.id === ps.id);
-          const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id } : o)) : undefined;
+          const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} startWithChecklist={!!openStepPage.checklist} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

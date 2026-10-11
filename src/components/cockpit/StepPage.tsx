@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -43,6 +43,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   onNext?: () => void;
   /** Copies this step, with the task around it, for Claude. */
   onCopyForClaude?: () => void;
+  /** Opened from "Create Checklist": the to-do box is out and ready. */
+  startWithChecklist?: boolean;
   /** The client's waiting step: what is out with them, in place of adding work
    *  (nothing gets made while it is with them). */
   outFor?: React.ReactNode;
@@ -98,7 +100,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [todoDraft, setTodoDraft] = useState("");
   const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(canChat ? "client" : "team");
   const [subject, setSubject] = useState(`Re: ${task.title}`);
-  const [showTodos, setShowTodos] = useState(false);
+  const [showTodos, setShowTodos] = useState(startWithChecklist);
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
   const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirSave = useRef<(() => void) | null>(null);
@@ -117,7 +119,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
   // Which box to put the cursor in next, set by a choice, done after drawing.
-  const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(null);
+  const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(startWithChecklist ? { box: "todo", n: 1 } : null);
   useEffect(() => {
     if (!focusNext) return;
     (focusNext.box === "todo" ? todoRef.current : talkRef.current)?.focus();
