@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -886,13 +886,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!next) { setAskNext(task.id); setNextDraft(""); return; }
     // When it started, so its page shows what is said from here on.
     if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
-    // The deliverable the next step makes follows it there from the step
-    // just finished ("Send to Brian again" gets the review back).
+    // Client work still under way moves on to the next step; links, files
+    // and finished work stay where they were used (Derek, 2026-10-11).
     const done = task.subtasks.find((x) => x.id === doneId);
-    if (next.makes && done?.holds?.includes(next.makes)) {
-      const rest = done.holds.filter((k) => k !== next.makes);
+    const moving = carryForward(done?.holds, (k) => {
+      const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
+      return !!r && (r.status === "approved" || r.status === "completed");
+    }).filter((k) => !next.holds?.includes(k));
+    if (done && moving.length) {
+      const rest = (done.holds ?? []).filter((k) => !moving.includes(k as DeliverableKey));
       onPatchSub(doneId, { holds: rest.length ? rest : undefined });
-      onPatchSub(next.id, { holds: [...(next.holds ?? []), next.makes] });
+      onPatchSub(next.id, { holds: [...(next.holds ?? []), ...moving] });
     }
     const status = statusForStep(task.status, stepStage(next, task.assigneeId));
     if (status) onPatch({ status });
@@ -929,7 +933,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       }
     }
     onToggleSub(sid);
-    onPatchSub(sid, { doneAt: new Date().toISOString() });
+    onPatchSub(sid, { doneAt: new Date().toISOString(), outcome: "Done" });
     setAutoDone(null);
     advanceFrom(sid);
   };
@@ -997,7 +1001,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (what === "ok") {
       const byClient = !!from?.onClient;
       const title = byClient ? `${firstName} approved ${name}` : `${name.charAt(0).toUpperCase()}${name.slice(1)} approved`;
-      const made = addApprovalStep(taskRef.current.subtasks, stepId, title, key, () => newId("s_"));
+      const made = addApprovalStep(taskRef.current.subtasks, stepId, title, key, () => newId("s_"), undefined, byClient ? `${firstName} approved` : "Approved");
       if (!made) return;
       if (openStep) setNextStepDone(openStep.id, true);
       const next = made.hasNext ? stepAfter(made.list, made.approvalId) : null;
@@ -1465,7 +1469,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>{sub.title}</span>
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
-              {sub.done && sub.doneAt && <span className="text-muted">Done {formatDue(sub.doneAt.slice(0, 10))}</span>}
+              {sub.done && <span className="text-muted">{sub.outcome ?? "Done"}{sub.doneAt ? ` · ${formatDue(sub.doneAt.slice(0, 10))}` : ""}</span>}
               {/* Each step's own due date (Derek, 2026-10-11). */}
               {(() => {
                 const d = !sub.done ? sub.due ?? null : null;
@@ -1491,14 +1495,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </li>
     );
   };
-  // What closed steps hold stays loaded (so it still says whether it exists,
-  // and its window still opens from elsewhere, like Reminders), drawn in a
-  // holder with no height; the open step's page draws its own.
-  const closedHeld = () => (
-    <div className="h-0 overflow-hidden">
-      {steps.filter((x) => x.id !== pageStepId).map((x) => <div key={x.id}>{stepHeld(x, activeStep?.id === x.id)}</div>)}
-    </div>
-  );
   const offeredTemplates = templatesFor(templates, task.clientId);
   const [savePlan, setSavePlan] = useState<string | null>(null);
   const savePlanAs = (clientId: string | null) => {
@@ -1556,7 +1552,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {progress.total > 0 && (
         <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
       )}
-      {closedHeld()}
       <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
         {steps.map(stepRow)}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
@@ -1825,9 +1820,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     key === "brief" ? "Project instructions"
     : key === "email" ? (task.draftEmail?.subject?.trim() || "Draft email")
     : reviews[key]?.title?.trim() || (key === "doc" ? "Client document" : REVIEW_LINES.find((l) => l.kind === key)?.label ?? key);
-  const unheldKeys = DELIVERABLE_KEYS.filter((k) => !stepHolding(steps, k));
-  const unheldPresent = unheldKeys.some(deliverablePresent);
-  const unheldBlocks = unheldKeys.map((k) => <div key={k}>{deliverableBlock(k, false)}</div>);
+  // Client work lives here, all of it, wherever its step is (Derek,
+  // 2026-10-11: "bring it down below so we can get to it easily"). Each block
+  // is drawn once, here; a step's page lists what is on it with Open.
+  const anyWork = DELIVERABLE_KEYS.some(deliverablePresent);
+  const workBlocks = DELIVERABLE_KEYS.map((k) => {
+    const on = deliverablePresent(k) ? stepHolding(steps, k) : null;
+    return (
+      <div key={k}>
+        {on && <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>}
+        {deliverableBlock(k, !!on && on.id === activeStep?.id)}
+      </div>
+    );
+  });
+  // Opens a piece of client work's own window from anywhere (a step's page).
+  const openWork = (k: DeliverableKey) => {
+    if (k === "doc") setDocStartNonce((n) => n + 1);
+    else if (k === "brief") setBriefStartNonce((n) => n + 1);
+    else if (k === "email") setEmailOpenNonce((n) => n + 1);
+    else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
+  };
   const holdKey = (stepId: string, key: string) => onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, stepId, key) });
   const releaseKey = (key: string) => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, key) });
   // A deliverable made from a step's menu goes on the step first; it is told
@@ -1928,7 +1940,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(j, 0, from);
     onPatchSub(sub.id, { holds: list });
   };
-  const stepHeld = (sub: Subtask, isActive: boolean) => {
+  const stepHeld = (sub: Subtask) => {
     const keys = (sub.holds ?? []).filter((k) =>
       (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
     if (!keys.length) return null;
@@ -1958,7 +1970,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
                       className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                   </span>
-                ) : deliverableBlock(k as DeliverableKey, isActive)}
+                ) : (() => {
+                  const d = k as DeliverableKey;
+                  if (!deliverablePresent(d)) return null;
+                  const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
+                  return (
+                    <span className="flex min-w-0 items-center gap-3 rounded-[5px] border bg-surface px-3 py-2">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
+                        <span className="block text-[16px] text-muted">{KIND_LABEL[d]}{r ? ` · ${r.status === "with_client" ? "With the client" : r.status === "client_submitted" ? "Changes sent" : r.status === "approved" ? "Approved" : r.status === "completed" ? "Completed" : "Draft"}` : ""}</span>
+                      </span>
+                      <button onClick={() => openWork(d)} className="h-9 shrink-0 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">Open</button>
+                      <button onClick={() => releaseKey(d)} title="Take off this step (it stays under Client work)" aria-label={`Take ${deliverableName(d)} off this step`}
+                        className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
+                    </span>
+                  );
+                })()}
               </div>
             </div>
           );
@@ -2183,14 +2210,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Deliverables on no step (Derek: they may sit outside a step). With
           steps and nothing loose, there is no section, but the blocks stay
           mounted so they can say whether they exist. */}
-      {steps.length === 0 || unheldPresent ? section("Client work", (
+      {section("Client work", (
         <>
-          {unheldBlocks}
-          {!unheldPresent && (
-            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client documents, reviews and draft emails on no step show here. Add them to a step from its page." : "Client documents, reviews and draft emails show here."}</p>
+          {workBlocks}
+          {!anyWork && (
+            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client documents, reviews and draft emails show here. Add them from a step's page." : "Client documents, reviews and draft emails show here."}</p>
           )}
         </>
-      ), addMenu) : <div>{unheldBlocks}</div>}
+      ), addMenu)}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {attachmentsBlock}
@@ -2317,7 +2344,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </div>
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
-              held={stepHeld(ps, isCur) ?? undefined}
+              held={stepHeld(ps) ?? undefined}
               handoff={isHandoffStep(ps, task.assigneeId) && !ps.done ? handoffDetails(ps) : undefined}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}

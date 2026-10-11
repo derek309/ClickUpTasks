@@ -853,6 +853,9 @@ export interface Subtask {
   /** A step that is on the client, not the team: their review (Derek,
    *  2026-10-11: "a new step assigned to the client, with waiting"). */
   onClient?: boolean;
+  /** How the step ended (Derek, 2026-10-11: "every step will have an
+   *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
+  outcome?: string;
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
@@ -2869,7 +2872,7 @@ export function addChangesRound(subtasks: Subtask[], reviewStepId: string, clien
     { id: makeId(), title: `Make ${clientFirstName}'s changes`, done: false, stage: "changes_requested", addedFor: key, startedAt: now,
       ...(opts.review ? { holds: [opts.review] } : {}), ...(opts.todos?.length ? { todos: opts.todos } : {}) },
   ];
-  let list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  let list = subtasks.map((s) => (s.id === reviewStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `${clientFirstName} sent changes` } : s));
   if (opts.review) list = releaseFromSteps(list, opts.review);
   list.splice(at + 1, 0, ...round);
   return list;
@@ -2908,7 +2911,7 @@ export function addTellClientStep(subtasks: Subtask[], doneId: string, clientFir
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === doneId);
   if (at < 0) return null;
-  let list = subtasks.map((s) => (s.id === doneId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  let list = subtasks.map((s) => (s.id === doneId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: "Changes done" } : s));
   list = releaseFromSteps(list, "email");
   list.splice(at + 1, 0, { id: makeId(), title: `Let ${clientFirstName} know the changes are done`, done: false, stage: "in_progress", addedFor: key, holds: ["email"], startedAt: now });
   return list;
@@ -2921,7 +2924,7 @@ export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstN
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === sentId);
   if (at < 0) return null;
-  const list = subtasks.map((s) => (s.id === sentId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  const list = subtasks.map((s) => (s.id === sentId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `Email sent to ${clientFirstName}` } : s));
   list.splice(at + 1, 0, { id: makeId(), title: `Check in if ${clientFirstName} hasn't replied`, done: false, stage: "waiting", addedFor: key, due, finishWhen: "reply", startedAt: now });
   return list;
 }
@@ -3068,7 +3071,7 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   const from = subtasks.find((s) => s.id === fromStepId);
   if (!from || from.onClient) return null;
   const at = subtasks.findIndex((s) => s.id === fromStepId);
-  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `Sent to ${clientFirstName} for review` } : s));
   // The review and the email that goes with it both sit on the client's step.
   list = releaseFromSteps(releaseFromSteps(list, review), "email");
   list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName} to review ${name}`, done: false, stage: "waiting", onClient: true,
@@ -3080,15 +3083,15 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
  *  is done and an approval step records it (Derek, 2026-10-11: "there's an
  *  approval"). When the plan has a next step, the approval is just a record
  *  and the next step starts; with none, it is current and asks what's next. */
-export function addApprovalStep(subtasks: Subtask[], fromStepId: string, what: string, key: string, makeId: () => string, now = new Date().toISOString()): { list: Subtask[]; approvalId: string; hasNext: boolean } | null {
+export function addApprovalStep(subtasks: Subtask[], fromStepId: string, what: string, key: string, makeId: () => string, now = new Date().toISOString(), outcome = "Approved"): { list: Subtask[]; approvalId: string; hasNext: boolean } | null {
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === fromStepId);
   if (at < 0) return null;
-  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now } : s));
+  let list = subtasks.map((s) => (s.id === fromStepId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome } : s));
   const id = makeId();
   list.splice(at + 1, 0, { id, title: what, done: false, stage: "approved", addedFor: key, startedAt: now });
   const hasNext = !!stepAfter(list, id);
-  if (hasNext) list = list.map((s) => (s.id === id ? { ...s, done: true, doneAt: now, title: what } : s));
+  if (hasNext) list = list.map((s) => (s.id === id ? { ...s, done: true, doneAt: now, title: what, outcome: "Next step started" } : s));
   else list = list.map((s) => (s.id === id ? { ...s, title: `${what}: what's next?` } : s));
   return { list, approvalId: id, hasNext };
 }
@@ -3100,6 +3103,14 @@ export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, cl
   const at = subtasks.findIndex((s) => s.id === clientStepId);
   if (at < 0) return null;
   const list = [...subtasks];
-  list.splice(at, 0, { id: makeId(), title: `Review email sent to ${clientFirstName}`, done: true, doneAt: now, stage: "waiting", addedFor: `emailed:${clientStepId}:${now}`, startedAt: now });
+  list.splice(at, 0, { id: makeId(), title: `Review email sent to ${clientFirstName}`, done: true, doneAt: now, stage: "waiting", addedFor: `emailed:${clientStepId}:${now}`, startedAt: now, outcome: "Sent" });
   return list;
+}
+
+/** What a finished step hands to the next: its client work still under way
+ *  (a document or review not yet approved, instructions, a draft email).
+ *  Links and files stay where they were used (Derek, 2026-10-11: "carry over
+ *  what is being done to move forward"). */
+export function carryForward(holds: string[] | undefined, finished: (key: DeliverableKey) => boolean): DeliverableKey[] {
+  return (holds ?? []).filter((k): k is DeliverableKey => ["doc", "image", "page", "video", "brief", "email"].includes(k) && !finished(k as DeliverableKey));
 }

@@ -204,3 +204,15 @@ describe("the document's stage as steps", () => {
     expect(out.map((x) => [x.title, x.done])).toEqual([["Create", true], ["Review email sent to Derek", true], ["Waiting on Derek", false]]);
   });
 });
+
+import { carryForward } from "./data";
+
+describe("outcomes and carrying work forward", () => {
+  it("a review sent records its outcome", () => {
+    const out = addClientReviewStep([s("a", "Write")], "a", "Derek", "x", "doc", null, () => "n")!;
+    expect(out[0].outcome).toBe("Sent to Derek for review");
+  });
+  it("carries unfinished client work, not links, files or approved work", () => {
+    expect(carryForward(["doc", "page", "att:1", "email"], (k) => k === "page")).toEqual(["doc", "email"]);
+  });
+});

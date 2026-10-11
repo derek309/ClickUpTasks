@@ -268,7 +268,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
                   onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                   className="-mx-1 w-full resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
-                  <span>{sub.done ? `Done${sub.doneAt ? ` ${timeAgo(sub.doneAt)}` : ""}` : isCurrent ? "The current step" : "Comes later"}</span>
+                  <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : isCurrent ? "The current step" : "Comes later"}</span>
                   {sub.assigneeId && <span>· on {userById(sub.assigneeId)?.name ?? "a teammate"}</span>}
                 </div>
                 {controls}
