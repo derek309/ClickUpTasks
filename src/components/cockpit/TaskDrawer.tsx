@@ -7,7 +7,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, followUpMoves, doneSteps, dateQuickPicks, TASK_ACTION_META,
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, STEP_STAGES, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -27,6 +27,7 @@ import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, type ReviewReminders } from "./TaskDocument";
 import { HandoffPage } from "./HandoffPage";
+import { StepPage } from "./StepPage";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
 // when the app loads, because the app rewrites the address as you move around,
@@ -887,6 +888,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const advanceFrom = (doneId: string) => {
     const next = stepAfter(task.subtasks, doneId);
     if (!next) { setAskNext(task.id); setNextDraft(""); return; }
+    // When it started, so its page shows what is said from here on.
+    if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
     const handoff = isHandoffStep(next, task.assigneeId);
     if (next.due || handoff) setNewStep(next.title, next.due ?? null, handoff ? `handoff:${next.id}` : null);
     const patch: Partial<Task> = {};
@@ -901,8 +904,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // never blocks (Derek, 2026-10-11: "warn only").
     const sub = task.subtasks.find((x) => x.id === sid);
     const missing = sub ? missingNeeds(sub) : [];
-    if (missing.length && !window.confirm(`"${sub!.title}" still needs: ${missing.join(", ")}. Mark it done anyway?`)) return;
+    const openTodos = (sub?.todos ?? []).filter((t) => !t.done).length;
+    const ask = [missing.length ? `still needs: ${missing.join(", ")}` : null, openTodos ? `has ${openTodos} ${openTodos === 1 ? "to do" : "to dos"} open` : null].filter(Boolean).join(", and ");
+    if (ask && !window.confirm(`"${sub!.title}" ${ask}. Mark it done anyway?`)) return;
     onToggleSub(sid);
+    onPatchSub(sid, { doneAt: new Date().toISOString() });
     if (openStep) setNextStepDone(openStep.id, true);
     setAutoDone(null);
     advanceFrom(sid);
@@ -1440,11 +1446,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </span>
           </div>
           {sub.addedFor && !sub.done && <span className="-mt-1.5 text-[16px] text-muted">Added when {firstName} sent changes</span>}
-          {isActive && followBox}
-          {!sub.done && stepPlanBits(sub, isActive)}
-          {stepHeld(sub, isActive)}
-          {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
-          {isActive && clientChangesList}
+          {(() => {
+            // The step at a glance (the dashboard, Derek 2026-10-11): when it
+            // was done, its to-dos, and new words from the client while it ran.
+            const tp = todoProgress(sub.todos);
+            const w = stepWindow(task.subtasks, sub.id, task.createdAt);
+            const fresh = (messages ?? []).filter((m) => m.direction === "inbound" && !m.read && inWindow(m.at, w)).length;
+            const facts = [
+              sub.done && sub.doneAt ? `Done ${formatDue(sub.doneAt.slice(0, 10))}` : null,
+              tp.total ? `${tp.done} of ${tp.total} to do` : null,
+            ].filter(Boolean);
+            return (
+              <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px]">
+                {facts.map((f) => <span key={f} className="text-muted">{f}</span>)}
+                {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
+                <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} className="font-semibold text-accent hover:underline">Open ›</button>
+              </div>
+            );
+          })()}
+          {pageStepId !== sub.id && (<>
+            {isActive && followBox}
+            {!sub.done && stepPlanBits(sub, isActive)}
+            {stepHeld(sub, isActive)}
+            {handoff && !sub.done && (isActive || upcoming) && handoffDetails(sub)}
+            {isActive && clientChangesList}
+          </>)}
         </div>
       </li>
     );
@@ -1775,6 +1801,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: list });
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   const [stepMenuFor, setStepMenuFor] = useState<string | null>(null);
+  // The step whose own page is open, and whether full page (Derek: a slide
+  // out to look quickly, full page to work in, like a handoff).
+  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean } | null>(null);
+  const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
   // The step's +: make a deliverable on it, add a new link or file, or put
   // something the task already has on it (brief, section 6).
   const stepAddMenu = (sub: Subtask) => {
@@ -2212,6 +2242,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         )}
         {/* Floating at the bottom of the drawer so you can log from anywhere
             in the scroll (Derek, 2026-09-14: inline "it will get lost"). */}
+        {(() => {
+          const ps = pageStepId ? task.subtasks.find((x) => x.id === pageStepId) : null;
+          if (!ps || !openStepPage) return null;
+          const isCur = activeStep?.id === ps.id;
+          return (
+            <StepPage task={task} sub={ps} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
+              onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
+              onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
+              onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
+              followBox={isCur ? followBox : undefined}
+              planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
+              held={stepHeld(ps, isCur) ?? undefined}
+              handoff={isHandoffStep(ps, task.assigneeId) && !ps.done ? handoffDetails(ps) : undefined}
+              messages={messages ?? []} actions={actions}
+              canChat={hasMessaging && !!onSendTaskMessage}
+              onSendChat={onSendTaskMessage ? (body) => onSendTaskMessage("chat", "", body) : undefined}
+              onAddNote={(body) => logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
+                body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })} />
+          );
+        })()}
         {(() => {
           const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && !!x.assigneeId) : null;
           return hs ? (
