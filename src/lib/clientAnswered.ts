@@ -6,6 +6,7 @@
 // open and its date still days away until somebody happened to look. The
 // routes where the answer actually arrives call this, so the task is right
 // whether or not anyone is watching.
+import { stepsOnClientReply } from "./stepsServer";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { todayPacific } from "./data";
 
@@ -27,4 +28,6 @@ export async function clientAnsweredOnTask(taskId: string | null, what: string):
   // Follow up column is where people look for what needs them now.
   const today = todayPacific();
   await supabaseAdmin.from("tasks").update({ follow_up_at: today, updated_by: null }).eq("id", taskId).gt("follow_up_at", today);
+  // A step waiting on their reply ("Check in if they haven't replied") is done.
+  if (what === "reply") await stepsOnClientReply(taskId).catch(() => false);
 }

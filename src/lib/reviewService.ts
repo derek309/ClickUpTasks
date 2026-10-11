@@ -3,6 +3,7 @@
 // the actor from the signed in teammate (teamActor); Claude over MCP acts as its own
 // member (mcpReviewServices.ts). So every rule lives here once: one live review per
 // task and kind, the approval lock, versions, the 30 day restore and sending.
+import { stepsOnReviewApproved, stepsOnReviewChanges, stepsOnReviewSent } from "./stepsServer";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { appendTaskEvent, liveDocument, linkState, mintDocLink, setWorkingFile, CHANGED_MEANWHILE, teamSend, type ReviewActor, type TeamTask } from "./taskDocumentServer";
@@ -76,6 +77,13 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
   // leave none. Only on the approval itself, not on a re-pick of Approved.
   if (done.ok && approving && actor.memberId) {
     await appendTaskEvent(taskId, reviewApprovedByTeamEvent(kindNoun(kind), (doc.version as number) ?? 0), actor.memberId);
+  }
+  // The steps follow the stage, whether or not anyone has the task open.
+  if (done.ok) {
+    const v = (doc.version as number) ?? 0;
+    if (approving) await stepsOnReviewApproved(taskId, kind, v, false).catch(() => false);
+    else if (stage === "client_submitted") await stepsOnReviewChanges(taskId, kind, doc.id as string, v).catch(() => false);
+    else if (stage === "with_client") await stepsOnReviewSent(taskId, kind).catch(() => false);
   }
   return done;
 }
@@ -289,5 +297,7 @@ export async function sendReview(
   const outcome = await teamSend(doc.id, baseVersion, actor);
   if (!outcome.ok) return { ok: false, status: outcome.status, error: outcome.error, current: outcome.current ?? null };
   const url = link.live ? link.url : await mintDocLink(doc.id, task, actor, origin);
+  // The steps move on the server too: our step done, the client's waiting step started.
+  await stepsOnReviewSent(task.id, kind).catch(() => false);
   return { ok: true, version: outcome.version, url, documentId: doc.id };
 }

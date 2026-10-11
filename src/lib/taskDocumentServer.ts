@@ -15,6 +15,7 @@
 // Every client write goes through clientPublish, and every publish goes through
 // the database function, which locks the document row and refuses a version
 // built on stale text. Nothing here writes document data onto the tasks row.
+import { stepsOnReviewApproved, stepsOnReviewChanges } from "./stepsServer";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "./supabaseAdmin";
@@ -355,6 +356,10 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   // Either answer is news, so a follow up date still days away must not hide
   // it; an approval also finishes a follow up that was waiting on it.
   await clientAnsweredOnTask(scope.taskId, approved ? `approved:${scope.kind}` : "changes");
+  // The steps move with the answer, whether or not anyone has the task open.
+  // Keyed on the document's own version, as the task page keys them, so the two never both add one.
+  if (approved) await stepsOnReviewApproved(scope.taskId, scope.kind, version, true).catch(() => false);
+  else await stepsOnReviewChanges(scope.taskId, scope.kind, scope.documentId, version).catch(() => false);
 
   // Named by the review, so a task's document, image review and HTML review tell apart in an inbox.
   await notifyOwnerOfClientDoc(scope, {
@@ -388,6 +393,8 @@ export async function clientCommentAsksForChanges(scope: DocScope): Promise<bool
   );
   await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", scope.taskId);
   await clientAnsweredOnTask(scope.taskId, "changes");
+  const { data: d } = await supabaseAdmin.from("task_documents").select("version").eq("id", scope.documentId).maybeSingle();
+  await stepsOnReviewChanges(scope.taskId, scope.kind, scope.documentId, Number((d as { version?: number } | null)?.version ?? 0)).catch(() => false);
   return true;
 }
 
