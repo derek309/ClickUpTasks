@@ -8,7 +8,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, namedForWork, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1669,9 +1669,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // step"): a new step named after the work, holding it (the one already made,
   // or a new one started).
   const quickStep = (key: DeliverableKey) => {
-    const what = ({ doc: "document", image: "image", page: "HTML", video: "video" } as Partial<Record<DeliverableKey, string>>)[key] ?? KIND_LABEL[key];
     const id = newId("s_");
-    const list = holdOnStep([...taskRef.current.subtasks, { id, title: `Create ${what} for review`, done: false, ...(meId ? { assigneeId: meId } : {}) }], id, key);
+    const list = holdOnStep([...taskRef.current.subtasks, { id, title: quickStepName(key) ?? KIND_LABEL[key], done: false, ...(meId ? { assigneeId: meId } : {}) }], id, key);
     if (asking) setAskNext(null);
     onPatch({ subtasks: list });
     if (!deliverablePresent(key)) setPendingStart(key);
@@ -1686,11 +1685,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
   const quickPeopleOptions = () => [
-    ...(onDelegate ? [{ key: "delegate", label: "Delegate to a teammate", disabled: false, note: undefined as string | undefined, onPick: () => askDock("delegate") }] : []),
-    { key: "followup", label: `Follow up with ${firstName}`, disabled: false, note: "in 3 days" as string | undefined, onPick: followUpStep },
+    { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
+    ...(onDelegate ? [{ key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: () => askDock("delegate") }] : []),
   ];
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
-    key: k, label: ({ doc: "Document", image: "Image", page: "HTML", video: "Video" } as const)[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
+    key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
   const renderPlan = () => (
     <section className="mt-8" aria-labelledby="task-steps">
@@ -1758,8 +1757,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {quickWorkOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
                 <div role="menu" aria-label="Quick step" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
-                  <div className="truncate px-2.5 py-1.5 text-[16px] text-muted">Add a step:</div>
-                  {quickWork.map((o) => (
+                                    {quickWork.map((o) => (
                     <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
                       <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}

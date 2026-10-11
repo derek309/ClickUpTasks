@@ -3137,8 +3137,13 @@ export function addEmailSentRecord(subtasks: Subtask[], clientStepId: string, _c
  *  named is never renamed. */
 export function namedForWork(sub: Subtask, key: DeliverableKey): string | null {
   if (!sub.addedFor || !/: what's next\?$/.test(sub.title)) return null;
-  const what = ({ doc: "document", image: "image", page: "HTML", video: "video" } as Partial<Record<DeliverableKey, string>>)[key];
-  return what ? `Create ${what} for review` : null;
+  return quickStepName(key);
+}
+/** The name of a step that makes this work, in Derek's words (2026-10-11):
+ *  "Create HTML Review". */
+export function quickStepName(key: DeliverableKey): string | null {
+  const what = ({ doc: "Document", image: "Image", page: "HTML", video: "Video" } as Partial<Record<DeliverableKey, string>>)[key];
+  return what ? `Create ${what} Review` : null;
 }
 
 /** What a finished step hands to the next: its client work still under way

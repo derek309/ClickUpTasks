@@ -227,7 +227,7 @@ import { namedForWork } from "./data";
 
 describe("a what's next step named by what it makes", () => {
   it("takes the name of the work picked", () => {
-    expect(namedForWork(s("a", "Derek approved the document: what's next?", { addedFor: "ok:doc:1" }), "page")).toBe("Create HTML for review");
+    expect(namedForWork(s("a", "Derek approved the document: what's next?", { addedFor: "ok:doc:1" }), "page")).toBe("Create HTML Review");
   });
   it("never renames a step someone named", () => {
     expect(namedForWork(s("a", "Build the email", { addedFor: "ok:doc:1" }), "page")).toBeNull();
