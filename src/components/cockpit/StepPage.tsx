@@ -16,7 +16,7 @@ import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
-export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen,
+export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
   controls, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
@@ -30,6 +30,8 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
   onReopen: () => void;
+  /** Deletes the step; at the very bottom of its page (Derek, 2026-10-11). */
+  onDelete?: () => void;
   /** The step's date, who has it, its stage, attach and delete. */
   controls?: React.ReactNode;
   /** What "Add client work" offers, besides a checklist and a text: a
@@ -292,6 +294,11 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
             </div>
             <div className={`min-w-0 ${full ? "mt-8 md:mt-0" : "mt-8"}`}>{conversation}</div>
           </div>
+          {onDelete && (
+            <div className="mx-auto mt-10 flex w-full max-w-[1280px] justify-end border-t px-4 pb-8 pt-4 sm:px-8">
+              <button onClick={onDelete} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>
+            </div>
+          )}
         </div>
       </div>
     </>

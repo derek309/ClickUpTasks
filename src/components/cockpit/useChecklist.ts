@@ -87,7 +87,7 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
       title: isDelegation ? `Take this back from ${who}?` : `Delete “${s.title || "this checklist item"}”?`,
       message: isDelegation
         ? `${who} loses access to this task${lastOne ? ", and it leaves the Delegated stage" : ""}. What they were asked to do is deleted with it, and this can't be undone.`
-        : "This can't be undone.",
+        : "You can undo this right after.",
       confirmLabel: isDelegation ? "Take it back" : "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
@@ -96,7 +96,16 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
         // that means it is with someone else.
         if (lastOne && t.status === "delegated") patch.status = "in_progress";
         update(taskId, patch, { remove: subId });
-        if (isDelegation) pushToast(`Taken back from ${who}`);
+        // Undo puts it back where it was (Derek, 2026-10-11: everything restorable).
+        const at = t.subtasks.findIndex((x) => x.id === subId);
+        const undo = () => {
+          const cur = tasksRef.current.find((x) => x.id === taskId);
+          if (!cur || cur.subtasks.some((x) => x.id === subId)) return;
+          const list = [...cur.subtasks];
+          list.splice(Math.min(at, list.length), 0, s);
+          update(taskId, { subtasks: list });
+        };
+        pushToast(isDelegation ? `Taken back from ${who}` : `Deleted "${s.title || "step"}"`, { label: "Undo", run: undo });
       },
     });
   };

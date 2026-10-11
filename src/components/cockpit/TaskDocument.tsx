@@ -1051,7 +1051,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const icon = KIND_ICON[kind];
   const row = (
     <WorkItemRow tone={kind} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}{linkToggleButton}</>}
-      onOpen={() => switchView({ full: true })} />
+      onOpen={() => switchView({ full: true })} onDelete={() => void deleteDocument()} />
   );
   const openList = comments.filter((c) => !c.completedAt);
   const openCommentsBlock = !showOpenComments || openList.length === 0 ? null : (

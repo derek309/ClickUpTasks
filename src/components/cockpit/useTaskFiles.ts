@@ -135,13 +135,21 @@ export function useTaskFiles({ tasks, pushToast, setUploadProgress, update, setC
     if (!t) return;
     setConfirmDialog({
       title: `Delete “${att.name}”?`,
-      message: "This permanently deletes the file. It can't be undone.",
+      message: "You can undo this for a few seconds after.",
       confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
-        if (att.path) deleteTaskFile(att.path);
         update(id, { attachments: t.attachments.filter((a) => a.id !== att.id) });
-        pushToast("Attachment removed");
+        // The stored file is erased only once Undo has passed (Derek,
+        // 2026-10-11: everything restorable).
+        let undone = false;
+        const timer = att.path ? setTimeout(() => { if (!undone) deleteTaskFile(att.path!); }, 15_000) : null;
+        pushToast(`Removed "${att.name}"`, { label: "Undo", run: () => {
+          undone = true;
+          if (timer) clearTimeout(timer);
+          const cur = tasks.find((x) => x.id === id) ?? t;
+          if (!cur.attachments.some((a) => a.id === att.id)) update(id, { attachments: [...cur.attachments, att] });
+        } });
       },
     });
   };

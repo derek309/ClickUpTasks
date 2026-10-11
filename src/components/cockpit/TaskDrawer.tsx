@@ -726,6 +726,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           rest (Derek, 2026-10-11: "why can't we edit the reminders"). */}
       {reminders.length > 0 ? (
         <span>. Reminders:{" "}
+          {/* Inline, so the sentence runs on after it instead of breaking. */}
+          <span className="inline-block">
           <ActionMenu title="Reminder emails to the client" triggerClassName={`${word} rounded hover:bg-background`}
             label={reminders.length === 1 ? reminders[0].summary : `${reminders.length} reviews`}
             items={reminders.flatMap((r) => {
@@ -738,6 +740,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 r.canRestart && { label: `${pre}Restart reminders`, onClick: r.restart },
               ];
             })} />
+          </span>
         </span>
       ) : null}
       {/* The follow up is a date in the sentence (Derek, 2026-10-11: "we only
@@ -1526,9 +1529,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
         }} />
       {stagePicker(sub, isActive)}
-      <span className="flex-1" />
-      <button onClick={() => { setOpenStepPage(null); onDeleteSub(sub.id); }} title={isHandoffStep(sub, task.assigneeId) ? "Take this back" : "Delete this step"}
-        className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>
     </div>
   );
   // A step on the task: one line that says what is happening inside it, the
@@ -1867,6 +1867,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!hasMessaging) return false;
     const now = new Date().toISOString();
     onPatch({ draftEmail: { ...buildReviewEmail({ ...review, greetName: messageDest?.name }), createdAt: now, updatedAt: now } });
+    // The review's email sits on the same step as the review (Derek, 2026-10-11).
+    const holder = stepHolding(task.subtasks, review.kind);
+    const emailOn = stepHolding(task.subtasks, "email");
+    if (holder && emailOn?.id !== holder.id) onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, holder.id, "email") });
     setEmailOpenNonce((n) => n + 1);
     return true;
   };
@@ -2000,27 +2004,53 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     );
   };
+  // Client work on a step sorts by dragging its grip (Derek, 2026-10-11):
+  // the order is the step's own list, documents, reviews, links and files.
+  const [dragHeld, setDragHeld] = useState<{ stepId: string; key: string; grabbed: boolean } | null>(null);
+  const [dropHeld, setDropHeld] = useState<string | null>(null);
+  const moveHeld = (sub: Subtask, from: string, to: string) => {
+    const list = [...(sub.holds ?? [])];
+    const i = list.indexOf(from), j = list.indexOf(to);
+    if (i < 0 || j < 0 || i === j) return;
+    list.splice(i, 1);
+    list.splice(j, 0, from);
+    onPatchSub(sub.id, { holds: list });
+  };
   const stepHeld = (sub: Subtask, isActive: boolean) => {
-    const keys = sub.holds ?? [];
-    const deliverables = keys.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k));
-    const assets = keys.filter((k) => k.startsWith("att:")).map((k) => task.attachments.find((a) => attachmentKey(a.id) === k)).filter((a): a is Attachment => !!a);
-    if (!deliverables.length && !assets.length) return null;
+    const keys = (sub.holds ?? []).filter((k) =>
+      (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
+    if (!keys.length) return null;
+    const sortable = keys.length > 1;
     return (
       <div className="flex flex-col gap-2">
-        {deliverables.map((k) => <div key={k}>{deliverableBlock(k, isActive)}</div>)}
-        {assets.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {assets.map((a) => (
-              <span key={a.id} className="group/asset inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
-                {a.url
-                  ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
-                  : <button onClick={() => (a.kind === "image" ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
-                <button onClick={() => releaseKey(attachmentKey(a.id))} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
-                  className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
-              </span>
-            ))}
-          </div>
-        )}
+        {keys.map((k) => {
+          const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
+          const dragging = dragHeld?.stepId === sub.id && dragHeld.key === k;
+          return (
+            <div key={k} draggable={dragging && dragHeld?.grabbed}
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", k); }}
+              onDragEnd={() => { setDragHeld(null); setDropHeld(null); }}
+              onDragOver={(e) => { if (dragHeld?.stepId === sub.id && dragHeld.key !== k) { e.preventDefault(); setDropHeld(k); } }}
+              onDrop={(e) => { if (dragHeld?.stepId !== sub.id) return; e.preventDefault(); moveHeld(sub, dragHeld.key, k); setDragHeld(null); setDropHeld(null); }}
+              className={`group/held flex items-center gap-1.5 rounded-[5px] ${dropHeld === k ? "ring-2 ring-accent/50" : ""} ${dragging && dragHeld?.grabbed ? "opacity-50" : ""}`}>
+              {sortable && (
+                <span onMouseDown={() => setDragHeld({ stepId: sub.id, key: k, grabbed: true })} onMouseUp={() => setDragHeld(null)} title="Drag to sort" aria-hidden
+                  className="hidden w-5 shrink-0 cursor-grab select-none text-center text-[16px] text-muted opacity-40 group-hover/held:opacity-100 active:cursor-grabbing sm:block">⋮⋮</span>
+              )}
+              <div className="min-w-0 flex-1">
+                {a ? (
+                  <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
+                    {a.url
+                      ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
+                      : <button onClick={() => (a.kind === "image" ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
+                    <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
+                      className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
+                  </span>
+                ) : deliverableBlock(k as DeliverableKey, isActive)}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -2363,6 +2393,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
+              onDelete={() => { setOpenStepPage(null); onDeleteSub(ps.id); }}
               controls={stepControls(ps, isCur)}
               addOptions={stepAddOptions(ps)}
               canText={!!messageDest?.phone && !!onSendTaskMessage}

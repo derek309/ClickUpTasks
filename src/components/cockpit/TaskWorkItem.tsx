@@ -38,7 +38,7 @@ const ROW_TONE = {
   brief: { box: "border-l-accent", tile: "bg-highlight-soft" },
 } as const;
 
-export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }: {
+export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelete, deleteLabel = "Delete", tone }: {
   icon: string;
   title: string;
   badge?: React.ReactNode;
@@ -46,6 +46,10 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }:
   /** Quiet buttons before Open, like Copy link. */
   actions?: React.ReactNode;
   onOpen: () => void;
+  /** Delete from the row (Derek, 2026-10-11). Whoever passes it says how it
+   *  comes back: a review goes to its Restore list, a draft has Undo. */
+  onDelete?: () => void;
+  deleteLabel?: string;
   tone: keyof typeof ROW_TONE;
 }) {
   const colors = ROW_TONE[tone];
@@ -67,6 +71,10 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, tone }:
         {actions}
         {/* Quiet like its neighbours: the task's one filled button is Mark done on its next step. */}
         <button onClick={onOpen} className="rounded-lg border bg-surface px-5 py-1.5 text-[16px] font-semibold text-foreground transition hover:bg-background">Open</button>
+        {onDelete && (
+          <button onClick={onDelete} title={deleteLabel} aria-label={`${deleteLabel}: ${title}`}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /></button>
+        )}
       </span>
     </div>
   );

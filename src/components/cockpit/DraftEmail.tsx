@@ -28,7 +28,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
   openNonce: number;
   /** Open as soon as the task opens: a draft picked from the client's page. */
   startOpen?: boolean;
-  pushToast: (text: string) => void;
+  pushToast: (text: string, action?: { label: string; run: () => void }) => void;
   /** Writes the email with AI from an instruction and the draft's own context. */
   onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
 }) {
@@ -60,7 +60,9 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
       {/* A new draft's subject starts as the task's title; the row says what it is
           until the subject says more (Derek, 2026-09-13). */}
       <WorkItemRow tone="email" icon="✉️" title={draft.subject.trim() && draft.subject.trim() !== task.title.trim() ? draft.subject.trim() : "Draft email"} badge={badge} meta={meta}
-        onOpen={() => setFull(true)} />
+        onOpen={() => setFull(true)}
+        // Deleted from the row with Undo, so a draft is never lost by a slip.
+        onDelete={() => { const kept = draft; onPatch({ draftEmail: null }); pushToast("Draft email deleted", { label: "Undo", run: () => onPatch({ draftEmail: kept }) }); }} />
       {open && (
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
