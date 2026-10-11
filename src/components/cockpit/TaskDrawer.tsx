@@ -8,7 +8,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, namedForWork, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, namedForWork, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1744,6 +1744,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
                     </button>
                   ))}
+                  {/* Saved plans too: their steps go on the end (Derek, 2026-10-11:
+                      "we can add some in templates"). */}
+                  {offeredTemplates.length > 0 && (<>
+                    <div className="mt-1 border-t px-2.5 pb-1 pt-2 text-[16px] text-muted">From a template:</div>
+                    {offeredTemplates.map((t) => (
+                      <button key={t.id} role="menuitem" onClick={() => { setQuickWorkOpen(false); onApplyTemplate(t.id); }}
+                        className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background">
+                        <span className="min-w-0 flex-1 truncate">{t.name}</span><span className="shrink-0 text-muted">{templateSteps(t).length} steps</span>
+                      </button>
+                    ))}
+                  </>)}
                 </div>
               </>)}
             </span>
