@@ -167,6 +167,10 @@ type LastUndo = { id: string; run: () => void; at: number };
 function rememberUndo(ref: { current: LastUndo | null }, id: string, run: () => void) { ref.current = { id, run, at: Date.now() }; }
 const undoTooOld = (at: number) => Date.now() - at > 60_000;
 
+/** The time, for event handlers (outside the component so the render purity
+ *  rule can tell it's never read while drawing). */
+const clockNow = () => Date.now();
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Your sign in address, which is your Gmail: shown as From in the Inbox.
   const [myEmail, setMyEmail] = useState<string | null>(null);
@@ -367,7 +371,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // If an admin turns DMs off while someone's actually looking at a thread,
   // don't leave them stranded on a now-hidden feature — closing the thread
   // drops them back to the view they came from.
-  useEffect(() => { if (!dmEnabled && dmUserId !== null) setDmUserId(null); }, [dmEnabled, dmUserId]);
+  // (Done while rendering, with the other navigation resets below.)
   // Declared up here rather than down with the other layout state because
   // goToView (just below) closes over it — every navigation also dismisses
   // the mobile sidebar.
@@ -512,12 +516,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // keystroke-driven task writes make a timing-window ledger risky).
   const clientWriteLedgerRef = useRef<Map<string, number>>(new Map());
   const CLIENT_ECHO_TTL_MS = 5000;
-  const markOwnClientWrite = (id: string) => clientWriteLedgerRef.current.set(id, Date.now());
+  const markOwnClientWrite = (id: string) => clientWriteLedgerRef.current.set(id, clockNow());
   const isOwnClientEcho = (id: string) => {
     const ts = clientWriteLedgerRef.current.get(id);
     if (ts === undefined) return false;
     clientWriteLedgerRef.current.delete(id);
-    return Date.now() - ts < CLIENT_ECHO_TTL_MS;
+    return clockNow() - ts < CLIENT_ECHO_TTL_MS;
   };
 
   const setClientStatus = (id: string, status: ClientStatus) => {
@@ -805,17 +809,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleHideDone = () => setHideDone(!hideDone);
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => afterFirstFrame(() => setDrawerFull(localStorage.getItem("cut_drawerFull") === "1")), []);
-  // Drop the project filter whenever we leave its client (or enter My Work).
-  useEffect(() => { setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView && !settingsView ? p : null)); }, [activeClient, myWork, personalView, inboxView, settingsView, projects]);
-  // Clear the folder-rail scope whenever the client/view changes.
-  useEffect(() => { setActiveFolder(null); }, [activeClient, myWork, personalView, inboxView, dirView]);
-  // A bulk selection is scoped to whatever list is on screen — switching
-  // clients/views leaves the selected ids referring to now-invisible tasks,
-  // which would make the floating bulk-action bar silently apply to rows
-  // the user can no longer see. Clear it on any navigation.
-  useEffect(() => { setSelectedTaskIds(new Set()); }, [activeClient, activeProject, myWork, personalView, inboxView]);
-  // Links/Notes/health are single-client concepts — always land back on Tasks when the active client changes.
-  useEffect(() => { setClientTab("tasks"); }, [activeClient, myWork]);
+  // Navigation resets, made while rendering when what they hang on changes
+  // ("adjusting state when a prop changes"), not in effects that drew the
+  // screen twice for each (2026-10-11, the last lint errors here). Same
+  // rules as before:
+  // - leaving a project's client (or entering My Work) drops the project filter;
+  // - the folder-rail scope clears when the client or view changes;
+  // - a bulk selection is scoped to the list on screen, so any navigation
+  //   clears it rather than leave the bar acting on rows you can't see;
+  // - Links/Notes/health are one client's, so a new client lands on Tasks;
+  // - DMs switched off while one is open closes it.
+  const navNow = { activeClient, myWork, personalView, inboxView, settingsView, dirView, activeProject, projects, dmEnabled, dmUserId };
+  const [navPrev, setNavPrev] = useState(navNow);
+  const navChanged = (...keys: (keyof typeof navNow)[]) => keys.some((k) => navPrev[k] !== navNow[k]);
+  if (navChanged("activeClient", "myWork", "personalView", "inboxView", "settingsView", "dirView", "activeProject", "projects", "dmEnabled", "dmUserId")) {
+    setNavPrev(navNow);
+    if (navChanged("activeClient", "myWork", "personalView", "inboxView", "settingsView", "projects"))
+      setActiveProject((p) => (p && projects.find((x) => x.id === p)?.clientId === activeClient && !myWork && !personalView && !inboxView && !settingsView ? p : null));
+    if (navChanged("activeClient", "myWork", "personalView", "inboxView", "dirView")) setActiveFolder(null);
+    if (navChanged("activeClient", "activeProject", "myWork", "personalView", "inboxView")) setSelectedTaskIds(new Set());
+    if (navChanged("activeClient", "myWork")) setClientTab("tasks");
+    if (!dmEnabled && dmUserId !== null) setDmUserId(null);
+  }
 
   // --- Deep-link URL sync ---------------------------------------------------
   const currentNav = (): NavState => ({
@@ -1033,7 +1048,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         setLoading(false);
       }
     })();
-  }, []);
+  }, [me.id]); // you, for the start load; the same for the whole sign in
 
   // Map indices — clientById/projectById/tasksById used to be linear .find()
   // scans over the full arrays, called from many places per render (often
