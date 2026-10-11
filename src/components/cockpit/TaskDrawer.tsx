@@ -978,6 +978,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (status) onPatch({ status });
   };
   // Mark done on the current step, or its tick: one action, not two.
+  // The "changes are done" email takes the task's draft slot; a draft already
+  // there (an older review email, or one being written) is replaced only on a
+  // yes (Derek, 2026-10-11: it kept the old "Please review" draft).
+  const takeDraftForChanges = () => {
+    const cur = task.draftEmail;
+    if (!cur || !htmlToText(cur.body).trim()) return true;
+    return window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with the "changes are done" email?`);
+  };
   const completeStep = (sid: string) => {
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
@@ -993,7 +1001,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The plan's next step already makes the email: it gets the draft and
     // starts as usual (advanceFrom), no extra step.
     if (telling === "use" && sub) {
-      if (!task.draftEmail) onPatch({ draftEmail: changesDoneEmail(sub) });
+      if (takeDraftForChanges()) onPatch({ draftEmail: changesDoneEmail(sub) });
       const next = stepAfter(task.subtasks, sid);
       // Only when no step holds an email yet: each sits on one step.
       if (next && !stepHolding(task.subtasks, "email")) onPatchSub(next.id, { holds: [...(next.holds ?? []), "email"] });
@@ -1002,7 +1010,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const list = addTellClientStep(task.subtasks, sid, firstName, () => newId("s_"));
       if (list) {
         const status = statusForStep(task.status, "in_progress");
-        onPatch({ subtasks: list, ...(status ? { status } : {}), ...(task.draftEmail ? {} : { draftEmail: changesDoneEmail(sub) }) });
+        onPatch({ subtasks: list, ...(status ? { status } : {}), ...(takeDraftForChanges() ? { draftEmail: changesDoneEmail(sub) } : {}) });
         setAutoDone(null);
         pushToast(`Next: let ${firstName} know. The email is drafted for you to read.`);
         return;
