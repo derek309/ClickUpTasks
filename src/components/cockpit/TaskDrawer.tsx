@@ -55,7 +55,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onAddSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, slideBackLabel, openEmail, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub, onRenameSub, onDeleteSub, onPatchSub, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, slideBackLabel, openEmail, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -1027,7 +1027,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!t) return;
     // A new step answers "what happens next?".
     if (asking) setAskNext(null);
-    onAddSub(t);
+    // On whoever added it (Derek, 2026-10-11: "auto assign it to the creator").
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id: newId("s_"), title: t, done: false, ...(meId ? { assigneeId: meId } : {}) }] });
   };
   // A client sent changes on a review while its review step is current: that
   // step is done, and "Make the changes" and a new client review follow it
@@ -1670,7 +1671,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const quickStep = (key: DeliverableKey) => {
     const what = ({ doc: "document", image: "image", page: "HTML", video: "video" } as Partial<Record<DeliverableKey, string>>)[key] ?? KIND_LABEL[key];
     const id = newId("s_");
-    const list = holdOnStep([...taskRef.current.subtasks, { id, title: `Create ${what} for review`, done: false }], id, key);
+    const list = holdOnStep([...taskRef.current.subtasks, { id, title: `Create ${what} for review`, done: false, ...(meId ? { assigneeId: meId } : {}) }], id, key);
     if (asking) setAskNext(null);
     onPatch({ subtasks: list });
     if (!deliverablePresent(key)) setPendingStart(key);
