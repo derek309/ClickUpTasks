@@ -7,7 +7,7 @@
 // opens full page to work in, like a handoff. Messages to the client are
 // ordinary messages; they show here because they were sent while the step
 // ran (stepWindow), nothing is filed apart for the client.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   STATUS_META, htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
@@ -17,7 +17,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 
 export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen,
-  controls, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, addOptions = [], canText = false, onSendText, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -32,6 +32,11 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   onReopen: () => void;
   /** The step's date, who has it, its stage, attach and delete. */
   controls?: React.ReactNode;
+  /** What "Add client work" offers, besides a checklist and a text: a
+   *  document, a review, an email (Derek, 2026-10-11). */
+  addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
+  canText?: boolean;
+  onSendText?: (body: string) => void;
   /** The current step's follow up, from the task page. */
   followBox?: React.ReactNode;
   /** What a plan's step makes and needs. */
@@ -57,7 +62,24 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   const own = todoProgress(todos);
   const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
   const [todoDraft, setTodoDraft] = useState("");
-  const [talk, setTalk] = useState<"client" | "team">(canChat ? "client" : "team");
+  const [talk, setTalk] = useState<"client" | "text" | "team">(canChat ? "client" : "team");
+  const [showTodos, setShowTodos] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const todoRef = useRef<HTMLInputElement>(null);
+  const talkRef = useRef<HTMLTextAreaElement>(null);
+  // Which box to put the cursor in next, set by a choice, done after drawing.
+  const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(null);
+  useEffect(() => {
+    if (!focusNext) return;
+    (focusNext.box === "todo" ? todoRef.current : talkRef.current)?.focus();
+  }, [focusNext]);
+  // Everything "Add client work" offers: a checklist, the task's documents and
+  // reviews and an email (from the task page), and a text.
+  const options = [
+    { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
+    ...addOptions,
+    ...(canText && onSendText ? [{ key: "text", label: "Send text", onPick: () => { setTalk("text"); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); } }] : []),
+  ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
   const [draft, setDraft] = useState("");
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
@@ -82,7 +104,9 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
   const send = () => {
     const body = draft.trim();
     if (!body) return;
-    if (talk === "client" && onSendChat) onSendChat(body); else onAddNote(body);
+    if (talk === "client" && onSendChat) onSendChat(body);
+    else if (talk === "text" && onSendText) onSendText(body);
+    else onAddNote(body);
     setDraft("");
   };
 
@@ -93,6 +117,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
         <h3 id="step-talk" className="text-[17px] font-bold">Conversation on this step</h3>
         <div role="group" aria-label="Who to talk to" className="flex gap-1 rounded-lg bg-background p-1">
           {canChat && <button onClick={() => setTalk("client")} aria-pressed={talk === "client"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "client" ? "bg-surface shadow-soft" : "text-muted"}`}>With {first}</button>}
+          {talk === "text" && <button aria-pressed className="h-9 rounded-md bg-surface px-3 text-[16px] font-semibold shadow-soft">Text</button>}
           <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
         </div>
       </div>
@@ -137,11 +162,11 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
           );
         })}
       </div>
-      <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : CHANNEL_TONE.chat.surface}`}>
+      <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : talk === "text" ? CHANNEL_TONE.sms.surface : CHANNEL_TONE.chat.surface}`}>
         <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? "Note for the team" : `Message ${first}`}</label>
-        <textarea id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2}
+        <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)} rows={2}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
-          placeholder={talk === "team" ? "Note for the team, about this step" : `Message ${first} about this step`}
+          placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : `Message ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
           <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows under this step here."}</span>
@@ -151,7 +176,40 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
     </section>
   );
 
-  const todoList = (
+  const hasTodos = todos.length > 0 || clientItems.length > 0 || showTodos;
+  const empty = !held && todos.length === 0 && clientItems.length === 0 && !showTodos;
+  // The one way to add to a step (Derek, 2026-10-11): a quick list to start
+  // with while it is empty, then a button.
+  const addButton = (
+    <div className="relative">
+      <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen}
+        className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add client work</button>
+      {addOpen && (<>
+        <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
+        <div role="menu" aria-label="Add client work" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
+          {options.map((o) => (
+            <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(false); o.onPick(); }}
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
+              <span className="min-w-0 flex-1">{o.label}</span>{o.note && <span className="shrink-0 text-muted">{o.note}</span>}
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+  const quickStart = (
+    <section aria-label="Add client work" className="flex flex-col gap-2">
+      <h3 className="text-[17px] font-bold">Add client work</h3>
+      <div className="flex flex-wrap gap-2">
+        {options.map((o) => (
+          <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.note}
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:border-accent hover:bg-background disabled:opacity-50"><I.plus className="h-4 w-4 text-accent" /> {o.label}</button>
+        ))}
+      </div>
+      <p className="text-[16px] text-muted">Or paste a link or drop a file anywhere on this page.</p>
+    </section>
+  );
+  const todoList = !hasTodos ? null : (
     <section aria-labelledby="step-todo" className="flex flex-col gap-2">
       <h3 id="step-todo" className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}</h3>
       {clientItems.length > 0 && (
@@ -182,7 +240,7 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
           ))}
         </ul>
       )}
-      <input value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
+      <input ref={todoRef} value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
         placeholder="+ Add a to do" aria-label="Add a to do"
         className="rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
     </section>
@@ -220,11 +278,14 @@ export function StepPage({ task, sub, client, stage, isCurrent, full, onToggleFu
               </div>
               {followBox}
               {planBits}
+              {empty ? quickStart : <div>{addButton}</div>}
               {todoList}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
-                  <h3 id="step-works" className="text-[17px] font-bold">What this step works on</h3>
+                  <h3 id="step-works" className="text-[17px] font-bold">Client work</h3>
                   {held}
+                  {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}
+                  <p className="text-[16px] text-muted">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
               )}
               {handoff}
