@@ -1138,9 +1138,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatch({ subtasks: list, ...(status ? { status } : {}) });
       return;
     }
-    let live = true;
+    // Not cancelled when stageKey changes: clearing movedTo above changes it at
+    // once, which threw this round away (audit 2026-10-11). addChangesRound is
+    // keyed, so running twice adds it once.
     void fetchTaskDocumentComments(docId).then((comments) => {
-      if (!live) return;
       const todos = comments.filter((c) => c.fromClient && !c.completedAt && c.body.trim())
         .map((c) => ({ id: newId("td_"), title: c.body.trim().slice(0, 300), done: false, fromClient: true, commentId: c.id }));
       const list = addChangesRound(taskRef.current.subtasks, stepId, firstName, key, () => newId("s_"), { review: k, todos });
@@ -1151,7 +1152,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatch({ subtasks: list, ...(status ? { status } : {}), ...(due ? { followUpAt: due } : {}) });
       pushToast(`Changes on ${name}: added "Make ${firstName}'s changes"${todos.length ? ` with ${todos.length} to ${todos.length === 1 ? "do" : "dos"}` : ""}`);
     });
-    return () => { live = false; };
   }, [stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // What the client sends from their portal lands on the open changes step,
   // made in front of the current step when there is none (Derek, 2026-10-11:

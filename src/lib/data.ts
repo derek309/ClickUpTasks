@@ -3208,6 +3208,47 @@ export function homeStepFor(subtasks: Subtask[], key: string, offId: string): Su
   return home && home.id !== offId ? home : null;
 }
 
+/** A three-way merge of a task's steps for a browser save (audit 2026-10-11):
+ *  `base` is what the browser had before its edit, `local` what it wants to
+ *  write, `remote` what the database holds now. The server adds and changes
+ *  steps by itself (stepsServer), so anything it added or changed that this
+ *  edit did not touch is kept; whatever this edit changed or deleted wins. */
+export function mergeSubtasks(base: Subtask[], local: Subtask[], remote: Subtask[]): Subtask[] {
+  const same = (a: Subtask | undefined, b: Subtask | undefined) => JSON.stringify(a) === JSON.stringify(b);
+  const baseById = new Map(base.map((x) => [x.id, x]));
+  const remoteById = new Map(remote.map((x) => [x.id, x]));
+  const localIds = new Set(local.map((x) => x.id));
+  // Ours, taking the database's copy of each item this edit left alone; an
+  // item deleted elsewhere that this edit did not touch stays deleted.
+  const out: Subtask[] = [];
+  for (const item of local) {
+    const was = baseById.get(item.id);
+    const now = remoteById.get(item.id);
+    if (was && same(was, item)) { if (now) out.push(now); continue; }
+    out.push(item);
+  }
+  // Items added elsewhere since: after the item they follow in the database.
+  remote.forEach((item, i) => {
+    if (baseById.has(item.id) || localIds.has(item.id)) return;
+    const prev = [...remote.slice(0, i)].reverse().find((x) => out.some((o) => o.id === x.id));
+    const at = prev ? out.findIndex((o) => o.id === prev.id) + 1 : out.length;
+    out.splice(at, 0, item);
+  });
+  return out;
+}
+
+/** The step a review's news belongs to (audit 2026-10-11): the client's
+ *  waiting step for that review, else the step holding it, else an older
+ *  waiting step that kept no note of which review, else the current step when
+ *  it is ours (never a teammate's handoff). Null when none fits. */
+export function stepForReview(subtasks: Subtask[], kind: DeliverableKey, ownerId: string | null): Subtask | null {
+  const open = planSteps(subtasks).filter((x) => !x.done);
+  return open.find((x) => x.onClient && x.waitsOn === kind)
+    ?? open.find((x) => x.holds?.includes(kind) && !isHandoffStep(x, ownerId))
+    ?? open.find((x) => x.onClient && !x.waitsOn)
+    ?? (() => { const cur = currentStep(subtasks); return cur && !cur.onClient && !isHandoffStep(cur, ownerId) ? cur : null; })();
+}
+
 /** What a finished step hands to the next: its client work still under way
  *  (a document or review not yet approved, instructions, a draft email).
  *  Links and files stay where they were used (Derek, 2026-10-11: "carry over

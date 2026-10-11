@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, holdOnStep, isHandoffStep, planSteps,
+  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, holdOnStep, isHandoffStep, planSteps, stepAfter, stepForReview,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -66,9 +66,18 @@ export async function stepsOnReviewChanges(taskId: string, kind: ReviewKindKey, 
     .map((c) => ({ id: newId("td_"), title: (c.body ?? "").trim().slice(0, 300), done: false, fromClient: true, commentId: c.id }));
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
-    const cur = currentStep(list);
-    if (!cur) return null;
-    return addChangesRound(list, cur.id, first, `${kind}:${version}`, () => newId("s_"), { review: kind as DeliverableKey, todos });
+    // A changes round already open for this review (a comment opened it, then
+    // Send changes bumped the version): its new comments join that round
+    // instead of a second one starting (audit 2026-10-11).
+    const round = planSteps(list).find((x) => !x.done && new RegExp(`^${kind}:\\d+$`).test(x.addedFor ?? ""));
+    if (round) {
+      const have = new Set((round.todos ?? []).map((t) => t.commentId).filter(Boolean));
+      const add = todos.filter((t) => !have.has(t.commentId));
+      return add.length ? list.map((x) => (x.id === round.id ? { ...x, todos: [...(x.todos ?? []), ...add] } : x)) : null;
+    }
+    const step = stepForReview(list, kind as DeliverableKey, row.assignee_id);
+    if (!step) return null;
+    return addChangesRound(list, step.id, first, `${kind}:${version}`, () => newId("s_"), { review: kind as DeliverableKey, todos });
   }, true);
 }
 
@@ -79,13 +88,16 @@ export async function stepsOnReviewApproved(taskId: string, kind: ReviewKindKey,
   const name = await reviewName(taskId, kind);
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
-    const cur = currentStep(list);
+    const cur = stepForReview(list, kind as DeliverableKey, row.assignee_id);
     if (!cur) return null;
     const title = byClient ? `${first} approved ${name}` : `${name.charAt(0).toUpperCase()}${name.slice(1)} approved`;
     const made = addApprovalStep(list, cur.id, title, `ok:${kind}:${version}`, () => newId("s_"), undefined, byClient ? `${first} approved` : "Approved");
     if (!made) return null;
     const now = new Date().toISOString();
-    return made.list.map((x, i) => (made.hasNext && i === made.list.findIndex((y) => y.id === made.approvalId) + 1 && !x.startedAt ? { ...x, startedAt: now } : x));
+    // The plan's next step, not merely the next item in the list (a portal
+    // request can sit between them).
+    const next = made.hasNext ? stepAfter(made.list, made.approvalId) : null;
+    return made.list.map((x) => (next && x.id === next.id && !x.startedAt ? { ...x, startedAt: now } : x));
   });
 }
 

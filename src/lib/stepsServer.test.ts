@@ -101,4 +101,38 @@ describe("steps added on the server", () => {
     expect(steps().find((s) => s.title === "Changes from Brian")!.todos?.map((t) => t.commentId)).toEqual(["c10"]);
     expect(await stepsOnCommentRemoved("t1", "c9")).toBe(false);
   });
+
+  it("an approval on one review moves that review's waiting step, not another's", async () => {
+    setup([
+      { id: "a", title: "Write", done: true },
+      { id: "wd", title: "Waiting on the document", done: false, onClient: true, waitsOn: "doc", addedFor: "sent:a" },
+      { id: "wi", title: "Waiting on the image", done: false, onClient: true, waitsOn: "image", addedFor: "sent:a" },
+      { id: "z", title: "Schedule", done: false },
+    ]);
+    db.task_documents.push({ task_id: "t1", kind: "image", title: "Poster", deleted_at: null });
+    expect(await stepsOnReviewApproved("t1", "image", 1, true)).toBe(true);
+    expect(steps().find((x) => x.id === "wd")!.done).toBe(false);
+    expect(steps().find((x) => x.id === "wi")!.done).toBe(true);
+  });
+
+  it("Send changes after a comment joins the open round instead of starting a second", async () => {
+    await stepsOnReviewSent("t1", "doc");
+    expect(await stepsOnReviewChanges("t1", "doc", "d1", 3)).toBe(true);
+    db.task_document_comments.push({ id: "c3", document_id: "d1", body: "And the date", author_id: null, completed_at: null });
+    expect(await stepsOnReviewChanges("t1", "doc", "d1", 4)).toBe(true);
+    const rounds = steps().filter((x) => x.title === "Make Brian's changes");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].todos?.map((t) => t.title)).toEqual(["Change the headline", "And the date"]);
+  });
+
+  it("after an approval the plan's next step starts, even past a portal request", async () => {
+    setup([
+      { id: "w", title: "Waiting", done: false, onClient: true, waitsOn: "doc", addedFor: "sent:a" },
+      { id: "req", title: "Make the logo bigger", done: false, fromClient: true },
+      { id: "z", title: "Schedule", done: false },
+    ]);
+    await stepsOnReviewApproved("t1", "doc", 1, true);
+    expect(steps().find((x) => x.id === "z")!.startedAt).toBeTruthy();
+    expect(steps().find((x) => x.id === "req")!.startedAt).toBeUndefined();
+  });
 });

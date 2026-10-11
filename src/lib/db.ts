@@ -16,6 +16,7 @@ import {
   projectsSeed,
   seedTasks,
   seedNotifications,
+  mergeSubtasks,
   type Task,
   type Client,
   type Project,
@@ -574,6 +575,14 @@ export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string
   const changed = changedTaskColumns(before, after);
   if (!Object.keys(changed).length) return null;
   noteTaskWrite(after.id);
+  // The steps are written as a merge with what the database holds now, so a
+  // step the server just added or finished is not overwritten by this save
+  // (data.ts mergeSubtasks, audit 2026-10-11).
+  if ("subtasks" in changed) {
+    const { data: cur } = await supabase.from("tasks").select("subtasks").eq("id", after.id).maybeSingle();
+    const remote = (cur as { subtasks?: Subtask[] | null } | null)?.subtasks;
+    if (Array.isArray(remote)) changed.subtasks = mergeSubtasks(before.subtasks ?? [], after.subtasks ?? [], remote);
+  }
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
   if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
   return res;

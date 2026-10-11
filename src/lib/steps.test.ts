@@ -315,3 +315,22 @@ describe("where client work goes back to", () => {
     expect(homeStepFor(list, "doc", "a")).toBeNull();
   });
 });
+
+import { mergeSubtasks } from "./data";
+
+describe("a browser save keeps what the server did meanwhile", () => {
+  const a = s("a", "Write"), b = s("b", "Waiting", { onClient: true });
+  it("keeps a step the server added, in its place", () => {
+    const local = [{ ...a, done: true }, b];
+    const remote = [a, s("srv", "Make Brian's changes"), b];
+    expect(mergeSubtasks([a, b], local, remote).map((x) => [x.id, x.done])).toEqual([["a", true], ["srv", false], ["b", false]]);
+  });
+  it("keeps the server's change to a step this edit did not touch", () => {
+    const remote = [a, { ...b, done: true, outcome: "Brian replied" }];
+    expect(mergeSubtasks([a, b], [{ ...a, title: "Write it" }, b], remote)[1]).toMatchObject({ done: true, outcome: "Brian replied" });
+  });
+  it("this edit wins on what it changed, and its deletes stick", () => {
+    const remote = [{ ...a, title: "Server" }, b];
+    expect(mergeSubtasks([a, b], [{ ...a, title: "Mine" }], remote).map((x) => x.title)).toEqual(["Mine"]);
+  });
+});

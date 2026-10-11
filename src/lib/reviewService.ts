@@ -64,7 +64,7 @@ export async function reopenReview(taskId: string, kind: ReviewKind, actor: Revi
  *  leaves it null, so nobody is told they clicked a button they never clicked. */
 export async function setReviewStage(taskId: string, kind: ReviewKind, actor: ReviewActor, stage: unknown): Promise<ReviewOutcome<{ document: Row }>> {
   if (!(REVIEW_STAGES as readonly unknown[]).includes(stage)) return fail(400, "Unknown stage.");
-  const doc = await liveDocument(taskId, kind, "id, approved_at, version");
+  const doc = await liveDocument(taskId, kind, "id, approved_at, version, reminder_every_days");
   if (!doc) return fail(404, noDocumentYet(kind));
   const approving = stage === "approved" && !doc.approved_at;
   const lock = stage === "approved"
@@ -83,7 +83,7 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
     const v = (doc.version as number) ?? 0;
     if (approving) await stepsOnReviewApproved(taskId, kind, v, false).catch(() => false);
     else if (stage === "client_submitted") await stepsOnReviewChanges(taskId, kind, doc.id as string, v).catch(() => false);
-    else if (stage === "with_client") await stepsOnReviewSent(taskId, kind).catch(() => false);
+    else if (stage === "with_client") await stepsOnReviewSent(taskId, kind, Number((doc as Row).reminder_every_days ?? 1)).catch(() => false);
   }
   return done;
 }
@@ -298,6 +298,6 @@ export async function sendReview(
   if (!outcome.ok) return { ok: false, status: outcome.status, error: outcome.error, current: outcome.current ?? null };
   const url = link.live ? link.url : await mintDocLink(doc.id, task, actor, origin);
   // The steps move on the server too: our step done, the client's waiting step started.
-  await stepsOnReviewSent(task.id, kind).catch(() => false);
+  await stepsOnReviewSent(task.id, kind, Number((doc as Row).reminder_every_days ?? 1)).catch(() => false);
   return { ok: true, version: outcome.version, url, documentId: doc.id };
 }
