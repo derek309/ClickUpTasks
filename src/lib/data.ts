@@ -2420,6 +2420,30 @@ export function htmlToText(html: string): string {
 /** "&amp;" and friends back to the characters, for a plain line like an
  *  email subject: some senders (a WordPress form) send "J&amp;J" there, and
  *  it became a task title as written (Derek, 2026-10-10). */
+/** Where an email's signature starts, to fold it away (-1 when there's
+ *  none): the "-- " line mail programs put above one; a line that is just
+ *  the sender's full name (the signature block starts there); or a sign off
+ *  that is just their first name, kept, with what follows folded (Brian
+ *  signing "Brian" over three lines of trademark notice). Only looks at the
+ *  last 15 lines. (Inbox 2026-10-09, task conversation 2026-10-11) */
+export function signatureCut(text: string, signer?: string | null): number {
+  const lines = text.split("\n");
+  const from = Math.max(1, lines.length - 15);
+  const upTo = (i: number) => lines.slice(0, i).join("\n").length;
+  for (let i = lines.length - 1; i >= from; i--) if (/^--\s*$/.test(lines[i])) return upTo(i);
+  const name = (signer ?? "").trim().toLowerCase();
+  if (!name) return -1;
+  const first = name.split(/\s+/)[0];
+  const full = name.split(/\s+/).length >= 2 ? name : null;
+  for (let i = lines.length - 1; i >= from; i--) {
+    const l = lines[i].replace(/[*_]/g, "").replace(/^[-–]\s*/, "").replace(/[,.]$/, "").trim().toLowerCase();
+    if (full && l === full) return upTo(i);
+    // A first name sign off with something after it: keep the name.
+    if (l === first && first.length >= 2 && i < lines.length - 1 && lines.slice(i + 1).some((x) => x.trim())) return upTo(i + 1);
+  }
+  return -1;
+}
+
 export function decodeEntities(s: string): string {
   return s.replace(/&quot;/gi, '"').replace(/&#0?39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&");
 }

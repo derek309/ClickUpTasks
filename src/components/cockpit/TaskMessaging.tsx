@@ -14,7 +14,7 @@ import {
   users, userById, timeAgo, htmlToText, looksLikeHtml, plainTextToHtml, describeEvent, eventTopic, foldRuns,
   mentionCandidates, applyMention,
   type Task, type Client, type Contact, type Attachment, type MessageChannel, type Message, type Comment,
-  TaskAction, TaskActionKind, TASK_ACTION_META, splitQuotedEmail, tidyEmailText,
+  TaskAction, TaskActionKind, TASK_ACTION_META, splitQuotedEmail, signatureCut, tidyEmailText, ghlConfirmState,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId, NotInGhlChip } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
@@ -841,13 +841,19 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
   };
 
+  const ghlMissingId = [...(messages ?? [])].filter((x) => ghlConfirmState(x) === "missing").sort((a, b) => b.at.localeCompare(a.at))[0]?.id ?? null;
   const renderMessageItem = (m: Message, gap: string, dupeCount?: number, continued = false) => {
     const isReplyingHere = replyingTo?.id === m.id;
     const rawBodyText = m.body?.trim() ? (looksLikeHtml(m.body) ? htmlToText(m.body) : m.body) : "";
     // The reply chain and the signature block under it are not what anyone
     // opened the task to read: one line of "I edited it. Its ready." was
     // rendering as a screen and a half of quoted history.
-    const { visible: ownText, quoted } = splitQuotedEmail(tidyEmailText(rawBodyText));
+    // Their signature folds in with it, behind the same ··· (Derek,
+    // 2026-10-11: Brian's trademark notice filled half his message).
+    const split = splitQuotedEmail(tidyEmailText(rawBodyText));
+    const sigAt = signatureCut(split.visible, m.direction === "outbound" ? (m.createdBy ? userById(m.createdBy)?.name ?? null : null) : client.name);
+    const ownText = sigAt > 0 ? split.visible.slice(0, sigAt).trimEnd() : split.visible;
+    const quoted = [sigAt > 0 ? split.visible.slice(sigAt).trim() : "", split.quoted].filter(Boolean).join("\n\n");
     const { cleanText, imageUrls, linkUrls } = splitMessageUrls(ownText || rawBodyText);
     const quotedOpen = openQuotes.has(m.id);
     const mine = m.direction === "outbound";
@@ -887,7 +893,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
               <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
               {!email && <span className={`font-medium ${CHANNEL_TONE[m.channel === "sms" ? "sms" : "chat"].label}`}>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
               <span>· {timeAgo(m.at)}</span>
-              <NotInGhlChip m={m} className="text-[16px]" />
+              {/* Once, on the newest, in grey: on every email it read as a row
+                  of red errors (Derek, 2026-10-11). */}
+              {m.id === ghlMissingId && <NotInGhlChip m={m} quiet className="text-[16px]" />}
               {dupeCount && dupeCount > 1 && (
                 <span className="inline-flex items-center rounded-[5px] bg-background px-1.5 py-0 text-[16px] font-semibold text-muted" title={`Collapsed ${dupeCount} identical sends within 10 minutes`}>sent {dupeCount}×</span>
               )}

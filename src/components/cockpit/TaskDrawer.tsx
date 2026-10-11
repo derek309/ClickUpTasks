@@ -898,6 +898,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     : waitingOn ? waitingOn
     : stepDate.tone === "none" ? "No date yet"
     : stepDate.label;
+  // The client's newest message since the open follow up was set, when no
+  // trigger already finished it.
+  const repliedSince = openStep && !(watchState?.met)
+    ? [...(messages ?? [])].filter((m) => m.direction === "inbound" && m.at > openStep.at).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null
+    : null;
   const nextStepCard = task.status === "done" && !openStep && !asking ? null : (
     <div className={`mt-4 overflow-hidden rounded-2xl ${openStep || followUp || asking ? "bg-surface shadow-soft ring-1 ring-border" : "bg-surface ring-1 ring-border"}`}>
       {/* No coloured band: the date under the step says how late it is
@@ -907,7 +912,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="ml-auto truncate text-[16px] font-bold">{barState}</span>
       </div>
       {/* How late it is, first thing you see (Derek, 2026-10-11). */}
-      <div className="px-4 pt-2.5 text-[14px] font-bold uppercase tracking-wide text-muted sm:px-5">
+      <div className="px-4 pt-2.5 text-[16px] font-bold uppercase tracking-wide text-muted sm:px-5">
         Follow up{(openStep || followUp) && (stepDate.tone === "late" || stepDate.tone === "soon") && (
           <span className={stepDate.tone === "late" ? "text-danger" : "text-highlight"}> · {stepDate.label.split(",")[0]}</span>
         )}
@@ -1005,9 +1010,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </span>
               </>)}
             </div>
+            {/* They wrote back since this was set, and nothing finished it by
+                itself: say so, with Done right there (Derek, 2026-10-11:
+                Brian replied "done" and the card still asked to chase him). */}
+            {repliedSince && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px]">
+                <span className="font-semibold text-success">{client.name.split(/\s+/)[0]} replied {timeAgo(repliedSince.at)}</span>
+                <button onClick={tickStep} className="rounded-[5px] px-2 py-0.5 font-semibold text-accent ring-1 ring-[var(--border)] hover:ring-accent">Mark done</button>
+              </div>
+            )}
             {/* One quiet line of history: what set it, and what came before. */}
             {(openStep || finished.length > 0) && (
-              <p className="mt-1 text-[15px] text-muted">
+              <p className="mt-1 text-[16px] text-muted">
                 {openStep && (
                   <button onClick={() => jumpToAction(openStep.id)} title="Show where this step was set" className="hover:text-foreground hover:underline">
                     {TASK_ACTION_META[openStep.kind].verb} {timeAgo(openStep.at)}
@@ -1049,9 +1063,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <option value="__new">+ New list…</option>
         </select>
       </Row>
-      <Row label="Contact" icon={<I.user />}>
-        {(() => { const ct = contactById(task.contactId) || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId); return <span className={`block truncate px-2 py-1 text-[16px] ${ct ? "" : "text-muted"}`}>{ct ? ct.name : "None"}</span>; })()}
-      </Row>
+      {/* The task's contact, else the client's own (a client linked to a
+          contact by linked_contact_id was missed and read "None"); no row
+          while contacts are still loading (Derek, 2026-10-11). */}
+      {(() => {
+        const ct = contactById(task.contactId) || linkedContactInfo || contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
+        return ct ? <Row label="Contact" icon={<I.user />}><span className="block truncate px-2 py-1 text-[16px]">{ct.name}</span></Row> : null;
+      })()}
     </dl>
   );
   // The client's own reply, submitted through the public /waiting/[token]

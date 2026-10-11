@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
+import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, signatureCut, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
 import { createPortal } from "react-dom";
@@ -1290,20 +1290,6 @@ function EmailHtml({ m, p, asText = false, signer }: { m: Message; p: InboxViewP
 // What the person wrote, readable: tracking links show as their website,
 // earlier messages quoted underneath fold away, and the email exactly as it
 // came is one click off (Derek, 2026-10-01: "emails that look like all links").
-// Where the signature starts in plain text: the "-- " line mail programs
-// put above one, else the last line near the end that is just their name.
-function signatureAt(text: string, signer?: string | null): number {
-  const lines = text.split("\n");
-  const from = Math.max(1, lines.length - 15);
-  for (let i = lines.length - 1; i >= from; i--) if (/^--\s*$/.test(lines[i])) return lines.slice(0, i).join("\n").length;
-  const name = (signer ?? "").trim().toLowerCase();
-  if (name.split(/\s+/).length < 2) return -1;
-  for (let i = lines.length - 1; i >= from; i--) {
-    const l = lines[i].replace(/[*_]/g, "").trim().toLowerCase();
-    if (l === name || l === `- ${name}` || l === `-${name}`) return lines.slice(0, i).join("\n").length;
-  }
-  return -1;
-}
 function EmailBody({ body, signer }: { body: string; signer?: string | null }) {
   const [original, setOriginal] = useState(false);
   const [quoted, setQuoted] = useState(false);
@@ -1317,7 +1303,7 @@ function EmailBody({ body, signer }: { body: string; signer?: string | null }) {
     </>
   );
   const visible = split.visible || text;
-  const sigAt = signatureAt(visible, signer);
+  const sigAt = signatureCut(visible, signer);
   const trimmed = sigAt > 0 ? visible.slice(0, sigAt).trimEnd() : visible;
   const shown = quoted ? text : trimmed;
   const more = (!!split.quoted && !!split.visible) || trimmed !== visible;

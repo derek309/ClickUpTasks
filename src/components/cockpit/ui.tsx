@@ -598,7 +598,9 @@ export type Toast = { id: string; text: string; action?: { label: string; run: (
  *  usually whoever sent or received it has not connected Gmail sync there, or
  *  the person was not a contact yet. On an email, Add puts a copy in their
  *  GoHighLevel conversation without sending anything (Derek, 2026-10-07). */
-export function NotInGhlChip({ m, className = "" }: { m: Pick<Message, "id" | "channel" | "ghlMessageId" | "at">; className?: string }) {
+export function NotInGhlChip({ m, className = "", quiet = false }: { m: Pick<Message, "id" | "channel" | "ghlMessageId" | "at">; className?: string;
+  /** Grey words, not a red badge: shown once in a conversation, it's a note, not an error. */
+  quiet?: boolean }) {
   const [state, setState] = useState<"idle" | "busy" | "added" | { error: string }>("idle");
   if (state === "added") return <span className={`inline-flex items-center whitespace-nowrap rounded-[5px] bg-success-soft px-1.5 py-0 font-semibold text-success ${className}`}>Added to GoHighLevel</span>;
   if (ghlConfirmState(m) !== "missing") return null;
@@ -614,7 +616,7 @@ export function NotInGhlChip({ m, className = "" }: { m: Pick<Message, "id" | "c
   const error = typeof state === "object" ? state.error : null;
   return (
     <span className={`inline-flex flex-wrap items-center gap-1.5 ${className}`}>
-      <span className="inline-flex items-center whitespace-nowrap rounded-[5px] bg-danger-soft px-1.5 py-0 font-semibold text-danger"
+      <span className={`inline-flex items-center whitespace-nowrap rounded-[5px] px-1.5 py-0 font-semibold ${quiet ? "text-muted" : "bg-danger-soft text-danger"}`}
         title="GoHighLevel has no copy of this yet. Check that whoever sent or received it has Gmail sync connected in their GoHighLevel profile.">
         Not in GoHighLevel
       </span>
