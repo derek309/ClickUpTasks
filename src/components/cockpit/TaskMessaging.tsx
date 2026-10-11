@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, meetings, description, createdLine } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, meetings, description, createdLine } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -665,15 +665,6 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     </div>
   );
 
-  // A reply goes out on the channel it came in on (Derek, 2026-09-01: "I
-  // click reply on a chat, it opened an email format"). Chat used to be
-  // redirected to email on the grounds that it had no compose surface of its
-  // own; it has had one for a while, and channelComposer takes "chat"
-  // directly. Answering a chat message with an email, subject line and all,
-  // is not a reply to it. "call" genuinely has no compose surface.
-  const replyableChannel = (ch: MessageChannel): Channel | undefined =>
-    ch === "chat" || ch === "email" || ch === "sms" ? ch : undefined;
-
   // An action reads as a decision, not a note: what you did, and the
   // commitment it left behind with whether that commitment was kept. The
   // next-step strip is the part that makes the history worth scrolling.
@@ -867,11 +858,26 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     const email = m.channel === "email";
     const clientInitials = client.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
     const hoverTool = "flex h-8 w-8 items-center justify-center rounded-lg bg-background text-muted hover:bg-accent-soft hover:text-foreground";
+    // The three ways to answer a message, on every message (task detail
+    // redesign, 2026-10-11): by email (threaded when it was an email), in
+    // chat right under it, or a private note about it.
+    const answerTool = "flex h-8 w-8 items-center justify-center rounded-md text-accent transition hover:bg-background";
+    const who = mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "us") : "us") : client.name;
+    const answerTools = (
+      <div role="group" aria-label="Respond to this message" className="flex shrink-0 items-center gap-0.5">
+        {onComposeEmail && hasMessaging && (
+          <button onClick={() => (email ? openReply(m.id, "email", m.subject) : onComposeEmail())} title="Reply by email" aria-label="Reply by email" className={answerTool}><I.mail className="h-[18px] w-[18px]" /></button>
+        )}
+        {onSendTaskMessage && hasMessaging && (
+          <button onClick={() => { onMarkChannelRead?.("chat"); setComposingChannel(null); resetComposer(); setReplyingTo({ id: m.id, channel: "chat" }); }} title="Reply in chat" aria-label="Reply in chat" className={answerTool}><I.chatBubbles className="h-[18px] w-[18px]" /></button>
+        )}
+        {onNoteInDock && (
+          <button onClick={() => onNoteInDock(`About ${who.split(" ")[0]}'s ${email ? "email" : m.channel === "sms" ? "text" : "chat"}${m.subject ? ` "${m.subject}"` : ""}: `)} title="Add a note" aria-label="Add a note" className={answerTool}><I.note className="h-[18px] w-[18px]" /></button>
+        )}
+      </div>
+    );
     const msgTools = (
       <>
-        {replyableChannel(m.channel) && onSendTaskMessage && (
-          <button onClick={() => { setToolsFor(null); openReply(m.id, replyableChannel(m.channel)!, m.subject, (cleanText || m.subject || "").slice(0, 120)); }} title="Reply" aria-label="Reply" className={hoverTool}>↩</button>
-        )}
         {canAdmin && onEditMessage && (
           <button onClick={() => { setToolsFor(null); startEditMessage(m); }} title="Edit (this doesn't unsend anything already delivered)" aria-label="Edit" className={hoverTool}><I.pencil className="h-3.5 w-3.5" /></button>
         )}
@@ -883,10 +889,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     );
     return (
       <div key={m.id} className={`group relative ${gap}`}>
-        {/* Two sides, like a text thread: the client on the left, us on the
-            right. An email is a letter, so it is a white card on its side
-            rather than a bubble (Derek, 2026-09-16). */}
-        <div className={`relative flex items-end gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
+        {/* Every message on the left, the channel a small tag (task detail
+            redesign, 2026-10-11). It was two sides like a text thread, which
+            put half a long history at the far edge of a 1280px column. */}
+        <div className="relative flex items-start gap-2.5">
           <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center">
             {continued ? null : mine && m.createdBy ? <Avatar id={m.createdBy} size={30} /> : (
               <span className={`flex h-8 w-8 items-center justify-center rounded-full text-[16px] font-bold text-white ${mine ? "bg-accent" : ""}`} style={mine ? undefined : { background: client.color }}>{mine ? "✳" : clientInitials}</span>
@@ -894,12 +900,11 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
           </div>
           {/* Tinted by channel, the same colour the reply box turns when that
               channel is picked; which side it sits on says who wrote it. */}
-          <div className={`min-w-0 ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].surface} ${email ? "w-full max-w-[640px] rounded-2xl p-3.5" : `max-w-full rounded-2xl px-3.5 py-2.5 sm:max-w-[min(620px,85%)] ${mine ? "rounded-br-md" : "rounded-bl-md"}`}`}>
-            <div className={`flex flex-wrap items-center gap-x-2 text-[16px] text-muted ${continued && !email ? "hidden" : ""}`}>
-              {email && <span className={`font-semibold ${CHANNEL_TONE.email.label}`}>Email</span>}
+          <div className="min-w-0 w-full max-w-[760px] rounded-[5px] border bg-surface px-3.5 py-2.5 shadow-soft">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px] text-muted">
               <span className="font-semibold text-foreground">{mine ? (m.createdBy ? (userById(m.createdBy)?.name ?? "You") : "Sent") : client.name}</span>
-              {!email && <span className={`font-medium ${CHANNEL_TONE[m.channel === "sms" ? "sms" : "chat"].label}`}>· {m.channel === "sms" ? "Text" : "Chat"}</span>}
-              <span>· {timeAgo(m.at)}</span>
+              <span className={`rounded-[5px] px-2 font-medium ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].surface} ${CHANNEL_TONE[m.channel === "sms" ? "sms" : email ? "email" : "chat"].label}`}>{email ? "Email" : m.channel === "sms" ? "Text" : "Chat"}</span>
+              <span>{timeAgo(m.at)}</span>
               {/* Once, on the newest, in grey: on every email it read as a row
                   of red errors (Derek, 2026-10-11). */}
               {m.id === ghlMissingId && <NotInGhlChip m={m} quiet className="text-[16px]" />}
@@ -911,10 +916,12 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                   <span className="h-1.5 w-1.5 rounded-full bg-accent" /> New
                 </span>
               )}
-              {editingMsgId !== m.id && (
+              <span className="flex-1" />
+              {editingMsgId !== m.id && answerTools}
+              {editingMsgId !== m.id && canAdmin && (onEditMessage || onDeleteMessage) && (
                 <button onClick={() => setToolsFor((x) => (x === m.id ? null : m.id))}
-                  title="Reply, edit or delete" aria-label="Message actions" aria-expanded={toolsFor === m.id}
-                  className="ml-auto shrink-0 rounded px-1 text-[19px] leading-none hover:text-foreground sm:hidden">⋯</button>
+                  title="Edit or delete" aria-label="Edit or delete" aria-expanded={toolsFor === m.id}
+                  className="shrink-0 rounded px-1 text-[19px] leading-none hover:text-foreground sm:hidden">⋯</button>
               )}
             </div>
             {toolsFor === m.id && editingMsgId !== m.id && (

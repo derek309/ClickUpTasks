@@ -9,6 +9,7 @@ import {
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
 import { CHANNEL_TONE } from "./channelTone";
+import { ActionMenu } from "./ActionMenu";
 // Plain fetch reaches this route without a session and gets a 401 back.
 import { authedFetch } from "@/lib/supabase";
 
@@ -32,7 +33,7 @@ const ICON: Record<TaskActionKind, string> = {
 
 export function ActionDock({
   task, client, contact, actions, messages, me, users, onLog, onPatch, onAddComment, onOpenCompose, canMessageClient = true, onSendDm, onDelegate, taskLink, askNextStepFor, onAskNextStepHandled, pushToast,
-  onSendMessage, reachable, replyTarget, openRequest, bar = false,
+  onSendMessage, reachable, replyTarget, openRequest, onBook, bar = false,
 }: {
   task: Task;
   client: { name: string } | null;
@@ -73,8 +74,11 @@ export function ActionDock({
   reachable?: { chat: boolean; sms: boolean; email: boolean };
   /** A message picked to reply to in the conversation; n changes to ask again. */
   replyTarget?: { id: string; channel: "chat" | "sms"; preview: string; text?: string; n: number } | null;
-  /** The top bar's Chat, Text and Call: open the box in that mode and focus it; n changes to ask again. */
-  openRequest?: { mode: "chat" | "sms" | "call"; n: number } | null;
+  /** The top bar's Chat, Text and Call, and a message's Add a note: open the
+   *  box in that mode and focus it, with text to start from; n changes to ask again. */
+  openRequest?: { mode: "note" | "chat" | "sms" | "call"; text?: string; n: number } | null;
+  /** Opens the real booking window (BookAppointment). */
+  onBook?: () => void;
 }) {
   const [view, setView] = useState<"closed" | "menu" | "askTask" | TaskActionKind>("closed");
   const [body, setBody] = useState("");
@@ -225,16 +229,22 @@ export function ActionDock({
   useEffect(() => {
     if (!openRequest || openRequest.n === seenOpen.current) return;
     seenOpen.current = openRequest.n;
-    const mode = openRequest.mode;
+    const { mode, text } = openRequest;
     // Deferred a frame, like the reopen after a send below: it lands during
     // the drawer's own render.
     const r = requestAnimationFrame(() => {
       if (mode === "call") { openPanelRef.current("call"); return; }
       setReplyTo(null);
       setChannel(mode);
+      if (text) setQuickNote(text);
       setView("closed");
       setBarOpen(true);
-      requestAnimationFrame(() => quickRef.current?.focus());
+      requestAnimationFrame(() => {
+        const el = quickRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
     });
     return () => cancelAnimationFrame(r);
   }, [openRequest]);
@@ -702,13 +712,16 @@ export function ActionDock({
   // Delegate is not a record of something that happened, so it sits with Ask
   // AI under Get help: both are the same move, getting the work off your own
   // hands. One is a person, one is not.
-  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k) && k !== "delegate");
-  const CLIENT_ACTIONS = TASK_ACTION_ORDER.filter((k) => CLIENT_FACING_ACTIONS.has(k));
+  // Log meeting and Delegate task are gone (task detail redesign, 2026-10-11):
+  // a meeting is pasted in as a note, and a step is handed off by giving it
+  // an owner in the checklist. Book is the real booking window.
+  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k) && k !== "delegate" && k !== "met");
+  const CLIENT_ACTIONS = TASK_ACTION_ORDER.filter((k) => CLIENT_FACING_ACTIONS.has(k) && (k !== "meeting" || !!onBook));
   const menuGroups: { label: string; kinds: TaskActionKind[] }[] = [
     { label: "Just record it", kinds: INTERNAL_ACTIONS },
     { label: who ? `Reach ${who}` : "Reach the client", kinds: canMessageClient ? CLIENT_ACTIONS : [] },
     // Nobody to hand it to means no point offering it.
-    { label: GET_HELP, kinds: users.some((u) => u.id !== me?.id) ? ["delegate"] : [] },
+    { label: GET_HELP, kinds: [] },
   ];
   // Numbered in the order they are drawn, so the digit on screen is the digit
   // you press. Nine choices is a lot to hunt through when you use the same
@@ -736,7 +749,7 @@ export function ActionDock({
   // rather than trailing the whole menu.
   const menuHits: (TaskActionKind | "ask")[] = shownGroups.flatMap((g) =>
     g.label === GET_HELP ? [...(askShown ? ["ask" as const] : []), ...g.kinds] : g.kinds);
-  const openHit = (h: TaskActionKind | "ask") => openPanel(h === "ask" ? "askTask" : h);
+  const openHit = (h: TaskActionKind | "ask") => { if (h === "meeting" && onBook) { setView("closed"); onBook(); return; } openPanel(h === "ask" ? "askTask" : h); };
 
   // Kept current in an effect rather than during render, so the shortcut
   // handler always sees what is actually drawn without the effect re-binding
@@ -781,7 +794,6 @@ export function ActionDock({
                     className="h-10 w-10 shrink-0 rounded-xl text-[20px] text-muted hover:bg-background hover:text-foreground">＋</button>
                   <button onClick={() => openBar("note")} className={`min-w-0 flex-1 truncate rounded-xl py-2.5 text-[16px] font-semibold ${CHANNEL_TONE.note.surface} ${CHANNEL_TONE.note.tab}`}>🔒 Note</button>
                   {canChat && <button onClick={() => openBar("chat")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Chat</button>}
-                  {canText && <button onClick={() => openBar("sms")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Text</button>}
                   {canEmail && <button onClick={() => onOpenCompose?.("email")} className="min-w-0 flex-1 rounded-xl bg-background py-2.5 text-[16px] font-semibold hover:bg-accent-soft">Email</button>}
                 </div>
               )}
@@ -797,18 +809,31 @@ export function ActionDock({
                       wider screens; a phone keeps ＋ for them. */}
                   {(
                     <div role="group" aria-label="What are you doing" className="flex flex-wrap items-center gap-x-4 gap-y-1 px-2 pb-1 pt-0 sm:pb-1.5 sm:pt-0.5">
+                      {/* Note, then To client: Chat and Email, then Message team,
+                          More (Text, Call, Book) and Ask AI (task detail redesign,
+                          2026-10-11). Texting is a click further away on purpose:
+                          the team wants chat and email used more. */}
                       <button onClick={() => { if (noting) setBarOpen(false); else { setChannel("note"); setReplyTo(null); } }} aria-pressed={noting} className={`${tabBtn} ${noting ? CHANNEL_TONE.note.tab : tabOff}`}>🔒 Note</button>
+                      {(canChat || canEmail) && <span className="-mr-2 hidden text-[16px] text-muted sm:inline">To client</span>}
                       {canChat && <button onClick={() => { if (channel === "chat") setBarOpen(false); else setChannel("chat"); }} aria-pressed={channel === "chat"} className={`${tabBtn} ${channel === "chat" ? CHANNEL_TONE.chat.tab : tabOff}`}>Chat</button>}
-                      {canText && <button onClick={() => { if (channel === "sms") setBarOpen(false); else setChannel("sms"); }} aria-pressed={channel === "sms"} className={`${tabBtn} ${channel === "sms" ? CHANNEL_TONE.sms.tab : tabOff}`}>Text</button>}
                       {/* Email is a letter, so it opens the full email window. */}
                       {canEmail && <button onClick={() => onOpenCompose?.("email")} className={`${tabBtn} ${tabOff}`}>Email</button>}
-                      {canMessageClient && <button onClick={() => openPanel("call")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Call</button>}
-                      {canMessageClient && <button onClick={() => openPanel("meeting")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Book</button>}
+                      {/* Text shows as a tab only while it is the box's channel. */}
+                      {channel === "sms" && <button onClick={() => setBarOpen(false)} aria-pressed className={`${tabBtn} ${CHANNEL_TONE.sms.tab}`}>Text</button>}
                       <span aria-hidden className="hidden h-4 w-px bg-border sm:inline-block" />
-                      <button onClick={() => openPanel("met")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Log meeting</button>
                       <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message team</button>
-                      {users.some((u) => u.id !== me?.id) && <button onClick={() => openPanel("delegate")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Delegate task</button>}
-                      <button onClick={() => openPanel("askTask")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>✦ Ask AI</button>
+                      {canMessageClient && (canText || onBook) && (
+                        <span className="hidden sm:inline">
+                          <ActionMenu title="More ways to reach the client" triggerClassName={`${tabBtn} ${tabOff} inline-flex items-center gap-1`}
+                            label={<>More<I.chevron className="h-3.5 w-3.5 -rotate-90" /></>}
+                            items={[
+                              canText && { label: "Text", onClick: () => openBar("sms") },
+                              { label: "Call", onClick: () => openPanel("call") },
+                              !!onBook && { label: "Book", onClick: onBook },
+                            ]} />
+                        </span>
+                      )}
+                      <button onClick={() => openPanel("askTask")} className={`${tabBtn} ${tabOff} hidden sm:ml-auto sm:inline`}>✦ Ask AI</button>
                     </div>
                   )}
                   <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">

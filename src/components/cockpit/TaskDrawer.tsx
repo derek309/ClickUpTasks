@@ -1232,6 +1232,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
+    onNoteInDock: (text) => askDock("note", text),
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
@@ -1674,8 +1675,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [topPanel, setTopPanel] = useState<"client" | "move" | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
   // The dock opens in Chat, Text or Call from here; n changes to ask again.
-  const [dockRequest, setDockRequest] = useState<{ mode: "chat" | "sms" | "call"; n: number } | null>(null);
-  const askDock = (mode: "chat" | "sms" | "call") => setDockRequest((r) => ({ mode, n: (r?.n ?? 0) + 1 }));
+  const [dockRequest, setDockRequest] = useState<{ mode: "note" | "chat" | "sms" | "call"; text?: string; n: number } | null>(null);
+  const askDock = (mode: "note" | "chat" | "sms" | "call", text?: string) => setDockRequest((r) => ({ mode, text, n: (r?.n ?? 0) + 1 }));
   const topIcon = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-accent transition hover:bg-background disabled:cursor-not-allowed disabled:text-muted disabled:opacity-50";
   const popover = (children: React.ReactNode, wide = false) => (<>
     <div className="fixed inset-0 z-30" onClick={() => setTopPanel(null)} />
@@ -1960,6 +1961,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           reachable={{ chat: hasMessaging, sms: !!messageDest?.phone, email: !!messageDest?.email }}
           replyTarget={replyTarget}
           openRequest={dockRequest}
+          onBook={canBook ? () => setBookOpen(true) : undefined}
           onAskNextStepHandled={() => setPendingNextStep(null)}
           pushToast={pushToast}
           bar={!!slideOver && !full}
