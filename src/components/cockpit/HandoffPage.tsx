@@ -42,7 +42,7 @@ const STAGE: Record<string, { label: string; tone: string }> = {
   completed: { label: "Completed", tone: "bg-emerald-50 text-emerald-700" },
 };
 
-export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, onClose, onOpenFile, onSendDm, onPatchTask, canAdmin, clientLinks = [], pushToast }: {
+export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, onClose, onOpenFile, onSendDm, onPatchTask, canAdmin, clientLinks = [], pushToast, onHandTo }: {
   task: Task;
   sub: Subtask;
   meId?: string | null;
@@ -61,6 +61,9 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
    *  is already saved is the reason nobody attaches them. */
   clientLinks?: ClientLink[];
   pushToast: (msg: string) => void;
+  /** Who it goes to, picked here (Derek, 2026-10-11: no delegate box, just
+   *  the handoff page). Picking someone is what hands it over. */
+  onHandTo?: (memberId: string) => void;
 }) {
   useEscapeToClose(onClose);
   const h = handoffOf(sub);
@@ -276,9 +279,24 @@ export function HandoffPage({ task, sub, meId, link, onPatchSub, onToggleSub, on
           )}
 
           <div className="mt-4 flex flex-wrap gap-2 text-[16px]">
-            {holder && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={holder.id} size={22} /> For {holder.name}</span>}
+            {editing && onHandTo ? (
+              <label className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-1">
+                {holder ? <Avatar id={holder.id} size={22} /> : <span className="font-semibold text-danger">For</span>}
+                <select value={sub.assigneeId ?? ""} onChange={(e) => e.target.value && onHandTo(e.target.value)} aria-label="Who this handoff is for"
+                  className="h-9 cursor-pointer bg-transparent text-[16px] font-semibold outline-none">
+                  {!sub.assigneeId && <option value="">Pick a teammate</option>}
+                  {users.filter((u) => u.id !== task.assigneeId).map((u) => <option key={u.id} value={u.id}>For {u.name}</option>)}
+                </select>
+              </label>
+            ) : holder && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={holder.id} size={22} /> For {holder.name}</span>}
             {owner && <span className="inline-flex items-center gap-2 rounded-[5px] bg-background px-3 py-2"><Avatar id={owner.id} size={22} /> From {owner.name}</span>}
-            {sub.due && <span className="rounded-[5px] bg-highlight-soft px-3 py-2 font-semibold text-highlight">Due {formatDue(sub.due)}</span>}
+            {editing ? (
+              <label className="inline-flex items-center gap-2 rounded-[5px] bg-highlight-soft px-3 py-1 font-semibold text-highlight">
+                Due
+                <input type="date" value={sub.due ?? ""} onChange={(e) => onPatchSub(sub.id, { due: e.target.value || null })} aria-label="When it is due"
+                  className="h-9 bg-transparent text-[16px] font-semibold outline-none" />
+              </label>
+            ) : sub.due && <span className="rounded-[5px] bg-highlight-soft px-3 py-2 font-semibold text-highlight">Due {formatDue(sub.due)}</span>}
             {total > 0 && <span className="rounded-[5px] bg-violet-50 px-3 py-2 font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">{done} of {total} steps done</span>}
           </div>
 

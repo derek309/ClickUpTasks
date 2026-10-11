@@ -1692,10 +1692,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...(meId ? { assigneeId: meId } : {}) }] });
     setOpenStepPage({ taskId: task.id, id, full: false, checklist: true });
   };
+  // A handoff straight to its page, where who, the name and the date are
+  // filled in with the rest (Derek, 2026-10-11: no delegate box).
+  const delegateStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Handoff", done: false, due: addBusinessDaysIso(TODAY, 3), handoff: { steps: [] } }] });
+    setOpenHandoff(id);
+  };
   const quickPeopleOptions = () => [
     { key: "checklist", label: "Create Checklist", disabled: false, note: undefined as string | undefined, onPick: checklistStep },
     { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
-    ...(onDelegate ? [{ key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: () => askDock("delegate") }] : []),
+    { key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: delegateStep },
   ];
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
@@ -2606,12 +2614,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           );
         })()}
         {(() => {
-          const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && !!x.assigneeId) : null;
+          const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && (!!x.assigneeId || !!x.handoff)) : null;
           return hs ? (
             <HandoffPage task={task} sub={hs} meId={meId} clientLinks={clientLinks} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
               onPatchSub={onPatchSub} onToggleSub={onToggleSub} onClose={() => setOpenHandoff(null)}
               onOpenFile={(att) => { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); else void openPreview(att); }}
-              onSendDm={onSendDm} pushToast={pushToast} onPatchTask={onPatch} canAdmin={!!canAdmin} />
+              onSendDm={onSendDm} pushToast={pushToast} onPatchTask={onPatch} canAdmin={!!canAdmin}
+              // Picking who it is for hands it over: theirs, notified, and the
+              // task Delegated while it is out (as the delegate box did).
+              onHandTo={(id) => { onPatchSub(hs.id, { assigneeId: id }); if (!hs.done) onPatch({ status: "delegated" }); }} />
           ) : null;
         })()}
         <ActionDock
