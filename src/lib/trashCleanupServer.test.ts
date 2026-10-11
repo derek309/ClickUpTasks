@@ -85,8 +85,11 @@ beforeEach(() => {
       { id: "d_trashed", task_id: "t_live_in_project", deleted_at: OLD },
     ],
     task_briefs: [
-      { id: "b_gone", task_id: "t_gone" },
-      { id: "b_live", task_id: "t_live_in_client" },
+      { id: "b_gone", task_id: "t_gone", deleted_at: null },
+      { id: "b_live", task_id: "t_live_in_client", deleted_at: null },
+      // Deleted from a live task: gone after 30 days, kept before.
+      { id: "b_deleted_old", task_id: "t_live_in_project", deleted_at: OLD },
+      { id: "b_deleted_recent", task_id: "t_live_in_project", deleted_at: recent },
     ],
   };
 });
@@ -109,8 +112,8 @@ describe("purgeExpiredTrash", () => {
 
   it("removes the files of project instructions on purged tasks, and only those", async () => {
     await purgeExpiredTrash();
-    expect(removedBriefFiles).toEqual(["b_gone"]);
-    expect(ids("task_briefs")).toEqual(["b_live"]);
+    expect(removedBriefFiles.sort()).toEqual(["b_deleted_old", "b_gone"]);
+    expect(ids("task_briefs")).toEqual(["b_deleted_recent", "b_live"]);
   });
 
   it("leaves trash younger than 30 days alone", async () => {

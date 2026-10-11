@@ -19,9 +19,9 @@ const RETENTION_DAYS = 30;
 // Per run, and per .in() list, so no request carries an overlong URL.
 const BATCH = 200;
 
-type Trashable = "task_documents" | "clients" | "projects" | "tasks";
+type Trashable = "task_documents" | "task_briefs" | "clients" | "projects" | "tasks";
 
-export type PurgeResult = { documents: number; clients: number; projects: number; tasks: number; kept: number; errors: string[] };
+export type PurgeResult = { documents: number; briefs: number; clients: number; projects: number; tasks: number; kept: number; errors: string[] };
 
 function chunks<T>(items: T[]): T[][] {
   const out: T[][] = [];
@@ -93,6 +93,13 @@ export async function purgeExpiredTrash(): Promise<PurgeResult> {
   for (const id of docIds) await deleteDocStorage(id);
   const documents = await remove("task_documents", docIds, errors);
 
+  // Project instructions deleted from a task (supabase/task-briefs-restore.sql,
+  // Derek 2026-10-11): restorable for 30 days, then gone for good with their
+  // files. The row's cascade takes its link and file rows.
+  const briefIds = await expiredIds("task_briefs", cutoff, errors);
+  for (const id of briefIds) await deleteBriefStorage(id);
+  const briefs = await remove("task_briefs", briefIds, errors);
+
   const expiredClients = await expiredIds("clients", cutoff, errors);
   const liveInClient = new Set([
     ...(await withLiveChildren("tasks", "client_id", expiredClients, errors)),
@@ -118,7 +125,7 @@ export async function purgeExpiredTrash(): Promise<PurgeResult> {
   const clients = await remove("clients", clientIds, errors);
   const projects = await remove("projects", projectIds, errors);
   const tasks = await remove("tasks", taskIds, errors);
-  return { documents, clients, projects, tasks, kept: liveInClient.size + liveInProject.size, errors };
+  return { documents, briefs, clients, projects, tasks, kept: liveInClient.size + liveInProject.size, errors };
 }
 
 /** Days an unmatched email or meeting note is kept. */
