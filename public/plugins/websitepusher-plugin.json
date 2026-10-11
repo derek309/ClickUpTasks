@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-11 15:10:43",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.5.3.zip",
+  "last_updated": "2026-10-11 19:50:00",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.5.4.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* A full-site pull now brings the images and media down on hosts that keep the uploads folder on separate storage (a link from wp-content/uploads). Before, those sites' images were left out without a warning."
+  "changelog": "* A full-site pull now brings down theme and plugin folders that are links to another folder (a Git checkout, the way a development site is often set up), leaving out their Git history and build tools. Before, those were left out and the pulled site had no theme.\n* A full-site pull now lists anything it had to leave out, instead of leaving it out without a word."
 }
