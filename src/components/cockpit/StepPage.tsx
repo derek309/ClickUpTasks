@@ -54,7 +54,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   doneActions?: React.ReactNode;
   /** What "Add client work" offers, besides a checklist and a text: a
    *  document, a review, an email (Derek, 2026-10-11). */
-  addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
+  addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string } }[];
   canText?: boolean;
   onSendText?: (body: string) => void;
   /** Email the client from the step (Derek, 2026-10-11: "email, sms or chat,
@@ -132,7 +132,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); } },
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
-  ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void }[];
+  ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string } }[];
   const [draft, setDraft] = useState("");
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
@@ -252,7 +252,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           {options.map((o) => (
             <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(false); o.onPick(); }}
               className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-              <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
+              <span className="min-w-0 truncate">{o.label}</span>
+              {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
+              {o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
             </button>
           ))}
         </div>
@@ -263,8 +265,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     <section aria-label="Add to this step" className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-2">
         {options.map((o) => (
-          <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.note}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:border-accent hover:bg-background disabled:opacity-50"><I.plus className="h-4 w-4 text-accent" /> {o.label}</button>
+          <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.tone ? `Add ${o.label} to this step${o.note ? ` (${o.note})` : ""}` : o.note}
+            className="inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:border-accent hover:bg-background disabled:opacity-50">
+            <I.plus className="h-4 w-4 shrink-0 text-accent" /><span className="min-w-0 truncate">{o.label}</span>
+            {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 text-[16px] font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
+          </button>
         ))}
       </div>
       <p className="text-[16px] text-muted">Or paste a link or drop a file anywhere on this page.</p>

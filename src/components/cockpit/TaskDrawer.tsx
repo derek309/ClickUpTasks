@@ -2126,10 +2126,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ];
     return kinds.map((x) => {
       const here = holds.includes(x.key);
-      const on = !here && deliverablePresent(x.key) ? stepTitleHolding(x.key) : null;
-      return { key: x.key, label: x.label, disabled: here, onPick: () => pick(x.key),
-        // It already exists: picking it puts that one on this step, never a second one.
-        note: here ? "on this step" : deliverablePresent(x.key) ? (on ? `already on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : "already made") : undefined };
+      const made = deliverablePresent(x.key);
+      const on = !here && made ? stepTitleHolding(x.key) : null;
+      const r = x.key === "doc" || x.key === "image" || x.key === "page" || x.key === "video" ? reviews[x.key] : null;
+      // It already exists: the button names it, in its stage's color, and
+      // adds that one to this step, never a second (Derek, 2026-10-11).
+      return { key: x.key, label: made ? deliverableName(x.key) : x.label, disabled: here, onPick: () => pick(x.key),
+        tone: made && r ? reviewTone(r.status) : undefined,
+        note: here ? "on this step" : on ? `on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : undefined };
     });
   };
   // What a step holds, drawn on it: its deliverables as their own rows (the
