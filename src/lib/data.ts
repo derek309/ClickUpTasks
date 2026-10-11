@@ -1068,11 +1068,12 @@ export const STATUS_META: Record<TaskStatus, { label: string; dot: string; chip:
   on_hold: { label: "On hold", dot: "#a8a29e", chip: "#f5f5f4" },
   // The client said go. Deliberately not Done: their yes and your delivery
   // are two different events, and collapsing them loses the gap between them.
-  approved: { label: "Approved", dot: "#8b5cf6", chip: "#f5f3ff" },
+  approved: { label: "Approved", dot: "#22c55e", chip: "#f0fdf4" },
   // Handed to a teammate. Set by delegating, never picked by hand — see
   // HIDDEN_STATUSES.
   delegated: { label: "Delegated", dot: "#7c3aed", chip: "#f5f3ff" },
-  done: { label: "Done", dot: "#22c55e", chip: "#f0fdf4" },
+  // Approved and Done share their colors with the review stages (lib/reviewTone).
+  done: { label: "Done", dot: "#15803d", chip: "#dcfce7" },
 };
 export const STATUS_ORDER: TaskStatus[] = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "delegated", "approved", "done"];
 
