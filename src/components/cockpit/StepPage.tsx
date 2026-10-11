@@ -333,6 +333,19 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 {controls}
                 {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>
+              {/* Directions: what we want, so whoever does it (Claude included,
+                  with the copy button) has it all in one place (Derek, 2026-10-11). */}
+              <section aria-labelledby="step-directions" className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 id="step-directions" className="text-[17px] font-bold">Directions</h3>
+                  {onCopyForClaude && <button onClick={onCopyForClaude} className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[16px] font-semibold hover:bg-background"><span aria-hidden>✳</span> Copy for Claude</button>}
+                </div>
+                <textarea key={sub.id} defaultValue={sub.notes ?? ""} rows={3} aria-label="Directions for this step"
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (sub.notes ?? "")) onPatchSub({ notes: v || undefined }); }}
+                  placeholder="What we want on this step: what to make, what to change, where things are, how it should look…"
+                  className="w-full resize-y rounded-lg border bg-surface px-3 py-2 text-[16px] outline-none [field-sizing:content] focus:border-accent" />
+                <p className="text-[16px] text-muted">Paste or drop images, files and links anywhere on this page; they go on this step with the directions.</p>
+              </section>
               {followBox}
               {planBits}
               {outFor !== undefined ? outFor : empty ? quickStart : <div>{addButton}</div>}

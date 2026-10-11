@@ -479,7 +479,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const owner = sub.onClient ? `${client.name} (the client)` : sub.assigneeId ? userById(sub.assigneeId)?.name ?? "a teammate" : task.assigneeId ? userById(task.assigneeId)?.name ?? null : null;
     const holds = [...new Set([...(withSentHolds(sub).holds ?? []), ...sentReviews(sub)])];
     const work = holds.flatMap((k) => {
-      if (k.startsWith("att:")) { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? [`- ${a.name}${a.url ? ` (${a.url})` : ""}`] : []; }
+      if (k.startsWith("att:")) { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? [a.url ? `- ${a.name}: ${a.url}` : `- ${a.name} (${a.kind}, see it with view_task_file, file: ${a.id})`] : []; }
       const d = k as DeliverableKey;
       if (!deliverablePresent(d)) return [];
       const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
@@ -496,8 +496,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ``,
       `This step (${at + 1} of ${plan.length}): ${sub.title}`,
       `- ${sub.done ? `Done: ${sub.outcome ?? "Done"}` : cur?.id === sub.id ? "The current step" : "Comes later"}${owner ? ` · on ${owner}` : ""}${sub.due ? ` · due ${sub.due}` : ""}`,
+      sub.notes?.trim() ? `\nDirections:\n${sub.notes.trim()}` : "",
       sub.todos?.length ? `\nTo do on this step:\n${sub.todos.map((t) => `- [${t.done ? "x" : " "}] ${t.title}`).join("\n")}` : "",
-      work.length ? `\nClient work on this step:\n${work.join("\n")}` : "",
+      work.length ? `\nOn this step (client work, links and files):\n${work.join("\n")}` : "",
       sub.needs?.length ? `\nIt needs: ${sub.needs.join(", ")}` : "",
       said.length ? `\nSaid during this step:\n${said.join("\n")}` : "",
       `\nAll the steps:\n${plan.map((x, i) => `${i + 1}. [${x.done ? "x" : x.id === cur?.id ? ">" : " "}] ${x.title}${x.done && x.outcome ? ` (${x.outcome})` : ""}`).join("\n")}`,
