@@ -29,7 +29,7 @@ export type UseChecklistDeps = {
 
 export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDialog, pushToast, tasksRef, selectedTaskIds, setBulkDelegateOpen, clearSelection }: UseChecklistDeps) {
   const toggleSub = (taskId: string, subId: string) => {
-    const t = tasks.find((x) => x.id === taskId);
+    const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     if (!t) return;
     const s = t.subtasks.find((x) => x.id === subId);
     const nowDone = s ? !s.done : false;
@@ -66,14 +66,14 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     if (nowDone && s?.assigneeId && t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} completed "${s.title}" on ${t.title}`, taskId, { skipEmail: true });
   };
   const addSub = (taskId: string, title: string) => {
-    const t = tasks.find((x) => x.id === taskId);
+    const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     if (!t || !title.trim()) return;
     const sub: Subtask = { id: newId("s_"), title: title.trim(), done: false };
     update(taskId, { subtasks: [...t.subtasks, sub] }, { append: [sub] });
   };
-  const renameSub = (taskId: string, subId: string, title: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }, { patch: subId, with: { title } }); };
+  const renameSub = (taskId: string, subId: string, title: string) => { const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId); if (t) update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, title } : s)) }, { patch: subId, with: { title } }); };
   const deleteSub = (taskId: string, subId: string) => {
-    const t = tasks.find((x) => x.id === taskId);
+    const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     const s = t?.subtasks.find((x) => x.id === subId);
     if (!t || !s) return;
     // Taking a handoff back is a bigger deal than deleting a checklist line:
@@ -110,7 +110,7 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     });
   };
   const patchSub = (taskId: string, subId: string, patch: Partial<Subtask>) => {
-    const t = tasks.find((x) => x.id === taskId);
+    const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     if (!t) return;
     const before = t.subtasks.find((s) => s.id === subId);
     update(taskId, { subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, ...patch } : s)) }, { patch: subId, with: patch });
@@ -185,7 +185,7 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     clearSelection();
     pushToast(bulkDelegateSummary(chosen.length, toName));
   };
-  const toggleLabel = (taskId: string, labelId: string) => { const t = tasks.find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
+  const toggleLabel = (taskId: string, labelId: string) => { const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId); if (t) update(taskId, { labelIds: t.labelIds.includes(labelId) ? t.labelIds.filter((l) => l !== labelId) : [...t.labelIds, labelId] }); };
 
   // A client's ghlLocationId field is repurposed to store the contact's business/company name.
   // Which client a task belongs to when the composer is opened from somewhere
