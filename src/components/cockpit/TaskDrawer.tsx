@@ -37,6 +37,7 @@ let handoffFromUrl: string | null = typeof window === "undefined" ? null : new U
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
+import { ClientWebsite } from "./ClientWebsite";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
@@ -232,6 +233,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ attachments: atts, subtasks: subs });
     pushToast(`${ids.length} ${ids.length === 1 ? "link" : "links"} added to the step`);
   };
+  // A picture into the client's website Media Library (Derek, 2026-10-12).
+  const [sendingSite, setSendingSite] = useState<string | null>(null);
+  const sendToWebsite = async (att: Attachment) => {
+    if (att.website) { void navigator.clipboard?.writeText(att.website.url); pushToast("On the website already. Its link is copied."); return; }
+    setSendingSite(att.id);
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/to-website`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: att.id }) }).catch(() => null);
+    const j = res ? await res.json().catch(() => null) : null;
+    setSendingSite(null);
+    if (!res?.ok || !j?.media) { pushToast(j?.error ?? "Couldn't send it to the website."); return; }
+    onPatch({ attachments: taskRef.current.attachments.map((a) => (a.id === att.id ? { ...a, website: j.media } : a)) });
+    pushToast("On the website's Media Library", { label: "Copy link", run: () => void navigator.clipboard?.writeText(j.media.url) });
+  };
+  const websiteButton = (a: Attachment, onPicture = true) => (
+    <button onClick={() => void sendToWebsite(a)} disabled={sendingSite === a.id}
+      title={a.website ? "On the website. Click to copy its link" : "Send to the client's website Media Library"}
+      className={onPicture ? `flex h-7 items-center gap-1 rounded-md px-1.5 text-[13px] font-semibold text-white transition ${a.website ? "bg-success/90" : "bg-black/60 hover:bg-black/80"}` : "text-[16px] font-semibold text-accent"}>
+      {sendingSite === a.id ? "Sending…" : a.website ? "✓ On website" : "⤴ Website"}
+    </button>
+  );
   // Reads the <title> server-side (CORS puts it out of reach here) and renames
   // the attachment if it finds one. Silent on failure: the URL-derived name is
   // already a reasonable answer, so a dead link or a slow host costs nothing.
@@ -2115,6 +2135,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   : <span className="grid h-28 w-40 place-items-center text-muted">🖼️</span>}
               </button>
               <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                {own && a.path && websiteButton(a)}
                 {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>}
                 {own
                   ? <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
@@ -2630,6 +2651,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     </button>
                     <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
                       className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface/90 text-muted shadow hover:text-danger">×</button>
+                    <span className="absolute bottom-1 left-1">{websiteButton(a)}</span>
                   </span>
                 ) : a ? (
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
@@ -2779,6 +2801,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <div className="font-bold">In GoHighLevel</div>
           {saasRow}
           {canAdmin && client.id.startsWith("cl_") && saasUrl && <ClientGhlKey clientId={client.id} saasUrl={saasUrl} pushToast={pushToast} />}
+          {canAdmin && client.id.startsWith("cl_") && <ClientWebsite clientId={client.id} pushToast={pushToast} />}
         </div>
       )}
     </>, true);

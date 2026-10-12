@@ -764,6 +764,8 @@ export interface Attachment {
   gmailAttachmentId?: string;
   mimeType?: string;
   url?: string; // for kind "link" — a drive/website URL rather than a stored file
+  /** Sent to the client's website: its Media Library item (lib/clientWebsite). */
+  website?: { id: number; url: string; at: string };
   /** On a task: the email file this was copied from (lib/emailFiles
    *  emailFileSources), so the same file is never copied onto it twice. */
   emailSource?: string;

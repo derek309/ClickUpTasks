@@ -1297,6 +1297,17 @@ export function createServer(opts = {}) {
       });
   }
 
+  // A task's picture onto the client's website (hosted only, Derek 2026-10-12).
+  if (opts.services?.sendToWebsite) {
+    server.tool("send_to_website",
+      "Upload one of a task's stored files (a picture, usually) into the client's WordPress Media Library, so it can be used on their site. Give the file id from get_task's Files, or its name. Returns its address on the site; a file sent before is not sent twice. Needs the client's Website set up in the app (an admin adds it under SaaS account on a task).",
+      { task_id: z.string(), file: z.string().describe("the file id from get_task, or its name") },
+      async ({ task_id, file }) => {
+        if (!await loadTask(task_id, "id")) return noTask(task_id);
+        return { content: [{ type: "text", text: await opts.services.sendToWebsite(task_id, file) }] };
+      });
+  }
+
   server.tool("add_checklist_items",
     "Add one or more steps to the end of a task's plan, in the order given (the app calls the checklist Steps). Check get_task first to see what's already there and avoid duplicates.",
     { id: z.string(), items: z.array(z.string()).min(1).describe("item titles to add, unchecked") },

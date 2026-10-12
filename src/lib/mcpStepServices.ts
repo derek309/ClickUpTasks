@@ -3,6 +3,7 @@
 // so work Claude does moves the plan on the same way the task page does.
 import { supabaseAdmin } from "./supabaseAdmin";
 import { holdDraftOnStep, tickStep, tickTodo } from "./stepsServer";
+import { sendTaskFileToSite } from "./clientWebsite";
 
 export function createStepServices({ memberId }: { memberId: string }) {
   let name: Promise<string> | null = null;
@@ -14,5 +15,10 @@ export function createStepServices({ memberId }: { memberId: string }) {
     tickStep: (taskId: string, stepId: string, done: boolean) => tickStep(taskId, stepId, done),
     tickTodo: async (taskId: string, ref: string, done: boolean) => tickTodo(taskId, ref, done, await label()),
     holdDraftOnStep: (taskId: string, subject: string, step?: string) => holdDraftOnStep(taskId, subject, step),
+    // A task's picture into the client's website Media Library (Derek, 2026-10-12).
+    sendToWebsite: async (taskId: string, file: string) => {
+      const r = await sendTaskFileToSite(taskId, file);
+      return r.ok ? `${r.name} ${r.already ? "was already" : "is now"} in the website's Media Library: ${r.media.url} (media id ${r.media.id}).` : r.error;
+    },
   };
 }
