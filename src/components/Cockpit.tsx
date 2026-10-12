@@ -1742,6 +1742,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     } catch { pushToast("Couldn't copy to the clipboard."); }
   };
   const copyClientForClaude = async (listId?: string) => {
+    // Tasks ticked: only those (Derek, 2026-10-12: "will Claude only add those
+    // tasks"); nothing ticked: the whole list, as before.
+    if (selectedTaskIds.size > 0) { await copySelectedForClaude(); return; }
     const client = clientById(activeClient);
     if (!client) return;
     const scopeId = listId ?? activeProject;
