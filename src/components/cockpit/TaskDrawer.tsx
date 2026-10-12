@@ -57,11 +57,13 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, slideBackLabel, openEmail, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
   slideOver?: boolean;
+  /** Opened from the Inbox: the feed starts on Everything. */
+  fromInbox?: boolean;
   /** Slid over the Inbox: what "← back" returns to (the conversation's subject). */
   slideBackLabel?: string | null;
   /** Opened from a draft on the client's page: its email window opens with it. */
@@ -1489,7 +1491,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
     onDeleteMessage, onEditMessage, hasMessaging,
     // Over the Inbox you just read the conversation, so the feed opens on Everything.
-    initialView: slideOver ? "all" : undefined,
+    initialView: fromInbox ? "all" : undefined,
   });
   // Reads like the task row it effectively is: a tick box, their face, what
   // they were asked for, and when they owe it. Sits directly under the stage
@@ -2599,6 +2601,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <div className="flex items-center gap-1 border-b px-3 py-2 text-[16px] text-muted">
       <button onClick={onClose} title="Back (Esc)" className="min-w-0 truncate rounded-lg px-2 py-1.5 font-semibold hover:bg-background hover:text-foreground">← {slideBackLabel || "Inbox"}</button>
       <span className="flex-1" />
+      {/* Up and down the list it was opened from (j / k work too). */}
+      {navTotal > 1 && (
+        <span className="mr-1 flex items-center">
+          <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" aria-label="Previous task" className="rounded-lg p-2 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
+          <span className="min-w-[56px] text-center tabular-nums">{navIndex + 1} of {navTotal}</span>
+          <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className="rounded-lg p-2 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
+        </span>
+      )}
       <button onClick={onToggleFull} title="Open the task on its own page" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
       <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
       <div className="relative">
