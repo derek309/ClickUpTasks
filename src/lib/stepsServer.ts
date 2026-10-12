@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addReplyStep, datesForCurrentStep, emailOwnWords, htmlToText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
+  addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
   isHandoffStep, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
@@ -298,7 +298,7 @@ export async function holdDraftOnStep(taskId: string, subject: string, stepRef?:
  *  a task without steps and even when short. Otherwise (it arrived on a thread
  *  already linked) only on a task with steps, and not for a plain "thanks". */
 export async function stepsOnClientEmail(taskId: string, m: { id: string; subject: string | null; body: string; at: string; from: string | null }, always = false): Promise<boolean> {
-  const text = emailOwnWords(htmlToText(m.body ?? ""));
+  const text = clientEmailText(m.body ?? "", m.from);
   if (!always && isJustThanks(text)) return false;
   let status: TaskStatus | null = null;
   return rewriteSteps(taskId, (row, first) => {

@@ -3103,6 +3103,41 @@ export function emailOwnWords(text: string): string {
   return (cut >= 0 ? text.slice(0, cut) : text).trim();
 }
 
+// Where a sign off, legal footer or quote starts, for a body whose line
+// breaks were lost (Pam's reply on a Reply step read as one block with her
+// license line, Medicare disclaimer and confidentiality notice, 2026-10-12).
+const INLINE_CUTS: RegExp[] = [
+  /\s(Sincerely|Kind regards|Best regards|Warm regards|Warmly|Respectfully|Regards),\s/i,
+  /\bCONFIDENTIALITY NOTICE\b/i,
+  /\bThis (e-?mail|communication|message)(,| and any attachments,?)? (is|contains|may contain) (confidential|privileged|information intended)/i,
+  /-{5,}\s*Forwarded message/i,
+  /\sOn [^\n]{0,200}?\bwrote:/i,
+  /\s>\s/,
+];
+const SIGN_OFF_LINE = /^(sincerely|kind regards|best regards|warm regards|warmly|respectfully|regards|best|cheers|thanks|thank you|many thanks)[,!.]?$/i;
+
+/** A client's email as the words they wrote: no quoted thread, signature,
+ *  sign off or legal footer, `*bold*` markers gone, their line breaks kept.
+ *  Plain text is never run through htmlToText, which flattens it to one
+ *  line on the server. Used when a Reply step is made and when it shows. */
+export function clientEmailText(body: string, signer?: string | null): string {
+  if (!body) return "";
+  const raw = looksLikeHtml(body) ? htmlToText(body.replace(/<br\s*\/?>|<\/(p|div|li|tr|h\d)>/gi, (m) => `${m}\n`)) : body;
+  let text = splitQuotedEmail(tidyEmailText(raw)).visible || tidyEmailText(raw);
+  text = emailOwnWords(text);
+  for (const re of INLINE_CUTS) {
+    const m = re.exec(text);
+    if (m && m.index > 0) text = text.slice(0, m.index);
+  }
+  const lines = text.split("\n");
+  for (let i = Math.max(1, lines.length - 40); i < lines.length; i++) {
+    if (SIGN_OFF_LINE.test(lines[i].replace(/[*_]/g, "").trim())) { text = lines.slice(0, i).join("\n"); break; }
+  }
+  const sig = signatureCut(text, signer);
+  if (sig > 0) text = text.slice(0, sig);
+  return text.replace(/\*{1,2}([^*\n]+?)\*{1,2}/g, "$1").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** "Thanks!", "Sounds good": nothing to do, so no step (Derek, 2026-10-12). */
 export function isJustThanks(text: string): boolean {
   const own = emailOwnWords(text).replace(/\s+/g, " ").trim();

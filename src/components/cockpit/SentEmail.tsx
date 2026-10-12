@@ -5,7 +5,7 @@
 // review"). It says whether the client has written back since; the whole box
 // opens the email as it went out.
 import { useState } from "react";
-import { htmlToText, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
+import { clientEmailText, htmlToText, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
 import { reviewTone } from "@/lib/reviewTone";
 
 const CHANNEL_WORD: Partial<Record<Message["channel"], string>> = { email: "email", sms: "text", chat: "the portal" };
@@ -86,7 +86,7 @@ export function ReceivedEmailBox({ email, answered, onReply }: {
       </div>
       {open && (
         <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
-          {email.body || "(no text)"}
+          {clientEmailText(email.body, email.from) || email.body || "(no text)"}
         </div>
       )}
     </div>

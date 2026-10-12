@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  clientEmailText,
   waitingFollowUp,
   isReplyTask,
   unansweredPreviewByTask,
@@ -1374,5 +1375,20 @@ describe("the task's dates follow its current step", () => {
     expect(datesForCurrentStep([], handoff, { assigneeId: "u_derek", due: "2026-10-20", followUpAt: null })).toEqual({ followUpAt: "2026-10-16" });
     // Nothing changed: nothing moves.
     expect(datesForCurrentStep(after, after, { assigneeId: "u_derek", due: "2026-10-12", followUpAt: null })).toEqual({});
+  });
+});
+
+describe("clientEmailText", () => {
+  const footer = "*specializing in: Medicare*\n\n*CA LIC # 4021753*\n\n*Medicare disclaimer: We do not offer every plan.*\nCONFIDENTIALITY NOTICE: This communication contains information.";
+  it("keeps only what the client wrote, line breaks and all", () => {
+    const body = `No, thats no commission.\nIll say the ones within 10 miles.\n\nSincerely,\n\n${footer}\n\nOn Mon, Oct 12, 2026 at 9:08 AM Derek Fox wrote:\n> Hi Pamela,`;
+    expect(clientEmailText(body, "Pamela Macias")).toBe("No, thats no commission.\nIll say the ones within 10 miles.");
+  });
+  it("cleans a body that lost its line breaks", () => {
+    const flat = `No, thats no commission. lol. Sincerely, ${footer.replace(/\n+/g, " ")} On Mon, Oct 12, 2026 at 9:08 AM Derek Fox wrote: > Hi Pamela,`;
+    expect(clientEmailText(flat, "Pamela Macias")).toBe("No, thats no commission. lol.");
+  });
+  it("reads HTML with its paragraphs", () => {
+    expect(clientEmailText("<div>Looks <b>great</b></div><div>Send it Friday</div>", "Pam")).toBe("Looks great\nSend it Friday");
   });
 });
