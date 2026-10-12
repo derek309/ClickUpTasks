@@ -2245,7 +2245,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     });
     setEmailOpenNonce((n) => n + 1);
   };
-  const sentNextPanel = sentStep && typeof document !== "undefined" ? (() => {
+  // Built when drawn, not here: its menu reads work labels defined further
+  // down, and reading them before then crashed the page (2026-10-12).
+  const sentNextPanel = () => !sentStep || typeof document === "undefined" ? null : (() => {
     const stg = stepStage(sentStep, task.assigneeId);
     const asking = asksWhatsNext(sentStep) || !sentStep.title;
     return createPortal(
@@ -2292,7 +2294,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </div>
       </div>
     </div>, document.body);
-  })() : null;
+  })();
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
@@ -3094,7 +3096,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onTodoDone={(t) => { const k = reviewOnStep(ps); if (k && t.commentId) void docApi(task.id, k, "/comments", { method: "PATCH", body: JSON.stringify({ commentId: t.commentId, done: true }) }); }} />
           );
         })()}
-        {sentNextPanel}
+        {sentNextPanel()}
         <ActionDock
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
           me={userById(meId) ?? null} users={users}
