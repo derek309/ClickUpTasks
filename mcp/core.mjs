@@ -1071,12 +1071,18 @@ export function createServer(opts = {}) {
       },
       async ({ task_id, kind, image_labels, page_labels, ...change }) => reply(await services.updateReview(task_id, kind, { ...change, imageLabels: page_labels ?? image_labels })));
 
-    const writeDocument = async ({ task_id, body, title }) => {
+    // Comments the new version answers can be resolved with it (Derek,
+    // 2026-10-12): ids from get_review, or "all" open ones.
+    const RESOLVE = z.union([z.literal("all"), z.array(z.string())]).optional()
+      .describe('comments this version answers, marked done after it is saved: their ids from get_review, or "all" for every open comment. Leave out to keep them open.');
+    const withResolved = async (out, task_id, kind, which) => which ? `${out}\n${await services.resolveComments(task_id, kind, which)}` : out;
+    const writeDocument = async ({ task_id, body, title, resolve_comments }) => {
       const html = docTextToHtml(body);
       if (!docHtmlToText(html)) return reply("The document is empty.");
-      return reply(await services.writeDocument(task_id, html, title));
+      return reply(await withResolved(await services.writeDocument(task_id, html, title), task_id, "doc", resolve_comments));
     };
     const writeSchema = {
+      resolve_comments: RESOLVE,
       task_id: z.string(),
       body: z.string().min(1).describe("the whole document, in the simple markdown described above"),
       title: z.string().optional().describe("the document's name; omit to keep it"),
@@ -1105,12 +1111,13 @@ export function createServer(opts = {}) {
         })).min(1).max(10).optional(),
         keep_others: z.boolean().optional().describe("keep the working copy's other images or pages and replace or add only these"),
         html: z.string().optional(), name: z.string().optional().describe("the version's file name"),
+        resolve_comments: RESOLVE,
       },
-      async ({ task_id, kind, image_url, upload_id, images, pages, keep_others, html, name }) => reply(await services.addVersion(task_id, kind, {
+      async ({ task_id, kind, image_url, upload_id, images, pages, keep_others, html, name, resolve_comments }) => reply(await withResolved(await services.addVersion(task_id, kind, {
         imageUrl: image_url, uploadId: upload_id, html, name,
         ...(images ? { images: images.map((i) => ({ imageUrl: i.image_url, uploadId: i.upload_id, name: i.name, label: i.label, position: i.position })), keepOthers: !!keep_others } : {}),
         ...(pages ? { pages: pages.map((p) => ({ html: p.html, name: p.name, label: p.label, position: p.position })), keepOthers: !!keep_others } : {}),
-      })));
+      }), task_id, kind, resolve_comments)));
 
     server.tool("use_version",
       "Make an earlier version the working copy again (on the client document, bring back an earlier version's text). send_for_review sends it.",

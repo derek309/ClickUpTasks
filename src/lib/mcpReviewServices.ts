@@ -509,6 +509,23 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return `Updated comment [${commentId}]${change.done === undefined ? "" : change.done ? ", marked done" : ", open again"}.`;
     },
 
+    /** Comments a new version answers, marked done in one go (Derek,
+     *  2026-10-12: "resolve when a new version is created"): the ids given,
+     *  or "all" open ones on the review. */
+    async resolveComments(taskId: string, kind: ReviewKind, which: string[] | "all"): Promise<string> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return task;
+      const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
+      if (!doc) return "No review to resolve comments on.";
+      const { data: open } = await supabaseAdmin.from("task_document_comments").select("id").eq("document_id", doc.id as string).is("completed_at", null);
+      const ids = ((open ?? []) as { id: string }[]).map((c) => c.id).filter((id) => which === "all" || which.includes(id));
+      const actor = await fileActor();
+      let n = 0;
+      for (const id of ids) { const r = await editDocComment(doc.id as string, id, { done: true }, actor); if (r.ok) n++; }
+      const missing = which === "all" ? [] : which.filter((id) => !ids.includes(id));
+      return `Resolved ${n} ${n === 1 ? "comment" : "comments"}${missing.length ? `; not open or not found: ${missing.join(", ")}` : ""}.`;
+    },
+
     async deleteComment(commentId: string): Promise<string> {
       const scope = await commentScope(commentId);
       if (typeof scope === "string") return scope;
