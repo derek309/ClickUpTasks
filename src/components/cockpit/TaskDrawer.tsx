@@ -2382,7 +2382,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // The "Follow up in" picked beside Send (Derek, 2026-10-12): the
           // check in, the task's follow up, and a due date already earlier
           // all move to it. Three business days when none was picked.
-          const due = addBusinessDaysIso(TODAY, email.followUpDays || 3);
+          const due = email.followUpDate || addBusinessDaysIso(TODAY, 3);
           const list = addCheckInStep(task.subtasks, sentFrom.id, firstName, due, () => newId("s_"));
           if (list) {
             if (openStep) setNextStepDone(openStep.id, true);
@@ -2397,8 +2397,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
         // A due date inside that window already brings it back: no follow up then.
-        if (email.followUpDays && task.status !== "done") {
-          const checkBack = addBusinessDaysIso(TODAY, email.followUpDays);
+        if (email.followUpDate && task.status !== "done") {
+          const checkBack = email.followUpDate;
           // The follow up is that day, and a due date before it moves with it.
           onPatch({ status: "waiting", followUpAt: checkBack, ...(task.due && task.due < checkBack ? { due: checkBack } : {}) });
         }

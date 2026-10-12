@@ -31,34 +31,37 @@ import { newId } from "./ui";
 /** replyTo: messages.id this answers, so the send routes thread it as a reply. */
 export type OutgoingEmail = { subject: string; body: string; attachments: Attachment[]; cc: string[]; bcc: string[]; replyTo: string | null;
   /** On a task: business days until the client is followed up, null for no follow up. */
-  followUpDays?: number | null };
+  /** The day the task comes back to you (yyyy-mm-dd), or none. */
+  followUpDate?: string | null };
 
 /** Follow up choices beside Send on a task's email (Derek, 2026-10-07: "send,
  *  follow up in X days, default 3"). The last one picked is remembered. */
-// When to follow up, the way people think of it (Derek, 2026-10-12): a few
-// days out, a week, next Monday or next month. Each is a date (a weekend rolls
-// on to Monday); what Send gets is the number of business days to it.
-const FOLLOW_UP_KEY = "emailFollowUpChoice";
-const FOLLOW_UP_CHOICES = ["1", "2", "3", "4", "5", "6", "week", "nextweek", "nextmonth"] as const;
-type FollowUpChoice = (typeof FOLLOW_UP_CHOICES)[number];
-const followUpLabel: Record<FollowUpChoice, string> = {
-  1: "Tomorrow", 2: "In 2 days", 3: "In 3 days", 4: "In 4 days", 5: "In 5 days", 6: "In 6 days",
-  week: "In a week", nextweek: "Next week", nextmonth: "Next month",
-} as Record<FollowUpChoice, string>;
-const weekdayOn = (iso: string) => { const d = new Date(`${iso}T12:00:00`); const w = d.getDay(); return w === 6 ? addDaysIso(iso, 2) : w === 0 ? addDaysIso(iso, 1) : iso; };
-export function followUpDate(choice: FollowUpChoice, today = TODAY): string {
-  if (choice === "nextweek") { const w = new Date(`${today}T12:00:00`).getDay(); return addDaysIso(today, ((8 - w) % 7) || 7); }
-  if (choice === "nextmonth") { const [y, m] = today.split("-").map(Number); return weekdayOn(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`); }
-  return weekdayOn(addDaysIso(today, choice === "week" ? 7 : Number(choice)));
+// When to follow up, by the day (Derek, 2026-10-12: "Today, Tomorrow,
+// Wednesday, Thursday, Friday, next Monday, next month, custom"): today, the
+// rest of this working week by name, next Monday, the first weekday of next
+// month, or any date. Remembered as a kind ("d2" is two days out), so it
+// still makes sense tomorrow.
+const FOLLOW_UP_KEY = "emailFollowUpPick";
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const dow = (iso: string) => new Date(`${iso}T12:00:00`).getDay();
+const weekdayOn = (iso: string) => (dow(iso) === 6 ? addDaysIso(iso, 2) : dow(iso) === 0 ? addDaysIso(iso, 1) : iso);
+export type FollowUpPick = { value: string; label: string; date: string };
+export function followUpPicks(today = TODAY): FollowUpPick[] {
+  const out: FollowUpPick[] = [];
+  if (dow(today) >= 1 && dow(today) <= 5) out.push({ value: "today", label: "Today", date: today });
+  for (let d = 1; d <= 6; d++) {
+    const date = addDaysIso(today, d);
+    const w = dow(date);
+    if (w === 0 || w === 6) break; // the rest of this working week only
+    out.push({ value: `d${d}`, label: d === 1 ? "Tomorrow" : DAY_NAMES[w], date });
+  }
+  out.push({ value: "nextmonday", label: "Next Monday", date: addDaysIso(today, ((8 - dow(today)) % 7) || 7) });
+  const [y, m] = today.split("-").map(Number);
+  out.push({ value: "nextmonth", label: "Next month", date: weekdayOn(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`) });
+  return out;
 }
-/** Business days from today to that date, which is what Send counts in. */
-export function businessDaysTo(target: string, today = TODAY): number {
-  let n = 0;
-  for (let d = today; d < target; d = addDaysIso(d, 1)) { const w = new Date(`${addDaysIso(d, 1)}T12:00:00`).getDay(); if (w !== 0 && w !== 6) n++; }
-  return Math.max(1, n);
-}
-const readFollowUpChoice = (): FollowUpChoice | null => {
-  try { const v = localStorage.getItem(FOLLOW_UP_KEY); if (v === "none") return null; return (FOLLOW_UP_CHOICES as readonly string[]).includes(v ?? "") ? v as FollowUpChoice : "3"; } catch { return "3"; }
+const readFollowUpPick = (): string => {
+  try { return localStorage.getItem(FOLLOW_UP_KEY) ?? "d2"; } catch { return "d2"; }
 };
 
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
@@ -315,8 +318,12 @@ export function EmailWindow({
   };
   // What goes out is kept as the draft first, so it retires itself once the sent
   // email shows up (sentEmailFor), and a failed send still has it.
-  const [followUpChoice, setFollowUpChoice] = useState<FollowUpChoice | null>(readFollowUpChoice);
-  const followUpDays = followUpChoice ? businessDaysTo(followUpDate(followUpChoice)) : null;
+  const picks = followUpPicks();
+  const [followUpPick, setFollowUpPick] = useState<string>(readFollowUpPick);
+  const [customDate, setCustomDate] = useState("");
+  // A remembered kind that doesn't exist today (Thursday's "d3") falls back to Next Monday.
+  const pickNow = followUpPick === "none" || followUpPick === "custom" || picks.some((p) => p.value === followUpPick) ? followUpPick : "nextmonday";
+  const followUpDate = pickNow === "none" ? null : pickNow === "custom" ? (customDate || null) : picks.find((p) => p.value === pickNow)?.date ?? null;
   const send = () => {
     if (!onSend || !toEmail) return;
     const email = outgoing();
@@ -324,7 +331,7 @@ export function EmailWindow({
     finished.current = true;
     save({ ...draftRef.current, ...pending.current, subject: email.subject, body: currentBody(), attachments, cc, bcc, updatedAt: new Date().toISOString() });
     pending.current = {};
-    onSend(followUp ? { ...email, followUpDays } : email);
+    onSend(followUp ? { ...email, followUpDate } : email);
     onClose();
   };
   // A scheduled email leaves no sent message to match until it goes out, so its draft clears now.
@@ -440,11 +447,16 @@ export function EmailWindow({
               {followUp && onSend && (
                 <label className="inline-flex items-center gap-1.5 text-[16px] text-muted" title="The task waits on them and comes back to you that day; it joins their Monday reminder email">
                   Follow up
-                  <select value={followUpChoice ?? "none"} onChange={(e) => { const v = e.target.value === "none" ? null : e.target.value as FollowUpChoice; setFollowUpChoice(v); try { localStorage.setItem(FOLLOW_UP_KEY, v ?? "none"); } catch { /* not kept */ } }}
+                  <select value={pickNow} onChange={(e) => { setFollowUpPick(e.target.value); try { localStorage.setItem(FOLLOW_UP_KEY, e.target.value); } catch { /* not kept */ } }}
                     className="rounded-md border bg-surface px-2 py-1.5 text-[16px] font-semibold text-foreground outline-none focus:border-accent">
-                    {FOLLOW_UP_CHOICES.map((c) => <option key={c} value={c}>{followUpLabel[c]} · {formatDue(followUpDate(c))}</option>)}
+                    {picks.map((p) => <option key={p.value} value={p.value}>{p.label}, {formatDue(p.date)}</option>)}
+                    <option value="custom">Custom date…</option>
                     <option value="none">No follow up</option>
                   </select>
+                  {pickNow === "custom" && (
+                    <input type="date" value={customDate} min={TODAY} onChange={(e) => setCustomDate(e.target.value)} aria-label="Follow up date"
+                      className="rounded-md border bg-surface px-2 py-1 text-[16px] text-foreground outline-none focus:border-accent" />
+                  )}
                 </label>
               )}
               {/* What a phone took off the top of the window, as two buttons. */}
