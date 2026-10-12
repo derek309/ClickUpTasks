@@ -1713,15 +1713,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
           className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
-        <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
-          className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pl-1 sm:pr-4">
-          {sub.done ? (
-            <span aria-hidden className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white"><I.check className="h-3.5 w-3.5" /></span>
+        {/* The circle is the tick (Derek, 2026-10-12: "how can I mark a step
+            complete"); the rest of the row opens the step. The client's own
+            step is answered on its page instead. */}
+        {(() => {
+          const tickable = !sub.onClient && !asksWhatsNext(sub);
+          const mark = sub.done ? (
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white"><I.check className="h-3.5 w-3.5" /></span>
           ) : isActive ? (
-            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[st].dot }} />
+            <span className="group/tick flex h-6 w-6 items-center justify-center rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[st].dot }} />
           ) : (
-            <span aria-hidden className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2" />
-          )}
+            <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 text-accent"><I.check className="h-3.5 w-3.5 opacity-0 group-hover/tick:opacity-100" /></span>
+          );
+          return tickable ? (
+            <button onClick={() => (sub.done ? onToggleSub(sub.id) : completeStep(sub.id))} aria-pressed={sub.done}
+              title={sub.done ? "Done. Click to reopen" : "Mark this step done"} aria-label={sub.done ? `Reopen ${sub.title}` : `Mark ${sub.title} done`}
+              className="group/tick shrink-0 self-start rounded-full py-3 pl-3 hover:opacity-80 sm:pl-1">{mark}</button>
+          ) : <span aria-hidden className="shrink-0 self-start py-3 pl-3 sm:pl-1">{mark}</span>;
+        })()}
+        <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
+          className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>{sub.title}</span>
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
