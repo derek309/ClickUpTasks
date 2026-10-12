@@ -218,6 +218,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
     if (!typed) void fetchLinkTitle(id, href);
   };
+  // The client's saved short links put on a step (Derek, 2026-10-12): each
+  // becomes a link on the task (or reuses the one already there) held by
+  // the step.
+  const attachSavedLinks = (stepId: string, ids: string[]) => {
+    let atts = taskRef.current.attachments;
+    let subs = taskRef.current.subtasks;
+    for (const l of (clientLinks ?? []).filter((x) => ids.includes(x.id))) {
+      let att = atts.find((a) => a.url === l.url);
+      if (!att) { att = { id: newId("at_"), name: l.label || prettyLinkName(l.url), kind: "link", size: "", url: l.url }; atts = [...atts, att]; }
+      subs = holdOnStep(subs, stepId, attachmentKey(att.id));
+    }
+    onPatch({ attachments: atts, subtasks: subs });
+    pushToast(`${ids.length} ${ids.length === 1 ? "link" : "links"} added to the step`);
+  };
   // Reads the <title> server-side (CORS puts it out of reach here) and renames
   // the attachment if it finds one. Silent on failure: the URL-derived name is
   // already a reasonable answer, so a dead link or a slow host costs nothing.
@@ -2953,6 +2967,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
               onCopyPortalLink={onCopyClientLink}
+              savedLinks={(clientLinks ?? []).map((l) => {
+                const att = task.attachments.find((a) => a.url === l.url);
+                return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)) };
+              })}
+              onAttachLinks={(ids) => attachSavedLinks(ps.id, ids)}
               onAskTodos={hasMessaging && !!messageDest?.email ? (ids) => askAboutTodos(ps, ids) : undefined}
               onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}

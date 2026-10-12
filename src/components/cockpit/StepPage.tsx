@@ -20,7 +20,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -76,6 +76,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   onCopyLink?: () => void;
   /** The client's portal, opened on this task (they don't see steps). */
   onCopyPortalLink?: () => void;
+  /** The client's saved short links (quick links), to put on this step. */
+  savedLinks?: { id: string; label: string; url: string; on: boolean }[];
+  onAttachLinks?: (ids: string[]) => void;
   /** Ask the client about these to-dos: one email, the step stays put. */
   onAskTodos?: (todoIds: string[]) => void;
   messages: Message[];
@@ -116,6 +119,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(startWithChecklist);
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
+  // The saved links being picked, or null when the list is closed.
+  const [linkPick, setLinkPick] = useState<string[] | null>(null);
   // Directions read as text once written; new ones open ready to type.
   const [dirEditing, setDirEditing] = useState(!(sub.notes && htmlToText(sub.notes).trim()));
   const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,6 +149,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   // reviews and an email (from the task page), and a text.
   const options = [
     { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); setDirEditing(true); } },
+    // The client's saved short links, picked from a list (Derek, 2026-10-12).
+    ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
@@ -449,6 +456,38 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {followBox}
               {planBits}
               {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : held ? null : <div>{addMenu(false)}</div>}
+              {/* Saved links: tick the ones this step needs. */}
+              {linkPick !== null && onAttachLinks && (
+                <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-[17px] font-bold">Saved links</h3>
+                    <button onClick={() => setLinkPick(null)} aria-label="Close" className="rounded px-1.5 text-muted hover:text-foreground">×</button>
+                  </div>
+                  <ul className="flex max-h-[320px] flex-col gap-1 overflow-y-auto">
+                    {savedLinks.map((l) => (
+                      <li key={l.id}>
+                        <label className="flex cursor-pointer items-center gap-2.5 rounded-[5px] px-1.5 py-1 text-[16px] hover:bg-background">
+                          <input type="checkbox" checked={linkPick.includes(l.id)} disabled={l.on}
+                            onChange={() => setLinkPick((p) => (p ?? []).includes(l.id) ? (p ?? []).filter((x) => x !== l.id) : [...(p ?? []), l.id])}
+                            className="h-4 w-4 accent-[var(--accent)]" />
+                          <span className="min-w-0 flex-1 truncate font-medium">{l.label}</span>
+                          <span className="min-w-0 max-w-[45%] truncate text-muted">{l.on ? "on this step" : l.url.replace(/^https?:\/\//, "")}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                  {(() => {
+                    const fresh = linkPick.filter((id) => !savedLinks.find((l) => l.id === id)?.on);
+                    return (
+                      <div className="flex items-center gap-2">
+                        <button disabled={!fresh.length} onClick={() => { onAttachLinks(fresh); setLinkPick(null); }}
+                          className="h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white disabled:opacity-40">Add {fresh.length || ""} {fresh.length === 1 ? "link" : "links"}</button>
+                        <button onClick={() => setLinkPick(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
+                      </div>
+                    );
+                  })()}
+                </section>
+              )}
               {/* Directions: what we want on this step, added from + Add like
                   the rest (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
               {!dirOpen && dirRemoved !== null && (
