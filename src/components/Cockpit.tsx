@@ -2445,16 +2445,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const needsStrip = clientView && clientTab !== "chat" && activeClient !== WORKSPACE_CLIENT_ID && clientById(activeClient) ? (() => {
           const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
           const ct = contactForClient(activeClient);
-          const talk = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms")) : [];
+          // Portal chats count too (Derek, 2026-10-12: Pam's chat never showed here).
+          const talk = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms" || m.channel === "chat")) : [];
           const latest = (dir: "inbound" | "outbound") => talk.filter((m) => m.direction === dir).reduce<Message | null>((a, m) => (!a || m.at > a.at ? m : a), null);
           const inn = latest("inbound"); const out = latest("outbound");
           const plain = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
           const canMsg = canMessageClient(activeClient);
           return (
               <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
-                lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms", preview: `${inn.channel === "sms" ? "Text" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
-                lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" } : null}
-                onReply={canMsg && inn ? () => { if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
+                lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms" | "chat", preview: `${inn.channel === "sms" ? "Text" : inn.channel === "chat" ? "Chat" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
+                lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" | "chat" } : null}
+                onReply={canMsg && inn ? () => { if (inn.channel === "chat") { if (inn.taskId) setOpenTaskId(inn.taskId); } else if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
                 onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
                 onText={canMsg && ct?.phone ? () => openClientText(activeClient) : null}
                 drafts={canMsg ? [

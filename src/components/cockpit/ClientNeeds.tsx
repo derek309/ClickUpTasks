@@ -37,8 +37,8 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   ghlContactId: string | null;
   first: string;
   /** Their latest email or text, and ours (Derek, 2026-10-05, mockup D). */
-  lastIn: { at: string; channel: "email" | "sms"; preview: string; unread: boolean } | null;
-  lastOut: { at: string; channel: "email" | "sms" } | null;
+  lastIn: { at: string; channel: "email" | "sms" | "chat"; preview: string; unread: boolean } | null;
+  lastOut: { at: string; channel: "email" | "sms" | "chat" } | null;
   onReply: (() => void) | null;
   onEmail: (() => void) | null;
   onText: (() => void) | null;
@@ -101,7 +101,7 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
       {/* Messages: their reply waiting on us, else when we last talked. */}
       <div className={`${box} ${theirTurn ? "bg-accent-soft" : "bg-background"}`}>
         <div className="min-w-0 flex-1 truncate">
-          <b className={`${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
+          <b className={`${theirTurn ? "text-accent" : ""}`}>{theirTurn ? `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : lastIn!.channel === "chat" ? "wrote in the portal" : "replied"} ${timeAgo(lastIn!.at)}` : last ? `Last ${last.channel === "sms" ? "text" : last.channel === "chat" ? "chat" : "email"} ${shortDay(last.at)}` : "No messages yet"}</b>
           <span className="text-[16px] text-muted"> · {theirTurn ? lastIn!.preview : last ? (last === lastOut ? "You wrote last" : `${first} wrote last`) : `Say hello to ${first}`}</span>
         </div>
         {allDrafts.length > 0 && (
