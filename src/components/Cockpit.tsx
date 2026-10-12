@@ -2514,7 +2514,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   })),
                   ...(inboxPrefs.queuedDrafts ?? []).filter((d) => !!ct && (d.contactId === ct.id || d.to.toLowerCase() === ((d.kind === "email" ? ct.email : ct.phone) ?? "").toLowerCase())).map((d) => ({
                     id: `queued:${d.id}`, title: d.kind === "email" ? (d.subject?.trim() || "No subject") : htmlToText(d.body).slice(0, 60), where: `${d.kind === "email" ? "Email" : "Text"} from ${d.by ?? "Claude"}`, at: d.createdAt,
-                    open: () => (d.kind === "email" ? openClientEmail(activeClient, { subject: d.subject ?? "", body: d.body, queuedId: d.id }) : openClientText(activeClient, htmlToText(d.body), d.id)),
+                    open: () => (d.kind === "email" ? openClientEmail(activeClient, { subject: d.subject ?? "", body: looksLikeHtml(d.body) ? d.body : plainTextToHtml(d.body), queuedId: d.id }) : openClientText(activeClient, htmlToText(d.body), d.id)),
                   })),
                 ] : []}
                 onOpenClientDraft={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
@@ -3339,6 +3339,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <ClientEmail key={clientEmail.nonce} start={clientEmail} clientName={clientById(cid)?.name ?? "this client"} meId={me.id}
             toEmail={contact?.email || null} messages={contact ? messages.filter((m) => m.contactId === contact.id) : null}
             onClose={() => setClientEmail(null)}
+            // A Claude draft from the queue goes with it, or Discard looked
+            // like it did nothing (Derek, 2026-10-12).
+            onDiscarded={clientEmail.queuedId ? () => void retireQueuedDraft(setInboxPrefs, clientEmail.queuedId!) : undefined}
             onSend={allowed ? (email) => afterQueuedSend(clientEmail.queuedId, sendMessage(cid, "email", email.subject, email.body, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo)) : undefined}
             onSchedule={allowed ? (email, whenIso) => scheduleMessage(cid, "email", email.subject, email.body, whenIso, email.attachments, email.cc, email.bcc, null, undefined, email.replyTo) : undefined}
             ccContacts={contacts} onUpload={(file) => uploadOneImage(`messages/${cid}`, file)}

@@ -25,8 +25,10 @@ export type ClientEmailStart = {
   queuedId?: string;
 };
 
-export function ClientEmail({ start, clientName, meId, toEmail, messages, onClose, onSend, onSchedule, ccContacts, onUpload, onAiDraft, scheduled, onLoadScheduled, onCancelScheduled, pushToast }: {
+export function ClientEmail({ start, clientName, meId, toEmail, messages, onClose, onSend, onSchedule, ccContacts, onUpload, onAiDraft, scheduled, onLoadScheduled, onCancelScheduled, pushToast, onDiscarded }: {
   start: ClientEmailStart;
+  /** Discard also drops where the draft came from (a Claude draft in the Inbox queue). */
+  onDiscarded?: () => void;
   clientName: string;
   meId: string;
   toEmail: string | null;
@@ -67,7 +69,7 @@ export function ClientEmail({ start, clientName, meId, toEmail, messages, onClos
   return (
     <EmailWindow key={draft.createdAt} draft={draft} heading="Email" subheading={clientName}
       save={(next) => { setDraft(next); void saveClientEmailDraft(clientId, next, meId); }}
-      onDiscard={() => { void deleteClientEmailDraft(clientId); }}
+      onDiscard={() => { void deleteClientEmailDraft(clientId); onDiscarded?.(); }}
       onClose={onClose} onSend={onSend} onSchedule={onSchedule} toEmail={toEmail}
       ccContacts={ccContacts} onUpload={onUpload} onAiDraft={onAiDraft}
       scheduled={scheduled} onCancelScheduled={onCancelScheduled} pushToast={pushToast} />
