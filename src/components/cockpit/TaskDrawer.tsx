@@ -1900,7 +1900,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Quick step</button>
               {quickWorkOpen && (<>
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
-                <div role="menu" aria-label="Quick step" className="absolute bottom-full right-0 z-40 mb-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
+                {/* Opens downward (Derek, 2026-10-12: upward it was cut off at the top). */}
+                <div role="menu" aria-label="Quick step" className="absolute right-0 top-full z-40 mt-1 max-h-[min(70vh,560px)] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg">
                                     {quickWork.map((o) => (
                     <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
                       className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
