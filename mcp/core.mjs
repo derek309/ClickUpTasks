@@ -643,9 +643,25 @@ export function createServer(opts = {}) {
     `Set a task's status (${STATUSES.join(" | ")}). Set "in_progress" when you start work on it and "review" or "done" when you stop, each with an add_comment saying what you're doing or did. Setting \"waiting\" also marks the task waiting on the client (clearing its assignee), same as the app's Waiting column. \"on_hold\" pauses it (the client put it on the back burner); it never nudges the client and is never late.`,
     { id: z.string(), status: z.enum(STATUSES) },
     async ({ id, status }) => {
-      const before = await loadTask(id, "status,follow_up_at");
+      const before = await loadTask(id, "status,follow_up_at,subtasks,created_at");
       if (!before) return noTask(id);
       const patch = { status };
+      // Finished: a "Task done" step records who and when, as in the app
+      // (data.ts taskDoneStep); reopened, it goes.
+      const subs = before.subtasks || [];
+      if (status === "done" && before.status !== "done") {
+        await members();
+        const at = nowIso();
+        const when = new Date(at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        const plan = subs.filter((x) => !x.fromClient && x.addedFor !== "finished");
+        const open = plan.filter((x) => !x.done);
+        const days = Math.max(0, Math.round((Date.parse(at) - Date.parse(before.created_at)) / 86400000));
+        const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+        const notes = `<p>Took ${days === 0 ? "less than a day" : days === 1 ? "1 day" : `${days} days`} from when it was made.</p>${plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done.</p>` : ""}${open.length ? `<p>Left open:</p><ul>${open.map((x) => `<li>${esc(x.title)}</li>`).join("")}</ul>` : ""}`;
+        patch.subtasks = [...subs.filter((x) => x.addedFor !== "finished"), { id: rid("s_"), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${memberNames[ME] || "Claude"} · ${when}`, notes, assigneeId: ME }];
+      } else if (status !== "done" && before.status === "done" && subs.some((x) => x.addedFor === "finished")) {
+        patch.subtasks = subs.filter((x) => x.addedFor !== "finished");
+      }
       // "waiting" status and waiting_on_client always move together (see
       // data.ts's applyWaitingStatusSync) — replicated here since this tool
       // is a separate Node process with no app import.

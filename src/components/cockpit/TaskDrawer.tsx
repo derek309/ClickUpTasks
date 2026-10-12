@@ -1059,15 +1059,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ draftEmail: { ...draft, link: { url: j.url, label: `Open "${name}"` }, updatedAt: new Date().toISOString() } });
   };
   // "It's finished": the step asking what's next is done and so is the task.
-  const finishTask = (sid: string) => {
-    const now = new Date().toISOString();
-    onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, done: true, doneAt: now, outcome: "Task finished" } : x)), status: "done" });
-    pushToast("Task finished");
+  // "It's finished": the step asking what's next was only a question, so it
+  // goes; marking the task done adds its "Task done" record step
+  // (useTaskEdits). With email, a short "it's done" draft to the client opens
+  // to read and send (Derek, 2026-10-12: "ask do you want to let the client
+  // know", as part of what's next).
+  const finishTask = (sid: string, tellClient = false) => {
+    onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== sid), status: "done" });
+    if (tellClient) {
+      const now = new Date().toISOString();
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      onPatch({ draftEmail: { subject: `Done: ${task.title}`, body: `${greetingHtml(messageDest?.name)}<p>Good news: <strong>${esc(task.title)}</strong> is done.</p><p>Let me know if you have any questions, or if there is anything else you need.</p>`, replyTo: null, createdAt: now, updatedAt: now } });
+      setEmailOpenNonce((n) => n + 1);
+      pushToast(`Task done. The email to ${firstName} is drafted for you to read.`);
+    } else pushToast("Task done");
   };
   const whatsNextActions = (sid: string) => (
-    <div className="flex flex-wrap items-center gap-3 text-[16px]">
-      <span className="min-w-0 flex-1 text-muted">Name the next step above, or add client work below.</span>
+    <div className="flex flex-wrap items-center gap-2 text-[16px]">
+      <span className="min-w-0 flex-1 text-muted">Name the next step above, or add client work below. Or:</span>
       <button onClick={() => finishTask(sid)} className="shrink-0 rounded-[5px] bg-success px-3 py-1.5 font-semibold text-white hover:opacity-90">The task is finished</button>
+      {hasMessaging && !!messageDest?.email && (
+        <button onClick={() => finishTask(sid, true)} title={`Finish it and draft an email telling ${firstName} it's done`}
+          className="shrink-0 rounded-[5px] border border-success px-3 py-1.5 font-semibold text-success hover:bg-success-soft">Finish and email {firstName}</button>
+      )}
     </div>
   );
   const completeStep = (sid: string) => {

@@ -1330,3 +1330,15 @@ describe("an older handoff becomes a plain step", () => {
     expect(moved.handoff).toEqual({ thread: [{ id: "m1", authorId: "u_derek", body: "Any luck?", at: "2026-10-12T10:00:00Z" }] });
   });
 });
+
+describe("the Task done step", () => {
+  it("records who, when, how long and what was left open", async () => {
+    const { taskDoneStep } = await import("./data");
+    const s = taskDoneStep({ createdAt: "2026-10-03T16:00:00Z", subtasks: [{ id: "a", title: "Write", done: true }, { id: "b", title: "Schedule it", done: false }, { id: "r", title: "Logo bigger", done: false, fromClient: true }] }, "u_derek", "Derek Fox", "2026-10-12T22:40:00Z", () => "s_x");
+    expect(s).toMatchObject({ id: "s_x", title: "Task done", done: true, addedFor: "finished", assigneeId: "u_derek" });
+    expect(s.outcome).toMatch(/^Done by Derek Fox · Mon, Oct 12, 3:40\sPM$/);
+    expect(s.notes).toContain("Took 9 days");
+    expect(s.notes).toContain("1 of 2 steps done");
+    expect(s.notes).toContain("<li>Schedule it</li>");
+  });
+});

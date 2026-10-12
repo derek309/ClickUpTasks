@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -194,6 +194,14 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // Done is done: an unsent draft email on it is thrown out, so Drafts
     // doesn't fill with emails nobody will send (Derek, 2026-10-07).
     if (synced.status === "done" && before.draftEmail && synced.draftEmail === undefined) synced.draftEmail = null;
+    // Finished: a "Task done" step records who and when; reopened, it goes.
+    if (synced.status === "done" && before.status !== "done") {
+      const base = synced.subtasks ?? before.subtasks;
+      synced.subtasks = [...base.filter((x) => x.addedFor !== "finished"), taskDoneStep({ createdAt: before.createdAt, subtasks: base }, me.id, me.name, new Date().toISOString(), () => newId("s_"))];
+    } else if (synced.status && synced.status !== "done" && before.status === "done") {
+      const base = synced.subtasks ?? before.subtasks;
+      if (base.some((x) => x.addedFor === "finished")) synced.subtasks = base.filter((x) => x.addedFor !== "finished");
+    }
     const checkBack = waitingFollowUp(before, synced);
     if (checkBack) synced.followUpAt = checkBack;
     const withDue = followUpWithDue(before, synced);

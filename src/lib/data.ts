@@ -3023,6 +3023,24 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
 export type DeliverableKey = "doc" | "image" | "page" | "video" | "brief" | "email";
 export const attachmentKey = (id: string) => `att:${id}`;
 
+/** The last step of a finished task, a record (Derek, 2026-10-12: "a final
+ *  step with Task Done, who completed it, the date and time"): who and when
+ *  as its outcome, and in its notes how long it took, how the steps went and
+ *  any left open. One per task; reopening the task takes it away. */
+export function taskDoneStep(task: Pick<Task, "createdAt" | "subtasks">, byId: string | null, byName: string, at: string, makeId: () => string): Subtask {
+  const when = new Date(at).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const plan = planSteps(task.subtasks).filter((s) => s.addedFor !== "finished");
+  const days = Math.max(0, Math.round((Date.parse(at) - Date.parse(task.createdAt)) / 86_400_000));
+  const open = plan.filter((s) => !s.done);
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const lines = [
+    `<p>Took ${days === 0 ? "less than a day" : days === 1 ? "1 day" : `${days} days`} from when it was made.</p>`,
+    plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done.</p>` : "",
+    open.length ? `<p>Left open:</p><ul>${open.map((s) => `<li>${esc(s.title)}</li>`).join("")}</ul>` : "",
+  ].join("");
+  return { id: makeId(), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${byName} · ${when}`, notes: lines, ...(byId ? { assigneeId: byId } : {}) };
+}
+
 /** A client's email as a step keeps it. */
 export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string };
 
