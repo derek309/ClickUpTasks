@@ -351,23 +351,23 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={onClose} />}
       <div ref={pageRef} role="dialog" aria-label={`Step: ${sub.title}`}
         className={`fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-[16px]">
-          <button onClick={onClose} className="min-w-0 max-w-[50%] truncate rounded-lg px-2 py-1.5 text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
+        {/* One line: a long task name shortens instead of pushing × down. */}
+        <div className="flex items-center gap-x-3 border-b px-4 py-2 text-[16px]">
+          <button onClick={onClose} title={task.title} className="min-w-0 flex-1 truncate rounded-[5px] px-2 py-1.5 text-left text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
           {stepNo && stepNo.total > 1 && (
-            <span className="inline-flex items-center gap-1 text-muted">
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted">
               <button onClick={onPrev} disabled={!onPrev} title="Step before (←)" aria-label="Step before" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4" /></button>
               <span className="tabular-nums">Step {stepNo.at} of {stepNo.total}</span>
               <button onClick={onNext} disabled={!onNext} title="Step after (→)" aria-label="Step after" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4 rotate-180" /></button>
             </span>
           )}
-          <span className="flex-1" />
           {/* Done, or nothing: the step is the stage (Derek, 2026-10-11). */}
           {sub.done
             ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
  : null}
           {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
-          <button onClick={onToggleFull} className="rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
-          <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
+          <button onClick={onToggleFull} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
+          <button onClick={onClose} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className={`mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-8 ${full ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:gap-10" : ""}`}>

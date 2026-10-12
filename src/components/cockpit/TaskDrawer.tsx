@@ -2227,7 +2227,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML" }, { key: "video" as const, label: "Video" }] : []),
-      // Messages go through the conversation, not + Add (Derek, 2026-10-11).
+      // An email drafted on the step, to read and send (Derek, 2026-10-12);
+      // quick messages still go through the conversation.
+      ...(hasMessaging ? [{ key: "email" as const, label: "Email" }] : []),
     ];
     return kinds.map((x) => {
       const here = holds.includes(x.key);
