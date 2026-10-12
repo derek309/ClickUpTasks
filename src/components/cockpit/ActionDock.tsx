@@ -93,7 +93,6 @@ export function ActionDock({
   // The suggestion card is the default; "Change it" opens the fields. Editing
   // one field should not throw away the other three, so this is one flag over
   // the whole card rather than a mode per row.
-  const [editingNext, setEditingNext] = useState(false);
   // Type to filter the menu. Nine choices is past the point where scanning
   // beats typing two letters, and the filter costs nothing when you would
   // rather click: an empty box is the full menu.
@@ -197,7 +196,7 @@ export function ActionDock({
     // Seeded here too, not only on the reopen-after-send path. Opening the
     // dock from the menu left this null, so the card said "Unassigned" about
     // a task that has an owner.
-    setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
+    setSize(null); setAssignee(task.assigneeId ?? null);
     setWantNext(v !== "closed" && v !== "menu" && v !== "askTask" ? TASK_ACTION_META[v as TaskActionKind].needsNextStep : false);
     // Whoever owns the task is who a question about it usually goes to, so
     // they start selected rather than whoever happens to sort first.
@@ -304,7 +303,7 @@ export function ActionDock({
       const seed = reached ? `Check for ${firstName}'s reply` : "Pick this back up";
       seedRef.current = seed;
       setBody(askNextStepFor.body); setNextStep(seed); setNextDue(addBusinessDaysIso(TODAY, 3)); setStage(null); setAiReason("");
-      setSize(null); setAssignee(task.assigneeId ?? null); setEditingNext(false);
+      setSize(null); setAssignee(task.assigneeId ?? null);
       setWantNext(true);
       onAskNextStepHandled?.();
       // Asked automatically rather than waiting for a Suggest click. The
@@ -416,7 +415,7 @@ export function ActionDock({
     // "there should always be a next until it's marked done"). A task with
     // nothing scheduled is how ninety-odd of them ended up with no date, so
     // saving without one is refused rather than quietly allowed.
-    if (wantNext && !done && !nextStep.trim()) { pushToast("Say what happens next, or mark it done."); setEditingNext(true); return; }
+    if (wantNext && !done && !nextStep.trim()) { pushToast("Say what happens next, or mark it done."); return; }
 
     // Refused rather than logged. With nobody picked the branch below never
     // ran, so the message reached no one while the feed still said
@@ -538,16 +537,8 @@ export function ActionDock({
   // is how ninety-odd tasks ended up with no date on them. The only way out
   // is saying the work is finished, which is a different claim and gets its
   // own button.
-  const sizeIsSet = !!task.size || !!task.sizeHours || !!size;
   const shownSize = size ?? task.size ?? null;
   const assigneeName = assignee ? (userById(assignee)?.name ?? "Unassigned") : "Unassigned";
-
-  const fieldRow = (label: string, children: React.ReactNode) => (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-      <span className="w-[76px] shrink-0 text-[16px] font-semibold uppercase tracking-wide text-muted">{label}</span>
-      {children}
-    </div>
-  );
 
   // A labelled block: the label on its own line above what it labels. The
   // dock's inline fieldRow works for one or two rows; seven of them wrapped
@@ -577,77 +568,52 @@ export function ActionDock({
     );
   };
 
-  const nextStepPanel = (kind: TaskActionKind) => (
-    <div className="mt-2.5 rounded-[10px] border bg-background p-3 shadow-[inset_0_2px_5px_rgba(20,24,40,.06)]">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-[16px] font-bold">What&apos;s next?</span>
-        {aiBusy && <span className="inline-flex items-center gap-1 text-[16px] text-accent"><I.bolt /> Claude is reading the task…</span>}
-        {!aiBusy && !editingNext && (
-          <button onClick={() => suggest(kind)} className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[16px] text-muted hover:bg-surface hover:text-foreground">
-            <I.bolt /> Suggest again
-          </button>
-        )}
-      </div>
-
-      {/* The suggestion, whole. One thing to agree with. */}
-      {!editingNext ? (
-        <div className="rounded-[9px] border border-accent bg-surface p-3">
-          <div className="text-[16px] font-medium leading-snug">{nextStep || (aiBusy ? "…" : "Say what you do next")}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[16px] text-muted">
-            <span>Follow up <b className="font-semibold text-foreground">{nextDue ? formatDue(nextDue) : "not set"}</b></span>
-            <span aria-hidden>·</span>
-            <span>Stage <b className="font-semibold text-foreground">{STATUS_META[stage ?? task.status].label}</b></span>
-            <span aria-hidden>·</span>
-            <span>Assigned to <b className="font-semibold text-foreground">{assigneeName}</b></span>
-            {shownSize && (<><span aria-hidden>·</span><span>Takes <b className="font-semibold text-foreground">{sizeLabel({ size: shownSize })}</b></span></>)}
-          </div>
-          {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
-          {/* Asked, not assumed. A task nobody has sized is counted at four
-              hours in the plan, which is a number the plan invents rather
-              than one anyone stands behind. */}
-          {!sizeIsSet && !aiBusy && (
-            <div className="mt-2 rounded-md border border-dashed px-2 py-1.5 text-[16px] text-muted">
-              Nobody has said how long this takes. Pick one and the plan can place it.
-            </div>
-          )}
-          <button onClick={() => { seedRef.current = null; setEditingNext(true); }} className="mt-2 text-[16px] font-medium text-accent underline underline-offset-[3px]">Change it</button>
-        </div>
-      ) : (
-        <>
-          <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="What do you do next?"
-            className="w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-          {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
-          {fieldRow("Follow up", (
-            <>
-              {whenOptions(task.due).map((o) => (
-                <button key={o.label} onClick={() => setNextDue(o.date)}
-                  className={`rounded-md border px-2 py-1 text-[16px] ${nextDue === o.date ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}
-                  title={formatDue(o.date)}>{o.label}</button>
-              ))}
-              <DateChip value={nextDue} onChange={setNextDue}
-                label={nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? formatDue(nextDue) : "Pick a date"}
-                className={`rounded-md border px-2 py-1 text-[16px] ${nextDue && !whenOptions(task.due).some((o) => o.date === nextDue) ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`} />
-            </>
-          ))}
-          {fieldRow("Stage", pickableStatuses(task.status).filter((st) => st !== "done").map((st) => (
-            <button key={st} onClick={() => setStage(st)}
-              className={`rounded-md border px-2 py-1 text-[16px] ${(stage ?? task.status) === st ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{STATUS_META[st].label}</button>
-          )))}
-          {fieldRow("Owner", (
-            <select value={assignee ?? ""} onChange={(e) => setAssignee(e.target.value || null)}
-              className="rounded-md border bg-surface px-2 py-1 text-[16px] outline-none focus:border-accent">
-              <option value="">Unassigned</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          ))}
-          {fieldRow("Takes", SIZE_ORDER.map((sz) => (
-            <button key={sz} onClick={() => setSize(sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
-              className={`rounded-md border px-2 py-1 text-[16px] ${shownSize === sz ? "border-accent bg-accent text-white" : "bg-surface hover:bg-background"}`}>{SIZE_META[sz].label}</button>
-          )))}
-        </>
-      )}
-    </div>
+  // What's next as the task's own sentence (Derek, 2026-10-12: "the title and
+  // then the sentence mode like we have on the top"): the step to type over,
+  // then "Waiting, on Derek, follow up Oct 12, takes 30 min" where every
+  // underlined word is a picker. Touching anything keeps the AI from
+  // replacing it.
+  const touch = () => { seedRef.current = null; };
+  const word = "font-semibold underline decoration-dotted underline-offset-4 group-hover/w:decoration-solid";
+  const pick = (label: React.ReactNode, aria: string, value: string, options: { value: string; label: string }[], onPick: (v: string) => void) => (
+    <label className="group/w relative inline-block cursor-pointer" title={`Change ${aria.toLowerCase()}`}>
+      <span className={word}>{label}</span>
+      <select value={value} onChange={(e) => { touch(); onPick(e.target.value); }} aria-label={aria}
+        className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0">
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
+  const nextStepPanel = (kind: TaskActionKind) => {
+    const st = stage ?? task.status;
+    return (
+      <div className="mt-2.5 rounded-[5px] border bg-background p-3">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="text-[16px] font-bold">What&apos;s next?</span>
+          {aiBusy && <span className="inline-flex items-center gap-1 text-[16px] text-accent"><I.bolt /> Claude is reading the task…</span>}
+          {!aiBusy && (
+            <button onClick={() => suggest(kind)} className="ml-auto inline-flex items-center gap-1 rounded-[5px] border px-2 py-0.5 text-[16px] text-muted hover:bg-surface hover:text-foreground">
+              <I.bolt /> Suggest again
+            </button>
+          )}
+        </div>
+        <input value={nextStep} onChange={(e) => { touch(); setNextStep(e.target.value); }} placeholder="What do you do next?" aria-label="What's next"
+          className="-mx-1 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[18px] font-bold outline-none hover:bg-surface focus:bg-surface" />
+        <div className="text-[16px] leading-snug">
+          {pick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[st].dot }} />{STATUS_META[st].label}</>,
+            "Stage", st, pickableStatuses(task.status).filter((x) => x !== "done").map((x) => ({ value: x, label: STATUS_META[x].label })), (v) => setStage(v as TaskStatus))}
+          , on {pick(assigneeName, "Owner", assignee ?? "", [{ value: "", label: "Nobody" }, ...users.map((u) => ({ value: u.id, label: u.name }))], (v) => setAssignee(v || null))}
+          , follow up{" "}
+          <span className="inline-block">
+            <DateChip value={nextDue} onChange={(d) => { touch(); setNextDue(d); }}
+              label={nextDue ? formatDue(nextDue) : <span className="text-accent">set a date</span>} className={`${word} rounded hover:bg-surface`} />
+          </span>
+          , takes {pick(shownSize ? sizeLabel({ size: shownSize }) : <span className="text-accent">how long?</span>, "Takes", shownSize ?? "", [{ value: "", label: "Not sized" }, ...SIZE_ORDER.map((sz) => ({ value: sz, label: SIZE_META[sz].label }))], (v) => setSize((v || null) as TaskSize | null))}.
+        </div>
+        {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
+      </div>
+    );
+  };
 
   const header = (kind: TaskActionKind) => (
     <div className="mb-2.5 flex items-center justify-between">
