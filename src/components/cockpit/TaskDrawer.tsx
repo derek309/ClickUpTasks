@@ -38,6 +38,7 @@ import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
 import { ClientWebsite } from "./ClientWebsite";
+import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
@@ -1928,10 +1929,42 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, ...stepOwnerFields() }], id, "email") });
     if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail();
   };
+  // A meeting (Derek, 2026-10-12): a step for it, and the booking window opens.
+  const meetingStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Meeting with ${firstName}`, done: false, ...stepOwnerFields() }] });
+    setBookOpen(true);
+  };
+  // Asking them to pick a time: a step with a short draft carrying your own
+  // booking link, to read and send (Derek, 2026-10-12).
+  const bookingEmailStep = async () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    const cur = taskRef.current.draftEmail;
+    if (cur && htmlToText(cur.body).trim() && !window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with one asking ${firstName} to book a time?`)) return;
+    const links = await loadBookingLinks().catch(() => [] as BookingLink[]);
+    const mine = links.filter((l) => l.memberId === meId);
+    const link = mine.find((l) => /phone|call/i.test(l.label)) ?? mine[0] ?? links.find((l) => l.shared) ?? null;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const now = new Date().toISOString();
+    onPatch({
+      subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Book a time with ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
+      draftEmail: {
+        subject: `Can we find a time to talk about ${task.title}?`.slice(0, 120),
+        body: `${greetingHtml(messageDest?.name)}<p>Could we set up a quick call about <strong>${esc(task.title)}</strong>?</p>${link ? `<p>Pick a time that works for you here: <a href="${esc(link.url)}">book a time</a>. It goes straight on my calendar.</p>` : "<p>[booking link]</p>"}`,
+        replyTo: null, createdAt: now, updatedAt: now,
+      },
+    });
+    setEmailOpenNonce((n) => n + 1);
+    if (!link) pushToast("No booking page found for you. Add one with Copy booking link in the email.");
+  };
   const quickPeopleOptions = () => [
     { key: "checklist", label: "Create Checklist", disabled: false, note: undefined as string | undefined, onPick: checklistStep },
     ...(hasMessaging ? [{ key: "email", label: "Send Email to Client", disabled: false, note: deliverablePresent("email") ? "uses the draft" as string | undefined : undefined, onPick: emailStep }] : []),
     { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
+    ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", label: "Book a Meeting", disabled: false, note: undefined as string | undefined, onPick: meetingStep }] : []),
+    ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", label: "Email to Book a Time", disabled: false, note: undefined as string | undefined, onPick: () => void bookingEmailStep() }] : []),
     { key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: delegateStep },
   ];
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
