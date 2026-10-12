@@ -782,7 +782,7 @@ export function createServer(opts = {}) {
   server.tool("draft_email",
     "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
     { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task"),
-      step: z.string().optional().describe("a step's id or title to put the draft on; left out, the email gets a step of its own (\"Email <client>: <subject>\") as the current step, unless the current step is already about emailing them") },
+      step: z.string().optional().describe("a step's id or title to put the draft on; left out, the email gets a step of its own (\"Email <client>: <subject>\") right after the current step, unless the current step is already about emailing them. Finish the current step with check_item afterwards and the email step is next.") },
     async ({ id, subject, body, replace, step }) => {
       if (!await loadTask(id, "id")) return noTask(id);
       const now = nowIso();

@@ -152,10 +152,10 @@ describe("steps added on the server", () => {
     expect(db.task_document_comments[0].completed_at).toBeTruthy();
   });
 
-  it("a drafted email gets its own step in front of the current one", async () => {
+  it("a drafted email gets its own step right after the current one", async () => {
     expect(await holdDraftOnStep("t1", "Your newsletter")).toBe("Email Brian: Your newsletter");
-    expect(steps().map((x) => x.title)).toEqual(["Email Brian: Your newsletter", "Write the newsletter", "Schedule it"]);
-    expect(steps()[0].holds).toEqual(["email"]);
+    expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Email Brian: Your newsletter", "Schedule it"]);
+    expect(steps()[1].holds).toEqual(["email"]);
     // A second draft keeps to the step that holds one.
     expect(await holdDraftOnStep("t1", "Other")).toBe("Email Brian: Your newsletter");
     expect(steps()).toHaveLength(3);

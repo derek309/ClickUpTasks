@@ -277,10 +277,11 @@ export async function holdDraftOnStep(taskId: string, subject: string, stepRef?:
       on = title;
       return holdOnStep(list.map((x) => (x.id === cur.id ? { ...x, title, makes: "email" as const } : x)), cur.id, "email");
     }
-    // Its own step, in front of the current one so it is what's next to do.
+    // Its own step, right after the current one: the email follows the work
+    // under way (Derek, 2026-10-12: research was step 1, its email step 2).
     const id = newId("s_");
-    const step: Subtask = { id, title, done: false, makes: "email", startedAt: new Date().toISOString() };
-    const at = cur ? list.findIndex((x) => x.id === cur.id) : list.length;
+    const step: Subtask = { id, title, done: false, makes: "email" };
+    const at = cur ? list.findIndex((x) => x.id === cur.id) + 1 : list.length;
     const next = [...list];
     next.splice(at, 0, step);
     on = title;

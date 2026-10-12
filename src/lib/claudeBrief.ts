@@ -9,7 +9,7 @@ export const STEP_TOOLS = [
   "- get_task <task id> shows the steps in order, the current one marked, with directions, to-dos and the client work on each.",
   "- Finish a step with check_item <task id> <step id>: the next step starts like it does in the app.",
   "- Tick a to-do with check_todo <task id> <to-do id>; a client's change request is resolved on their page too.",
-  "- An email to the client: draft_email (it gets its own step, or pass step to put it on one). Nothing is sent; a teammate reads and sends it.",
+  "- An email to the client: draft_email (it gets its own step after the current one, or pass step to put it on one). Nothing is sent; a teammate reads and sends it.",
   "- Found more to do? add_checklist_items adds steps. Last step done and nothing left: set_task_status done.",
 ].join("\n");
 
