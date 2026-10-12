@@ -8,7 +8,7 @@ import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
-  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -850,6 +850,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           toneClass={dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : "text-foreground"}
           onChange={(d) => onPatch({ due: d })} onRecurrenceChange={(r) => onPatch({ recurrence: r })} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>} />
       </span>
+      {/* Repeating, said in the sentence rather than only as an icon
+          (Derek, 2026-10-12): "repeats every week", a word to change. */}
+      {task.recurrence !== "none" && (
+        <>, repeats {wordPick(describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday).replace(/^Every/, "every").replace(/^Monthly/, "monthly"),
+          "Repeats", task.recurrence,
+          (Object.keys(RECURRENCE_LABEL) as Recurrence[]).filter((r) => r !== "custom" || task.recurrence === "custom").map((r) => ({ value: r, label: r === "custom" ? describeRecurrence(task.recurrence, task.recurrenceInterval, task.recurrenceUnit, task.recurrenceDaysOfMonth, task.recurrenceNth, task.recurrenceWeekday) : RECURRENCE_LABEL[r] })),
+          (v) => onPatch({ recurrence: v as Recurrence }))}</>
+      )}
       {/* What chases the client while it waits, a word to change like the
           rest (Derek, 2026-10-11: "why can't we edit the reminders"). */}
       {reminders.length > 0 ? (
