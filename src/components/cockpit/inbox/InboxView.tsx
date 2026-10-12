@@ -407,13 +407,14 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
     const i = setInterval(load, 5 * 60_000);
     return () => { live = false; clearInterval(i); };
   }, []);
-  const act = async (id: string, action: "send" | "drop" | "save" | "schedule", extra?: { subject?: string; body?: string; at?: string }) => {
+  const act = async (id: string, action: "send" | "drop" | "save" | "schedule" | "refresh", extra?: { subject?: string; body?: string; at?: string }) => {
     setBusy(id);
     const r = await authedFetch("/api/inbox/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action, ...extra }) }).catch(() => null);
     const j = r ? await r.json().catch(() => ({})) : {};
     setBusy(null);
     if (!r?.ok) { p.pushToast(j.error ?? "That didn't work. Try again."); return false; }
     const who = list.find((x) => x.id === id)?.clientName ?? "them";
+    if (action === "refresh") { setList((l) => l.map((x) => (x.id === id ? { ...x, subject: j.subject ?? x.subject, body: j.body ?? x.body } : x))); p.pushToast("Rebuilt from their tasks as they are now."); return true; }
     if (action === "save") { setList((l) => l.map((x) => (x.id === id ? { ...x, subject: extra?.subject ?? x.subject, body: extra?.body ?? x.body } : x))); setEdit(null); p.pushToast("Saved. It still waits for Send."); }
     else {
       setList((l) => l.filter((x) => x.id !== id)); if (open === id) setOpen(null); setScheduleFor(null);
@@ -476,6 +477,11 @@ function RemindersGoingOut({ p }: { p: InboxViewProps }) {
                         </>)}
                       </span>
                       <button onClick={() => setEdit({ id: r.id, subject: r.subject, body: r.body })} className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background">Edit</button>
+                      {/* Changed their tasks? Rebuild the list from them (Derek, 2026-10-12). */}
+                      {r.id.startsWith("smr_portal_") && (
+                        <button disabled={busy === r.id} onClick={() => void act(r.id, "refresh")} title="Rebuild this email from their tasks as they are now (replaces any edits)"
+                          className="h-10 rounded-lg px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-50">↻ Refresh</button>
+                      )}
                       {/* The task it's about, to check or change before it goes (Derek, 2026-10-08). */}
                       {r.taskId && <AppLink href={taskHref(r.taskId)} onOpen={() => p.onOpenTask(r.taskId!, "Inbox")} className="inline-flex h-10 items-center rounded-lg px-3 font-semibold text-accent hover:bg-background">Open task</AppLink>}
                       <AppLink href={clientHref(r.clientId)} onOpen={() => p.onOpenClient(r.clientId)} className="inline-flex h-10 items-center rounded-lg px-3 font-semibold text-accent hover:bg-background">Open their tasks</AppLink>

@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
-import { resolveContact } from "@/lib/sendMessageServer";
-import { APP_URL } from "@/lib/appUrl";
+import { buildPortalReminder } from "@/lib/portalReminderServer";
 import { subtractBusinessDaysIso, todayPacific } from "@/lib/data";
-import { isReminderHour, portalReminderEmail, PORTAL_REMINDER_PREFIX, REMINDER_GAP_BUSINESS_DAYS, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
+import { isReminderHour, PORTAL_REMINDER_PREFIX, REMINDER_GAP_BUSINESS_DAYS, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -55,14 +54,8 @@ async function run(req: NextRequest) {
   const startOfDay = new Date(`${today}T00:00:00-08:00`).toISOString();
   const tally = { clients: byClient.size, queued: 0, nothingSent: 0, noEmail: 0, noSender: 0, alreadyToday: 0 };
   const previews: { client: string; to: string; subject: string }[] = [];
-  for (const [clientId, needs] of byClient) {
+  for (const clientId of byClient.keys()) {
     if (clientId === "cl_workspace") continue;
-    const { data: client } = await supabaseAdmin.from("clients").select("id, name, share_token, assigned_to, portal_shows_all_tasks, deleted_at").eq("id", clientId).maybeSingle();
-    if (!client || client.deleted_at) continue;
-    const contact = await resolveContact(clientId);
-    if (!contact?.email) { tally.noEmail++; continue; }
-    const owner = await resolveNotifyRecipient(client.assigned_to as string[] | null);
-    if (!owner) { tally.noSender++; continue; }
     // One reminder in REMINDER_GAP_BUSINESS_DAYS at most, sent or waiting for review.
     const gapStart = new Date(`${subtractBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS - 1)}T00:00:00-08:00`).toISOString();
     const { data: sent } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).gte("scheduled_at", gapStart < startOfDay ? gapStart : startOfDay).limit(1);
@@ -70,26 +63,13 @@ async function run(req: NextRequest) {
     // Last week's still waiting for review: not a second one (audit 2026-10-07).
     const { data: open } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).eq("status", REVIEW_STATUS).limit(1);
     if (open?.length) { tally.alreadyToday++; continue; }
-
-    const { data: working } = client.portal_shows_all_tasks
-      ? await supabaseAdmin.from("tasks").select("title, due").eq("client_id", clientId).eq("waiting_on_client", false).neq("status", "done").eq("is_private", false).is("deleted_at", null).order("due", { ascending: true, nullsFirst: false }).limit(20)
-      : { data: [] as any[] };
-    const { data: person } = await supabaseAdmin.from("contacts").select("name").eq("id", contact.id).maybeSingle();
-    const firstName = String((person as any)?.name ?? "").trim().split(/\s+/)[0] || null;
-    // Their portal link, made the first time if they have none yet.
-    let token = client.share_token as string | null;
-    if (!token && !dry) {
-      token = randomUUID().replace(/-/g, "");
-      await supabaseAdmin.from("clients").update({ share_token: token }).eq("id", clientId);
-    }
-    const email = portalReminderEmail({
-      firstName: firstName ? firstName[0].toUpperCase() + firstName.slice(1) : null,
-      needs: [...needs].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
-      working: thisWeek(((working ?? []) as any[]).map((t) => ({ title: t.title, due: t.due ?? null })), today),
-      showWorking: client.portal_shows_all_tasks === true, portalUrl: `${APP_URL}/waiting/${token ?? "<made when sent>"}`, monday, today,
-    });
-    if (!email) { tally.nothingSent++; continue; }
-    if (dry) { previews.push({ client: client.name as string, to: contact.email, subject: email.subject }); continue; }
+    // The same builder Refresh uses in the Inbox (lib/portalReminderServer).
+    const built = await buildPortalReminder(clientId, { today, monday, dry });
+    if (!built.ok) { if (built.reason === "no_email") tally.noEmail++; else if (built.reason === "nothing") tally.nothingSent++; continue; }
+    const owner = await resolveNotifyRecipient(built.assignedTo);
+    if (!owner) { tally.noSender++; continue; }
+    const email = built.email;
+    if (dry) { previews.push({ client: built.clientName, to: built.to, subject: email.subject }); continue; }
     const { error: qErr } = await supabaseAdmin.from("scheduled_messages").insert({
       id: PORTAL_REMINDER_PREFIX + randomUUID(), client_id: clientId, task_id: null, channel: "email",
       subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: REVIEW_STATUS, created_by: owner,

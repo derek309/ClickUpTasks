@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/serverAuth";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveContact, sendScheduledMessageNow } from "@/lib/sendMessageServer";
-import { REVIEW_STATUS } from "@/lib/portalReminders";
+import { PORTAL_REMINDER_PREFIX, REVIEW_STATUS } from "@/lib/portalReminders";
+import { buildPortalReminder } from "@/lib/portalReminderServer";
+import { todayPacific } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,6 +19,7 @@ import { REVIEW_STATUS } from "@/lib/portalReminders";
 // POST { id, action: "send" }           send it now, in the sender's name
 // POST { id, action: "drop" }           don't send it
 // POST { id, action: "schedule", at }   send it later (Derek, 2026-10-08: "I want this one to go tomorrow")
+// POST { id, action: "refresh" }        a client reminder rebuilt from their tasks as they are now (Derek, 2026-10-12)
 //
 // Admins only: these go to clients in a teammate's name.
 
@@ -52,6 +55,18 @@ export async function POST(req: NextRequest) {
     if (!subject || !(b.body ?? "").trim()) return NextResponse.json({ error: "It needs a subject and some words." }, { status: 400 });
     const { data } = await supabaseAdmin.from("scheduled_messages").update({ subject, body: b.body }).eq("id", b.id).eq("status", REVIEW_STATUS).select("id");
     return data?.length ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
+  }
+  if (b.action === "refresh") {
+    // Only the client reminders are built from their tasks; a review nudge has nothing to rebuild.
+    if (!b.id.startsWith(PORTAL_REMINDER_PREFIX)) return NextResponse.json({ error: "Only a client reminder can be refreshed." }, { status: 400 });
+    const { data: row } = await supabaseAdmin.from("scheduled_messages").select("client_id, body").eq("id", b.id).eq("status", REVIEW_STATUS).maybeSingle();
+    if (!row) return NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
+    // Keeps the opening it had: the Monday one says "this week".
+    const monday = String((row as any).body ?? "").includes("keep things moving this week");
+    const built = await buildPortalReminder((row as any).client_id, { today: todayPacific(), monday });
+    if (!built.ok) return NextResponse.json({ error: built.reason === "nothing" ? "Nothing is waiting on them this week any more. Use Don't send." : built.reason === "no_email" ? "They have no email on file." : "That client is gone." }, { status: 409 });
+    const { data } = await supabaseAdmin.from("scheduled_messages").update({ subject: built.email.subject, body: built.email.body }).eq("id", b.id).eq("status", REVIEW_STATUS).select("id");
+    return data?.length ? NextResponse.json({ ok: true, subject: built.email.subject, body: built.email.body }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
   }
   if (b.action === "schedule") {
     // Handed to the 15 minute sender, which sends it in the author's name then.
