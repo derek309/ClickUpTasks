@@ -45,7 +45,11 @@ export function followUpForDue(due: string, today: string = todayIso()): string 
 /** The follow up a due date change brings with it, or undefined to leave it:
  *  only when the due date really changes to a date and the same change doesn't
  *  set a follow up of its own. */
+/** Off (Derek, 2026-10-12: "when a due date is added it's auto adding a
+ *  follow up date, stop that from happening"). true brings it back. */
+export const DUE_SETS_FOLLOW_UP = false;
 export function followUpWithDue(before: { due: string | null }, patch: { due?: string | null; followUpAt?: string | null }, today: string = todayIso()): string | null | undefined {
+  if (!DUE_SETS_FOLLOW_UP) return undefined;
   if (patch.followUpAt !== undefined || !patch.due || patch.due === before.due) return undefined;
   return followUpForDue(patch.due, today);
 }

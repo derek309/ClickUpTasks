@@ -11,9 +11,9 @@ describe("a follow up goes with a due date", () => {
     expect(followUpForDue("2026-10-05", today)).toBeNull();
     expect(followUpForDue("2026-10-01", today)).toBeNull();
   });
-  it("only when the due date changes and no follow up is set with it", () => {
-    expect(followUpWithDue({ due: "2026-10-05" }, { due: "2026-10-20" }, today)).toBe("2026-10-19");
-    expect(followUpWithDue({ due: "2026-10-20" }, { due: "2026-10-06" }, today)).toBeNull();
+  it("is switched off: a due date leaves the follow up alone (Derek, 2026-10-12)", () => {
+    expect(followUpWithDue({ due: "2026-10-05" }, { due: "2026-10-20" }, today)).toBeUndefined();
+    expect(followUpWithDue({ due: "2026-10-20" }, { due: "2026-10-06" }, today)).toBeUndefined();
     expect(followUpWithDue({ due: "2026-10-20" }, { due: "2026-10-20" }, today)).toBeUndefined();
     expect(followUpWithDue({ due: null }, { due: "2026-10-20", followUpAt: "2026-10-10" }, today)).toBeUndefined();
     expect(followUpWithDue({ due: "2026-10-20" }, { due: null }, today)).toBeUndefined();
