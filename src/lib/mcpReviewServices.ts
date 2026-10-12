@@ -17,7 +17,7 @@ import {
   createReview, deleteReview, pickReviewVersion, removeReviewVersion, renameReview, reopenReview, restoreReview, sendReview, setReviewStage, writeDocBody,
 } from "./reviewService";
 import {
-  deleteDocComment, discardVersionFile, docComments, docVersionFile, editDocComment, finishDocUpload, postDocComment, readPageFile,
+  deleteDocComment, discardVersionFile, sharedDocFileUrl, sharedDocFiles, docComments, docVersionFile, editDocComment, finishDocUpload, postDocComment, readPageFile,
   sharedVersionFiles, startDocUpload, storeImageFile, storePageFile, type DocActor,
 } from "./taskDocumentFiles";
 import { fetchImage } from "./safeFetch";
@@ -232,6 +232,11 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         }
       }
       const comments = await docComments(doc.id);
+      // The files on the review, a comment's attachment among them, by name
+      // and id so Claude can open one (view_review_file). A comment used to
+      // say only "has a file" (Derek, 2026-10-12: Brian's new art was out of reach).
+      const shared = await sharedDocFiles(doc.id);
+      const fileName = new Map(shared.map((f) => [f.id, f.name]));
       // Which image or page of its version a pin is on, when the version holds several.
       const setsNewestFirst = kind !== "doc" ? [(doc.body as string) ?? "", ...(await sharedVersionFiles(doc.id)).map((v) => v.body).reverse()] : [];
       const pinPlace = (fileId: string) => {
@@ -241,7 +246,10 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       if (comments.length) {
         out.push(`\nComments (the client sees these too):\n${comments.map((c) => `  - [${c.id}] ${c.authorLabel}${c.fromClient ? " (client)" : ""}, ${c.createdAt}`
           + `${c.completedAt ? " · done" : ""}${c.pin ? ` · pin ${c.pin.number} on version ${numbers.get(c.pin.fileId) ?? "next"}${pinPlace(c.pin.fileId) ? ` (${pinPlace(c.pin.fileId)})` : ""} at x ${c.pin.x}, y ${c.pin.y}` : ""}`
-          + `${c.quote ? ` · on "${c.quote.replace(/\n/g, " … ")}"` : ""}${c.attachmentFileId ? " · has a file" : ""}: ${c.body}`).join("\n")}`);
+          + `${c.quote ? ` · on "${c.quote.replace(/\n/g, " … ")}"` : ""}${c.attachmentFileId ? ` · file "${fileName.get(c.attachmentFileId) ?? "attached"}" [${c.attachmentFileId}]` : ""}: ${c.body}`).join("\n")}`);
+      }
+      if (shared.length) {
+        out.push(`\nFiles on the review (open one with view_review_file):\n${shared.map((f) => `  - "${f.name}" [${f.id}]${f.fromClient ? " from the client" : f.addedBy ? ` from ${f.addedBy}` : ""}, ${f.createdAt.slice(0, 10)}`).join("\n")}`);
       }
       return out.join("\n");
     },
@@ -524,6 +532,29 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       for (const id of ids) { const r = await editDocComment(doc.id as string, id, { done: true }, actor); if (r.ok) n++; }
       const missing = which === "all" ? [] : which.filter((id) => !ids.includes(id));
       return `Resolved ${n} ${n === 1 ? "comment" : "comments"}${missing.length ? `; not open or not found: ${missing.join(", ")}` : ""}.`;
+    },
+
+    /** One file on a review (a comment's attachment, a client upload): a
+     *  picture as itself so Claude can see it, anything else as a link. */
+    async reviewFile(taskId: string, kind: ReviewKind, fileId: string): Promise<{ text: string; image?: { data: string; mimeType: string } }> {
+      const task = await taskFor(taskId);
+      if (typeof task === "string") return { text: task };
+      const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
+      if (!doc) return { text: "No review of that kind on the task." };
+      const f = (await sharedDocFiles(doc.id as string)).find((x) => x.id === fileId.trim() || x.name.toLowerCase() === fileId.trim().toLowerCase());
+      if (!f) return { text: `No file "${fileId}" on that review. get_review lists them.` };
+      const url = await sharedDocFileUrl(doc.id as string, f.id, false);
+      if (!url) return { text: `${f.name} can't be opened.` };
+      const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
+      const mimeType = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" } as Record<string, string>)[ext];
+      if (mimeType) {
+        const res = await fetch(url).catch(() => null);
+        if (res?.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length <= 4 * 1024 * 1024) return { text: `${f.name}:`, image: { data: buf.toString("base64"), mimeType } };
+        }
+      }
+      return { text: `${f.name}: ${url} (works for 5 minutes)` };
     },
 
     async deleteComment(commentId: string): Promise<string> {

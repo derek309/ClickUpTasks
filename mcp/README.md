@@ -45,7 +45,7 @@ Reviews (hosted only), for a task's client document (kind `doc`), image review
 `create_review`, `update_review`, `write_document`, `start_image_upload`,
 `add_review_version`, `use_version`, `remove_version`, `send_for_review`,
 `get_review_link`, `revoke_review_link`, `add_review_comment`,
-`update_review_comment`, `delete_review_comment`, `delete_review`,
+`update_review_comment`, `view_review_file`, `delete_review_comment`, `delete_review`,
 `restore_review`. `get_client_document` and `write_client_document` still work
 as the older names for the document. See each tool's own description in
 `core.mjs` for its exact arguments. An image review version can hold up to 10

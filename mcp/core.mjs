@@ -1167,6 +1167,14 @@ export function createServer(opts = {}) {
       { comment_id: z.string(), text: z.string().optional(), done: z.boolean().optional() },
       async ({ comment_id, text, done }) => reply(await services.updateComment(comment_id, { text, done })));
 
+    server.tool("view_review_file",
+      "Open a file on a review: a comment's attachment or a file the client uploaded (get_review lists them with ids). A picture comes back as the picture itself, so you can see it; any other file as a short lived link.",
+      { task_id: z.string(), kind: KIND, file: z.string().describe("the file id from get_review, or its name") },
+      async ({ task_id, kind, file }) => {
+        const r = await services.reviewFile(task_id, kind, file);
+        return { content: [{ type: "text", text: r.text }, ...(r.image ? [{ type: "image", data: r.image.data, mimeType: r.image.mimeType }] : [])] };
+      });
+
     server.tool("delete_review_comment",
       "Delete a comment from a review's thread. Comment ids come from get_review.",
       { comment_id: z.string() },

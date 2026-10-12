@@ -10,7 +10,7 @@ export const STEP_TOOLS = [
   "- Finish a step with check_item <task id> <step id>: the next step starts like it does in the app.",
   "- Tick a to-do with check_todo <task id> <to-do id>; a client's change request is resolved on their page too.",
   "- An email to the client: draft_email (it gets its own step after the current one, or pass step to put it on one). Nothing is sent; a teammate reads and sends it.",
-  "- Review comments: get_review lists them with ids. A new version (write_document or add_review_version) takes resolve_comments with the ids it answers, or \"all\"; update_review_comment resolves one.",
+  "- Review comments: get_review lists them with ids, and the files on them (open one with view_review_file). A new version (write_document or add_review_version) takes resolve_comments with the ids it answers, or \"all\"; update_review_comment resolves one.",
   "- Found more to do? add_checklist_items adds steps. Last step done and nothing left: set_task_status done.",
 ].join("\n");
 
