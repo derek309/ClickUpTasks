@@ -263,8 +263,10 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
   //
   // Undo snapshots only the keys being written, so reverting restores exactly
   // what changed and can't clobber edits made to other fields in between.
-  const bulkPatch = (patch: Partial<Task>, summary: string) => {
-    const ids = [...selectedTaskIds];
+  // ids: a set other than the selection (a group's Move all, Derek 2026-10-12).
+  // patch may be worked out per task.
+  const bulkPatch = (patch: Partial<Task> | ((t: Task) => Partial<Task>), summary: string, only?: string[]) => {
+    const ids = only ?? [...selectedTaskIds];
     if (!ids.length) return;
     const n = ids.length;
     const plural = n === 1 ? "" : "s";
@@ -274,19 +276,20 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       confirmLabel: `Update ${n} task${plural}`,
       danger: false,
       onConfirm: () => {
-        const keys = Object.keys(patch) as (keyof Task)[];
-        const before = ids
+        const changes = ids
           .map((id) => {
             const t = tasksRef.current.find((x) => x.id === id);
             if (!t) return null;
+            const next = typeof patch === "function" ? patch(t) : patch;
             const prev: Partial<Task> = {};
-            keys.forEach((k) => { (prev as Record<string, unknown>)[k] = t[k]; });
-            return { id, prev };
+            (Object.keys(next) as (keyof Task)[]).forEach((k) => { (prev as Record<string, unknown>)[k] = t[k]; });
+            return { id, prev, next };
           })
-          .filter((x): x is { id: string; prev: Partial<Task> } => !!x);
-        ids.forEach((id) => patchTask(id, patch));
+          .filter((x): x is { id: string; prev: Partial<Task>; next: Partial<Task> } => !!x);
+        const before = changes.map(({ id, prev }) => ({ id, prev }));
+        changes.forEach(({ id, next }) => patchTask(id, next));
         setConfirmDialog(null);
-        clearSelection();
+        if (!only) clearSelection();
         pushToast(`${summary} for ${n} task${plural}`, {
           label: "Undo",
           run: () => {

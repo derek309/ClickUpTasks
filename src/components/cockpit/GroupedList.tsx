@@ -24,7 +24,7 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, onMoveGroup, meId, previewByTask, listsFor }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
@@ -72,6 +72,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // When set, each row gets a selection checkbox for bulk edit; the caller
   // owns the selected-id set and renders its own bulk-action bar.
   selectedIds?: Set<string>; onToggleSelect?: (taskId: string) => void;
+  /** Overdue's Move all (Derek, 2026-10-12: "bulk change the due dates for
+   *  all the overdue"): every task in the group to one date. */
+  onMoveGroup?: (taskIds: string[], due: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [subDraft, setSubDraft] = useState<Record<string, string>>({});
@@ -222,6 +225,15 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                 onDragLeave={() => setDragOverKey((k) => (k === g.key ? null : k))}
                 onDrop={(e) => { if (!onDropInGroup) return; e.preventDefault(); if (dragTaskId) onDropInGroup(dragTaskId, g.key); setDragTaskId(null); setDragOverKey(null); }}
                 className={`flex w-full items-center gap-2 border-y px-4 py-2 text-left transition ${dragOverKey === g.key ? "ring-2 ring-inset ring-accent" : ""}`} style={{ background: g.color + "22", borderColor: g.color + "40" }}>
+                {/* The whole group at once: tick to select every task in it. */}
+                {onToggleSelect && g.tasks.length > 0 && (() => {
+                  const all = g.tasks.every((t) => selectedIds?.has(t.id));
+                  return (
+                    <input type="checkbox" checked={all} aria-label={`Select every task in ${g.label}`} title={all ? "Unselect these" : "Select all of these"}
+                      onChange={() => g.tasks.forEach((t) => { if (all || !selectedIds?.has(t.id)) onToggleSelect(t.id); })}
+                      className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)]" />
+                  );
+                })()}
                 <button onClick={() => toggleG(g.key)} aria-expanded={!collapsedG.has(g.key)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left">
                   <I.chevron className={`text-muted transition ${collapsedG.has(g.key) ? "rotate-180" : "-rotate-90"}`} />
@@ -229,6 +241,10 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                   <span className="truncate text-[15px] font-bold">{g.label}</span>
                   <span className="shrink-0 rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
                 </button>
+                {g.key === "overdue" && onMoveGroup && g.tasks.length > 0 && (
+                  <InlineDate value={null} onChange={(d) => { if (d) onMoveGroup(g.tasks.map((t) => t.id), d); }} emptyLabel="Move all to…"
+                    className="shrink-0 rounded-lg border bg-surface px-2.5 py-1 text-[14px] font-semibold text-danger shadow-sm hover:bg-background" />
+                )}
                 {canQuickAdd && onAddInGroup && (
                   <button onClick={() => onAddInGroup(g.key)} title={`Add a task to ${g.label}`}
                     className="flex shrink-0 items-center gap-1.5 rounded-lg border bg-surface py-1 pl-2 pr-2.5 text-[14px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-white">
