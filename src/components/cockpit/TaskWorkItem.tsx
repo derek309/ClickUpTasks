@@ -94,8 +94,11 @@ export function WorkItemRow({ icon, title, badge, meta, actions, more = [], onOp
 
 /** The full screen window. Esc or Close shuts it; onClose should land any
  *  pending save first. */
-export function WorkItemWindow({ icon, title, badge, status, actions, onClose, children }: {
+export function WorkItemWindow({ icon, title, badge, status, actions, onClose, backTo, children }: {
   icon: string;
+  /** The task it belongs to: a "‹ task" link back to it (Derek, 2026-10-12:
+   *  "when I go into a draft email I need a way to get to the task"). */
+  backTo?: string;
   /** Usually an input, so the name is edited where it is read. */
   title: React.ReactNode;
   badge?: React.ReactNode;
@@ -117,6 +120,12 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, c
   return createPortal(
     <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex flex-col bg-background">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 sm:px-8">
+        {backTo && (
+          <button onClick={onClose} title={`Back to ${backTo}`} className="flex max-w-[260px] shrink-0 items-center gap-1 rounded-[5px] px-2 py-1.5 text-[16px] font-semibold text-muted hover:bg-background hover:text-foreground">
+            <span aria-hidden>‹</span><span className="truncate">{backTo}</span>
+          </button>
+        )}
+        {backTo && <span aria-hidden className="h-6 w-px bg-[var(--border)]" />}
         <span aria-hidden className="text-[24px]">{icon}</span>
         <div className="min-w-0 flex-1">{title}</div>
         {badge}

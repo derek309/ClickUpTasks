@@ -403,7 +403,7 @@ export function TaskBrief({ task, clientName, pushToast, startNonce, onPresence 
   return (
     <>
       {row}
-      <WorkItemWindow icon={ICON} title={titleInput} status={saveLabel} onClose={close}
+      <WorkItemWindow backTo={task.title} icon={ICON} title={titleInput} status={saveLabel} onClose={close}
         actions={<button onClick={() => void copyText()} className={quiet}>Copy as text</button>}>
         <p className="mb-5 rounded-xl bg-accent-soft px-4 py-3 text-[16px]">
           For a designer or anyone outside the team. The client never sees these, and nothing here acts as the client.

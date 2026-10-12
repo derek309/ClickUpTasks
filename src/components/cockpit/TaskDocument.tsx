@@ -1548,7 +1548,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       {row}
       {deletedLine}
       {full && (
-        <WorkItemWindow icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
+        <WorkItemWindow backTo={task.title} icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">

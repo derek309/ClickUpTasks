@@ -335,13 +335,8 @@ export function EmailWindow({
 
   return (
     <>
-      <WorkItemWindow icon="✉️" badge={badge} onClose={onClose}
-        title={
-          <div>
-            <p className="px-1 text-[22px] font-bold leading-tight">{heading}</p>
-            {subheading && <p className="truncate px-1 text-[16px] text-muted">{subheading}</p>}
-          </div>
-        }>
+      <WorkItemWindow icon="✉️" badge={badge} onClose={onClose} backTo={subheading}
+        title={<p className="px-1 text-[22px] font-bold leading-tight">{heading}</p>}>
         {/* Attachments sit in a right column beside the email, like the client document. */}
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0">
