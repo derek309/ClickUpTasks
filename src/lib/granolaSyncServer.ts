@@ -9,7 +9,7 @@ import { granolaGetNote } from "./granolaClient";
 import { resolveOrPromoteTrackedClient } from "./ghlConversationTask";
 import { contactsByEmail } from "./contactsByEmail";
 import { TASK_FILES_BUCKET } from "./db";
-import { stepsOnMeetingTranscript } from "./stepsServer";
+import { ensureMeetingSteps, stepsOnMeetingTranscript } from "./stepsServer";
 import type { Subtask } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -118,6 +118,12 @@ async function transcriptOntoTask(clientId: string, note: Awaited<ReturnType<typ
     .filter((t) => t.step && dayGap(t.step.due) <= 3 * 86400000)
     .sort((a, b) => dayGap(a.step!.due) - dayGap(b.step!.due))[0];
   if (!waiting) return;
+  await fileTranscript(waiting.id, note);
+}
+
+async function fileTranscript(taskId: string, note: Awaited<ReturnType<typeof granolaGetNote>>): Promise<string> {
+  const meetingDay = (note.calendar_event?.scheduled_start_time || note.created_at).slice(0, 10);
+  const waiting = { id: taskId };
   const body = transcriptText(note);
   const name = `Meeting transcript ${meetingDay}.txt`;
   const path = `${waiting.id}/${randomUUID().slice(0, 8)}-${name.replace(/\s+/g, "-")}`;
@@ -128,4 +134,26 @@ async function transcriptOntoTask(clientId: string, note: Awaited<ReturnType<typ
   const { error: rpcError } = await supabaseAdmin.rpc("append_task_attachments", { task_id: waiting.id, items: [att] });
   if (rpcError) throw new Error(`attach failed: ${rpcError.message}`);
   await stepsOnMeetingTranscript(waiting.id, att.id);
+  return name;
+}
+
+/** Client work's Add, Meeting transcript (Derek, 2026-10-12): the steps if
+ *  the task has none, then the client's Granola meeting nearest the step's
+ *  date, from the last two weeks, filed now. For a meeting Granola sent
+ *  before the step was there. */
+export async function transcriptForTask(taskId: string): Promise<{ ok: true; filed: string | null } | { ok: false; error: string }> {
+  await ensureMeetingSteps(taskId);
+  const { data: task } = await supabaseAdmin.from("tasks").select("client_id, subtasks").eq("id", taskId).maybeSingle();
+  if (!task) return { ok: false, error: "No such task." };
+  const step = ((task.subtasks as Subtask[] | null) ?? []).find((x) => !x.done && x.finishWhen === "transcript");
+  if (!step) return { ok: false, error: "Couldn't add the transcript step." };
+  const since = new Date(Date.now() - 14 * 86400000).toISOString();
+  const { data: notes } = await supabaseAdmin.from("granola_synced_notes").select("granola_note_id, client_note_id").eq("client_id", task.client_id).not("client_note_id", "is", null);
+  if (!notes?.length) return { ok: true, filed: null };
+  const { data: meetings } = await supabaseAdmin.from("client_notes").select("id, created_at").in("id", notes.map((n: any) => n.client_note_id)).gte("created_at", since);
+  const target = Date.parse(step.due ?? new Date().toISOString().slice(0, 10));
+  const nearest = (meetings ?? []).sort((a: any, b: any) => Math.abs(Date.parse(a.created_at) - target) - Math.abs(Date.parse(b.created_at) - target))[0];
+  if (!nearest) return { ok: true, filed: null };
+  const noteId = notes.find((n: any) => n.client_note_id === nearest.id)!.granola_note_id;
+  return { ok: true, filed: await fileTranscript(taskId, await granolaGetNote(noteId)) };
 }

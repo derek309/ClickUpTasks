@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, withMeetingSteps, 
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
@@ -2440,6 +2440,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         return { taskId: task.id, kinds: exists ? [...kinds, kind] : kinds.filter((k) => k !== kind) };
       })} />
   );
+  const pullTranscript = async () => {
+    pushToast("Looking for the meeting in Granola…");
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/meeting-transcript`, { method: "POST" }).catch(() => null);
+    const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string } | null;
+    if (!res?.ok) { pushToast(`⚠️ ${j?.error ?? "Couldn't reach Granola."}`); return; }
+    pushToast(j?.filed ? `Added ${j.filed} and ticked the meeting steps.` : "Added the meeting steps. Granola's transcript lands there after the meeting.");
+  };
   // Everything a task can gain, in one menu beside Deliverables. It was a row
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
@@ -2450,11 +2457,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
       hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
       // The meeting's steps (Derek, 2026-10-12): Granola's transcript lands on
-      // the second as a file and ticks it, so the Document stays free.
-      !task.subtasks.some((x) => !x.done && x.finishWhen === "transcript") && { label: "Meeting transcript", onClick: () => {
-        const steps = withMeetingSteps(taskRef.current.subtasks, firstName, task.due && task.due >= TODAY ? task.due : TODAY, () => newId("s_"));
-        if (steps) { onPatch({ subtasks: steps }); pushToast("Added Meet and Add the meeting transcript. Granola's transcript lands there by itself."); }
-      } },
+      // the second as a file and ticks it, so the Document stays free. A
+      // meeting Granola already sent is filed at once.
+      { label: "Meeting transcript", onClick: () => void pullTranscript() },
       { label: "Link", onClick: () => { setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); } },
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />

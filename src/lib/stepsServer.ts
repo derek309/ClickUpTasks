@@ -9,7 +9,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
   isHandoffStep, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
-  todayPacific, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
+  todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
 
@@ -118,6 +118,16 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
     if (!waiting.length) return null;
     const now = new Date().toISOString();
     return list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+  });
+}
+
+/** Client work's Add, Meeting transcript: the meeting's two steps, dated to
+ *  the task (or today when that has passed). Nothing when they are there. */
+export async function ensureMeetingSteps(taskId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row, first) => {
+    const today = todayPacific();
+    return (row.subtasks ?? []).some((x) => !x.done && x.finishWhen === "transcript") ? null
+      : withMeetingSteps(row.subtasks ?? [], first, row.due && row.due >= today ? row.due : today, () => newId("s_"));
   });
 }
 
