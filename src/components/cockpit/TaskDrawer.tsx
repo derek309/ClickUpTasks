@@ -1744,7 +1744,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
     ];
-    const heldHere = isActive && !sub.onClient ? stepHeld(withSentHolds(sub)) : null;
+    // The current step lists what's on it, one line each, read only: the work
+    // is done inside the step, with its directions (Derek, 2026-10-12: "show
+    // that it's attached and approved and ready, but they can't open it from here").
+    const heldHere = isActive && !sub.onClient ? (() => {
+      const lines = [
+        ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => {
+          const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
+          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{deliverableName(k)}</span>{r ? stageChip(r.status) : <span className="text-muted">{k === "email" ? "Draft" : KIND_LABEL[k]}</span>}</span>;
+        }),
+        ...holds.filter((k) => !!sentMail(k)).map((k) => <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>✉</span><span className="min-w-0 truncate font-medium">{sentMail(k)!.subject?.trim() || "Email"}</span><span className="text-muted">Sent</span></span>),
+        ...holds.filter((k) => k.startsWith("att:")).map((k) => { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>🔗</span><span className="min-w-0 truncate">{a.name}</span></span> : null; }),
+        ...(sub.fromEmails ?? []).map((e) => <span key={e.messageId} className="flex min-w-0 items-center gap-2"><span aria-hidden>📨</span><span className="min-w-0 truncate font-medium">{e.subject || "Email"}</span><span className="text-muted">from {e.from.split(" ")[0]}</span></span>),
+      ].filter(Boolean);
+      return lines.length ? (
+        <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} title="Open the step to work on it"
+          className="flex w-full flex-col gap-1 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">{lines}</button>
+      ) : null;
+    })() : null;
     const missing = !sub.done ? missingNeeds(sub) : [];
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
     return (
