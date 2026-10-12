@@ -1703,7 +1703,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
           className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>{sub.title}</span>
+            <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>
+              {/* Numbered, so "step 2" means the same to everyone (Derek, 2026-10-12). */}
+              {!sub.fromClient && steps.some((x) => x.id === sub.id) && <span className="mr-1.5 tabular-nums text-muted">{steps.findIndex((x) => x.id === sub.id) + 1}.</span>}
+              {sub.title}
+            </span>
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
               {sub.done && <span className="text-muted">{sub.outcome ?? "Done"}{sub.doneAt ? ` · ${formatDue(sub.doneAt.slice(0, 10))}` : ""}</span>}
               {/* Each step's own due date (Derek, 2026-10-11). */}
