@@ -17,6 +17,7 @@ import { I, Avatar, CollapsibleText, newId } from "./ui";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
+import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
   controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
@@ -115,6 +116,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(startWithChecklist);
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
+  // Directions read as text once written; new ones open ready to type.
+  const [dirEditing, setDirEditing] = useState(!(sub.notes && htmlToText(sub.notes).trim()));
   const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirSave = useRef<(() => void) | null>(null);
   // Deleted directions can come back until the page closes.
@@ -140,7 +143,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   // Everything "Add client work" offers: a checklist, the task's documents and
   // reviews and an email (from the task page), and a text.
   const options = [
-    { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); } },
+    { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); setDirEditing(true); } },
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
@@ -449,21 +452,32 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {/* Directions: what we want on this step, added from + Add like
                   the rest (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
               {!dirOpen && dirRemoved !== null && (
-                <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
+                <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
               )}
               {dirOpen && (
                 <section aria-labelledby="step-directions" className="flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-2">
                     <h3 id="step-directions" className="text-[17px] font-bold">Directions</h3>
+                    {/* Read, or write in (Derek, 2026-10-12: "no way to save or
+                        close the directions"). They save as you type; Done closes. */}
+                    {dirEditing
+                      ? <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }} className="ml-auto h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90">Done</button>
+                      : <button onClick={() => setDirEditing(true)} className="ml-auto h-9 rounded-[5px] px-3 text-[16px] font-semibold text-accent hover:bg-background">Edit</button>}
                     <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
                   </div>
-                  <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus={!sub.notes}
+                  {!dirEditing ? (
+                    <div role="button" tabIndex={0} onClick={() => setDirEditing(true)} onKeyDown={(e) => { if (e.key === "Enter") setDirEditing(true); }} title="Click to edit"
+                      className="rte-content cursor-text rounded-[5px] px-1 py-0.5 text-[16px] hover:bg-background" dangerouslySetInnerHTML={{ __html: safeMessageHtml(sub.notes ?? "") }} />
+                  ) : (
+                  <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
                     onChange={(html) => {
                       if (dirTimer.current) clearTimeout(dirTimer.current);
                       dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
                       dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
                     }}
                     placeholder="What we want on this step: what to make, what to change, where things are…" />
+                  )}
+                  {dirEditing && <p className="text-[16px] text-muted">Saves as you type.</p>}
                 </section>
               )}
               {todoList}
