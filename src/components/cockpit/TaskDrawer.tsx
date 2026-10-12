@@ -1068,7 +1068,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatchSub(next.id, { holds: [...(next.holds ?? []), ...moving] });
     }
     const status = statusForStep(task.status, stepStage(next, task.assigneeId));
-    if (status) onPatch({ status });
+    // The plan reaching a teammate's step dates the task to it, as handing it over does.
+    const teammates = isHandoffStep(next, task.assigneeId) ? handoffDates(next.due) : {};
+    if (status || Object.keys(teammates).length) onPatch({ ...(status ? { status } : {}), ...teammates });
   };
   // Mark done on the current step, or its tick: one action, not two.
   // The "changes are done" email takes the task's draft slot; a draft already
@@ -1596,7 +1598,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         return (
           <span className="inline-flex items-center gap-1">
             <span className="text-muted">Due</span>
-            <InlineDate value={d} onChange={(v) => onPatchSub(sub.id, { due: v })} onClear={() => onPatchSub(sub.id, { due: null })}
+            <InlineDate value={d} onChange={(v) => { onPatchSub(sub.id, { due: v }); if (isActive && v && sub.assigneeId && sub.assigneeId !== task.assigneeId) onPatch(handoffDates(v)); }} onClear={() => onPatchSub(sub.id, { due: null })}
               emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
               className={`font-semibold underline decoration-dotted underline-offset-4 ${t === "late" ? "text-danger" : t === "soon" ? "text-highlight" : ""}`} />
           </span>
@@ -1610,12 +1612,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <span className="text-muted">Assign</span>
           <InlineAssignee value={sub.assigneeId ?? null} size={24}
             onChange={(a) => {
-              onPatchSub(sub.id, { assigneeId: a });
+              // Given to a teammate: on their list today unless a follow up is already set.
+              onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
               // The current step's owner decides the status: a teammate makes it
               // Delegated, back to the owner returns it to the step's own stage.
               if (isActive) {
                 const status = statusForStep(task.status, stepStage({ ...sub, assigneeId: a ?? undefined }, task.assigneeId));
-                if (status) onPatch({ status });
+                const toTeammate = !!a && a !== task.assigneeId;
+                onPatch({ ...(status ? { status } : {}), ...(toTeammate ? handoffDates(sub.due) : {}) });
               }
               // Giving the current step to a teammate: the follow up finishes
               // when they mark it done (brief, section 6).
@@ -1624,11 +1628,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {sub.assigneeId && <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span>}
         </span>
       )}
+      {/* A teammate's step has their own follow up: the day it lands on their list. */}
+      {!sub.onClient && !sub.done && sub.assigneeId && sub.assigneeId !== task.assigneeId && (
+        <span className="inline-flex items-center gap-1">
+          <span className="text-muted">{userById(sub.assigneeId)?.name.split(" ")[0] ?? "Their"}&apos;s follow up</span>
+          <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
+            emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))}
+            className="font-semibold underline decoration-dotted underline-offset-4" />
+        </span>
+      )}
       {/* No stage to pick: the step is the stage (Derek, 2026-10-11). The task's
           follow up date, settable from the step it is about. */}
       {isActive && !sub.done && (
         <span className="inline-flex items-center gap-1">
-          <span className="text-muted">Follow up</span>
+          {/* Yours, the task's, apart from a teammate's own follow up beside it. */}
+          <span className="text-muted">{sub.assigneeId && sub.assigneeId !== task.assigneeId ? "Your follow up" : "Follow up"}</span>
           <InlineDate value={followUp} onChange={(v) => moveStepDate(v)} onClear={() => moveStepDate(null)}
             emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
             className="font-semibold underline decoration-dotted underline-offset-4" />
@@ -1850,9 +1864,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const delegateStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Hand off", done: false, due: addBusinessDaysIso(TODAY, 3) }] });
+    // In front of the current step, so the handoff is what's happening now
+    // (Derek, 2026-10-12: "I delegated this task").
+    const list = [...taskRef.current.subtasks];
+    const cur = currentStep(list);
+    list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, { id, title: "Hand off", done: false, due: addBusinessDaysIso(TODAY, 3), startedAt: new Date().toISOString() });
+    onPatch({ subtasks: list });
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
+  // A teammate has the current step: the task is theirs until that date, and
+  // comes back to its owner the business day after (Derek, 2026-10-12: "check
+  // it the day after it is due").
+  const handoffDates = (due: string | null | undefined): Partial<Task> => (due ? { due, followUpAt: addBusinessDaysIso(due, 1) } : {});
   // An email to the client as a step of its own: the draft sits on it and its
   // window opens to write in. Nothing goes until someone presses Send
   // (Derek, 2026-10-12).

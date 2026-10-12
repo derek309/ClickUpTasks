@@ -884,6 +884,10 @@ export interface Subtask {
    *  emails, it's a task that needs to be completed"): a copy, so the step
    *  shows them whichever task the thread is linked to. */
   fromEmails?: ReceivedEmail[];
+  /** A teammate's step: when it shows on THEIR list to pick up, apart from
+   *  when it's due (Derek, 2026-10-12: "due in a few days, but assigned to her
+   *  to follow up with it today"). */
+  followUpAt?: string | null;
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
@@ -2423,7 +2427,11 @@ export function delegatedDueFor(
   task: { assigneeId?: string | null; subtasks?: Subtask[] },
   userId: string,
 ): string | null {
-  return delegatedItemFor(task, userId)?.due ?? null;
+  // Their follow up when it is sooner than the due date: that is the day it
+  // shows on their list.
+  const it = delegatedItemFor(task, userId);
+  if (!it) return null;
+  return it.followUpAt && (!it.due || it.followUpAt < it.due) ? it.followUpAt : it.due ?? it.followUpAt ?? null;
 }
 
 /** The handoff this person is holding on someone else's task: their open

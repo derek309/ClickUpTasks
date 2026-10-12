@@ -1353,3 +1353,12 @@ describe("a to-do asked about", () => {
     expect(todoWaiting({ id: "x", title: "x", done: false }, [])).toBeNull();
   });
 });
+
+describe("a teammate's own follow up", () => {
+  it("puts the step on their list on that day when it comes before the due date", async () => {
+    const { delegatedDueFor } = await import("./data");
+    const task = { assigneeId: "u_derek", subtasks: [{ id: "h", title: "Hand off", done: false, assigneeId: "u_michaella", due: "2026-10-15", followUpAt: "2026-10-12" }] };
+    expect(delegatedDueFor(task, "u_michaella")).toBe("2026-10-12");
+    expect(delegatedDueFor({ ...task, subtasks: [{ ...task.subtasks[0], followUpAt: null }] }, "u_michaella")).toBe("2026-10-15");
+  });
+});
