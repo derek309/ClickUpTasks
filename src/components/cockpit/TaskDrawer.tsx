@@ -1638,6 +1638,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="inline-flex items-center gap-1.5">
           <span className="text-muted">Assign</span>
           <InlineAssignee value={sub.assigneeId ?? null} size={24}
+            label={sub.assigneeId ? <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span> : undefined}
             onChange={(a) => {
               // Given to a teammate: on their list today unless a follow up is already set.
               onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
@@ -1652,7 +1653,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               // when they mark it done (brief, section 6).
               if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
             }} />
-          {sub.assigneeId && <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span>}
         </span>
       )}
       {/* A teammate's step has their own follow up: the day it lands on their list. */}

@@ -630,13 +630,15 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
   );
 }
 
-export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22 }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number }) {
+export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22, label }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number;
+  /** Words beside the face, part of the same button (Derek, 2026-10-12: "click the names too"). */
+  label?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   return (
     <div className="relative">
-      <button ref={ref} title={waiting ? (client ? `Waiting on ${client.name}` : "Waiting on the client") : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className="rounded-full hover:opacity-80">
+      <button ref={ref} title={waiting ? (client ? `Waiting on ${client.name}` : "Waiting on the client") : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className={label ? "inline-flex items-center gap-1.5 rounded-full hover:opacity-80" : "rounded-full hover:opacity-80"}>
         {/* The client only stands in when nobody owns a waiting task. With an
             owner the face stays theirs, and the row says who it waits on. */}
         {waiting && !value
@@ -648,6 +650,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
               ? <span className="inline-flex items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: client.color, fontSize: size * 0.4 }}>{clientInitials(client.name)}</span>
               : <span className="inline-flex items-center justify-center rounded-full border border-amber-400/60 bg-amber-50 text-amber-700" style={{ width: size, height: size, fontSize: size * 0.42 }}><I.user /></span>)
           : <Avatar id={value} size={size} />}
+        {label}
       </button>
       {open && (<>
         <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
