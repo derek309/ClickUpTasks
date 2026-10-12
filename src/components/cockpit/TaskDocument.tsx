@@ -301,7 +301,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const isLive = (body: string) => { const ids = imagesOf(body); return ids.length > 0 && ids.every((id) => liveVersionIds.has(id)); };
   const versionOptions = versioned && doc ? [
     ...sent.map((fileId, i) => ({ fileId, label: `Version ${i + 1}` })).filter((o) => isLive(o.fileId)),
-    ...(doc.body && !sent.includes(doc.body) ? [{ fileId: doc.body, label: "New, not sent" }] : []),
+    // The one being worked on is simply the next number; "Changes not sent"
+    // beside it says it hasn't gone (Derek, 2026-10-12: no duplicate wording).
+    ...(doc.body && !sent.includes(doc.body) ? [{ fileId: doc.body, label: `Version ${sent.length + 1}` }] : []),
   ] : [];
   const shownFileId = viewingVersion && versionOptions.some((o) => o.fileId === viewingVersion) ? viewingVersion : (doc?.body || null);
 
