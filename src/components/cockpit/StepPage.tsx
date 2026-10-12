@@ -154,12 +154,13 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     if (!t.done && t.commentId) onTodoDone?.(t);
   };
 
-  // What was said while this step ran, oldest first, like a chat.
+  // What was said while this step ran, newest first under the box you write
+  // in (Derek, 2026-10-12: "flip the conversation so the latest is at the top").
   const w = stepWindow(task.subtasks, sub.id, task.createdAt);
   const said = [
     ...messages.filter((m) => inWindow(m.at, w) && m.channel !== "call").map((m) => ({ key: `m_${m.id}`, at: m.at, kind: "message" as const, m })),
     ...actions.filter((a) => !!a.body.trim() && !a.parentId && inWindow(a.at, w)).map((a) => ({ key: `a_${a.id}`, at: a.at, kind: "action" as const, a })),
-  ].sort((x, y) => x.at.localeCompare(y.at));
+  ].sort((x, y) => y.at.localeCompare(x.at));
 
   const send = () => {
     const body = draft.trim();
@@ -188,7 +189,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
         </div>
       </div>
-      <div className={said.length ? "flex flex-col gap-3" : "hidden"}>
+      <div className={said.length ? "order-last flex flex-col gap-3" : "hidden"}>
         {said.map((x) => {
           if (x.kind === "message") {
             const m = x.m;
@@ -255,7 +256,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
-          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows under this step here."}
+          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows below, newest first."}
             {talk === "email" && onFullEmail && <> <button onClick={() => { onFullEmail(subject, draft); setDraft(""); }} className="font-semibold text-accent underline decoration-dotted underline-offset-4">Full email</button></>}
           </span>
           <button onClick={send} disabled={!draft.trim()} className="h-9 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-40">Send</button>
