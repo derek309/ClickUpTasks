@@ -1316,3 +1316,17 @@ describe("a client's email as a step", () => {
     expect(isJustThanks("Thanks! Can we move it to Friday?")).toBe(false);
   });
 });
+
+describe("an older handoff becomes a plain step", () => {
+  it("moves the brief, steps, links and files onto the step and keeps only the chat", async () => {
+    const { handoffIntoStep } = await import("./data");
+    const moved = handoffIntoStep({ id: "s1", title: "Research", done: false, assigneeId: "u_claude",
+      handoff: { goal: "Count the contacts turning 65", steps: [{ id: "h1", text: "Pull the list", done: true }], links: [{ id: "l1", label: "Sheet", url: "https://x.test" }], fileIds: ["a1", "gone"], deliverables: ["doc"], doneWhen: ["Pam has the number"], thread: [{ id: "m1", authorId: "u_derek", body: "Any luck?", at: "2026-10-12T10:00:00Z" }], status: "doing" } }, ["a1"])!;
+    expect(moved.notes).toContain("Count the contacts turning 65");
+    expect(moved.notes).toContain("Pam has the number");
+    expect(moved.notes).toContain("https://x.test");
+    expect(moved.todos).toEqual([{ id: "h1", title: "Pull the list", done: true }]);
+    expect(moved.holds).toEqual(["doc", "att:a1"]);
+    expect(moved.handoff).toEqual({ thread: [{ id: "m1", authorId: "u_derek", body: "Any luck?", at: "2026-10-12T10:00:00Z" }] });
+  });
+});

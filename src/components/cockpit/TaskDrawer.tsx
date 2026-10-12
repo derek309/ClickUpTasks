@@ -7,7 +7,7 @@ import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
-  parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -27,7 +27,6 @@ import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
-import { HandoffPage } from "./HandoffPage";
 import { StepPage } from "./StepPage";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
@@ -258,7 +257,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [dupOpen, setDupOpen] = useState(false);
   // The delegation whose handoff page is open. A handoff link (?task=…&handoff=…)
   // opens it straight away; read once, since the app rewrites the address.
-  const [openHandoff, setOpenHandoff] = useState<string | null>(() => {
+  // A step link (?task=…&handoff=…, the old handoff links too) opens that
+  // step's page; read once, since the app rewrites the address.
+  const [linkedStep] = useState<string | null>(() => {
     const id = handoffFromUrl;
     if (!id || !task.subtasks.some((x) => x.id === id)) return null;
     handoffFromUrl = null;
@@ -1493,50 +1494,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Over the Inbox you just read the conversation, so the feed opens on Everything.
     initialView: fromInbox ? "all" : undefined,
   });
-  // Reads like the task row it effectively is: a tick box, their face, what
-  // they were asked for, and when they owe it. Sits directly under the stage
-  // chips, because "Delegated" in that row and the person holding it are one
-  // fact and were two screens apart.
-  // A teammate's step: how far along their handoff is and what is on it,
-  // one click from its page (Derek, 2026-09-16). Its Mark done is the step's.
-  const handoffDetails = (s: Subtask) => (
-    (() => {
-            const h = handoffOf(s);
-            const { done, total } = handoffProgress(h);
-            const facts = [
-              h.deliverables.length ? `${h.deliverables.length} ${h.deliverables.length === 1 ? "piece" : "pieces"} of client work` : null,
-              h.links.length ? `${h.links.length} ${h.links.length === 1 ? "link" : "links"}` : null,
-              h.fileIds.length ? `${h.fileIds.length} ${h.fileIds.length === 1 ? "file" : "files"}` : null,
-              h.thread.length ? `${h.thread.length} ${h.thread.length === 1 ? "message" : "messages"}` : null,
-            ].filter(Boolean);
-            return (
-              <div className="space-y-2">
-                {total > 0 && (
-                  <div className="flex items-center gap-2.5 text-[16px] text-muted">
-                    <span className="shrink-0">{done} of {total} steps</span>
-                    <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-surface">
-                      <span className="block h-full rounded-full" style={{ width: `${Math.round((done / total) * 100)}%`, background: STATUS_META.delegated.dot }} />
-                    </span>
-                  </div>
-                )}
-                {total > 0 && done === total && !s.done && (
-                  <div className="text-[16px] font-medium text-accent">All steps done. Mark it finished.</div>
-                )}
-                <div className="flex flex-wrap items-center gap-2">
-                  {facts.map((f) => <span key={f} className="rounded-[5px] bg-background px-2 py-0.5 text-[16px] text-muted">{f}</span>)}
-                  <span className="ml-auto flex flex-wrap gap-2">
-                    <button onClick={() => { const url = handoffLink(taskLink?.() ?? `?task=${task.id}`, s.id); navigator.clipboard?.writeText(url).then(() => pushToast("Handoff link copied"), () => pushToast(`Share this link: ${url}`)); }}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-surface px-3 text-[16px] font-medium shadow-soft hover:bg-background"><I.link /> Copy link</button>
-                    <button onClick={() => setOpenHandoff(s.id)}
-                      className="inline-flex h-9 items-center rounded-lg px-3 text-[16px] font-semibold text-white shadow-soft hover:opacity-90" style={{ background: STATUS_META.delegated.dot }}>
-                      {total || h.goal.trim() ? "Open handoff" : "Write the handoff"}
-                    </button>
-                  </span>
-                </div>
-              </div>
-            );
-    })()
-  );
   // Reorder: the dragged item goes where the one it was dropped on is,
   // everything else (handoffs included) keeps its place.
   const moveSub = (fromId: string, toId: string) => {
@@ -1817,13 +1774,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...stepOwnerFields() }] });
     setOpenStepPage({ taskId: task.id, id, full: false, checklist: true });
   };
-  // A handoff straight to its page, where who, the name and the date are
-  // filled in with the rest (Derek, 2026-10-11: no delegate box).
+  // Delegate this Task: a step for someone else, due in three business days.
+  // Its page opens to pick who, name it and write the directions (Derek,
+  // 2026-10-12: steps for everyone, no handoff page).
   const delegateStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Handoff", done: false, due: addBusinessDaysIso(TODAY, 3), handoff: { steps: [] } }] });
-    setOpenHandoff(id);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Hand off", done: false, due: addBusinessDaysIso(TODAY, 3) }] });
+    setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // An email to the client as a step of its own: the draft sits on it and its
   // window opens to write in. Nothing goes until someone presses Send
@@ -2263,7 +2221,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step whose own page is open, and whether full page (Derek: a slide
   // out to look quickly, full page to work in, like a handoff).
-  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean } | null>(null);
+  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
+  // An older handoff opened as a step: its brief, steps, files and reviews
+  // move onto the step once (handoffIntoStep); its chat stays to read.
+  const pageSub = openStepPage?.taskId === task.id ? task.subtasks.find((x) => x.id === openStepPage.id) ?? null : null;
+  useEffect(() => {
+    if (!pageSub) return;
+    const moved = handoffIntoStep(pageSub, task.attachments.map((a) => a.id));
+    if (moved && (pageSub.note || pageSub.handoff?.goal || pageSub.handoff?.steps?.length || pageSub.handoff?.links?.length || pageSub.handoff?.fileIds?.length || pageSub.handoff?.deliverables?.length || pageSub.handoff?.doneWhen?.length)) onPatchSub(pageSub.id, moved);
+  }, [pageSub?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
@@ -2801,7 +2767,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
-              handoff={isHandoffStep(ps, task.assigneeId) && !ps.done ? handoffDetails(ps) : undefined}
+              onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}
               onSendChat={onSendTaskMessage ? (body) => onSendTaskMessage("chat", "", body) : undefined}
@@ -2811,24 +2777,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               // A to-do that was the client's comment: the comment is done on the review too.
               onTodoDone={(t) => { const k = reviewOnStep(ps); if (k && t.commentId) void docApi(task.id, k, "/comments", { method: "PATCH", body: JSON.stringify({ commentId: t.commentId, done: true }) }); }} />
           );
-        })()}
-        {(() => {
-          const hs = openHandoff ? task.subtasks.find((x) => x.id === openHandoff && (!!x.assigneeId || !!x.handoff)) : null;
-          return hs ? (
-            <HandoffPage task={task} sub={hs} meId={meId} clientLinks={clientLinks} link={handoffLink(taskLink?.() ?? `?task=${task.id}`, hs.id)}
-              onPatchSub={onPatchSub} onToggleSub={onToggleSub} onClose={() => setOpenHandoff(null)}
-              onOpenFile={(att) => { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); else void openPreview(att); }}
-              onSendDm={onSendDm} pushToast={pushToast} onPatchTask={onPatch} canAdmin={!!canAdmin}
-              // Picking who it is for hands it over: theirs, notified, and the
-              // task Delegated while it is out (as the delegate box did).
-              onHandTo={(id) => {
-                onPatchSub(hs.id, { assigneeId: id });
-                // Delegated only when it is the current step, and never over
-                // On hold or Done (statusForStep's rule, audit 2026-10-11).
-                const status = !hs.done && activeStep?.id === hs.id ? statusForStep(task.status, "delegated") : null;
-                if (status) onPatch({ status });
-              }} />
-          ) : null;
         })()}
         <ActionDock
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
@@ -2842,7 +2790,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // The delegate box takes only who, what to call it and when it is
           // due; everything else about the handoff is written on its own page,
           // so delegating opens it rather than asking for it all up front.
-          onDelegate={onDelegate ? (spec) => { const id = onDelegate(spec); if (id) setOpenHandoff(id); return id; } : undefined}
+          onDelegate={onDelegate ? (spec) => { const id = onDelegate(spec); if (id) setOpenStepPage({ taskId: task.id, id, full: false }); return id; } : undefined}
           taskLink={taskLink}
           askNextStepFor={pendingNextStep}
           onSendMessage={onSendTaskMessage ? (channel, body, replyToId) => {

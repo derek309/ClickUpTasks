@@ -10,7 +10,7 @@ import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
 import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
-import { delegateeOf, delegationTitle, handoffDoneEvent, type Me, type NotificationKind, type Priority, type Subtask, type Task, type TaskSize, userById, users } from "@/lib/data";
+import { delegateeOf, delegationTitle, handoffDoneEvent, plainTextToHtml, type Me, type NotificationKind, type Priority, type Subtask, type Task, type TaskSize, userById, users } from "@/lib/data";
 import { appendCommentDb, finishHandoffWatchDb, insertTaskAction } from "@/lib/db";
 
 export type UseChecklistDeps = {
@@ -143,10 +143,9 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     const sub: Subtask = {
       id: newId("s_"), title: title || t.title, done: false,
       assigneeId: spec.toId, due: spec.theirDue,
-      // Links ride in the instructions: LinkedText already renders a URL as a
-      // chip wherever the note is shown, so a separate links column would be
-      // a second way to say the same thing.
-      note: [spec.instructions, ...spec.links].filter(Boolean).join("\n"),
+      // The step's directions, like any step's (Derek, 2026-10-12: steps, no
+      // handoffs). Links ride in them.
+      ...(() => { const text = [spec.instructions, ...spec.links].filter(Boolean).join("\n").trim(); return text ? { notes: plainTextToHtml(text) } : {}; })(),
     };
     const patch: Partial<Task> = {
       subtasks: [...t.subtasks, sub],

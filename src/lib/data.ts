@@ -931,6 +931,38 @@ export function handoffOf(sub: Pick<Subtask, "note" | "handoff">): Handoff {
 export const handoffProgress = (h: Handoff): { done: number; total: number } =>
   ({ done: h.steps.filter((s) => s.done).length, total: h.steps.length });
 
+/** An older handoff folded into its step (Derek, 2026-10-12: "remove the
+ *  handoff and just use steps, then it's consistent for all"): its goal,
+ *  done-when and links become the step's directions, its steps the step's
+ *  to-dos, its files and reviews the step's client work. Its chat stays on
+ *  handoff.thread, shown read only. Null when there is nothing to move. */
+export function handoffIntoStep(sub: Subtask, attachmentIds: string[]): Partial<Subtask> | null {
+  const h = sub.handoff;
+  if (!h && !sub.note) return null;
+  const goal = (h?.goal ?? sub.note ?? "").trim();
+  const steps = h?.steps ?? [];
+  const links = h?.links ?? [];
+  const doneWhen = (h?.doneWhen ?? []).filter((x) => x.trim());
+  const files = (h?.fileIds ?? []).filter((id) => attachmentIds.includes(id)).map(attachmentKey);
+  const deliverables = h?.deliverables ?? [];
+  if (!goal && !steps.length && !links.length && !doneWhen.length && !files.length && !deliverables.length) return null;
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = [
+    goal ? (/<[a-z][\s\S]*>/i.test(goal) ? goal : plainTextToHtml(goal)) : "",
+    doneWhen.length ? `<p><strong>Done when</strong></p><ul>${doneWhen.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "",
+    links.length ? `<p><strong>Links</strong></p><ul>${links.map((l) => `<li><a href="${esc(l.url)}">${esc(l.label || l.url)}</a></li>`).join("")}</ul>` : "",
+  ].join("");
+  const have = sub.notes && htmlToText(sub.notes).trim() ? sub.notes : "";
+  return {
+    ...(html ? { notes: have ? `${have}${html}` : html } : {}),
+    ...(steps.length ? { todos: [...(sub.todos ?? []), ...steps.map((x) => ({ id: x.id, title: x.how ? `${x.text}: ${x.how}` : x.text, done: x.done }))] } : {}),
+    ...(files.length || deliverables.length ? { holds: [...new Set([...(sub.holds ?? []), ...deliverables, ...files])] } : {}),
+    // Only the chat is kept, to read.
+    handoff: h?.thread?.length ? { thread: h.thread } : undefined,
+    note: undefined,
+  };
+}
+
 /** The handoff's own link: the task's link with the delegation named. */
 export function handoffLink(taskLink: string, subId: string): string {
   const url = new URL(taskLink, "https://clickuptasks.vercel.app");

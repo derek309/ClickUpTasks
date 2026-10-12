@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, handoff, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -71,8 +71,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   planBits?: React.ReactNode;
   /** What the step works on: its deliverables, links and files. */
   held?: React.ReactNode;
-  /** A teammate's step: their handoff, one click away. */
-  handoff?: React.ReactNode;
+  /** Copies a link straight to this step, to send a teammate. */
+  onCopyLink?: () => void;
   messages: Message[];
   actions: TaskAction[];
   canChat: boolean;
@@ -189,6 +189,22 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
         </div>
       </div>
+      {/* The chat from when this step was a handoff, kept to read (Derek,
+          2026-10-12: handoffs are steps now). */}
+      {(sub.handoff?.thread?.length ?? 0) > 0 && (
+        <details className="order-last rounded-[5px] bg-background px-3 py-2 text-[16px]">
+          <summary className="cursor-pointer font-semibold text-muted">Earlier handoff chat ({sub.handoff!.thread!.length})</summary>
+          <div className="mt-2 flex flex-col gap-2">
+            {sub.handoff!.thread!.map((m) => (
+              <div key={m.id} className={m.kind === "event" ? "text-muted" : ""}>
+                <span className="font-semibold">{m.authorId ? userById(m.authorId)?.name ?? "Someone" : "Someone"}</span>
+                <span className="text-muted"> · {timeAgo(m.at)}</span>
+                <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.body}</div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
       <div className={said.length ? "order-last flex flex-col gap-3" : "hidden"}>
         {said.map((x) => {
           if (x.kind === "message") {
@@ -366,6 +382,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           {sub.done
             ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
  : null}
+          {onCopyLink && <button onClick={onCopyLink} title="Copy a link to this step" aria-label="Copy a link to this step" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-background hover:text-foreground"><I.link /></button>}
           {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
           <button onClick={onToggleFull} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
           <button onClick={onClose} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
@@ -434,7 +451,6 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   <p className="text-[16px] text-muted">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
               )}
-              {handoff}
             </div>
             <div className={`min-w-0 ${full ? "mt-8 md:mt-0" : "mt-8"}`}>{conversation}</div>
           </div>
