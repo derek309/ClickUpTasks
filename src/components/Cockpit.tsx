@@ -3262,7 +3262,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // One tidy row (Derek, 2026-10-12: "how can we improve the bulk bar"):
         // how many and Clear, then what to change, then Claude, then Delete
         // on its own at the end. Every control the same height and corners.
-        <div role="toolbar" aria-label="Change the selected tasks" className="fixed bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-[5px] border bg-surface px-3 py-2 text-[16px] shadow-xl">
+        <div role="toolbar" aria-label="Change the selected tasks"
+          // Centred over the task area, not the window, so the sidebar never
+          // covers its left end; it wraps to a second row when narrow
+          // (Derek, 2026-10-12: it was cut off).
+          className="fixed bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-[5px] border bg-surface px-3 py-2 text-[16px] shadow-xl md:left-[calc(var(--drawer-left,0px)_+_(100vw_-_var(--drawer-left,0px))_/_2)] md:max-w-[min(1100px,calc(100vw_-_var(--drawer-left,0px)_-_32px))]">
           <span className="font-semibold tabular-nums">{selectedTaskIds.size} selected</span>
           <button onClick={clearSelection} title="Unselect them (Esc)" aria-label="Clear the selection" className="h-9 rounded-[5px] px-2 text-muted hover:bg-background hover:text-foreground">✕</button>
           <span aria-hidden className="mx-1 h-6 w-px bg-[var(--border)]" />
