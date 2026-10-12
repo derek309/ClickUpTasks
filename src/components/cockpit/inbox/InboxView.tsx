@@ -2108,7 +2108,11 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     { value: PERSONAL_CLIENT_ID, label: "Personal", sub: "Only you see it" },
     { value: WORKSPACE_CLIENT_ID, label: "ClickUpLocal", sub: "Our own projects" },
     ...[...p.clients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ value: c.id, label: c.name })),
-  ], [p.clients]);
+    // Lists too, by name (Derek, 2026-10-12: "search for projects and personal
+    // tasks"): picking one picks its client and that list.
+    ...[{ id: WORKSPACE_CLIENT_ID, name: "ClickUpLocal" }, { id: PERSONAL_CLIENT_ID, name: "Personal" }, ...p.clients]
+      .flatMap((c) => p.listsFor(c.id).map((l) => ({ value: `list:${c.id}:${l.id}`, label: l.name, sub: `List · ${c.name}` }))),
+  ], [p.clients, p.listsFor]);
   const guessedClient = useMemo(() => {
     const name = t.peerName.replace(/\s*\(via [^)]*\)\s*$/i, "").trim().toLowerCase();
     return name ? p.clients.find((c) => c.name.toLowerCase() === name)?.id ?? "" : "";
@@ -2166,8 +2170,11 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
             // Searchable (Derek, 2026-10-07): a plain select of every client
             // was a long scroll to find one.
             <div className="mb-2 flex items-center gap-2"><span className="shrink-0 text-muted">Whose</span>
-              <SearchableSelect value={whose} options={clientOptions} onChange={(v) => { setPickedClient(v); setNewOpen(false); }}
-                placeholder="Pick a client" searchPlaceholder="Search clients…" title="Whose is it"
+              <SearchableSelect value={whose} options={clientOptions} onChange={(v) => {
+                if (v.startsWith("list:")) { const [, cid, lid] = v.split(":"); setPickedClient(cid); setNewList(lid); setNewOpen(false); return; }
+                setPickedClient(v); setNewOpen(false);
+              }}
+                placeholder="Pick a client or list" searchPlaceholder="Search clients and lists…" title="Whose is it"
                 className="h-9 min-w-0 flex-1 rounded-md bg-surface px-2 text-left ring-1 ring-[var(--border)]" /></div>
           )}
           {whoseLists.length > 0 && (
@@ -2204,7 +2211,7 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
           {/* Type the task, then create it (Derek, 2026-10-06: "more custom
               control"): title, list, who it's on and when it's due. */}
           {!newOpen ? (
-            <button disabled={busy} onClick={() => startNew(whoseLists[0]?.id ?? "")} className={`${linkBtn} mt-2`}>＋ New task from this</button>
+            <button disabled={busy} onClick={() => startNew((newList && whoseLists.some((l) => l.id === newList) ? newList : whoseLists[0]?.id) ?? "")} className={`${linkBtn} mt-2`}>＋ New task from this</button>
           ) : (
             <form className="mt-3 grid gap-2 rounded-lg bg-background p-3" onSubmit={async (e) => {
               e.preventDefault();
