@@ -1342,3 +1342,14 @@ describe("the Task done step", () => {
     expect(s.notes).toContain("<li>Schedule it</li>");
   });
 });
+
+describe("a to-do asked about", () => {
+  it("waits until the client writes after the question", async () => {
+    const { todoWaiting } = await import("./data");
+    const t = { id: "td1", title: "Checkbox wording", done: false, askedAt: "2026-10-12T10:00:00Z" };
+    expect(todoWaiting(t, [{ direction: "inbound", at: "2026-10-12T09:00:00Z" }])).toBe("waiting");
+    expect(todoWaiting(t, [{ direction: "inbound", at: "2026-10-12T11:00:00Z" }])).toBe("answered");
+    expect(todoWaiting({ ...t, done: true }, [])).toBeNull();
+    expect(todoWaiting({ id: "x", title: "x", done: false }, [])).toBeNull();
+  });
+});

@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress,
+  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onAskTodos, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -73,6 +73,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   held?: React.ReactNode;
   /** Copies a link straight to this step, to send a teammate. */
   onCopyLink?: () => void;
+  /** Ask the client about these to-dos: one email, the step stays put. */
+  onAskTodos?: (todoIds: string[]) => void;
   messages: Message[];
   actions: TaskAction[];
   canChat: boolean;
@@ -143,6 +145,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const [draft, setDraft] = useState("");
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
+  // To-dos picked to ask the client about, in one email.
+  const [asking, setAsking] = useState<string[]>([]);
+  const toggleAsk = (id: string) => setAsking((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+  const waitingOn = todos.filter((t) => todoWaiting(t, messages) === "waiting").length;
   const addTodo = () => {
     const title = todoDraft.trim();
     if (!title) return;
@@ -325,7 +331,15 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   );
   const todoList = !hasTodos ? null : (
     <section aria-labelledby="step-todo" className="flex flex-col gap-2">
-      <h3 id="step-todo" className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}</h3>
+      <h3 id="step-todo" className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>
+      {/* The questions picked so far, asked in one email. */}
+      {asking.length > 0 && onAskTodos && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[5px] bg-sky-50 px-3 py-2 text-[16px] dark:bg-sky-500/10">
+          <span className="min-w-0 flex-1 font-semibold">Ask {first} about {asking.length === 1 ? "this one" : `these ${asking.length}`}</span>
+          <button onClick={() => { onAskTodos(asking); setAsking([]); }} className="h-9 rounded-[5px] bg-accent px-3 font-semibold text-white hover:opacity-90">Write the email</button>
+          <button onClick={() => setAsking([])} className="h-9 rounded-[5px] px-2 text-muted hover:text-foreground">Cancel</button>
+        </div>
+      )}
       {clientItems.length > 0 && (
         <ul className="flex flex-col gap-1.5">
           {clientItems.map((c) => (
@@ -342,12 +356,22 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       {todos.length > 0 && (
         <ul className="flex flex-col gap-1.5">
           {todos.map((t) => (
-            <li key={t.id} className="group/todo flex items-start gap-2.5">
+            <li key={t.id} className={`group/todo flex items-start gap-2.5 rounded-[5px] ${asking.includes(t.id) ? "bg-sky-50 ring-1 ring-sky-300 dark:bg-sky-500/10" : ""}`}>
               <button onClick={() => toggleTodo(t)} aria-pressed={t.done} aria-label={t.done ? `Reopen ${t.title}` : `Mark ${t.title} done`}
                 className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${t.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{t.done && <I.check className="h-3.5 w-3.5" />}</button>
               <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${t.done ? "text-muted line-through" : ""}`}>
                 {t.title}{t.fromClient && <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}</span>}
+                {(() => {
+                  const w8 = todoWaiting(t, messages);
+                  return w8 === "waiting" ? <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">? Asked {first} {timeAgo(t.askedAt!)}</span>
+                    : w8 === "answered" ? <span className="ml-2 font-semibold text-success no-underline">{first} answered</span> : null;
+                })()}
               </span>
+              {/* Ask the client about just this one (or several, picked together). */}
+              {!t.done && onAskTodos && (
+                <button onClick={() => toggleAsk(t.id)} aria-pressed={asking.includes(t.id)} title={`Ask ${first} about this`}
+                  className={`shrink-0 rounded-[5px] px-1.5 text-[15px] font-semibold text-accent hover:bg-background ${asking.includes(t.id) ? "" : "opacity-0 focus:opacity-100 group-hover/todo:opacity-100"}`}>{asking.includes(t.id) ? "✓ Ask" : `Ask ${first}`}</button>
+              )}
               <button onClick={() => setTodos(todos.filter((x) => x.id !== t.id))} title="Delete" aria-label={`Delete ${t.title}`}
                 className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/todo:opacity-100"><I.trash className="h-4 w-4" /></button>
             </li>

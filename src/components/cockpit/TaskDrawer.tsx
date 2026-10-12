@@ -8,7 +8,7 @@ import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
-  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -1748,6 +1748,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {sub.emailedAt && !sub.done && <span className="text-muted">Email sent {formatDue(sub.emailedAt.slice(0, 10))}</span>}
               {!sub.done && sentReviews(sub).map((k) => <span key={k} className="text-muted">{viewedLine(k)}</span>)}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
+              {(() => { const n = (sub.todos ?? []).filter((t) => todoWaiting(t, messages) === "waiting").length; return n > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{n} waiting on {firstName}</span>; })()}
               {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Client work on this step">{markers.join("  ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
               {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
@@ -2076,6 +2077,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       )}
     </div>
   );
+  // Ask the client about one or more to-dos on a step (Derek, 2026-10-12): a
+  // short email with each item and a place for the question, on the step,
+  // ending with how to answer. Sending marks them asked (see onSend).
+  const askAboutTodos = (st: Subtask, ids: string[]) => {
+    const items = (st.todos ?? []).filter((t) => ids.includes(t.id));
+    if (!items.length) return;
+    const cur = taskRef.current.draftEmail;
+    if (cur && htmlToText(cur.body).trim() && !window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with these questions?`)) return;
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const now = new Date().toISOString();
+    const body = items.length === 1
+      ? `${greetingHtml(messageDest?.name)}<p>A quick question about <strong>${esc(items[0].title)}</strong>:</p><p>[your question]</p><p>Just reply to this email with your answer.</p>`
+      : `${greetingHtml(messageDest?.name)}<p>A few quick questions about ${esc(task.title)}:</p><ol>${items.map((t) => `<li><strong>${esc(t.title)}</strong>: [your question]</li>`).join("")}</ol><p>Just reply to this email with your answers.</p>`;
+    onPatch({
+      draftEmail: { subject: items.length === 1 ? `Quick question: ${items[0].title}`.slice(0, 120) : `A few questions about ${task.title}`.slice(0, 120), body, replyTo: null, createdAt: now, updatedAt: now, asks: { stepId: st.id, todoIds: items.map((t) => t.id) } },
+      subtasks: holdOnStep(taskRef.current.subtasks, st.id, "email"),
+    });
+    setEmailOpenNonce((n) => n + 1);
+  };
   // Right after Send (Derek, 2026-10-12: "ok, what's next, here's my
   // suggestion and dates, approve or change"): the step the send just made,
   // as a sentence to say yes to or change. Closing keeps it as it is.
@@ -2127,6 +2147,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
       onSend={hasMessaging ? (email) => {
         onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
+        // A question about to-dos: they are marked asked, nothing else moves
+        // (Derek, 2026-10-12: "without blowing up the whole steps situation").
+        const asks = taskRef.current.draftEmail?.asks;
+        if (asks) {
+          const at = new Date().toISOString();
+          onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === asks.stepId ? { ...x, todos: (x.todos ?? []).map((t) => (asks.todoIds.includes(t.id) ? { ...t, askedAt: at } : t)) } : x)) });
+          pushToast(`Asked ${firstName}. ${asks.todoIds.length === 1 ? "That to do shows" : "Those to dos show"} it until ${firstName} answers.`);
+          return;
+        }
         // Sent from the step that holds it: that step is done, and checking in
         // waits three business days, finished by the client's reply.
         // The email to the client finishes the step working on the document:
@@ -2875,6 +2904,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
+              onAskTodos={hasMessaging && !!messageDest?.email ? (ids) => askAboutTodos(ps, ids) : undefined}
               onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}

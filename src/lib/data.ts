@@ -884,7 +884,16 @@ export interface Subtask {
   fromEmails?: ReceivedEmail[];
 }
 
-export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
+export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
+  /** When we asked the client about this one to-do (Derek, 2026-10-12: a
+   *  question on one item of a long checklist, without a new step). */
+  askedAt?: string };
+
+/** Asked about and not answered yet: no message from the client since. */
+export function todoWaiting(t: StepTodo, messages: { direction: string; at: string; channel?: string }[] | null | undefined): "waiting" | "answered" | null {
+  if (!t.askedAt || t.done) return null;
+  return (messages ?? []).some((m) => m.direction === "inbound" && m.at > t.askedAt! && m.channel !== "team") ? "answered" : "waiting";
+}
 
 export type HandoffStep = { id: string; text: string; how?: string; done: boolean };
 export type HandoffLink = { id: string; label: string; url: string };
@@ -1013,6 +1022,9 @@ export interface Task {
     bcc?: string[];
     /** messages.id this email answers, so it goes out as a reply in the same thread. */
     replyTo?: string | null;
+    /** A question about to-dos on a step: sending it marks them asked and
+     *  moves nothing else (Derek, 2026-10-12). */
+    asks?: { stepId: string; todoIds: string[] };
   } | null;
   contactId: string | null;
   due: string | null; // ISO yyyy-mm-dd
