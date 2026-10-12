@@ -1228,6 +1228,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const list = next && !next.startedAt ? made.list.map((x) => (x.id === next.id ? { ...x, startedAt: new Date().toISOString() } : x)) : made.list;
       const status = statusForStep(task.status, next ? stepStage(next, task.assigneeId) : "approved");
       onPatch({ subtasks: list, ...(status ? { status } : {}) });
+      // Ask what's next: the plan's next step to confirm, or the approval's own "what's next?".
+      setSentNext({ taskId: task.id, stepId: next?.id ?? made.approvalId, approved: name });
       return;
     }
     // Not cancelled when stageKey changes: clearing movedTo above changes it at
@@ -2108,27 +2110,46 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     });
     setEmailOpenNonce((n) => n + 1);
   };
-  // Right after Send (Derek, 2026-10-12: "ok, what's next, here's my
-  // suggestion and dates, approve or change"): the step the send just made,
-  // as a sentence to say yes to or change. Closing keeps it as it is.
-  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string } | null>(null);
+  // Right after Send, or an approval (Derek, 2026-10-12: "ok, what's next,
+  // here's my suggestion and dates, approve or change"; "a pop up marked
+  // Approved"): the step it made or started, as a sentence to say yes to or
+  // change. Closing keeps it as it is.
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
   // Escape closes this box first, not the task behind it.
   useEscapeToClose(closeSentNext, !!sentStep);
-  const sentNextPanel = sentStep && typeof document !== "undefined" ? createPortal(
+  // The suggestion comes off: a check in is removed; an approval keeps its
+  // record, done, without the question.
+  const dropSuggestion = (st: Subtask) => taskRef.current.subtasks.flatMap((x) => (x.id !== st.id ? [x]
+    : sentNext?.approved && x.addedFor?.startsWith("ok:") ? [{ ...x, title: x.title.replace(/: what's next\?$/, ""), done: true, doneAt: x.doneAt ?? new Date().toISOString() }] : []));
+  // Telling the client their approval landed, drafted on the step to read and send.
+  const emailApproved = (st: Subtask, name: string) => {
+    const now = new Date().toISOString();
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    onPatch({
+      draftEmail: { subject: `${name}: approved`, body: `${greetingHtml(messageDest?.name)}<p>Thanks for approving <strong>${esc(name)}</strong>. We will take it from here and let you know when it is live.</p>`, replyTo: null, createdAt: now, updatedAt: now },
+      subtasks: holdOnStep(taskRef.current.subtasks, st.id, "email"),
+    });
+    setEmailOpenNonce((n) => n + 1);
+  };
+  const sentNextPanel = sentStep && typeof document !== "undefined" ? (() => {
+    const stg = stepStage(sentStep, task.assigneeId);
+    const asking = asksWhatsNext(sentStep);
+    return createPortal(
     <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
       <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
         className="w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
-        <div className="text-[16px] font-semibold text-success">✓ Sent to {firstName}.</div>
+        <div className="text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : `✓ Sent to ${firstName}.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
-        <input autoFocus value={sentStep.title} onChange={(e) => onRenameSub(sentStep.id, e.target.value)} aria-label="Next step"
-          className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none hover:bg-background focus:bg-background" />
+        <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
+          onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
+          className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
         <div className="mt-1 text-[17px] leading-snug">
-          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META.waiting.dot }} />Waiting
+          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stg].dot }} />{STATUS_META[stg].label}
           {!sentStep.onClient && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
-          , follow up{" "}
+          , {sentNext?.approved && !sentStep.onClient ? "due" : "follow up"}{" "}
           <span className="inline-block">
             <InlineDate value={sentStep.due ?? null} formatValue={formatDue} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
               className={`${word} rounded hover:bg-background`}
@@ -2136,17 +2157,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </span>.
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button onClick={closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Looks good</button>
+          <button onClick={closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{asking ? "Decide later" : "Looks good"}</button>
+          {/* After an approval: tell the client, drafted to read and send. */}
+          {sentNext?.approved && hasMessaging && !!messageDest?.email && (
+            <button onClick={() => { const nm = sentNext.approved!; closeSentNext(); emailApproved(sentStep, nm); }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Email {firstName} it&apos;s approved</button>
+          )}
           <ActionMenu label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
             items={[
               // Instead of the suggestion: it comes off, the pick goes on.
-              ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== sentStep.id) }); closeSentNext(); o.onPick(); } })),
-              { label: "The task is finished", onClick: () => { onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== sentStep.id), status: "done" }); closeSentNext(); pushToast("Task done"); } },
+              ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
+              { label: "The task is finished", onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); } },
             ]} />
           <span className="ml-auto text-[16px] text-muted">Enter to keep it</span>
         </div>
       </div>
-    </div>, document.body) : null;
+    </div>, document.body);
+  })() : null;
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
