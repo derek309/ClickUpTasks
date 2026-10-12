@@ -894,6 +894,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Only a custom repeat needs more room than a word: its own line below.
   const chipRow = (
     <div className="mt-2 flex flex-wrap items-center gap-2">
+      {/* Kept off the client's portal and reminder emails (Derek, 2026-10-12).
+          A task in a private list is hidden with it. */}
+      {!task.private && (
+        <label title={project?.hiddenFromClient ? "Its list is private to the team" : "The client won't see this task in their portal or reminder emails"}
+          className={`inline-flex cursor-pointer items-center gap-1.5 text-[16px] ${task.hiddenFromClient || project?.hiddenFromClient ? "font-semibold text-foreground" : "text-muted"}`}>
+          <input type="checkbox" checked={!!task.hiddenFromClient || !!project?.hiddenFromClient} disabled={!!project?.hiddenFromClient}
+            onChange={(e) => onPatch({ hiddenFromClient: e.target.checked })} className="h-4 w-4 cursor-pointer accent-[var(--accent)]" />
+          🔒 Hide from client{project?.hiddenFromClient ? " (its list is private)" : ""}
+        </label>
+      )}
       {task.recurrence === "custom" && (
         <span className={`${chip} flex-wrap py-1 text-muted`}>
           {task.recurrenceUnit === "nth-weekday" ? (

@@ -727,6 +727,8 @@ export interface Folder {
  * directly, so it IS a "List"; it optionally sits inside a Folder. */
 export interface Project {
   id: string;
+  /** The whole list kept off the client's portal (Derek, 2026-10-12). */
+  hiddenFromClient?: boolean;
   clientId: string;
   name: string;
   description: string;
@@ -1068,6 +1070,9 @@ export interface Task {
    * pseudo-client/project (see PERSONAL_CLIENT_ID) rather than a real GHL
    * contact, so it never has anything to sync or show up in client views. */
   private: boolean;
+  /** Kept off the client's portal and reminder emails; the team sees it as
+   *  usual (Derek, 2026-10-12). */
+  hiddenFromClient?: boolean;
   subtasks: Subtask[];
   attachments: Attachment[];
   comments: Comment[];

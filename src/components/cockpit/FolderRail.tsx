@@ -16,7 +16,7 @@ const FOLDERS_ON = false;
 export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onCopyAllForClaude, onSelectFolder, onSelectList,
-  onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onDeleteList, onMoveList,
+  onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onToggleListHidden, onDeleteList, onMoveList,
   onReorderFolders, onReorderLists, onAddTask, trailing, onCopyListForClaude }: {
   folders: Folder[];           // this client's folders, in order
   lists: Project[];            // this client's lists (projects), all of them
@@ -33,6 +33,8 @@ export function FolderRail({
   onRenameFolder: (id: string) => void;
   onDeleteFolder: (id: string) => void;
   onRenameList: (id: string) => void;
+  /** Private to the team: the list (and its tasks) kept off the client's portal. */
+  onToggleListHidden?: (id: string) => void;
   onDeleteList: (id: string) => void;
   onMoveList: (id: string, folderId: string | null) => void;
   onReorderFolders: (orderedIds: string[]) => void;      // drag-sort folders (B5)
@@ -125,6 +127,7 @@ export function FolderRail({
       ))}
       {shownLists.map((l) => chip(
         <>
+          {l.hiddenFromClient && <span title="Private: the client doesn't see this list" aria-label="Private to the team" className="-ml-0.5 text-[13px] opacity-70">🔒</span>}
           {l.name}
           {/* Copy for Claude on the tab, Pin under ⋮ (Derek, 2026-10-07: "flip
               it"). Without the ⋮ menu the star stays here so it can still pin. */}
@@ -148,6 +151,7 @@ export function FolderRail({
           <div className="my-0.5 border-t" />
           {item(starredLists.has(l.id) ? "☆ Unpin from sidebar" : "★ Pin to sidebar", () => onToggleStarList(l.id))}
           {item("Rename list", () => onRenameList(l.id))}
+          {onToggleListHidden && item(l.hiddenFromClient ? "👁 Show in client portal" : "🔒 Private to the team (hide from client)", () => onToggleListHidden(l.id))}
           {item("Delete list", () => onDeleteList(l.id), true)}
         </>,
         { dim: dragList === l.id, onDragStart: () => setDragList(l.id), onDrop: () => dropList(l.id) },

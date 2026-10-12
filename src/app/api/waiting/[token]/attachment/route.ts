@@ -23,7 +23,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   const attId = req.nextUrl.searchParams.get("att") ?? "";
   const { data: m } = await supabaseAdmin.from("messages").select("client_id, task_id, gmail_message_id, mailbox_member_id, attachments, peer_name").eq("id", messageId).maybeSingle();
   if (!m || m.client_id !== scope.clientId || !m.task_id || !m.gmail_message_id || m.peer_name === "ClickUpTasks") return NextResponse.json({ error: "Not found" }, { status: 404 });
-  let q = supabaseAdmin.from("tasks").select("id").eq("id", m.task_id as string).eq("client_id", scope.clientId).eq("is_private", false).is("deleted_at", null);
+  let q = supabaseAdmin.from("tasks").select("id").eq("id", m.task_id as string).eq("client_id", scope.clientId).eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null);
   if (scope.projectId) q = q.eq("project_id", scope.projectId);
   const { data: task } = await q.maybeSingle();
   if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });

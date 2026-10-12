@@ -63,8 +63,10 @@ export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.na
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null, saas_url: c.saasUrl ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "", saasUrl: r.saas_url ?? "", additionalEmails: r.additional_emails ?? [] });
 
-const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], folder_id: p.folderId ?? null, position: p.position ?? 0, share_token: p.shareToken ?? null });
-const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null });
+const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], folder_id: p.folderId ?? null, position: p.position ?? 0, share_token: p.shareToken ?? null,
+  // As with a task's: only once set, so a save never names a column the SQL hasn't added.
+  ...(p.hiddenFromClient !== undefined ? { hidden_from_client: p.hiddenFromClient } : {}) });
+const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null, hiddenFromClient: r.hidden_from_client ?? undefined });
 const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
 const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
 const stageToRow = (s: Stage) => ({ id: s.id, project_id: s.projectId, name: s.name, position: s.position, is_done: s.isDone, created_at: s.createdAt });
@@ -80,6 +82,9 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   recurrence_days_of_month: t.recurrenceDaysOfMonth ?? null, follow_up_at: t.followUpAt ?? null, priority_auto: t.priorityAuto ?? false, size: t.size ?? null, size_hours: t.sizeHours ?? null, recurrence_nth: t.recurrenceNth ?? null, recurrence_weekday: t.recurrenceWeekday ?? null,
   ghl_task_id: t.ghlTaskId, label_ids: t.labelIds, subtasks: t.subtasks,
   attachments: t.attachments, comments: t.comments, updated_by: updatedBy ?? null, is_private: t.private,
+  // Only once someone has set it, so a save never names the column on a
+  // database the SQL (supabase/task-hidden-from-client.sql) hasn't reached.
+  ...(t.hiddenFromClient !== undefined ? { hidden_from_client: t.hiddenFromClient } : {}),
   // No draft_email: the server stages drafts too (the doc-reminders cron, Claude's
   // draft_email tool), and a full-row save from a task opened before that would
   // write the old value over it. saveTaskDraftEmail writes it on its own.
@@ -103,6 +108,7 @@ export const rowToTask = (r: any): Task => ({
   ghlTaskId: r.ghl_task_id, labelIds: r.label_ids ?? [], subtasks: r.subtasks ?? [],
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
+  hiddenFromClient: r.hidden_from_client ?? undefined,
   stageId: r.stage_id ?? null,
   clientResponse: r.client_response ?? null,
   draftEmail: r.draft_email ?? null,

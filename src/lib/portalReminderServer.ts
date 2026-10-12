@@ -21,13 +21,13 @@ export async function buildPortalReminder(clientId: string, o: { today: string; 
   const contact = await resolveContact(clientId);
   if (!contact?.email) return { ok: false, reason: "no_email" };
   const { data: waiting } = await supabaseAdmin.from("tasks").select("title, due, follow_up_at")
-    .eq("client_id", clientId).eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).is("deleted_at", null).limit(200);
+    .eq("client_id", clientId).eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).limit(200);
   const needs = ((waiting ?? []) as any[])
     .map((t) => ({ title: t.title as string, due: (t.due ?? null) as string | null, followUpAt: (t.follow_up_at ?? null) as string | null }))
     .filter((t) => thisWeek([t], o.today).length || (!!t.followUpAt && t.followUpAt <= o.today))
     .map(({ title, due }) => ({ title, due }));
   const { data: working } = client.portal_shows_all_tasks
-    ? await supabaseAdmin.from("tasks").select("title, due").eq("client_id", clientId).eq("waiting_on_client", false).neq("status", "done").eq("is_private", false).is("deleted_at", null).order("due", { ascending: true, nullsFirst: false }).limit(20)
+    ? await supabaseAdmin.from("tasks").select("title, due").eq("client_id", clientId).eq("waiting_on_client", false).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).order("due", { ascending: true, nullsFirst: false }).limit(20)
     : { data: [] as any[] };
   const { data: person } = await supabaseAdmin.from("contacts").select("name").eq("id", contact.id).maybeSingle();
   const firstName = String((person as any)?.name ?? "").trim().split(/\s+/)[0] || null;

@@ -65,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // request can't land a task under a different client's list.
   let projectId: string | null = null;
   if (payload?.projectId) {
-    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", scope.clientId).is("deleted_at", null).maybeSingle();
+    const { data: owned } = await supabaseAdmin.from("projects").select("id").eq("id", payload.projectId).eq("client_id", scope.clientId).eq("hidden_from_client", false).is("deleted_at", null).maybeSingle();
     if (owned) projectId = owned.id;
   }
   // No (valid) project named — reuse (or create) the client's default

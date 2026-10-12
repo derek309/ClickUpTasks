@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   // Confirm the task belongs to this token's own client (and project, if scoped)
   // before handing out an upload link, the same boundary the respond route enforces.
   if (taskId) {
-    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id").eq("id", taskId).eq("is_private", false).is("deleted_at", null).maybeSingle();
+    const { data: task } = await supabaseAdmin.from("tasks").select("id, client_id, project_id").eq("id", taskId).eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).maybeSingle();
     if (!task || task.client_id !== scope.clientId || (scope.projectId && task.project_id !== scope.projectId)) return fail(404, "Not found");
   } else if (scope.projectId) {
     // A new request is never available on a project-scoped token (see

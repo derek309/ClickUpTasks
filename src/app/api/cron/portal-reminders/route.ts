@@ -39,7 +39,7 @@ async function run(req: NextRequest) {
 
   // Open, shared tasks waiting on a client: who gets an email at all.
   const { data: waiting, error } = await supabaseAdmin.from("tasks").select("id, client_id, title, due, follow_up_at")
-    .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).is("deleted_at", null).like("client_id", "cl_%").limit(2000);
+    .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).like("client_id", "cl_%").limit(2000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const byClient = new Map<string, { title: string; due: string | null }[]>();
   const rows = ((waiting ?? []) as any[]).map((x) => ({ id: x.id as string, client_id: x.client_id as string, title: x.title as string, due: (x.due ?? null) as string | null, followUpAt: (x.follow_up_at ?? null) as string | null }));

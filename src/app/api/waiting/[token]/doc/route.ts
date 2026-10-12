@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const taskId = typeof payload?.taskId === "string" ? payload.taskId : "";
   // An image, page or video review is opened, never made, from here.
   const kind = payload?.kind === "image" || payload?.kind === "page" || payload?.kind === "video" ? payload.kind : "doc";
-  let q = supabaseAdmin.from("tasks").select("id, title, client_id, project_id, status").eq("id", taskId).eq("client_id", scope.clientId).eq("is_private", false).is("deleted_at", null);
+  let q = supabaseAdmin.from("tasks").select("id, title, client_id, project_id, status").eq("id", taskId).eq("client_id", scope.clientId).eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null);
   if (scope.projectId) q = q.eq("project_id", scope.projectId);
   const { data: task } = await q.maybeSingle();
   if (!task) return NextResponse.json({ error: "Not found" }, { status: 404 });

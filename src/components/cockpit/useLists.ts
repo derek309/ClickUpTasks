@@ -362,6 +362,18 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
       upsertProject(np);
     } });
   };
+  // A whole list kept off the client's portal, or shown again (Derek,
+  // 2026-10-12). The database hides or shows its tasks too; the list on
+  // screen follows at once.
+  const toggleProjectHidden = (id: string) => {
+    const p = projectById(id);
+    if (!p) return;
+    const np = { ...p, hiddenFromClient: !p.hiddenFromClient };
+    setProjects((ps) => ps.map((x) => (x.id === id ? np : x)));
+    setTasks((ts) => ts.map((t) => (t.projectId === id ? { ...t, hiddenFromClient: np.hiddenFromClient } : t)));
+    upsertProject(np);
+    pushToast(np.hiddenFromClient ? `${p.name} is private: the client doesn't see it in their portal` : `${p.name} shows in the client's portal again`);
+  };
   const deleteProject = (id: string) => {
     const p = projectById(id);
     const n = tasks.filter((t) => t.projectId === id).length;
@@ -379,5 +391,5 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     });
   };
 
-  return { createStage, addProject, renameProject, deleteProject, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject };
+  return { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject };
 }

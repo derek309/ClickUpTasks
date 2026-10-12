@@ -33,7 +33,7 @@ const ctx = { params: Promise.resolve({ token: TOKEN }) };
 
 const task = (id: string, extra: Record<string, unknown>) => ({
   id, client_id: "cl_acme", project_id: "p_site", title: id, description: "", due: "2026-09-12",
-  status: "todo", is_private: false, waiting_on_client: true, client_response: null,
+  status: "todo", is_private: false, hidden_from_client: false, waiting_on_client: true, client_response: null,
   attachments: [], assignee_id: "u_derek", deleted_at: null, ...extra,
 });
 
@@ -43,11 +43,14 @@ beforeEach(() => resetTables({
     can_request_new_tasks: true, portal_shows_all_tasks: true, deleted_at: null,
   }],
   projects: [
-    { id: "p_old", client_id: "cl_acme", name: "Old list", position: 0, deleted_at: TRASHED },
-    { id: "p_site", client_id: "cl_acme", name: "Website", position: 1, deleted_at: null },
+    { id: "p_old", client_id: "cl_acme", name: "Old list", position: 0, deleted_at: TRASHED, hidden_from_client: false },
+    { id: "p_site", client_id: "cl_acme", name: "Website", position: 1, deleted_at: null, hidden_from_client: false },
+    // Private to the team (Derek, 2026-10-12): never on the portal.
+    { id: "p_team", client_id: "cl_acme", name: "Team only", position: 2, deleted_at: null, hidden_from_client: true },
   ],
   tasks: [
     task("t_live", {}),
+    task("t_hidden", { hidden_from_client: true }),
     // Matches every GET query (waiting, responded, open, and ?task=) but trashed.
     task("t_trashed", { deleted_at: TRASHED, client_response: { body: "x", attachments: [], submittedAt: TRASHED } }),
   ],
