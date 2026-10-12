@@ -2663,7 +2663,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {ghlContactUrl && mayContactClient && (
         <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open in GHL" aria-label="Open in GHL" className={topIcon}><I.bolt className="h-[18px] w-[18px]" /></a>
       )}
-      {onCopyClientLink && <button onClick={onCopyClientLink} title="Copy the client link" aria-label="Copy the client link" className={topIcon}><I.link className="h-5 w-5" /></button>}
+      {onCopyClientLink && <button onClick={onCopyClientLink} title="Copy the client portal link (opens on this task)" aria-label="Copy the client portal link" className={topIcon}><I.link className="h-5 w-5" /></button>}
       {hasMessaging && (<>
         <span aria-hidden className="mx-1.5 h-5 w-px bg-border" />
         <button onClick={() => askDock("chat")} title="Chat" aria-label="Chat" className={topIcon}><I.chatBubbles className="h-5 w-5" /></button>
@@ -2717,6 +2717,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[
         { label: "Labels", onClick: () => setLabelOpen(true) },
         { label: "Copy link to task", onClick: onCopyLink },
+        onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
         { label: "Duplicate here", onClick: () => onDuplicate() },
         task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
         { label: "Delete task", onClick: onDelete, danger: true },
@@ -2790,6 +2791,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <ActionMenu label={<I.dots />} title="More actions" triggerClassName={iconButton} items={[
                 { label: "Labels", onClick: () => setLabelOpen(true) },
                 { label: "Copy link to task", onClick: onCopyLink },
+        onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
                 { label: "Duplicate here", onClick: () => onDuplicate() },
                 { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
                 task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
@@ -2904,6 +2906,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               ) : undefined}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
+              onCopyPortalLink={onCopyClientLink}
               onAskTodos={hasMessaging && !!messageDest?.email ? (ids) => askAboutTodos(ps, ids) : undefined}
               onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}

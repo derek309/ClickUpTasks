@@ -19,7 +19,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onAskTodos, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -73,6 +73,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   held?: React.ReactNode;
   /** Copies a link straight to this step, to send a teammate. */
   onCopyLink?: () => void;
+  /** The client's portal, opened on this task (they don't see steps). */
+  onCopyPortalLink?: () => void;
   /** Ask the client about these to-dos: one email, the step stays put. */
   onAskTodos?: (todoIds: string[]) => void;
   messages: Message[];
@@ -406,6 +408,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           {sub.done
             ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
  : null}
+          {onCopyPortalLink && <button onClick={onCopyPortalLink} title="Copy the client portal link (opens on this task; clients don't see steps)" aria-label="Copy the client portal link" className="inline-flex h-9 items-center gap-1 rounded-lg px-2 font-semibold text-muted hover:bg-background hover:text-foreground"><I.link /><span className="hidden sm:inline">Portal</span></button>}
           {onCopyLink && <button onClick={onCopyLink} title="Copy a link to this step" aria-label="Copy a link to this step" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-background hover:text-foreground"><I.link /></button>}
           {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
           <button onClick={onToggleFull} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
