@@ -2446,12 +2446,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         return { taskId: task.id, kinds: exists ? [...kinds, kind] : kinds.filter((k) => k !== kind) };
       })} />
   );
-  const pullTranscript = async () => {
+  // From a step page it lands on that step; from Add, on the meeting's steps.
+  const pullTranscript = async (stepId?: string) => {
     pushToast("Looking for the meeting in Granola…");
-    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/meeting-transcript`, { method: "POST" }).catch(() => null);
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/meeting-transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }).catch(() => null);
     const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string } | null;
     if (!res?.ok) { pushToast(`⚠️ ${j?.error ?? "Couldn't reach Granola."}`); return; }
-    pushToast(j?.filed ? `Added ${j.filed} and ticked the meeting steps.` : "Added the meeting steps. Granola's transcript lands there after the meeting.");
+    pushToast(j?.filed ? `Added ${j.filed}.`
+      : stepId ? `No Granola meeting with ${firstName} yet. It lands on this step after the meeting.`
+      : "Added the meeting steps. Granola's transcript lands there after the meeting.");
   };
   // Everything a task can gain, in one menu beside Deliverables. It was a row
   // of up to seven dashed buttons, wrapping two by two in the rail.
@@ -2465,7 +2468,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // The meeting's steps (Derek, 2026-10-12): Granola's transcript lands on
       // the second as a file and ticks it, so the Document stays free. A
       // meeting Granola already sent is filed at once.
-      { label: "Meeting transcript", onClick: () => void pullTranscript() },
+      { label: "Transcript", onClick: () => void pullTranscript() },
       { label: "Link", onClick: () => { setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); } },
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
@@ -2597,7 +2600,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // quick messages still go through the conversation.
       ...(hasMessaging ? [{ key: "email" as const, label: "Email" }] : []),
     ];
-    return kinds.map((x) => {
+    return [...kinds.map((x): { key: string; label: string; disabled: boolean; onPick: () => void; tone?: ReturnType<typeof reviewTone>; note?: string } => {
       const here = holds.includes(x.key);
       const made = deliverablePresent(x.key);
       const on = !here && made ? stepTitleHolding(x.key) : null;
@@ -2607,7 +2610,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       return { key: x.key, label: made ? deliverableName(x.key) : x.label, disabled: here, onPick: () => pick(x.key),
         tone: made && r ? reviewTone(r.status) : undefined,
         note: here ? "on this step" : on ? `on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : undefined };
-    });
+    }),
+    // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
+    { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }];
   };
   // What a step holds, drawn on it: its deliverables as their own rows (the
   // current step's reviews with their open comments), then its links and files.

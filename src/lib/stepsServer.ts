@@ -123,6 +123,16 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
 
 /** Client work's Add, Meeting transcript: the meeting's two steps, dated to
  *  the task (or today when that has passed). Nothing when they are there. */
+/** A step page's Transcript: this step waits on the meeting's transcript. */
+export async function stepWaitsOnTranscript(taskId: string, stepId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    const step = list.find((x) => x.id === stepId);
+    if (!step || step.done || step.finishWhen === "transcript") return null;
+    return list.map((x) => (x.id === stepId ? { ...x, finishWhen: "transcript" as const } : x));
+  });
+}
+
 export async function ensureMeetingSteps(taskId: string): Promise<boolean> {
   return rewriteSteps(taskId, (row, first) => {
     const today = todayPacific();
@@ -134,14 +144,15 @@ export async function ensureMeetingSteps(taskId: string): Promise<boolean> {
 /** The meeting's transcript came in from Granola: the open "Add the meeting
  *  transcript" step holds the file and is done, and the meeting step before
  *  it too (Derek, 2026-10-12). */
-export async function stepsOnMeetingTranscript(taskId: string, attachmentId: string): Promise<boolean> {
+export async function stepsOnMeetingTranscript(taskId: string, attachmentId: string, stepId?: string): Promise<boolean> {
   return rewriteSteps(taskId, (row) => {
     const list = row.subtasks ?? [];
-    const step = list.find((x) => !x.done && x.finishWhen === "transcript");
+    const step = list.find((x) => (stepId ? x.id === stepId : !x.done && x.finishWhen === "transcript"));
     if (!step) return null;
     const now = new Date().toISOString();
     return list.map((x) => {
-      if (x.id === step.id) return { ...x, done: true, doneAt: now, outcome: "Transcript from Granola", holds: [...(x.holds ?? []), `att:${attachmentId}`] };
+      if (x.id === step.id) return { ...x, done: true, doneAt: x.doneAt ?? now, finishWhen: undefined, outcome: "Transcript from Granola", holds: [...(x.holds ?? []), `att:${attachmentId}`] };
+      if (!x.done && x.finishWhen === "transcript") return { ...x, done: true, doneAt: now, outcome: "Transcript from Granola" };
       if (!x.done && x.addedFor === "meeting") return { ...x, done: true, doneAt: now, outcome: "Met" };
       return x;
     });
