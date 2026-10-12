@@ -1,6 +1,6 @@
 "use client";
 
-import { addReplyStep, emailOwnWords } from "@/lib/data";
+import { addBusinessDaysIso, addReplyStep, emailOwnWords } from "@/lib/data";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -3280,6 +3280,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               overdue task really leaves Overdue. No date clears them. */}
           <InlineDate value={null} onChange={(d) => { if (d) bulkPatch((t) => ({ due: d, ...(t.followUpAt && t.followUpAt < d ? { followUpAt: d } : {}) }), `Reschedule to ${friendlyDue(d)}`); }} emptyLabel="📅 Reschedule"
             className={`${BULK_CTL} inline-flex items-center font-semibold text-foreground`} />
+          {/* Spread out (Derek, 2026-10-12): one task per business day from the
+              day picked, soonest due first, so ten overdue tasks don't all
+              land on the same Monday again. */}
+          {selectedTaskIds.size > 1 && (
+            <InlineDate value={null} onChange={(d) => {
+              if (!d) return;
+              const order = [...selectedTaskIds].map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t)
+                .sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999") || x.title.localeCompare(y.title));
+              const dayOf = new Map(order.map((t, i) => [t.id, addBusinessDaysIso(d, i)]));
+              const last = dayOf.get(order[order.length - 1].id)!;
+              bulkPatch((t) => { const day = dayOf.get(t.id) ?? d; return { due: day, ...(t.followUpAt && t.followUpAt < day ? { followUpAt: day } : {}) }; },
+                `Spread out one a day, ${friendlyDue(d)} to ${friendlyDue(last)}`);
+            }} emptyLabel="↔ Spread out" className={`${BULK_CTL} inline-flex items-center text-foreground`} />
+          )}
           <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className={`${BULK_CTL} text-muted hover:text-danger`}>No date</button>
           <div className="w-44">
             <SearchableSelect value="" onChange={(v) => v && bulkMoveTo(v)}
