@@ -107,6 +107,7 @@ async function run(req: NextRequest) {
         due: toPacificDate(appt.startTime),
         title: `Meeting with ${titleCase(contact.name)}`,
         location: appt.location,
+        meeting: true,
       });
       if (taskId) synced++; else skipped++;
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { Subtask } from "./data";
+import { withMeetingSteps, type Subtask } from "./data";
 
 // A small in-memory database: enough of supabase's chain for stepsServer.
 type Row = Record<string, unknown>;
@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, stepsOnMeetingTranscript } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -160,5 +160,15 @@ describe("steps added on the server", () => {
     expect(await holdDraftOnStep("t1", "Other")).toBe("Email Brian: Your newsletter");
     expect(steps()).toHaveLength(3);
   });
-});
 
+  it("the meeting's transcript ticks its step and the meeting, holding the file", async () => {
+    setup(withMeetingSteps([], "Brian", "2026-10-14", (() => { let n = 0; return () => `m${++n}`; })(), "2026-10-12T00:00:00Z")!);
+    expect(steps().map((x) => [x.title, x.due, !!x.startedAt])).toEqual([["Meet with Brian", "2026-10-14", true], ["Add the meeting transcript", "2026-10-14", false]]);
+    // Rebooked: the same pair moves, no second pair.
+    expect(withMeetingSteps(steps(), "Brian", "2026-10-16", () => "x")!.map((x) => x.due)).toEqual(["2026-10-16", "2026-10-16"]);
+    expect(await stepsOnMeetingTranscript("t1", "a_1")).toBe(true);
+    expect(steps().map((x) => [x.done, x.outcome])).toEqual([[true, "Met"], [true, "Transcript from Granola"]]);
+    expect(steps()[1].holds).toEqual(["att:a_1"]);
+    expect(await stepsOnMeetingTranscript("t1", "a_2")).toBe(false);
+  });
+});

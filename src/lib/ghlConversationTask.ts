@@ -1,7 +1,7 @@
 // Shared "one open top-tier task per GHL contact thread" logic — used by the
 // inbound webhook (messages, calls) and the appointment sync poll. Server-only.
 import { supabaseAdmin } from "./supabaseAdmin";
-import { titleCase, conversationSignalRank, isReplyTask, todayPacific, toPacificDate } from "./data";
+import { titleCase, conversationSignalRank, isReplyTask, todayPacific, toPacificDate, withMeetingSteps, type Subtask } from "./data";
 import { resolveNotifyRecipient } from "./waitingNotify";
 
 // PostgREST PARSES the `.or()` string below — a value carrying its own filter
@@ -132,12 +132,12 @@ function withMeetingLocation(existing: { id: string; name: string; kind: string;
 export async function upsertConversationTask(
   contact: { id: string; name: string; client_id: string },
   ghlContactId: string,
-  opts?: { due?: string; title?: string; location?: string | null },
+  opts?: { due?: string; title?: string; location?: string | null; meeting?: boolean },
 ): Promise<string | null> {
   const due = opts?.due ?? todayPacific();
   const { data: openTasks } = await supabaseAdmin
     .from("tasks")
-    .select("id, title, attachments, comments")
+    .select("id, title, attachments, comments, subtasks")
     .eq("contact_id", contact.id)
     .eq("priority", "conversation")
     .neq("status", "done")
@@ -196,6 +196,10 @@ export async function upsertConversationTask(
       const next = withMeetingLocation(openTasks[0].attachments ?? [], opts.location);
       if (next !== null) patch.attachments = next; // null = location unchanged, don't churn the attachment
     }
+    if (opts?.meeting && opts.due) {
+      const steps = withMeetingSteps((openTasks[0].subtasks as Subtask[] | null) ?? [], titleCase(contact.name).split(" ")[0], opts.due, () => "s_" + crypto.randomUUID().replace(/-/g, ""));
+      if (steps) patch.subtasks = steps;
+    }
     await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", openTasks[0].id);
     return openTasks[0].id;
   }
@@ -238,6 +242,7 @@ export async function upsertConversationTask(
       : [],
     // On a brand-new task there's nothing to preserve, so a null "no change"
     // result just means "no meeting location" — fall back to the base array.
+    subtasks: opts?.meeting && opts.due ? withMeetingSteps([], titleCase(contact.name).split(" ")[0], opts.due, () => "s_" + crypto.randomUUID().replace(/-/g, "")) ?? [] : [],
     attachments: (() => { const base = ghlUrl ? [{ id: "at_" + crypto.randomUUID(), name: "GHL conversation", kind: "link", size: "", url: ghlUrl }] : []; return withMeetingLocation(base, opts?.location) ?? base; })(),
   });
   // A concurrent delivery for the same contact can lose the race to the

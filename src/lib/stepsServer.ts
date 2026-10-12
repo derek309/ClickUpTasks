@@ -121,6 +121,23 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
   });
 }
 
+/** The meeting's transcript came in from Granola: the open "Add the meeting
+ *  transcript" step holds the file and is done, and the meeting step before
+ *  it too (Derek, 2026-10-12). */
+export async function stepsOnMeetingTranscript(taskId: string, attachmentId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    const step = list.find((x) => !x.done && x.finishWhen === "transcript");
+    if (!step) return null;
+    const now = new Date().toISOString();
+    return list.map((x) => {
+      if (x.id === step.id) return { ...x, done: true, doneAt: now, outcome: "Transcript from Granola", holds: [...(x.holds ?? []), `att:${attachmentId}`] };
+      if (!x.done && x.addedFor === "meeting") return { ...x, done: true, doneAt: now, outcome: "Met" };
+      return x;
+    });
+  });
+}
+
 /** What the client sent from their portal goes on the open changes step,
  *  made in front of the current step when there is none (the task page's
  *  rule, now with nobody watching). Only on a task that has steps. */

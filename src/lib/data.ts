@@ -876,7 +876,7 @@ export interface Subtask {
   stepId?: string;
   /** What finishes this step's follow up by itself once it starts: "reply"
    *  for a check-in that ends when the client writes back. */
-  finishWhen?: "reply";
+  finishWhen?: "reply" | "transcript";
   /** A step that is on the client, not the team: their review (Derek,
    *  2026-10-11: "a new step assigned to the client, with waiting"). */
   onClient?: boolean;
@@ -3142,6 +3142,24 @@ export function clientEmailText(body: string, signer?: string | null): string {
 export function isJustThanks(text: string): boolean {
   const own = emailOwnWords(text).replace(/\s+/g, " ").trim();
   return own.length < 80 && /^(thanks|thank you|thx|ty|ok|okay|great|perfect|sounds good|got it|will do|awesome|appreciate it|love it|looks good)\b/i.test(own) && !own.includes("?");
+}
+
+/** A booked meeting's steps (Derek, 2026-10-12): meet them, then the
+ *  transcript, which Granola's notes fill and tick by themselves
+ *  (granolaSyncServer). The transcript is a file held on its step, never the
+ *  task's Document, which stays free for the work. A rebooked meeting moves
+ *  the open pair's dates instead of adding another pair. */
+export function withMeetingSteps(subtasks: Subtask[], name: string, due: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  const open = subtasks.find((x) => !x.done && x.finishWhen === "transcript");
+  if (open) {
+    if (open.due === due) return null;
+    return subtasks.map((x) => (x.id === open.id || (!x.done && x.addedFor === "meeting") ? { ...x, due } : x));
+  }
+  const hasCurrent = subtasks.some((x) => !x.done && x.startedAt);
+  return [...subtasks,
+    { id: makeId(), title: `Meet with ${name}`, done: false, due, addedFor: "meeting", ...(hasCurrent ? {} : { startedAt: now }) },
+    { id: makeId(), title: "Add the meeting transcript", done: false, due, addedFor: "transcript", finishWhen: "transcript" },
+  ];
 }
 
 /** A client's email becomes the step answering it: "Reply to Pam: <subject>",

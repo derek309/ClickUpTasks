@@ -25,6 +25,8 @@ export type GranolaNote = {
   attendees: { name: string | null; email: string | null }[];
   summary_text: string | null;
   summary_markdown: string | null;
+  /** Only with include=transcript: who spoke and what they said. */
+  transcript?: { speaker?: { source?: string | null; diarization_label?: string | null } | null; text?: string | null }[] | null;
 };
 
 async function granolaFetch(path: string): Promise<any> {
@@ -39,7 +41,10 @@ async function granolaFetch(path: string): Promise<any> {
 }
 
 export async function granolaGetNote(noteId: string): Promise<GranolaNote> {
-  return granolaFetch(`/notes/${encodeURIComponent(noteId)}`);
+  // The transcript rides along when Granola sends it; a refusal never costs
+  // the note itself.
+  try { return await granolaFetch(`/notes/${encodeURIComponent(noteId)}?include=transcript`); }
+  catch { return granolaFetch(`/notes/${encodeURIComponent(noteId)}`); }
 }
 
 // Lightweight list items only (id/title/owner/timestamps) — used by the

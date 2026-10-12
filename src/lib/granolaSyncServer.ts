@@ -8,6 +8,9 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { granolaGetNote } from "./granolaClient";
 import { resolveOrPromoteTrackedClient } from "./ghlConversationTask";
 import { contactsByEmail } from "./contactsByEmail";
+import { TASK_FILES_BUCKET } from "./db";
+import { stepsOnMeetingTranscript } from "./stepsServer";
+import type { Subtask } from "./data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -76,5 +79,53 @@ export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncRes
   if (error) throw new Error(`client_notes insert failed: ${error.message}`);
 
   await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: clientId, client_note_id: clientNoteId });
+  try { await transcriptOntoTask(clientId, note); } catch (e) { console.error("[granolaSync] transcript onto task failed", e); }
   return "created";
+}
+
+// The meeting as a text file: summary, then who said what. Plain text so the
+// file viewer and Claude's view_task_file both read it.
+function transcriptText(note: Awaited<ReturnType<typeof granolaGetNote>>): string {
+  const title = note.title || note.calendar_event?.event_title || "Meeting";
+  const when = note.calendar_event?.scheduled_start_time || note.created_at;
+  const lines = (note.transcript ?? [])
+    .map((t) => {
+      const text = (t.text ?? "").trim();
+      if (!text) return "";
+      const who = t.speaker?.diarization_label || (t.speaker?.source === "microphone" ? "Us" : t.speaker?.source === "speaker" ? "Them" : "");
+      return who ? `${who}: ${text}` : text;
+    })
+    .filter(Boolean);
+  const summary = note.summary_text?.trim() || note.summary_markdown?.trim() || "";
+  return [
+    title, new Date(when).toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "full", timeStyle: "short" }),
+    note.web_url ? `Granola: ${note.web_url}` : "",
+    summary ? `\nSUMMARY\n${summary}` : "",
+    lines.length ? `\nTRANSCRIPT\n${lines.join("\n")}` : "\n(Granola sent no transcript for this meeting.)",
+  ].filter(Boolean).join("\n");
+}
+
+/** A booked meeting's task waits on its transcript ("Add the meeting
+ *  transcript", data.withMeetingSteps). The client's open task whose step is
+ *  due nearest the meeting gets the file and the step ticks. */
+async function transcriptOntoTask(clientId: string, note: Awaited<ReturnType<typeof granolaGetNote>>): Promise<void> {
+  const { data: tasks } = await supabaseAdmin.from("tasks").select("id, subtasks")
+    .eq("client_id", clientId).neq("status", "done").is("deleted_at", null);
+  const meetingDay = (note.calendar_event?.scheduled_start_time || note.created_at).slice(0, 10);
+  const dayGap = (d?: string | null) => (d ? Math.abs(Date.parse(d) - Date.parse(meetingDay)) : Infinity);
+  const waiting = (tasks ?? [])
+    .map((t: any) => ({ id: t.id as string, step: ((t.subtasks as Subtask[] | null) ?? []).find((x) => !x.done && x.finishWhen === "transcript") }))
+    .filter((t) => t.step && dayGap(t.step.due) <= 3 * 86400000)
+    .sort((a, b) => dayGap(a.step!.due) - dayGap(b.step!.due))[0];
+  if (!waiting) return;
+  const body = transcriptText(note);
+  const name = `Meeting transcript ${meetingDay}.txt`;
+  const path = `${waiting.id}/${randomUUID().slice(0, 8)}-${name.replace(/\s+/g, "-")}`;
+  const { error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).upload(path, Buffer.from(body, "utf8"), { contentType: "text/plain; charset=utf-8", upsert: false });
+  if (error) throw new Error(`upload failed: ${error.message}`);
+  const bytes = Buffer.byteLength(body, "utf8");
+  const att = { id: "a_" + randomUUID().slice(0, 12), name, kind: "doc", size: bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`, path, mimeType: "text/plain" };
+  const { error: rpcError } = await supabaseAdmin.rpc("append_task_attachments", { task_id: waiting.id, items: [att] });
+  if (rpcError) throw new Error(`attach failed: ${rpcError.message}`);
+  await stepsOnMeetingTranscript(waiting.id, att.id);
 }
