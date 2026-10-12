@@ -24,7 +24,7 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, onMoveGroup, meId, previewByTask, listsFor }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
@@ -72,9 +72,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // When set, each row gets a selection checkbox for bulk edit; the caller
   // owns the selected-id set and renders its own bulk-action bar.
   selectedIds?: Set<string>; onToggleSelect?: (taskId: string) => void;
-  /** Overdue's Move all (Derek, 2026-10-12: "bulk change the due dates for
-   *  all the overdue"): every task in the group to one date. */
-  onMoveGroup?: (taskIds: string[], due: string) => void;
+
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [subDraft, setSubDraft] = useState<Record<string, string>>({});
@@ -241,10 +239,6 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
                   <span className="truncate text-[15px] font-bold">{g.label}</span>
                   <span className="shrink-0 rounded-[5px] px-1.5 text-[13px] font-semibold normal-case tracking-normal text-white" style={{ background: g.color }}>{g.tasks.length}</span>
                 </button>
-                {g.key === "overdue" && onMoveGroup && g.tasks.length > 0 && (
-                  <InlineDate value={null} onChange={(d) => { if (d) onMoveGroup(g.tasks.map((t) => t.id), d); }} emptyLabel="Move all to…"
-                    className="shrink-0 rounded-lg border bg-surface px-2.5 py-1 text-[14px] font-semibold text-danger shadow-sm hover:bg-background" />
-                )}
                 {canQuickAdd && onAddInGroup && (
                   <button onClick={() => onAddInGroup(g.key)} title={`Add a task to ${g.label}`}
                     className="flex shrink-0 items-center gap-1.5 rounded-lg border bg-surface py-1 pl-2 pr-2.5 text-[14px] font-semibold text-accent shadow-sm transition hover:bg-accent hover:text-white">

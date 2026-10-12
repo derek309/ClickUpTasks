@@ -3243,9 +3243,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection}
-              // A follow up before the new date moves with it, so the task leaves Overdue.
-              onMoveGroup={(ids, d) => bulkPatch((t) => ({ due: d, ...(t.followUpAt && t.followUpAt < d ? { followUpAt: d } : {}) }), `Move to ${friendlyDue(d)}`, ids)} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>
@@ -3272,9 +3270,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           }} className={BULK_CTL}><option value="" disabled>Assign</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
           <select aria-label="Stage" defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set stage to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className={BULK_CTL}><option value="" disabled>Stage</option>{pickableStatuses().map((st) => <option key={st} value={st}>{STATUS_META[st].label}</option>)}</select>
           <select aria-label="Priority" defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className={BULK_CTL}><option value="" disabled>Priority</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((pr) => <option key={pr} value={pr}>{PRIORITY_META[pr].label}</option>)}</select>
-          {/* The same quick picks as every other date; No date clears them. */}
-          <InlineDate value={null} onChange={(d) => { if (d) bulkPatch({ due: d }, `Set due date to ${friendlyDue(d)}`); }} emptyLabel="Due date"
-            className={`${BULK_CTL} inline-flex items-center text-foreground`} />
+          {/* Reschedule (Derek, 2026-10-12): tick a group's box, then one date
+              for all. A follow up before the new date moves with it, so an
+              overdue task really leaves Overdue. No date clears them. */}
+          <InlineDate value={null} onChange={(d) => { if (d) bulkPatch((t) => ({ due: d, ...(t.followUpAt && t.followUpAt < d ? { followUpAt: d } : {}) }), `Reschedule to ${friendlyDue(d)}`); }} emptyLabel="📅 Reschedule"
+            className={`${BULK_CTL} inline-flex items-center font-semibold text-foreground`} />
           <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className={`${BULK_CTL} text-muted hover:text-danger`}>No date</button>
           <div className="w-44">
             <SearchableSelect value="" onChange={(v) => v && bulkMoveTo(v)}
