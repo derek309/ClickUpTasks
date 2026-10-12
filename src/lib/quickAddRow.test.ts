@@ -29,8 +29,9 @@ describe("a task typed and added as it is", () => {
     expect(row.description).toBe("");
   });
 
-  it("starts automatic, so priority still follows the due date", () => {
-    expect(verbatimTaskRow("Anything").priorityAuto).toBe(true);
+  it("starts Normal, not following the due date (Derek, 2026-10-12)", () => {
+    const r = verbatimTaskRow("Anything");
+    expect([r.priority, r.priorityAuto]).toEqual(["normal", false]);
   });
 });
 
@@ -73,8 +74,8 @@ describe("filling in what a row did not answer", () => {
     expect(empty.followUpAt).toBe("2026-09-28");
   });
 
-  it("leaves priority automatic when the select was never touched", () => {
-    expect(applyDumpDefaults([row()], defaults)[0].priorityAuto).toBe(true);
+  it("stays Normal when the select was never touched", () => {
+    expect(applyDumpDefaults([row()], defaults)[0].priorityAuto).toBe(false);
   });
 
   it("makes a priority chosen by hand stick", () => {

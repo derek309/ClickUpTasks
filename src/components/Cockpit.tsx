@@ -1957,7 +1957,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       due: opts && "due" in opts ? opts.due ?? null : TODAY,
       // A due date picked here sets its follow up, as it does anywhere else.
       ...(opts?.due && opts.due !== TODAY ? { followUpAt: followUpWithDue({ due: null }, { due: opts.due }) ?? null } : {}),
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: personal, subtasks: [], attachments: [], comments: [],
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: false, private: personal, subtasks: [], attachments: [], comments: [],
       createdAt: new Date().toISOString(), createdBy: me.id,
     };
     // Its first step is answering them, with their email on it (Derek, 2026-10-12).

@@ -206,7 +206,7 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     const t: Task = {
       id: newId("t_"), projectId, clientId: p.clientId, title: title.trim(), description: "",
       status: stage?.isDone ? "done" : "todo", priority: "normal", assigneeId: me.id, contactId: p.clientId.slice(3), due: null,
-      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
+      recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: false, private: false, subtasks: [], attachments: [], comments: [], createdAt: new Date().toISOString(),
       stageId, createdBy: me.id,
     };
     setTasks((ts) => [...ts, t]);

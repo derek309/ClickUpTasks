@@ -62,7 +62,7 @@ export function useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog
       id: newId("t_"), projectId, clientId, title: tpl.name, description: "",
       status: "todo", priority: "normal", assigneeId: me.id,
       contactId: clientId.startsWith("cl_") ? clientId.slice(3) : null,
-      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: false,
+      due: null, recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: false, private: false,
       subtasks: stepsFromTemplate(tpl, () => newId("s_")),
       attachments: [], comments: [], createdAt: new Date().toISOString(), createdBy: me.id,
     };

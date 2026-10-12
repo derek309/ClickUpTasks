@@ -30,7 +30,7 @@ export type TaskRow = {
 
 const emptyRow = (): TaskRow => ({
   title: "", description: "", verbatim: "", assignee: null, due: null,
-  followUpAt: null, size: null, priority: "normal", priorityAuto: true, keep: true,
+  followUpAt: null, size: null, priority: "normal", priorityAuto: false, keep: true,
 });
 
 /** Your words, as a task. The first line is the title and the rest is the
@@ -89,9 +89,8 @@ export function applyDumpDefaults(rows: TaskRow[], d: DumpDefaults): TaskRow[] {
     // The AI reserves "urgent" for text that says so, so it wins over the
     // default. Anything else takes the chosen value.
     priority: r.priority === "urgent" ? "urgent" : d.priority,
-    // A priority chosen by hand sticks (Derek, 2026-09-28). Left automatic it
-    // keeps following the due date, which is what it does for every task made
-    // anywhere else in the app.
+    // New tasks are Normal and stay Normal (Derek, 2026-10-12: "auto set all
+    // tasks to normal on creation"): no priority that follows the due date.
     priorityAuto: d.priorityTouched || r.priority === "urgent" ? false : r.priorityAuto,
     keep: true,
   }));
