@@ -93,15 +93,15 @@ describe("delegating a batch", () => {
     }));
   });
 
-  it("lets a size and a priority be unpicked again, which is what leaving them alone means", () => {
+  it("sends no size or priority when they are left alone", () => {
     const p = open();
     click(button("Maria"));
     type("Do it");
     const dateChips = Array.from(host.querySelectorAll("button")).filter((b) => /^(Tomorrow|In \d|Next )/.test(b.textContent ?? ""));
     click(dateChips[0]);
 
-    click(button("1 hour"));
-    click(button("1 hour"));   // pressing it again clears it
+    // Sizing is switched off for now (data.ts SIZING_ON): no size to pick, none sent.
+    expect(Array.from(host.querySelectorAll("button")).some((b) => b.textContent === "1 hour")).toBe(false);
     click(button("Delegate 3"));
     expect(p.onDelegate).toHaveBeenLastCalledWith(expect.objectContaining({ size: null, priority: null }));
   });

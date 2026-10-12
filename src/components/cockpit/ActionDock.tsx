@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
-  User, TODAY, addBusinessDaysIso, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById,
+  User, TODAY, addBusinessDaysIso, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById, SIZING_ON,
   Priority, type DelegateSpec,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
@@ -608,7 +608,7 @@ export function ActionDock({
             <DateChip value={nextDue} onChange={(d) => { touch(); setNextDue(d); }}
               label={nextDue ? formatDue(nextDue) : <span className="text-accent">set a date</span>} className={`${word} rounded hover:bg-surface`} />
           </span>
-          , takes {pick(shownSize ? sizeLabel({ size: shownSize }) : <span className="text-accent">how long?</span>, "Takes", shownSize ?? "", [{ value: "", label: "Not sized" }, ...SIZE_ORDER.map((sz) => ({ value: sz, label: SIZE_META[sz].label }))], (v) => setSize((v || null) as TaskSize | null))}.
+          {SIZING_ON && <>, takes {pick(shownSize ? sizeLabel({ size: shownSize }) : <span className="text-accent">how long?</span>, "Takes", shownSize ?? "", [{ value: "", label: "Not sized" }, ...SIZE_ORDER.map((sz) => ({ value: sz, label: SIZE_META[sz].label }))], (v) => setSize((v || null) as TaskSize | null))}</>}.
         </div>
         {aiReason && <div className="mt-1.5 text-[16px] text-muted">{aiReason}</div>}
       </div>

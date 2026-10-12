@@ -8,7 +8,7 @@
 // own title (see bulkDelegations).
 import { useState } from "react";
 import {
-  PRIORITY_META, SIZE_META, SIZE_ORDER, formatDue, manualPriorityOptions, whenOptions,
+  PRIORITY_META, SIZE_META, SIZE_ORDER, SIZING_ON, formatDue, manualPriorityOptions, whenOptions,
   type Priority, type TaskSize, type User,
 } from "@/lib/data";
 import { bulkDelegateProblem, type BulkDelegateSpec } from "@/lib/bulkDelegate";
@@ -102,14 +102,14 @@ export function BulkDelegateModal({ count, users, onCancel, onDelegate, onProble
         </div>
 
         <div className="grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
-          <Field label="Each takes">
+          {SIZING_ON && <Field label="Each takes">
             <div className="flex flex-wrap gap-1.5">
               {SIZE_ORDER.map((sz) => (
                 <button key={sz} type="button" onClick={() => setSize(size === sz ? null : sz)} title={`${SIZE_META[sz].label} · ${SIZE_META[sz].hint}`}
                   className={chip(size === sz)}>{SIZE_META[sz].label}</button>
               ))}
             </div>
-          </Field>
+          </Field>}
           <Field label="Priority">
             <div className="flex flex-wrap gap-1.5">
               {/* No choice leaves every task on the priority it already has,

@@ -30,7 +30,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
-  SIZE_META, SIZE_ORDER, type Priority, type TaskSize,
+  SIZE_META, SIZE_ORDER, SIZING_ON, type Priority, type TaskSize,
 } from "@/lib/data";
 import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow } from "@/lib/quickAddRow";
 import { I, DateChip, SearchableSelect } from "./ui";
@@ -327,7 +327,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                   </select>
                   <span className="text-[16px] text-muted">A task the notes name someone else for goes to them instead.</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                {SIZING_ON && <div className="flex flex-wrap items-center gap-2">
                   {fieldLabel("How long")}
                   <select value={size ?? ""} onChange={(e) => setSize((e.target.value || null) as TaskSize | null)}
                     className="rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none">
@@ -335,7 +335,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                     {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
                   </select>
                   <span className="text-[16px] text-muted">An unsized task is counted at four hours wherever time is added up.</span>
-                </div>
+                </div>}
               </div>
             </div>
             {/* Two pairs rather than a row of four: one task or a list, and
@@ -429,11 +429,11 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                                 task the AI just read out of a paragraph, and
                                 an unsized task already counts as half a day
                                 in the planner. */}
-                            <select value={r.size ?? ""} onChange={(e) => patch(i, { size: (e.target.value || null) as TaskSize | null })}
+                            {SIZING_ON && <select value={r.size ?? ""} onChange={(e) => patch(i, { size: (e.target.value || null) as TaskSize | null })}
                               className={`rounded-md border bg-background px-2.5 py-1 text-[14px] outline-none ${r.size ? "" : "text-muted"}`}>
                               <option value="">How long?</option>
                               {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
-                            </select>
+                            </select>}
                           </div>
                         </div>
 

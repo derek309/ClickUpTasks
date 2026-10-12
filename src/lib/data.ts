@@ -1436,6 +1436,11 @@ export type TaskSize = "quick" | "hour" | "h2" | "h3" | "half" | "full" | "multi
 // as four hours and twelve. The named ones stay named — a full day is a
 // recognisable unit of work in a way that "8 h" is not — but the number rides
 // along with it so there is nothing to guess at.
+/** "How long will it take?" is switched off everywhere (Derek, 2026-10-12:
+ *  "not being used, keep it, turn it off site wide"). true brings every
+ *  control back; stored sizes are kept either way. */
+export const SIZING_ON = false;
+
 export const SIZE_META: Record<TaskSize, { label: string; hint: string; hours: number }> = {
   quick: { label: "30 min", hint: "0.5 h", hours: 0.5 },
   hour: { label: "1 hour", hint: "1 h", hours: 1 },
