@@ -24,7 +24,7 @@ const WORKING_RULES = `ClickUpTasks is the team's task manager. When you WORK on
    - "done" only when nothing is left for anyone,
    - "waiting" when it's waiting on the client,
    - leave it "in_progress" if you're stopping partway; say so in the comment.
-4. Tick checklist items you finished (check_item) and add ones you discovered (add_checklist_items) rather than listing them only in a comment.
+4. A task's checklist is its STEPS, in order; get_task marks the current one. Tick a step you finished (check_item), which starts the next step the way the app does, and tick a step's to-dos as you finish them (check_todo). Add steps you discovered (add_checklist_items) rather than listing them only in a comment.
 5. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
 
 Keep comments short and plain, written for a teammate skimming the task later. Never paste secrets, keys or passwords into a comment.`;
@@ -331,14 +331,58 @@ export function createServer(opts = {}) {
       return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
     });
 
+  // A task's steps as Claude reads them (Derek, 2026-10-12): the plan in
+  // order with the current step marked, and on each step its date, owner,
+  // directions, to-dos and the client work it holds. Portal requests listed apart.
+  const HOLD_NAME = { doc: "client document", image: "image review", page: "HTML review", video: "video review", brief: "project instructions", email: "draft email" };
+  async function stepsText(t) {
+    const subs = t.subtasks || [];
+    if (!subs.length) return "";
+    await members();
+    const plan = subs.filter((s) => !s.fromClient);
+    const current = plan.find((s) => !s.done) ?? null;
+    const mailIds = subs.flatMap((s) => (s.holds || []).filter((k) => k.startsWith("mail:")).map((k) => k.slice(5)));
+    const mails = mailIds.length ? await sb(`messages?select=id,subject,created_at&id=in.(${mailIds.map(enc).join(",")})`).catch(() => []) : [];
+    const docs = await sb(`task_documents?select=kind,title,status&task_id=eq.${enc(t.id)}&deleted_at=is.null`).catch(() => []);
+    const holdName = (k) => {
+      if (k.startsWith("att:")) { const a = (t.attachments || []).find((x) => `att:${x.id}` === k); return a ? `file "${a.name}"` : null; }
+      if (k.startsWith("mail:")) { const m = mails.find((x) => `mail:${x.id}` === k); return `sent email${m?.subject ? ` "${m.subject}"` : ""}`; }
+      if (k === "email") return t.draft_email ? `draft email "${t.draft_email.subject || ""}" (not sent)` : null;
+      const d = docs.find((x) => x.kind === k);
+      return d ? `${HOLD_NAME[k]} "${d.title || ""}" (${d.status})` : null;
+    };
+    const who = (id) => (id ? memberNames[id] || id : null);
+    const line = (s, i) => {
+      const mark = s.done ? "[done]" : s.id === current?.id ? "[CURRENT]" : "[ ]";
+      const bits = [
+        s.done ? s.outcome || "done" : null,
+        !s.done && s.due ? `due ${s.due}` : null,
+        s.onClient ? "on the client (finishes when they answer)" : who(s.assigneeId),
+        !s.done && s.finishWhen === "reply" ? "finishes when the client replies" : null,
+      ].filter(Boolean);
+      const out = [`${i + 1}. ${mark} ${s.title} [${s.id}]${bits.length ? ` · ${bits.join(" · ")}` : ""}`];
+      const dir = stripHtml(s.notes || s.note || "").trim();
+      if (dir) out.push(`   Directions: ${dir.length > 800 ? `${dir.slice(0, 800)}…` : dir}`);
+      for (const td of s.todos || []) out.push(`   - [${td.done ? "x" : " "}] ${td.title} [${td.id}]${td.fromClient ? " (from the client)" : ""}`);
+      const work = (s.holds || []).map(holdName).filter(Boolean);
+      if (work.length) out.push(`   Client work: ${work.join("; ")}`);
+      return out.join("\n");
+    };
+    const requests = subs.filter((s) => s.fromClient);
+    return [
+      `\nSteps (${plan.filter((s) => s.done).length} of ${plan.length} done; tick one with check_item, a to-do with check_todo):`,
+      ...plan.map(line),
+      requests.length ? `\nRequests from the client's portal:\n${requests.map((r) => `- [${r.done ? "x" : " "}] ${r.title} [${r.id}]${r.stepId ? ` · on "${plan.find((x) => x.id === r.stepId)?.title ?? "a step"}"` : ""}`).join("\n")}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
   server.tool("get_task",
-    "Get one task's full detail: description, checklist (id, title, done state, in order), links, client/list context.",
+    "Get one task's full detail: description, its steps in order (the current one marked, each with due date, who has it, directions, to-dos and the client work on it), portal requests, links, client/list context.",
     { id: z.string() },
     async ({ id }) => {
       await names();
       const t = await loadTask(id);
       if (!t) return noTask(id);
-      const checklist = (t.subtasks || []).map((s) => ({ id: s.id, title: s.title, done: !!s.done }));
       const links = (t.attachments || []).filter((a) => a.url).map((a) => `  - ${a.name}: ${a.url}`).join("\n");
       const files = storedFiles(t).map((a) => `  - ${a.name}${a.size ? ` (${a.size})` : ""}${a.where === "comment" ? " [on a comment]" : ""}  file: ${a.id}`).join("\n");
       const comments = (t.comments || []).filter((c) => c.kind !== "event").slice(-5).map((c) => `  - ${c.body}`).join("\n");
@@ -352,7 +396,7 @@ export function createServer(opts = {}) {
         brief(t),
         t.description ? `\nDescription:\n${stripHtml(t.description)}` : "",
         `\nProject instructions:\n${instructions || "(none)"}`,
-        checklist.length ? `\nChecklist: ${JSON.stringify(checklist)}` : "",
+        await stepsText(t),
         links ? `\nLinks:\n${links}` : "",
         files ? `\nFiles (see one with view_task_file):\n${files}` : "",
         comments ? `\nRecent comments:\n${comments}` : "",
@@ -736,15 +780,19 @@ export function createServer(opts = {}) {
 
   server.tool("draft_email",
     "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
-    { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task") },
-    async ({ id, subject, body, replace }) => {
+    { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task"),
+      step: z.string().optional().describe("a step's id or title to put the draft on; left out, the email gets a step of its own (\"Email <client>: <subject>\") as the current step, unless the current step is already about emailing them") },
+    async ({ id, subject, body, replace, step }) => {
       if (!await loadTask(id, "id")) return noTask(id);
       const now = nowIso();
       const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: now, updatedAt: now };
       // updated_by null makes a task open in the app pick the draft up live.
       const saved = await sb(`tasks?id=eq.${enc(id)}${LIVE}${replace ? "" : "&draft_email=is.null"}`, "PATCH", { draft_email, updated_by: null });
       if (!saved.length) return { content: [{ type: "text", text: `${id} already has a draft email waiting. Pass replace: true to swap it.` }] };
-      return { content: [{ type: "text", text: `Draft email saved on ${id} — waiting for review in the app.` }] };
+      // On a task with steps, the email has a step (Derek, 2026-10-12: "sending
+      // an email kind of needs its own step"); once sent it stays there as Sent.
+      const on = opts.services?.holdDraftOnStep ? await opts.services.holdDraftOnStep(id, subject, step).catch(() => null) : null;
+      return { content: [{ type: "text", text: `Draft email saved on ${id}${on ? `, on the step "${on}"` : ""} — waiting for review in the app.` }] };
     });
 
   // Reading an Inbox conversation (2026-10-09: a Claude chat handed an Inbox
@@ -1168,14 +1216,16 @@ export function createServer(opts = {}) {
   }
 
   server.tool("check_item",
-    "Tick (or untick) a checklist item on a task by matching its title text.",
-    { id: z.string(), item: z.string().describe("checklist item title (substring)"), done: z.boolean().optional() },
+    "Tick (or untick) a step on a task, by its id (s_..., from get_task) or a piece of its title. Ticking a step works like the app: the next step starts and the task's status follows it; after the last step the task asks what's next (add a step, or set the task to done). The reply says what happens next.",
+    { id: z.string(), item: z.string().describe("the step's id, or a piece of its title"), done: z.boolean().optional() },
     async ({ id, item, done }) => {
       const t = await loadTask(id, "subtasks, assignee_id");
       if (!t) return noTask(id);
       const it = item.toLowerCase();
-      const hit = (t.subtasks || []).find((s) => s.title.toLowerCase().includes(it)) ?? null;
-      if (!hit) return { content: [{ type: "text", text: `No checklist item matching "${item}".` }] };
+      const hit = (t.subtasks || []).find((s) => s.id === item.trim()) ?? (t.subtasks || []).find((s) => s.title.toLowerCase().includes(it)) ?? null;
+      if (!hit) return { content: [{ type: "text", text: `No step matching "${item}".` }] };
+      // The hosted server runs the app's step rules (lib/stepsServer tickStep).
+      if (opts.services?.tickStep) return { content: [{ type: "text", text: await opts.services.tickStep(id, hit.id, done ?? true) }] };
       // The one item, in a locked row (supabase/checklist-functions.sql), so a
       // teammate ticking another item at the same moment keeps their tick.
       // No author, so the change shows live for everyone.
@@ -1195,8 +1245,20 @@ export function createServer(opts = {}) {
       return { content: [{ type: "text", text: `Checklist "${hit.title}" → ${done ?? true ? "done" : "open"}.` }] };
     });
 
+  // A step's to-dos (hosted only): a client's change request ticked here is
+  // resolved on their review page too, as in the app.
+  if (opts.services?.tickTodo) {
+    server.tool("check_todo",
+      "Tick (or untick) one of a step's to-dos, by its id (td_..., from get_task) or a piece of its text. A to-do that came from a client's comment on a review also resolves that comment on their page.",
+      { id: z.string().describe("the task id"), todo: z.string().describe("the to-do's id, or a piece of its text"), done: z.boolean().optional() },
+      async ({ id, todo, done }) => {
+        if (!await loadTask(id, "id")) return noTask(id);
+        return { content: [{ type: "text", text: await opts.services.tickTodo(id, todo, done ?? true) }] };
+      });
+  }
+
   server.tool("add_checklist_items",
-    "Add one or more unchecked checklist items to a task, in the order given. Creates the checklist if the task has none yet. Check get_task first to see what's already there and avoid duplicates.",
+    "Add one or more steps to the end of a task's plan, in the order given (the app calls the checklist Steps). Check get_task first to see what's already there and avoid duplicates.",
     { id: z.string(), items: z.array(z.string()).min(1).describe("item titles to add, unchecked") },
     async ({ id, items }) => {
       const t = await loadTask(id, "subtasks");

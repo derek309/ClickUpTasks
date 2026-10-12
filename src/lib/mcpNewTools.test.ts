@@ -41,9 +41,11 @@ const call = async (c: Client, name: string, args: Record<string, unknown>) => (
 afterEach(() => vi.unstubAllGlobals());
 
 describe("checklist tools", () => {
-  it("get_task shows each item's id", async () => {
-    fake([{ table: "clients", rows: [] }, { table: "projects", rows: [] }, { table: "task_briefs", rows: [] }, { table: "tasks", rows: [task()] }]);
-    expect(await call(await connect(), "get_task", { id: "t_1" })).toContain('"id":"s_b"');
+  it("get_task shows each step's id, the current one marked", async () => {
+    fake([{ table: "clients", rows: [] }, { table: "projects", rows: [] }, { table: "task_briefs", rows: [] }, { table: "profiles", rows: [] }, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task()] }]);
+    const text = await call(await connect(), "get_task", { id: "t_1" });
+    expect(text).toContain("[s_b]");
+    expect(text).toMatch(/\[CURRENT\]/);
   });
   it("removes by id, and by text that matches one item", async () => {
     fake([{ table: "tasks", rows: [task()] }]);

@@ -17,9 +17,19 @@ app). The tool definitions live in `core.mjs`, shared by two transports:
 
 Tasks: `list_my_tasks`, `list_client_tasks`, `get_task`, `set_project_instructions`, `create_task`,
 `update_task`, `delete_task`, `set_task_status`, `add_comment`, `draft_email`,
-`check_item`, `add_checklist_items`, `list_members`, `list_clients`, `add_client`,
+`check_item`, `check_todo` (hosted only), `add_checklist_items`, `list_members`, `list_clients`, `add_client`,
 `list_projects`, `list_notes`, `add_note`, `list_links`, `get_client_link`,
 `get_client_overview`.
+
+Steps (Derek, 2026-10-12): a task's checklist is its steps. `get_task` prints
+them in order with the current one marked, each with due date, owner,
+directions, to-dos and the client work on it. On the hosted server
+`check_item` runs the app's step rules (`src/lib/stepsServer.ts` tickStep:
+the next step starts, the status follows, after the last step a "what's
+next?" step), `check_todo` ticks a step's to-do and resolves the client's
+comment it came from, and `draft_email` gives the email a step of its own
+("Email <client>: <subject>", current) unless `step` names one or the current
+step is already an email step. The stdio server only ticks.
 
 Inbox: `draft_message` (a new email or text in someone's Inbox, Drafts),
 `get_email_thread` (read one conversation from an Inbox link like

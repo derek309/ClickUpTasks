@@ -24,11 +24,11 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
-  db.tasks = [{ id: "t1", subtasks, assignee_id: "u_derek", client_id: "cl_1", updated_at: "1" }];
+  db.tasks = [{ id: "t1", subtasks, assignee_id: "u_derek", client_id: "cl_1", status: "in_progress", updated_at: "1" }];
   db.clients = [{ id: "cl_1", name: "Brian Goodell" }];
   db.task_documents = [{ task_id: "t1", kind: "doc", title: "Newsletter", deleted_at: null }];
   db.task_document_comments = [
@@ -135,4 +135,30 @@ describe("steps added on the server", () => {
     expect(steps().find((x) => x.id === "z")!.startedAt).toBeTruthy();
     expect(steps().find((x) => x.id === "req")!.startedAt).toBeUndefined();
   });
+
+  it("a step ticked from the MCP starts the next one; the last asks what's next", async () => {
+    expect(await tickStep("t1", "a", true)).toContain('Next step: "Schedule it"');
+    expect(steps().find((x) => x.id === "b")!.startedAt).toBeTruthy();
+    expect(await tickStep("t1", "b", true)).toContain("last step");
+    expect(steps().at(-1)).toMatchObject({ title: "Schedule it: what's next?", done: false });
+    expect(await tickStep("t1", "b", false)).toContain("reopened");
+  });
+
+  it("a to-do from a client comment is ticked and its comment resolved", async () => {
+    setup([{ id: "a", title: "Make Brian's changes", done: false, todos: [{ id: "td1", title: "Change the headline", done: false, fromClient: true, commentId: "c1" }] }]);
+    db.task_documents[0].id = "d1";
+    expect(await tickTodo("t1", "headline", true, "Claude")).toContain("resolved");
+    expect(steps()[0].todos![0].done).toBe(true);
+    expect(db.task_document_comments[0].completed_at).toBeTruthy();
+  });
+
+  it("a drafted email gets its own step in front of the current one", async () => {
+    expect(await holdDraftOnStep("t1", "Your newsletter")).toBe("Email Brian: Your newsletter");
+    expect(steps().map((x) => x.title)).toEqual(["Email Brian: Your newsletter", "Write the newsletter", "Schedule it"]);
+    expect(steps()[0].holds).toEqual(["email"]);
+    // A second draft keeps to the step that holds one.
+    expect(await holdDraftOnStep("t1", "Other")).toBe("Email Brian: Your newsletter");
+    expect(steps()).toHaveLength(3);
+  });
 });
+

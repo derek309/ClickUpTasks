@@ -1,5 +1,6 @@
 "use client";
 
+import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users,
@@ -1722,13 +1723,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ``,
       `Client: ${client.name}${contact?.email ? ` (${contact.email})` : ""}`,
       `List: ${project ? `${project.name} (list id ${project.id})` : "All lists"}`,
-      `Use the ClickUpTasks connection: get_task with a task id below for the full task.`,
+      `Use the ClickUpTasks connection: get_task with a task id below for the full task and its steps.`,
       ``,
       `Open tasks (${openTasks.length}):`,
-      ...shown.map((t) => `- ${t.title} [${t.id}] · ${STATUS_META[t.status].label} · ${PRIORITY_META[t.priority].label}${t.due ? ` · Due: ${t.due}` : ""}${t.assigneeId ? ` · On: ${userById(t.assigneeId)?.name ?? t.assigneeId}` : ""}`),
+      ...shown.map((t) => { const st = currentStepLine(t.subtasks); return `- ${t.title} [${t.id}] · ${STATUS_META[t.status].label} · ${PRIORITY_META[t.priority].label}${t.due ? ` · Due: ${t.due}` : ""}${t.assigneeId ? ` · On: ${userById(t.assigneeId)?.name ?? t.assigneeId}` : ""}${st ? ` · Now: ${st}` : ""}`; }),
       openTasks.length > shown.length ? `...and ${openTasks.length - shown.length} more (showing top ${shown.length} by priority/due)` : "",
       notes.length ? `\nRecent chat notes:\n${notes.map((n) => `- ${userById(n.authorId)?.name ?? "?"}: ${n.body}`).join("\n")}` : "",
       ghlUrl ? `\nGHL contact: ${ghlUrl}` : "",
+      `\n${STEP_TOOLS}`,
     ].filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(brief);
