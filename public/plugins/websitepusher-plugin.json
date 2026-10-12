@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.5.4",
+  "version": "1.6.0",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-11 19:50:00",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.5.4.zip",
+  "last_updated": "2026-10-12 17:47:54",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.6.0.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* A full-site pull now brings down theme and plugin folders that are links to another folder (a Git checkout, the way a development site is often set up), leaving out their Git history and build tools. Before, those were left out and the pulled site had no theme.\n* A full-site pull now lists anything it had to leave out, instead of leaving it out without a word."
+  "changelog": "* Changes for the site owner's review: when someone other than the site's owner finishes, their changes are stored on the website, not put live, until the owner approves them in WebsitePusher (or sends them back). Approving puts them live exactly as a push would, with the same backups and undo."
 }
