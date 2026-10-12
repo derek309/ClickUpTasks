@@ -2601,6 +2601,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {mail ? (
                   <SentEmailBox message={mail} messages={messages} firstName={firstName}
                     onRemove={() => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, k) })} />
+                ) : a && a.kind === "image" && a.path && attImageUrls[a.path] ? (
+                  // A picture shows as itself, a click opens it full size (Derek, 2026-10-12).
+                  <span className="relative inline-block">
+                    <button onClick={() => void openPreview(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="block overflow-hidden rounded-[5px] border bg-background hover:border-accent">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={attImageUrls[a.path]} alt={a.name} className="max-h-48 max-w-[280px] object-contain" />
+                    </button>
+                    <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
+                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-surface/90 text-muted shadow hover:text-danger">×</button>
+                  </span>
                 ) : a ? (
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                     {a.url
