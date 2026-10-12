@@ -1782,8 +1782,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Handoff", done: false, due: addBusinessDaysIso(TODAY, 3), handoff: { steps: [] } }] });
     setOpenHandoff(id);
   };
+  // An email to the client as a step of its own: the draft sits on it and its
+  // window opens to write in. Nothing goes until someone presses Send
+  // (Derek, 2026-10-12).
+  const emailStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, ...stepOwnerFields() }], id, "email") });
+    if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail();
+  };
   const quickPeopleOptions = () => [
     { key: "checklist", label: "Create Checklist", disabled: false, note: undefined as string | undefined, onPick: checklistStep },
+    ...(hasMessaging ? [{ key: "email", label: "Send Email to Client", disabled: false, note: deliverablePresent("email") ? "uses the draft" as string | undefined : undefined, onPick: emailStep }] : []),
     { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
     { key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: delegateStep },
   ];
