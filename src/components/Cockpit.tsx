@@ -314,7 +314,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const setGroupBy = (g: ViewPrefs["groupBy"]) => setPrefs({ groupBy: g });
   const setSortBy = (sb: SortBy) => setPrefs({ sortBy: sb });
   const setSortDir = (d: "asc" | "desc") => setPrefs({ sortDir: d });
-  const [filters, setFilters] = useState<FilterState>({ status: "all", assignee: "all", priority: "all" });
+  // Remembered in this browser, like group and sort (Derek, 2026-10-12:
+  // "whatever settings we select, let's remember them"): Everyone, Mine or
+  // Claude, and the View panel's filters.
+  const [filters, saveFilters] = usePersisted<FilterState>("viewFilters", { status: "all", assignee: "all", priority: "all" },
+    (v) => !!v && typeof v === "object" && typeof (v as FilterState).status === "string" && typeof (v as FilterState).assignee === "string" && typeof (v as FilterState).priority === "string");
+  const setFilters = (next: FilterState | ((f: FilterState) => FilterState)) => saveFilters(typeof next === "function" ? next(filters) : next);
   // Title, client, follow up, due (Derek: "on all tasks only show title,
   // client, follow and due date by default"). Stage, priority and created
   // were on by default and are all derivable from what is left: the priority
