@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatPinTime } from "@/lib/reviewPins";
 import { createPortal } from "react-dom";
-import { I } from "./ui";
+import { I, LinkedText } from "./ui";
 import { ActionMenu } from "./ActionMenu";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { shortcut } from "@/lib/platform";
@@ -228,6 +228,8 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
   const [attaching, setAttaching] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  // Resolved just now: stays in view, green, so it plainly took (Derek, 2026-10-12).
+  const [justDone, setJustDone] = useState<string[]>([]);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   // A comment on the whole of a version with several images opens from a link.
@@ -302,7 +304,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
   // older ones across boxes hid pin 1 on the Front (Derek, 2026-09-14).
   const grouping = !!pinGroups && pinGroups.length > 1;
   const older = grouping ? 0 : Math.max(0, openOnes.length - LATEST_COMMENTS);
-  const shown = [...(showOlder || grouping ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : [])];
+  const shown = [...(showOlder || grouping ? openOnes : openOnes.slice(0, LATEST_COMMENTS)), ...(showDone ? doneOnes : doneOnes.filter((c) => justDone.includes(c.id)))];
   // A highlight or pin clicked opens its comment wherever it is folded away.
   useEffect(() => {
     if (!focusedId) return;
@@ -385,7 +387,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
     return (
       <li key={c.id} ref={(el) => { if (el) itemRefs.current.set(c.id, el); else itemRefs.current.delete(c.id); }}
         onMouseEnter={onHover && c.pin ? () => onHover(c.id) : undefined} onMouseLeave={onHover && c.pin ? () => onHover(null) : undefined}
-        className={`-mx-2 flex gap-3 rounded-[5px] px-2 py-3 transition-colors ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
+        className={`-mx-2 flex gap-3 rounded-[5px] px-2 py-3 transition-colors ${done ? "border-l-4 border-l-success bg-success-soft/60" : ""} ${focusedId === c.id ? "ring-2 ring-highlight" : ""} ${hoverId === c.id ? "bg-highlight-soft/60" : ""}`}>
         {c.pin ? (
           <button onClick={() => onQuoteClick?.(c.id)} disabled={!onQuoteClick}
             title={moment ? `Jump to ${moment}` : `Show pin ${c.pin.number}${place ? ` on ${place}` : ""}`}
@@ -394,7 +396,9 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
             <PinNumber number={c.pin.number} color={pinColor} />
           </button>
         ) : (
-          <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px] font-semibold text-muted">{initials(c)}</span>
+          done
+            ? <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-success text-[16px] font-bold text-white">✓</span>
+            : <span aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-[16px] font-semibold text-muted">{initials(c)}</span>
         )}
         <div className="min-w-0 flex-1">
           {/* The name in full, then the comment, then a small time stamp (Derek,
@@ -405,7 +409,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
             <span className="ml-auto flex shrink-0 items-center gap-1">
               {/* Said in words, so what it does is plain (Derek, 2026-09-14 redesign). */}
               <button aria-pressed={done} title={done ? "Open it again" : "Mark it resolved"}
-                onClick={() => void act(c.id, () => onToggleDone(c.id, !done))} disabled={busy}
+                onClick={() => void act(c.id, async () => { const ok = await onToggleDone(c.id, !done); if (ok && !done) setJustDone((j) => [...j, c.id]); return ok; })} disabled={busy}
                 className={`whitespace-nowrap rounded-[5px] px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
                 {done ? "Resolved ✓" : "Resolve"}
               </button>
@@ -440,7 +444,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
               </div>
             </>
           ) : c.body && (
-            <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}>{c.body}</p>
+            <p className={`whitespace-pre-wrap break-words text-[16px] leading-relaxed ${done ? "text-muted line-through" : ""}`}><LinkedText text={c.body} /></p>
           )}
           {c.attachmentFileId && renderAttachment && <div className="mt-1 text-[16px]">{renderAttachment(c.attachmentFileId)}</div>}
           {/* Very small on purpose (Derek, 2026-09-14), an exception to the 16px rule. */}
@@ -448,7 +452,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
             <span>{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
             {onReply && <button onClick={() => { setReplyFor(replyFor === c.id ? null : c.id); setReplyText(""); }} className="text-[16px] font-semibold text-accent hover:underline">Reply</button>}
           </p>
-          {done && c.completedBy && <p className="text-[16px] text-muted">Done by {c.completedBy}</p>}
+          {done && <p className="text-[16px] font-semibold text-success">✓ Resolved{c.completedBy ? ` by ${c.completedBy}` : ""}</p>}
           {repliesOf(c.id).length > 0 && (
             <ul className="mt-2 space-y-2 border-l-2 pl-3">
               {repliesOf(c.id).map((r) => (
@@ -458,7 +462,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
                     <span className="text-[13px] text-muted">{when(r.createdAt)}</span>
                     {canDelete(r) && <button onClick={() => void act(r.id, () => onDelete(r.id))} className="ml-auto text-[13px] text-muted hover:text-danger">Delete</button>}
                   </div>
-                  <p className="whitespace-pre-wrap break-words leading-relaxed">{r.body}</p>
+                  <p className="whitespace-pre-wrap break-words leading-relaxed"><LinkedText text={r.body} /></p>
                 </li>
               ))}
             </ul>
@@ -523,6 +527,8 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
         <textarea ref={boxRef} value={draft} rows={2} maxLength={4000} data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
           onChange={(e) => { setDraft(e.target.value); fit(e.currentTarget); }}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void post(); } }}
+          // A picture or file pasted in is attached.
+          onPaste={(e) => { const f = e.clipboardData.files?.[0]; if (f && onAttach) { e.preventDefault(); void attach(f); } }}
           placeholder={pinDraft ? "Write a comment on this spot…" : quote ? "Write a comment on these words…" : placeholder ?? "Write a comment, or select words in the document to comment on them…"}
           aria-label="Write a comment" style={{ outline: "none" }}
           className="max-h-60 min-w-0 flex-1 resize-none overflow-hidden bg-transparent py-1.5 text-[16px] leading-snug outline-none" />
@@ -541,6 +547,13 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
           {posting ? "…" : "↑"}
         </button>
       </div>
+      {/* Said plainly (Derek, 2026-10-12): pictures, files and links can go with a comment. */}
+      {onAttach && !attached && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
+          <button onClick={() => fileInput.current?.click()} disabled={attaching || posting} className="inline-flex items-center gap-1 font-semibold text-accent hover:underline disabled:opacity-50"><I.clip /> {attaching ? "Adding…" : "Add a picture or file"}</button>
+          <span>or paste one in. Links you type are clickable.</span>
+        </div>
+      )}
       {attached && (
         <div className="mt-1 flex items-center gap-2 text-[16px]">
           <span className="min-w-0 flex-1 truncate">📎 {attached.name}</span>
