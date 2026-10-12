@@ -1284,3 +1284,19 @@ describe("waitingFollowUp", () => {
     expect(waitingFollowUp({ status: "waiting", waitingOnClient: true }, { status: "done", waitingOnClient: false }, "2026-09-30")).toBeNull();
   });
 });
+
+describe("what's next after the last step", () => {
+  it("asks with a step after the last one done, and asks again after that", async () => {
+    const { addWhatsNextStep, asksWhatsNext } = await import("./data");
+    let n = 0; const id = () => `s${++n}`;
+    const open = [{ id: "a", title: "Email Pam", done: true }, { id: "b", title: "Review ads", done: false }];
+    expect(addWhatsNextStep(open, "a", id)).toBeNull();
+    const done = [{ id: "a", title: "Email Pam", done: true }];
+    const asked = addWhatsNextStep(done, "a", id)!;
+    expect(asked[1]).toMatchObject({ title: "Email Pam: what's next?", done: false, addedFor: "next:a" });
+    expect(asksWhatsNext(asked[1])).toBe(true);
+    expect(addWhatsNextStep(asked.map((x) => ({ ...x, done: true })), "a", id)).toBeNull();
+    const again = addWhatsNextStep(asked.map((x) => ({ ...x, done: true })), asked[1].id, id)!;
+    expect(again[2].title).toBe("Email Pam: what's next?");
+  });
+});

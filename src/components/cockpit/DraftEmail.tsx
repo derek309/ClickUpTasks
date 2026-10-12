@@ -14,9 +14,11 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
+export function DraftEmail({ task, onPatch, onSent, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
+  /** The email really went out: its step keeps a box for it. */
+  onSent?: (message: Message) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
   toEmail: string | null;
   /** Missing when this teammate can't message this client. */
@@ -40,7 +42,7 @@ export function DraftEmail({ task, onPatch, toEmail, onSend, onSchedule, onUploa
   const sentAlready = draft ? sentEmailFor(draft, messages) : null;
   useEffect(() => {
     // Idempotent, so two people with the task open both writing null is harmless.
-    if (draft && sentAlready) onPatch({ draftEmail: null });
+    if (draft && sentAlready) { onSent?.(sentAlready); onPatch({ draftEmail: null }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, !!draft, sentAlready?.id]);
 

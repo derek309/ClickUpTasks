@@ -376,7 +376,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 <div className="flex items-center gap-3">
                   {/* The tick the step lines use, in place of a Mark done button
                       (Derek, 2026-10-11). The client's own step is answered below instead. */}
-                  {(sub.done || (isCurrent && !doneActions)) && (
+                  {/* Any open step can be ticked, not only the current one. */}
+                  {(sub.done || !doneActions) && (
                     <button onClick={sub.done ? onReopen : onMarkDone} aria-pressed={sub.done}
                       title={sub.done ? "Done. Click to reopen this step" : "Mark this step done"} aria-label={sub.done ? "Reopen this step" : "Mark this step done"}
                       className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "border-2 border-accent text-accent hover:bg-accent hover:text-white"}`}>

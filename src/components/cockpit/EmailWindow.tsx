@@ -346,7 +346,7 @@ export function EmailWindow({
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0">
             {onAiDraft && (
-              <div className={`mb-3 flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent-soft/40 px-3 py-2 sm:flex ${showAi ? "flex" : "hidden"}`}>
+              <div className={`mb-3 flex-wrap items-center gap-2 rounded-[5px] border border-accent/30 bg-accent-soft/40 px-3 py-2 sm:flex ${showAi ? "flex" : "hidden"}`}>
                 <span aria-hidden className="text-[18px]">✨</span>
                 <input value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void writeWithAi(aiInstruction.trim()); } }}
@@ -359,19 +359,17 @@ export function EmailWindow({
                 </button>
               </div>
             )}
-            <div className="overflow-hidden rounded-2xl border bg-surface shadow-sm">
-              {/* Cc / Bcc goes under the address, not beside it: on a phone it
-                  held its own width and wrapped the address across two lines
-                  (Derek, 2026-09-22: "move cc and bcc below the email"). */}
-              <div className="border-b px-4 py-2.5 text-[16px] sm:px-6">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="w-12 shrink-0 font-semibold text-muted sm:w-16">To</span>
-                  {toEmail
-                    ? <span className="min-w-0 flex-1 break-all">{toEmail}</span>
-                    : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
-                </div>
+            <div className="overflow-hidden rounded-[5px] border bg-surface shadow-sm">
+              {/* One line each, labels in one column (Derek, 2026-10-12: "awkward
+                  layout"). Cc / Bcc sits at the end of the To line; a long
+                  address shortens instead of wrapping. */}
+              <div className="flex min-h-12 items-center gap-3 border-b px-4 py-2 text-[16px] sm:px-6">
+                <span className="w-16 shrink-0 font-semibold text-muted">To</span>
+                {toEmail
+                  ? <span className="min-w-0 flex-1 truncate" title={toEmail}>{toEmail}</span>
+                  : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
                 {!showCopies && (
-                  <button onClick={() => setShowCopies(true)} className="ml-[60px] mt-1.5 font-medium text-accent hover:underline sm:ml-[76px]">Cc / Bcc</button>
+                  <button onClick={() => setShowCopies(true)} className="shrink-0 rounded-[5px] px-2 py-1 font-medium text-muted hover:bg-background hover:text-foreground">Cc / Bcc</button>
                 )}
               </div>
               {showCopies && (
@@ -380,10 +378,10 @@ export function EmailWindow({
                   <RecipientField label="Bcc" value={bcc} onChange={setBcc} contacts={ccContacts ?? []} />
                 </div>
               )}
-              <label className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5 sm:px-6">
-                <span className="w-12 shrink-0 text-[16px] font-semibold text-muted sm:w-16">Subject</span>
+              <label className="flex min-h-12 items-center gap-3 border-b px-4 py-2 text-[16px] sm:px-6">
+                <span className="w-16 shrink-0 font-semibold text-muted">Subject</span>
                 <input value={subject} onChange={(e) => setSubject(e.target.value)}
-                  placeholder={subjectFallback || "Subject"} className="min-w-0 flex-1 bg-transparent text-[18px] font-semibold outline-none" />
+                  placeholder={subjectFallback || "Subject"} className="min-w-0 flex-1 bg-transparent font-semibold outline-none" />
               </label>
               <div className={`p-4 sm:p-6 ${showTools ? "" : "[&_.rte-toolbar]:hidden sm:[&_.rte-toolbar]:flex"}`}
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}>

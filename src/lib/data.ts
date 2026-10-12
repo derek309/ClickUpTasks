@@ -2986,6 +2986,28 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
 /** The task's deliverables a step can hold, by the key a step stores. */
 export type DeliverableKey = "doc" | "image" | "page" | "video" | "brief" | "email";
 export const attachmentKey = (id: string) => `att:${id}`;
+/** A sent email, kept on the step it was written on so it never gets lost
+ *  (Derek, 2026-10-12: "keep the client box and just show sent"). */
+export const sentEmailKey = (messageId: string) => `mail:${messageId}`;
+
+/** The step that asks what's next: it stays current until it is renamed,
+ *  given client work or the task is finished (Derek, 2026-10-12: "keep asking
+ *  what's next until I say it's finished"). */
+export const asksWhatsNext = (s: Pick<Subtask, "done" | "addedFor" | "title">) => !s.done && !!s.addedFor && /: what's next\?$/.test(s.title);
+
+/** The last open step is done: a "what's next?" step right after it. Null
+ *  while any step is still open, or once it was asked for this step. */
+export function addWhatsNextStep(subtasks: Subtask[], doneId: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  if (planSteps(subtasks).some((s) => !s.done)) return null;
+  const key = `next:${doneId}`;
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const at = subtasks.findIndex((s) => s.id === doneId);
+  if (at < 0) return null;
+  const base = subtasks[at].title.replace(/: what's next\?$/, "");
+  const list = [...subtasks];
+  list.splice(at + 1, 0, { id: makeId(), title: `${base}: what's next?`, done: false, addedFor: key, startedAt: now });
+  return list;
+}
 
 /** The step holding `key`, or null. */
 export function stepHolding<T extends Pick<Subtask, "holds">>(subtasks: T[], key: string): T | null {

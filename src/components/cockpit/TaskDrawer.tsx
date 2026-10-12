@@ -8,7 +8,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffOf, handoffProgress, handoffLink, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -35,6 +35,7 @@ import { StepPage } from "./StepPage";
 // and handed to the first drawer that holds that delegation.
 let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
 import { DraftEmail } from "./DraftEmail";
+import { SentEmailBox } from "./SentEmail";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
@@ -998,7 +999,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // step, and a stale copy would write its holds back without it (audit).
     const latest = taskRef.current.subtasks;
     const next = stepAfter(latest, doneId);
-    if (!next) { setAskNext(task.id); setNextDraft(""); return; }
+    if (!next) {
+      // With steps, the plan asks with a step of its own, current until the
+      // task is finished (Derek, 2026-10-12).
+      const asked = steps.length > 0 ? addWhatsNextStep(latest, doneId, () => newId("s_")) : null;
+      if (asked) { onPatch({ subtasks: asked }); return; }
+      setAskNext(task.id); setNextDraft(""); return;
+    }
     // When it started, so its page shows what is said from here on.
     if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
     // Client work still under way moves on to the next step; links, files
@@ -1037,6 +1044,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const name = reviews[k]?.title?.trim() || deliverableName(k);
     onPatch({ draftEmail: { ...draft, link: { url: j.url, label: `Open "${name}"` }, updatedAt: new Date().toISOString() } });
   };
+  // "It's finished": the step asking what's next is done and so is the task.
+  const finishTask = (sid: string) => {
+    const now = new Date().toISOString();
+    onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, done: true, doneAt: now, outcome: "Task finished" } : x)), status: "done" });
+    pushToast("Task finished");
+  };
+  const whatsNextActions = (sid: string) => (
+    <div className="flex flex-wrap items-center gap-3 text-[16px]">
+      <span className="min-w-0 flex-1 text-muted">Name the next step above, or add client work below.</span>
+      <button onClick={() => finishTask(sid)} className="shrink-0 rounded-[5px] bg-success px-3 py-1.5 font-semibold text-white hover:opacity-90">The task is finished</button>
+    </div>
+  );
   const completeStep = (sid: string) => {
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
@@ -1449,7 +1468,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     createdLine,
     meetings: clientMeetings,
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
-    onMessageSent: (channel, body) => setPendingNextStep({ kind: channel, body }),
+    // With steps, the steps say what's next; the old panel asks only without them.
+    onMessageSent: (channel, body) => { if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: channel, body }); },
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     onNoteInDock: (text) => askDock("note", text),
@@ -2040,7 +2060,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
-    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
+    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch}
+      onSent={(m) => {
+        const list = taskRef.current.subtasks;
+        const on = stepHolding(list, "email");
+        if (on) onPatch({ subtasks: list.map((x) => (x.id === on.id ? { ...x, holds: (x.holds ?? []).map((k) => (k === "email" ? sentEmailKey(m.id) : k)) } : x)) });
+      }}
+      toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
       onSend={hasMessaging ? (email) => {
         onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
         // Sent from the step that holds it: that step is done, and checking in
@@ -2088,7 +2114,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const checkBack = addBusinessDaysIso(TODAY, email.followUpDays);
           onPatch({ status: "waiting", followUpAt: task.due && task.due <= checkBack ? null : checkBack });
         }
-        setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
+        if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
       } : undefined}
       onSchedule={hasMessaging && onScheduleTaskMessage ? (email, whenIso) =>
         onScheduleTaskMessage("email", email.subject, email.body, whenIso, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo) : undefined}
@@ -2293,15 +2319,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(j, 0, from);
     onPatchSub(sub.id, { holds: list });
   };
+  const sentMail = (k: string) => (k.startsWith("mail:") ? (messages ?? []).find((m) => sentEmailKey(m.id) === k) ?? null : null);
   const stepHeld = (sub: Subtask) => {
     const keys = (sub.holds ?? []).filter((k) =>
-      (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
+      (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)) || !!sentMail(k));
     if (!keys.length) return null;
     const sortable = keys.length > 1;
     return (
       <div className="flex flex-col gap-2">
         {keys.map((k) => {
           const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
+          const mail = sentMail(k);
           const dragging = dragHeld?.stepId === sub.id && dragHeld.key === k;
           return (
             <div key={k} draggable={dragging && dragHeld?.grabbed}
@@ -2315,7 +2343,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   className="hidden w-5 shrink-0 cursor-grab select-none text-center text-[16px] text-muted opacity-40 group-hover/held:opacity-100 active:cursor-grabbing sm:block">⋮⋮</span>
               )}
               <div className="min-w-0 flex-1">
-                {a ? (
+                {mail ? (
+                  <SentEmailBox message={mail} messages={messages} firstName={firstName}
+                    onRemove={() => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, k) })} />
+                ) : a ? (
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                     {a.url
                       ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
@@ -2691,7 +2722,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
@@ -2774,7 +2805,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           askNextStepFor={pendingNextStep}
           onSendMessage={onSendTaskMessage ? (channel, body, replyToId) => {
             onSendTaskMessage(channel, "", body, undefined, undefined, undefined, replyToId);
-            setPendingNextStep({ kind: channel, body });
+            if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: channel, body });
           } : undefined}
           reachable={{ chat: hasMessaging, sms: !!messageDest?.phone, email: !!messageDest?.email }}
           replyTarget={replyTarget}
