@@ -2118,15 +2118,10 @@ function SidePanel({ p, t, linkSearchRef }: { p: InboxViewProps; t: InboxThread;
     setBusy(true);
     const add = !!taskId && !!t.taskId && taskId !== t.taskId;
     try {
+      // The task gets a "Reply to …" step with their newest email on it
+      // (the link route does it; Derek, 2026-10-12), in place of a comment.
       await p.inbox.linkTask(t.key, taskId, add);
-      // Another task gets their newest email as a comment, so whoever does it
-      // can read the request there (Derek, 2026-10-07).
-      const last = add ? t.messages.find((m) => m.direction === "inbound") : null;
-      if (last && taskId) {
-        const from = whoWrote(last, t, p).name;
-        p.onAddComment(taskId, `📌 Email from ${from}, ${fullTime(last.at)}${last.subject ? `\n${last.subject}` : ""}\n\n${(last.body || "").trim().slice(0, 4000)}`);
-      }
-      p.pushToast(add ? "Linked, with their email added to the task" : taskId ? "Linked. New messages here land on the task too." : "Unlinked");
+      p.pushToast(taskId ? "Linked. Their email is on a Reply step on the task." : "Unlinked");
       setQ(""); setAddOpen(false);
     }
     catch (e) { p.pushToast(e instanceof Error ? e.message : "Couldn't link it."); }

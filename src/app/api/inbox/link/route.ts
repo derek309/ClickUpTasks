@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { stepsOnClientEmail } from "@/lib/stepsServer";
 import { requireUser, type AuthedUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isClientVisible } from "@/lib/extensionApi";
@@ -53,6 +54,13 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ taskIds: await extraTaskIds(threadKey) });
 }
 
+/** Their newest email becomes the task's "Reply to …" step (Derek, 2026-10-12). */
+async function replyStepFor(taskId: string, rows: Record<string, unknown>[]) {
+  const m = rows.filter((r) => r.direction === "inbound" && r.channel === "email").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+  if (!m) return;
+  await stepsOnClientEmail(taskId, { id: String(m.id), subject: (m.subject as string | null) ?? null, body: String(m.body ?? ""), at: String(m.created_at), from: (m.peer_name as string | null) ?? null }, true).catch(() => false);
+}
+
 export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -91,6 +99,7 @@ export async function POST(req: NextRequest) {
       .upsert({ thread_key: threadKey, task_id: taskId, linked_by: caller.memberId }, { onConflict: "thread_key,task_id", ignoreDuplicates: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await filesToTask(ids, taskId);
+    await replyStepFor(taskId, rows);
     return NextResponse.json({ ok: true, taskId: main, taskIds: await extraTaskIds(threadKey) });
   }
 
@@ -101,6 +110,7 @@ export async function POST(req: NextRequest) {
   else {
     await supabaseAdmin.from("inbox_task_links").delete().eq("thread_key", threadKey).eq("task_id", taskId);
     await filesToTask(ids, taskId);
+    await replyStepFor(taskId, rows);
   }
   return NextResponse.json({ ok: true, linked: ids.length, taskId, taskIds: await extraTaskIds(threadKey) });
 }

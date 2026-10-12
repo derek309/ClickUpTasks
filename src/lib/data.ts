@@ -878,6 +878,10 @@ export interface Subtask {
   /** On the client's waiting step: when the review email went to them, shown
    *  on the step instead of a step of its own (Derek, 2026-10-11). */
   emailedAt?: string;
+  /** The client's emails this step answers (Derek, 2026-10-12: "when a client
+   *  emails, it's a task that needs to be completed"): a copy, so the step
+   *  shows them whichever task the thread is linked to. */
+  fromEmails?: ReceivedEmail[];
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string };
@@ -2986,6 +2990,38 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
 /** The task's deliverables a step can hold, by the key a step stores. */
 export type DeliverableKey = "doc" | "image" | "page" | "video" | "brief" | "email";
 export const attachmentKey = (id: string) => `att:${id}`;
+
+/** A client's email as a step keeps it. */
+export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string };
+
+/** The email's own words: quoted history and signatures' "On … wrote:" cut off. */
+export function emailOwnWords(text: string): string {
+  const cut = text.search(/\n\s*(On .{0,200}wrote:|-{2,}\s*Original Message|From: .+\n)|\n>/i);
+  return (cut >= 0 ? text.slice(0, cut) : text).trim();
+}
+
+/** "Thanks!", "Sounds good": nothing to do, so no step (Derek, 2026-10-12). */
+export function isJustThanks(text: string): boolean {
+  const own = emailOwnWords(text).replace(/\s+/g, " ").trim();
+  return own.length < 80 && /^(thanks|thank you|thx|ty|ok|okay|great|perfect|sounds good|got it|will do|awesome|appreciate it|love it|looks good)\b/i.test(own) && !own.includes("?");
+}
+
+/** A client's email becomes the step answering it: "Reply to Pam: <subject>",
+ *  current, with the email on it. Another email while that step is open joins
+ *  it; the same email twice adds nothing. A "what's next?" step becomes it. */
+export function addReplyStep(subtasks: Subtask[], email: ReceivedEmail, clientFirstName: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+  if (subtasks.some((s) => s.fromEmails?.some((e) => e.messageId === email.messageId))) return null;
+  const open = planSteps(subtasks).find((s) => !s.done && s.addedFor?.startsWith("reply:"));
+  if (open) return subtasks.map((s) => (s.id === open.id ? { ...s, fromEmails: [...(s.fromEmails ?? []), email] } : s));
+  const subject = email.subject.replace(/^((re|fwd?):\s*)+/i, "").trim();
+  const title = `Reply to ${clientFirstName}${subject ? `: ${subject.slice(0, 80)}` : ""}`;
+  const fields = { title, makes: "email" as const, addedFor: `reply:${email.messageId}`, startedAt: now, fromEmails: [email] };
+  const cur = currentStep(subtasks);
+  if (cur && asksWhatsNext(cur)) return subtasks.map((s) => (s.id === cur.id ? { ...s, ...fields } : s));
+  const list = [...subtasks];
+  list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, { id: makeId(), done: false, ...fields });
+  return list;
+}
 /** A sent email, kept on the step it was written on so it never gets lost
  *  (Derek, 2026-10-12: "keep the client box and just show sent"). */
 export const sentEmailKey = (messageId: string) => `mail:${messageId}`;

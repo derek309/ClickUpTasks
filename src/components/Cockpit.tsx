@@ -1,5 +1,6 @@
 "use client";
 
+import { addReplyStep, emailOwnWords } from "@/lib/data";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -1959,6 +1960,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: true, private: personal, subtasks: [], attachments: [], comments: [],
       createdAt: new Date().toISOString(), createdBy: me.id,
     };
+    // Its first step is answering them, with their email on it (Derek, 2026-10-12).
+    const theirs = t.messages.find((m) => m.direction === "inbound" && m.channel === "email");
+    if (theirs) {
+      const from = (theirs.peerName ?? t.peerName).replace(/\s*\(via [^)]*\)\s*$/i, "").trim();
+      const made = addReplyStep([], { messageId: theirs.id, from, subject: decodeEntities(theirs.subject ?? t.subject ?? ""), body: emailOwnWords(htmlToText(theirs.body ?? "")).slice(0, 6000), at: theirs.at }, from.split(/\s+/)[0] || first, () => newId("s_"));
+      if (made) task.subtasks = made.map((x) => ({ ...x, assigneeId: task.assigneeId ?? undefined }));
+    }
     setTasks((ts) => [...ts, task]);
     // The email's files come along (Derek, 2026-10-07: Kelly's photos didn't):
     // from the newest email from them that has any, once the task is saved.

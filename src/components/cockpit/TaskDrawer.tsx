@@ -36,7 +36,7 @@ import { StepPage } from "./StepPage";
 let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
-import { SentEmailBox } from "./SentEmail";
+import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
@@ -528,7 +528,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const holds = [...new Set([...(withSentHolds(sub).holds ?? []), ...sentReviews(sub)])];
     // What is on the step comes with its content (Derek, 2026-10-11: "I can
     // just add it to the step").
-    const used = await usedForClaude(holds);
+    const used = [
+      ...(sub.fromEmails ?? []).map((e) => `- Email from ${e.from}, ${e.at.slice(0, 10)}, "${e.subject}":\n${e.body}`),
+      ...await usedForClaude(holds),
+    ];
     // What the client or anyone outside the team wrote is fenced off as data:
     // pasted into a Claude that can send email, it must never read as orders
     // (audit 2026-10-11).
@@ -1705,6 +1708,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const heldNames = [
       ...holds.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k)).filter(deliverablePresent).map(deliverableName),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
+      ...(sub.fromEmails?.length ? [`${sub.fromEmails.length === 1 ? "their email" : `${sub.fromEmails.length} emails from them`}`] : []),
     ];
     const missing = !sub.done ? missingNeeds(sub) : [];
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
@@ -2340,10 +2344,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepHeld = (sub: Subtask) => {
     const keys = (sub.holds ?? []).filter((k) =>
       (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)) || !!sentMail(k));
-    if (!keys.length) return null;
+    const emails = sub.fromEmails ?? [];
+    if (!keys.length && !emails.length) return null;
     const sortable = keys.length > 1;
     return (
       <div className="flex flex-col gap-2">
+        {/* The client's email this step answers; Reply drafts the answer on it. */}
+        {emails.map((e) => (
+          <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done}
+            onReply={hasMessaging ? () => {
+              startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
+              onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
+            } : undefined} />
+        ))}
         {keys.map((k) => {
           const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
           const mail = sentMail(k);

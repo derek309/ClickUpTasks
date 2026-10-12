@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
+  addApprovalStep, addReplyStep, emailOwnWords, htmlToText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
   isHandoffStep, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
@@ -287,4 +287,22 @@ export async function holdDraftOnStep(taskId: string, subject: string, stepRef?:
     return holdOnStep(next, id, "email");
   });
   return on;
+}
+
+/** A client's email on a task becomes a step to answer it (Derek, 2026-10-12).
+ *  always: linked or added on purpose from the Inbox, so it is a step even on
+ *  a task without steps and even when short. Otherwise (it arrived on a thread
+ *  already linked) only on a task with steps, and not for a plain "thanks". */
+export async function stepsOnClientEmail(taskId: string, m: { id: string; subject: string | null; body: string; at: string; from: string | null }, always = false): Promise<boolean> {
+  const text = emailOwnWords(htmlToText(m.body ?? ""));
+  if (!always && isJustThanks(text)) return false;
+  let status: TaskStatus | null = null;
+  return rewriteSteps(taskId, (row, first) => {
+    const list = row.subtasks ?? [];
+    if (!always && !planSteps(list).length) return null;
+    const who = (m.from ?? "").replace(/\s*\(via [^)]*\)\s*$/i, "").trim().split(/\s+/)[0] || first;
+    const made = addReplyStep(list, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at }, who, () => newId("s_"));
+    status = made ? statusForStep(row.status, "in_progress") : null;
+    return made;
+  }, false, () => (status ? { status } : null));
 }

@@ -1300,3 +1300,19 @@ describe("what's next after the last step", () => {
     expect(again[2].title).toBe("Email Pam: what's next?");
   });
 });
+
+describe("a client's email as a step", () => {
+  it("is a Reply step in front of the current one; a second email joins it; thanks is nothing", async () => {
+    const { addReplyStep, isJustThanks } = await import("./data");
+    let n = 0; const id = () => `s${++n}`;
+    const e = (messageId: string) => ({ messageId, from: "Pamela Macias", subject: "Re: Class ads", body: "Can we change the radius?", at: "2026-10-12T10:00:00Z" });
+    const list = addReplyStep([{ id: "a", title: "Write", done: true }, { id: "b", title: "Review ads", done: false }], e("m1"), "Pamela", id)!;
+    expect(list.map((x) => x.title)).toEqual(["Write", "Reply to Pamela: Class ads", "Review ads"]);
+    expect(addReplyStep(list, e("m1"), "Pamela", id)).toBeNull();
+    const two = addReplyStep(list, e("m2"), "Pamela", id)!;
+    expect(two).toHaveLength(3);
+    expect(two[1].fromEmails?.map((x) => x.messageId)).toEqual(["m1", "m2"]);
+    expect(isJustThanks("Thanks so much!\n\nOn Mon, Derek wrote:\n> hi")).toBe(true);
+    expect(isJustThanks("Thanks! Can we move it to Friday?")).toBe(false);
+  });
+});

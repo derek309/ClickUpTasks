@@ -5,7 +5,7 @@
 // review"). It says whether the client has written back since; the whole box
 // opens the email as it went out.
 import { useState } from "react";
-import { htmlToText, timeAgo, type Message } from "@/lib/data";
+import { htmlToText, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
 import { reviewTone } from "@/lib/reviewTone";
 
 const CHANNEL_WORD: Partial<Record<Message["channel"], string>> = { email: "email", sms: "text", chat: "the portal" };
@@ -53,6 +53,40 @@ export function SentEmailBox({ message, messages, firstName, onRemove }: {
       {open && (
         <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
           {htmlToText(message.body).trim()}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The client's email a "Reply to …" step answers (Derek, 2026-10-12): click
+ *  to read it, Reply to start the answer on this step. */
+export function ReceivedEmailBox({ email, answered, onReply }: {
+  email: ReceivedEmail;
+  answered: boolean;
+  onReply?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const tone = reviewTone(answered ? "approved" : "with_client");
+  const toggle = () => setOpen((o) => !o);
+  return (
+    <div className="rounded-[5px] border" style={{ background: tone.chip, borderColor: tone.dot }}>
+      <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter") toggle(); }} aria-expanded={open}
+        className="flex min-w-0 cursor-pointer items-center gap-3 px-3 py-2">
+        <span aria-hidden className="text-[18px]">📨</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[16px] font-semibold">{email.subject || "Email"}</span>
+          <span className="block truncate text-[16px] text-muted">From {email.from} · {timeAgo(email.at)}{answered ? " · answered" : ""}</span>
+        </span>
+        <span aria-hidden className="shrink-0 text-[16px] text-muted">{open ? "Hide" : "Read"}</span>
+        {onReply && !answered && (
+          <button onClick={(e) => { e.stopPropagation(); onReply(); }}
+            className="shrink-0 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-semibold text-white hover:opacity-90">Reply</button>
+        )}
+      </div>
+      {open && (
+        <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
+          {email.body || "(no text)"}
         </div>
       )}
     </div>
