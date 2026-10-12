@@ -1707,6 +1707,35 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // open task under the currently open client/project.
   // listId: just that list (Derek, 2026-10-06: "copy for Claude for these
   // lists as well, so it's only the list"), from the list's ⋮ menu.
+  // Only the tasks picked (Derek, 2026-10-12: "a Claude button in the bulk
+  // bar so it only copies those tasks to be completed").
+  const BULK_CTL = "h-9 rounded-[5px] border bg-background px-2.5 text-[16px] outline-none hover:bg-surface";
+  const copySelectedForClaude = async () => {
+    const picked = [...selectedTaskIds].map((id) => tasks.find((t) => t.id === id)).filter((t): t is Task => !!t);
+    if (!picked.length) return;
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://clickuptasks.vercel.app";
+    const brief = [
+      `Complete these ${picked.length} ${picked.length === 1 ? "task" : "tasks"} from ClickUpTasks, one at a time. For each, read it with get_task first.`,
+      ``,
+      ...picked.map((t, i) => {
+        const st = currentStepLine(t.subtasks);
+        const desc = htmlToText(t.description ?? "").replace(/\s+/g, " ").trim();
+        return [
+          `${i + 1}. ${t.title} [${t.id}]`,
+          `   ${[clientById(t.clientId)?.name, projectById(t.projectId)?.name].filter(Boolean).join(" · ")} · ${STATUS_META[t.status].label}${t.due ? ` · Due ${t.due}` : ""}${t.assigneeId ? ` · On ${userById(t.assigneeId)?.name ?? t.assigneeId}` : ""}`,
+          st ? `   Now: ${st}` : "",
+          desc ? `   ${desc.slice(0, 300)}${desc.length > 300 ? "…" : ""}` : "",
+          `   ${origin}/?task=${t.id}`,
+        ].filter(Boolean).join("\n");
+      }),
+      ``,
+      STEP_TOOLS,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(brief);
+      pushToast(`Copied ${picked.length} ${picked.length === 1 ? "task" : "tasks"} for Claude`);
+    } catch { pushToast("Couldn't copy to the clipboard."); }
+  };
   const copyClientForClaude = async (listId?: string) => {
     const client = clientById(activeClient);
     if (!client) return;
@@ -2136,6 +2165,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The pull direction went too (api/ghl/import-tasks, deleted 2026-09-29).
   // Task.ghlTaskId stays on the model: tasks imported before then still carry
   // it, and the GoHighLevel webhook and the MCP status tool match on it.
+  // Esc lets go of a selection, when nothing else is open to close first.
+  useEffect(() => {
+    if (!selectedTaskIds.size || openTaskId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) clearSelection(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedTaskIds.size, openTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
   const { toggleSub, addSub, deleteSub, renameSub, patchSub, toggleLabel, delegateTask, bulkDelegate } = useChecklist({ tasks, update, me, setTasks, notify, setConfirmDialog, pushToast, tasksRef, selectedTaskIds, setBulkDelegateOpen, clearSelection });
   useEffect(() => { toggleSubRef.current = toggleSub; });
   const lastUsedClientId = (): string | null => {
@@ -3217,9 +3253,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </main>
 
       {selectedTaskIds.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-xl border bg-surface px-3 py-2 shadow-xl">
-          <span className="text-[15px] font-medium">{selectedTaskIds.size} selected</span>
-          <select defaultValue="" onChange={(e) => {
+        // One tidy row (Derek, 2026-10-12: "how can we improve the bulk bar"):
+        // how many and Clear, then what to change, then Claude, then Delete
+        // on its own at the end. Every control the same height and corners.
+        <div role="toolbar" aria-label="Change the selected tasks" className="fixed bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center gap-2 rounded-[5px] border bg-surface px-3 py-2 text-[16px] shadow-xl">
+          <span className="font-semibold tabular-nums">{selectedTaskIds.size} selected</span>
+          <button onClick={clearSelection} title="Unselect them (Esc)" aria-label="Clear the selection" className="h-9 rounded-[5px] px-2 text-muted hover:bg-background hover:text-foreground">✕</button>
+          <span aria-hidden className="mx-1 h-6 w-px bg-[var(--border)]" />
+          <select aria-label="Assign to" defaultValue="" onChange={(e) => {
             const v = e.target.value;
             // "waiting" is a task flag, not a real member id. It never touches
             // the assignee, and assigning never clears it: a waiting task
@@ -3228,19 +3269,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             else if (v === "unassigned") bulkPatch({ assigneeId: null }, "Unassign");
             else if (v) bulkPatch({ assigneeId: v }, `Assign to ${users.find((u) => u.id === v)?.name ?? "user"}`);
             e.target.value = "";
-          }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Assignee…</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set status to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Status…</option>{pickableStatuses().map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select>
-          <select defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className="rounded-md border bg-background px-2 py-1 text-[15px] outline-none"><option value="" disabled>Priority…</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select>
-          {/* The same quick picks as every other date (Derek, 2026-10-09: "quick
-              today, tomorrow, Monday, etc like the others"). */}
-          <InlineDate value={null} onChange={(d) => { if (d) bulkPatch({ due: d }, `Set due date to ${friendlyDue(d)}`); }} emptyLabel="Due date…"
-            className="rounded-md border bg-background px-2 py-1 text-[15px] text-foreground" />
-          <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className="rounded-md border bg-background px-2 py-1 text-[15px] text-muted hover:bg-danger-soft hover:text-danger">Remove dates</button>
-          <div className="w-40">
+          }} className={BULK_CTL}><option value="" disabled>Assign</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+          <select aria-label="Stage" defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ status: e.target.value as TaskStatus }, `Set stage to ${STATUS_META[e.target.value as TaskStatus]?.label ?? e.target.value}`); e.target.value = ""; }} className={BULK_CTL}><option value="" disabled>Stage</option>{pickableStatuses().map((st) => <option key={st} value={st}>{STATUS_META[st].label}</option>)}</select>
+          <select aria-label="Priority" defaultValue="" onChange={(e) => { if (e.target.value) bulkPatch({ priority: e.target.value as Priority }, `Set priority to ${PRIORITY_META[e.target.value as Priority]?.label ?? e.target.value}`); e.target.value = ""; }} className={BULK_CTL}><option value="" disabled>Priority</option>{PRIORITY_ORDER.filter(isManuallyAssignable).map((pr) => <option key={pr} value={pr}>{PRIORITY_META[pr].label}</option>)}</select>
+          {/* The same quick picks as every other date; No date clears them. */}
+          <InlineDate value={null} onChange={(d) => { if (d) bulkPatch({ due: d }, `Set due date to ${friendlyDue(d)}`); }} emptyLabel="Due date"
+            className={`${BULK_CTL} inline-flex items-center text-foreground`} />
+          <button onClick={() => bulkPatch({ due: null }, "Removed due date")} title="Clear the due date on every selected task" className={`${BULK_CTL} text-muted hover:text-danger`}>No date</button>
+          <div className="w-44">
             <SearchableSelect value="" onChange={(v) => v && bulkMoveTo(v)}
               options={moveTargets}
               placeholder="Move to…" searchPlaceholder="Search clients and projects…"
-              className="rounded-md border bg-background px-2 py-1 text-[15px]" />
+              className={BULK_CTL} />
           </div>
           {selectedTaskIds.size === 2 && (() => {
             // The older task is the "keeper" (target); the newer one merges
@@ -3249,16 +3289,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             if (!a || !b) return null;
             const [target, source] = a.createdAt <= b.createdAt ? [a, b] : [b, a];
             return (
-              <button onClick={() => requestMerge(source.id, target.id)} title={`Merge "${source.title}" into "${target.title}"`}
-                className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Merge</button>
+              <button onClick={() => requestMerge(source.id, target.id)} title={`Merge "${source.title}" into "${target.title}"`} className={BULK_CTL}>Merge</button>
             );
           })()}
           {users.some((u) => u.id !== me.id) && (
-            <button onClick={() => setBulkDelegateOpen(true)} title={`Hand all ${selectedTaskIds.size} to one person, once`}
-              className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Delegate</button>
+            <button onClick={() => setBulkDelegateOpen(true)} title={`Hand all ${selectedTaskIds.size} to one person, once`} className={BULK_CTL}>Delegate</button>
           )}
-          <button onClick={bulkDelete} title="Delete selected tasks" className="rounded-md border border-danger/40 px-2.5 py-1 text-[15px] font-medium text-danger hover:bg-danger/10">Delete</button>
-          <button onClick={clearSelection} className="rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-background">Clear</button>
+          <button onClick={() => void copySelectedForClaude()} title="Copy just these tasks for Claude to complete"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[5px] bg-accent px-3 font-semibold text-white hover:opacity-90"><span aria-hidden>✳</span> Copy for Claude</button>
+          <span aria-hidden className="mx-1 h-6 w-px bg-[var(--border)]" />
+          <button onClick={bulkDelete} title="Delete selected tasks" className="h-9 rounded-[5px] px-3 font-semibold text-danger hover:bg-danger/10">Delete</button>
         </div>
       )}
 
