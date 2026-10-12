@@ -15,6 +15,7 @@ export default function AddClientModal({
   existingIds,
   onAdd,
   onAddRemote,
+  onOpenClient,
   onClose,
 }: {
   subAccounts: Client[];
@@ -23,6 +24,8 @@ export default function AddClientModal({
   onAdd: (contact: Contact) => void;
   /** Adds someone found in GoHighLevel who isn't in the local contacts table yet. */
   onAddRemote: (hit: GhlContactHit) => void;
+  /** An already added client: open it here, not in GoHighLevel (Derek, 2026-10-12). */
+  onOpenClient: (clientId: string) => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -99,12 +102,14 @@ export default function AddClientModal({
               <div key={c.id} className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-background">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: subColor(c.clientId) }} />
                 <div className="min-w-0 flex-1">
-                  {ghlUrl(c)
+                  {added
+                    ? <button onClick={() => onOpenClient("cl_" + c.id)} title="Open this client" className="block max-w-full truncate text-left text-[15px] font-medium text-accent hover:underline">{c.name}</button>
+                    : ghlUrl(c)
                     ? <a href={ghlUrl(c)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="block truncate text-[15px] font-medium text-accent hover:underline">{c.name}</a>
                     : <div className="truncate text-[15px] font-medium">{c.name}</div>}
                   <div className="truncate text-[13px] text-muted">{c.company ? `${c.company} · ` : ""}{c.email || "no email"} · {subName(c.clientId)}</div>
                 </div>
-                <button disabled={added} onClick={() => onAdd(c)} className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">{added ? "Added" : "Add"}</button>
+                <button onClick={() => (added ? onOpenClient("cl_" + c.id) : onAdd(c))} className={`shrink-0 rounded-md px-2.5 py-1 text-[15px] font-medium ${added ? "border text-foreground hover:bg-background" : "bg-accent text-white"}`}>{added ? "Open" : "Add"}</button>
               </div>
             );
           })}
@@ -119,13 +124,15 @@ export default function AddClientModal({
                   <div key={h.ghlContactId} className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-background">
                     <span className="h-2 w-2 shrink-0 rounded-full bg-border" />
                     <div className="min-w-0 flex-1">
-                      <a href={`https://app.gohighlevel.com/v2/location/${h.locationId}/contacts/detail/${h.ghlContactId}`}
+                      {added
+                        ? <button onClick={() => onOpenClient(`cl_ct_ghl_${h.ghlContactId}`)} title="Open this client" className="block max-w-full truncate text-left text-[15px] font-medium text-accent hover:underline">{h.name}</button>
+                        : <a href={`https://app.gohighlevel.com/v2/location/${h.locationId}/contacts/detail/${h.ghlContactId}`}
                         target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel"
-                        className="block truncate text-[15px] font-medium text-accent hover:underline">{h.name}</a>
+                        className="block truncate text-[15px] font-medium text-accent hover:underline">{h.name}</a>}
                       <div className="truncate text-[13px] text-muted">{h.company ? `${h.company} · ` : ""}{h.email || h.phone || "no email"}</div>
                     </div>
-                    <button disabled={added} onClick={() => onAddRemote(h)}
-                      className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-40">{added ? "Added" : "Add"}</button>
+                    <button onClick={() => (added ? onOpenClient(`cl_ct_ghl_${h.ghlContactId}`) : onAddRemote(h))}
+                      className={`shrink-0 rounded-md px-2.5 py-1 text-[15px] font-medium ${added ? "border text-foreground hover:bg-background" : "bg-accent text-white"}`}>{added ? "Open" : "Add"}</button>
                   </div>
                 );
               })}

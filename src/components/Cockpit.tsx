@@ -3418,7 +3418,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
       )}
 
-      {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onClose={() => setAddClientOpen(false)} />}
+      {addClientOpen && <AddClientModal subAccounts={subAccounts} contacts={contacts} existingIds={new Set(clients.map((c) => c.id))} onAdd={addClientContact} onAddRemote={addRemoteContact} onOpenClient={(id) => { setAddClientOpen(false); openClientList(id); }} onClose={() => setAddClientOpen(false)} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {promptDialog && <PromptModal {...promptDialog} onCancel={() => setPromptDialog(null)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
