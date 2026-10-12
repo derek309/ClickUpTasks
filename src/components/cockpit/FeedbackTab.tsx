@@ -5,14 +5,16 @@
 // "Team feedback on ClickUpTasks" in CUL Tasks, with the task or page they
 // were on. Drag the tab up, down or to the other edge if it is in the way (the
 // spot is remembered per browser); its × hides it until the page reloads.
-import { useRef, useState } from "react";
+// A screenshot goes with it (Derek, 2026-10-12): 📸 takes one of the page,
+// or paste or drop an image in.
+import { useEffect, useRef, useState } from "react";
 import { usePersisted } from "@/lib/usePersisted";
 
 export const FEEDBACK_TASK_ID = "t_yhveqva5";
 
 export function FeedbackTab({ where, onSend }: {
   where: string;
-  onSend: (body: string) => void;
+  onSend: (body: string, images: File[]) => void;
 }) {
   const [savedTop, saveTop] = usePersisted("feedbackTabTop", 60, (v) => typeof v === "number" && v > 0 && v < 100);
   const [side, saveSide] = usePersisted<"left" | "right">("feedbackTabSide", "right", (v) => v === "left" || v === "right");
@@ -21,6 +23,31 @@ export function FeedbackTab({ where, onSend }: {
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [text, setText] = useState("");
+  const [shots, setShots] = useState<{ file: File; url: string }[]>([]);
+  const [capturing, setCapturing] = useState(false);
+  const addShot = (file: File) => setShots((s) => [...s, { file, url: URL.createObjectURL(file) }].slice(0, 5));
+  useEffect(() => () => shots.forEach((x) => URL.revokeObjectURL(x.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The page as it looks, without this box in the way: the browser asks
+  // which tab or screen once, one frame is kept, sharing stops at once.
+  const takeScreenshot = async () => {
+    const md = navigator.mediaDevices as MediaDevices & { getDisplayMedia?: (o: object) => Promise<MediaStream> };
+    if (!md?.getDisplayMedia) return;
+    setCapturing(true);
+    try {
+      const stream = await md.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" });
+      const video = document.createElement("video");
+      video.srcObject = stream; video.muted = true;
+      await video.play();
+      await new Promise((r) => setTimeout(r, 300));
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext("2d")?.drawImage(video, 0, 0);
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+      if (blob) addShot(new File([blob], `screenshot-${Date.now()}.png`, { type: "image/png" }));
+    } catch { /* cancelled */ }
+    finally { setCapturing(false); }
+  };
   const drag = useRef<{ x: number; y: number; top: number; moved: boolean } | null>(null);
 
   const topAt = (d: { y: number; top: number }, y: number) => Math.min(92, Math.max(8, d.top + ((y - d.y) / window.innerHeight) * 100));
@@ -45,8 +72,9 @@ export function FeedbackTab({ where, onSend }: {
   };
   const send = () => {
     if (!text.trim()) return;
-    onSend(`${text.trim()}\n\n(From the Feedback tab, on ${where})`);
-    setText(""); setOpen(false);
+    onSend(`${text.trim()}\n\n(From the Feedback tab, on ${where})`, shots.map((x) => x.file));
+    shots.forEach((x) => URL.revokeObjectURL(x.url));
+    setText(""); setShots([]); setOpen(false);
   };
 
   if (hidden) return null;
@@ -55,18 +83,33 @@ export function FeedbackTab({ where, onSend }: {
   const place: React.CSSProperties = dragAt
     ? { left: Math.min(window.innerWidth - 24, Math.max(0, dragAt.x - 11)) }
     : left ? { left: 0 } : { right: 0 };
-  const panel = open && (
+  const panel = open && !capturing && (
     <div className={`${left ? "ml-1" : "mr-1"} w-[300px] max-w-[calc(100vw-48px)] rounded-[5px] border bg-surface p-3 shadow-lg`}>
       <div className="flex items-center justify-between">
         <span className="text-[16px] font-semibold">Feedback</span>
         <button onClick={() => setOpen(false)} aria-label="Close feedback" className="rounded px-1.5 text-[16px] text-muted hover:bg-background">×</button>
       </div>
       <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={4}
+        onPaste={(e) => { const f = [...e.clipboardData.files].filter((x) => x.type.startsWith("image/")); if (f.length) { e.preventDefault(); f.forEach(addShot); } }}
+        onDrop={(e) => { const f = [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/")); if (f.length) { e.preventDefault(); f.forEach(addShot); } }}
         onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); }}
         placeholder="What's working, what's broken, what you'd change…"
         className="mt-2 w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+      {shots.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {shots.map((x, i) => (
+            <span key={x.url} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={x.url} alt={`Screenshot ${i + 1}`} className="h-14 w-20 rounded-[5px] border object-cover" />
+              <button onClick={() => { URL.revokeObjectURL(x.url); setShots((s) => s.filter((y) => y.url !== x.url)); }} aria-label="Remove screenshot"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-[12px] text-[color:var(--surface)]">×</button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-1 truncate text-[16px] text-muted">On {where}</div>
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <button onClick={() => void takeScreenshot()} title="Take a screenshot of this page (or paste one)" className="rounded-md border px-2.5 py-1.5 text-[16px] font-medium hover:bg-background">📸 Screenshot</button>
         <button onClick={send} disabled={!text.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Send</button>
       </div>
     </div>

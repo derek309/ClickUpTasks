@@ -3629,10 +3629,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         </div>
       )}
       <FeedbackTab where={openTask ? `the task "${openTask.title}" (${openTask.id})` : settingsView ? "Settings" : inboxView ? "the Inbox" : myWork ? "My work" : "the task list"}
-        onSend={(body) => {
+        onSend={async (body, images) => {
           // Straight to the database: the feedback task may not be in this
           // teammate's loaded tasks, so addComment (which needs it) won't do.
-          appendCommentDb(FEEDBACK_TASK_ID, { id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString() });
+          // Screenshots ride along as the comment's pictures.
+          const attachments = (await Promise.all(images.map((f) => uploadOneImage("comments", f)))).filter((a): a is Attachment => !!a);
+          appendCommentDb(FEEDBACK_TASK_ID, { id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), ...(attachments.length ? { attachments } : {}) });
           if (me.id !== "u_derek") notify("u_derek", `${me.name} sent feedback on ClickUpTasks`, FEEDBACK_TASK_ID, { kind: "message" });
           pushToast("Thanks, feedback sent");
         }} />
