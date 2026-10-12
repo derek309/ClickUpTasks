@@ -3645,7 +3645,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           if (me.id !== "u_derek") notify("u_derek", `${me.name} sent feedback on ClickUpTasks`, FEEDBACK_TASK_ID, { kind: "message" });
           pushToast("Thanks, feedback sent");
         }} />
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2">
+      {/* Above every window (reviews and emails are z-100, pictures z-110), so a
+          message about what you just did there is never hidden behind it. */}
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[120] flex -translate-x-1/2 flex-col items-center gap-2">
         {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>
     </div>
