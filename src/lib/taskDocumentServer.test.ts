@@ -64,6 +64,7 @@ vi.mock("./taskDocumentFiles", () => ({
   docVersionFile: async () => null, sharedVersionFiles: async () => [], readPageFile: async () => null,
   storePageFile: async () => ({ ok: false, status: 500, error: "not in this test" }), discardVersionFile: async () => {},
   docComments: async () => docCommentRows,
+  resolveOpenComments: async () => undefined,
 }));
 
 const { resolveDocToken, clientPublish } = await import("./taskDocumentServer");

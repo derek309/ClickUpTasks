@@ -32,7 +32,7 @@ function builder(table: string) {
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 const server = vi.hoisted(() => ({ liveDocument: vi.fn(), linkState: vi.fn(), mintDocLink: vi.fn(), setWorkingFile: vi.fn(), teamSend: vi.fn(), appendTaskEvent: vi.fn() }));
 vi.mock("./taskDocumentServer", () => ({ ...server, CHANGED_MEANWHILE: "Someone else changed this review at the same moment. Try again." }));
-const files = vi.hoisted(() => ({ docVersionFile: vi.fn(), recordCheckpoint: vi.fn(), removeVersionFile: vi.fn(), sharedVersionFiles: vi.fn() }));
+const files = vi.hoisted(() => ({ docVersionFile: vi.fn(), recordCheckpoint: vi.fn(), removeVersionFile: vi.fn(), sharedVersionFiles: vi.fn(), resolveOpenComments: vi.fn(async () => undefined) }));
 vi.mock("./taskDocumentFiles", () => files);
 const autoName = vi.hoisted(() => ({ nameReviewIfDefault: vi.fn() }));
 vi.mock("./reviewAutoName", () => autoName);
@@ -84,6 +84,8 @@ describe("setReviewStage", () => {
     expect(typeof calls[0].payload.approved_at).toBe("string");
     // And on the task's own record, so the Finished feed can find it later.
     expect(server.appendTaskEvent).toHaveBeenCalledWith("t_1", "approved the client document for the client (version 3)", "u_claude");
+    // Its open comments close with it (Derek, 2026-10-12).
+    expect(files.resolveOpenComments).toHaveBeenCalledWith("tdoc_1", "the approval");
   });
 
   it("leaves the client's own approval alone when the team picks Approved after them", async () => {

@@ -577,6 +577,14 @@ export async function postDocComment(documentId: string, rawBody: unknown, actor
 }
 
 /** The thread, oldest first. */
+/** An approval closes the review's open comments (Derek, 2026-10-12: "resolve
+ *  open comments when approved"), marked as resolved by it. */
+export async function resolveOpenComments(documentId: string, byLabel: string): Promise<void> {
+  await supabaseAdmin.from("task_document_comments")
+    .update({ completed_at: new Date().toISOString(), completed_by_label: byLabel })
+    .eq("document_id", documentId).is("completed_at", null);
+}
+
 export async function docComments(documentId: string): Promise<DocComment[]> {
   const { data } = await supabaseAdmin.from("task_document_comments")
     .select(COMMENT_COLUMNS)

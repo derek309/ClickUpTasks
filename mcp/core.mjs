@@ -25,7 +25,8 @@ const WORKING_RULES = `ClickUpTasks is the team's task manager. When you WORK on
    - "waiting" when it's waiting on the client,
    - leave it "in_progress" if you're stopping partway; say so in the comment.
 4. A task's checklist is its STEPS, in order; get_task marks the current one. Tick a step you finished (check_item), which starts the next step the way the app does, and tick a step's to-dos as you finish them (check_todo). Add steps you discovered (add_checklist_items) rather than listing them only in a comment.
-5. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
+5. Review comments you deal with get resolved, always: pass their ids as resolve_comments on the new version (write_document, add_review_version), or update_review_comment with done, or check_todo for the step's to-do it came from. Leave open only the ones you did not finish, and say why in your Done comment.
+6. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
 
 Keep comments short and plain, written for a teammate skimming the task later. Never paste secrets, keys or passwords into a comment.`;
 
@@ -1074,7 +1075,7 @@ export function createServer(opts = {}) {
     // Comments the new version answers can be resolved with it (Derek,
     // 2026-10-12): ids from get_review, or "all" open ones.
     const RESOLVE = z.union([z.literal("all"), z.array(z.string())]).optional()
-      .describe('comments this version answers, marked done after it is saved: their ids from get_review, or "all" for every open comment. Leave out to keep them open.');
+      .describe('the comments this version deals with, marked done after it is saved: their ids from get_review, or "all" when it deals with every open one. Always pass the ones you finished; leave out only those you did not.');
     const withResolved = async (out, task_id, kind, which) => which ? `${out}\n${await services.resolveComments(task_id, kind, which)}` : out;
     const writeDocument = async ({ task_id, body, title, resolve_comments }) => {
       const html = docTextToHtml(body);

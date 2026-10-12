@@ -15,6 +15,7 @@
 // Every client write goes through clientPublish, and every publish goes through
 // the database function, which locks the document row and refuses a version
 // built on stale text. Nothing here writes document data onto the tasks row.
+import { resolveOpenComments } from "./taskDocumentFiles";
 import { stepsOnReviewApproved, stepsOnReviewChanges } from "./stepsServer";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -358,7 +359,10 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   await clientAnsweredOnTask(scope.taskId, approved ? `approved:${scope.kind}` : "changes");
   // The steps move with the answer, whether or not anyone has the task open.
   // Keyed on the document's own version, as the task page keys them, so the two never both add one.
-  if (approved) await stepsOnReviewApproved(scope.taskId, scope.kind, version, true).catch(() => false);
+  if (approved) {
+    await resolveOpenComments(scope.documentId, "the approval").catch(() => undefined);
+    await stepsOnReviewApproved(scope.taskId, scope.kind, version, true).catch(() => false);
+  }
   else await stepsOnReviewChanges(scope.taskId, scope.kind, scope.documentId, version).catch(() => false);
 
   // Named by the review, so a task's document, image review and HTML review tell apart in an inbox.

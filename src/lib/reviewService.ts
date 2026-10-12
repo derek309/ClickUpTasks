@@ -3,6 +3,7 @@
 // the actor from the signed in teammate (teamActor); Claude over MCP acts as its own
 // member (mcpReviewServices.ts). So every rule lives here once: one live review per
 // task and kind, the approval lock, versions, the 30 day restore and sending.
+import { resolveOpenComments } from "./taskDocumentFiles";
 import { stepsOnReviewApproved, stepsOnReviewChanges, stepsOnReviewSent } from "./stepsServer";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
@@ -81,7 +82,10 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
   // The steps follow the stage, whether or not anyone has the task open.
   if (done.ok) {
     const v = (doc.version as number) ?? 0;
-    if (approving) await stepsOnReviewApproved(taskId, kind, v, false).catch(() => false);
+    if (approving) {
+      await resolveOpenComments(doc.id as string, "the approval").catch(() => undefined);
+      await stepsOnReviewApproved(taskId, kind, v, false).catch(() => false);
+    }
     else if (stage === "client_submitted") await stepsOnReviewChanges(taskId, kind, doc.id as string, v).catch(() => false);
     else if (stage === "with_client") await stepsOnReviewSent(taskId, kind, Number((doc as Row).reminder_every_days ?? 1)).catch(() => false);
   }
