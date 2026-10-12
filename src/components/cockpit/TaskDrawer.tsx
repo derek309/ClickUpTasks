@@ -2641,7 +2641,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           follows the sidebar; below md the sidebar is an overlay, so the
           drawer is full width. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
-        className={`${full ? "fixed inset-0 z-50 flex flex-col bg-surface" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
+        className={`${full ? "fixed inset-y-0 right-0 left-0 z-50 flex flex-col border-l bg-surface md:left-[var(--drawer-left,0px)]" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
         <div className="hidden sm:block">{slideOver && !full ? slideHeader : headerBar}</div>
 
