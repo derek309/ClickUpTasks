@@ -3,6 +3,7 @@
 // The task detail window (sidebar or full-page "document" view).
 import { reviewTone } from "@/lib/reviewTone";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
@@ -2074,6 +2075,45 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       )}
     </div>
   );
+  // Right after Send (Derek, 2026-10-12: "ok, what's next, here's my
+  // suggestion and dates, approve or change"): the step the send just made,
+  // as a sentence to say yes to or change. Closing keeps it as it is.
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string } | null>(null);
+  const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
+  const closeSentNext = () => setSentNext(null);
+  // Escape closes this box first, not the task behind it.
+  useEscapeToClose(closeSentNext, !!sentStep);
+  const sentNextPanel = sentStep && typeof document !== "undefined" ? createPortal(
+    <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
+      <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
+        className="w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
+        <div className="text-[16px] font-semibold text-success">✓ Sent to {firstName}.</div>
+        <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
+        <input autoFocus value={sentStep.title} onChange={(e) => onRenameSub(sentStep.id, e.target.value)} aria-label="Next step"
+          className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none hover:bg-background focus:bg-background" />
+        <div className="mt-1 text-[17px] leading-snug">
+          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META.waiting.dot }} />Waiting
+          {!sentStep.onClient && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
+          , follow up{" "}
+          <span className="inline-block">
+            <InlineDate value={sentStep.due ?? null} formatValue={formatDue} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
+              className={`${word} rounded hover:bg-background`}
+              onChange={(d) => { if (!d) return; onPatchSub(sentStep.id, { due: d }); onPatch({ followUpAt: d, ...(task.due && task.due < d ? { due: d } : {}) }); }} />
+          </span>.
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button onClick={closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Looks good</button>
+          <ActionMenu label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
+            items={[
+              // Instead of the suggestion: it comes off, the pick goes on.
+              ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== sentStep.id) }); closeSentNext(); o.onPick(); } })),
+              { label: "The task is finished", onClick: () => { onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== sentStep.id), status: "done" }); closeSentNext(); pushToast("Task done"); } },
+            ]} />
+          <span className="ml-auto text-[16px] text-muted">Enter to keep it</span>
+        </div>
+      </div>
+    </div>, document.body) : null;
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
@@ -2103,6 +2143,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const list = made?.map((x) => (x.addedFor === `sent:${activeStep.id}` ? { ...x, emailedAt: sentAt } : x));
           if (list) {
             onPatch({ subtasks: list, status: "waiting", followUpAt: due });
+            const made2 = list.find((x) => x.addedFor === `sent:${activeStep.id}`);
+            if (made2) setSentNext({ taskId: task.id, stepId: made2.id });
             return;
           }
         }
@@ -2123,6 +2165,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             if (openStep) setNextStepDone(openStep.id, true);
             const status = statusForStep(task.status, "waiting");
             onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
+            const checkIn = list.find((x) => x.addedFor === `checkin:${sentFrom.id}`);
+            if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id });
             setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
             return;
           }
@@ -2841,6 +2885,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onTodoDone={(t) => { const k = reviewOnStep(ps); if (k && t.commentId) void docApi(task.id, k, "/comments", { method: "PATCH", body: JSON.stringify({ commentId: t.commentId, done: true }) }); }} />
           );
         })()}
+        {sentNextPanel}
         <ActionDock
           task={task} client={client} contact={linkedContactInfo ?? null} actions={actions} messages={messages ?? undefined}
           me={userById(meId) ?? null} users={users}
