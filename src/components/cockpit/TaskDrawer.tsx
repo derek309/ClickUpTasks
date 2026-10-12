@@ -1041,7 +1041,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The next step starts: the status follows its stage, and it becomes the
   // follow up when it has a date or is a teammate's handoff. With no step
   // left, "Done. What happens next?" asks.
-  const advanceFrom = (doneId: string) => {
+  // The step the plan moves to (or the "what's next?" it adds), for the box
+  // that asks right after (Derek, 2026-10-12).
+  const advanceFrom = (doneId: string): string | null => {
     // The latest list: completeStep may have just put the email on the next
     // step, and a stale copy would write its holds back without it (audit).
     const latest = taskRef.current.subtasks;
@@ -1050,8 +1052,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // With steps, the plan asks with a step of its own, current until the
       // task is finished (Derek, 2026-10-12).
       const asked = steps.length > 0 ? addWhatsNextStep(latest, doneId, () => newId("s_")) : null;
-      if (asked) { onPatch({ subtasks: asked }); return; }
-      setAskNext(task.id); setNextDraft(""); return;
+      if (asked) { onPatch({ subtasks: asked }); return asked.find((x) => x.addedFor === `next:${doneId}`)?.id ?? null; }
+      setAskNext(task.id); setNextDraft(""); return null;
     }
     // When it started, so its page shows what is said from here on.
     if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
@@ -1071,6 +1073,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The plan reaching a teammate's step dates the task to it, as handing it over does.
     const teammates = isHandoffStep(next, task.assigneeId) ? handoffDates(next.due) : {};
     if (status || Object.keys(teammates).length) onPatch({ ...(status ? { status } : {}), ...teammates });
+    return next.id;
   };
   // Mark done on the current step, or its tick: one action, not two.
   // The "changes are done" email takes the task's draft slot; a draft already
@@ -1154,7 +1157,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onToggleSub(sid);
     onPatchSub(sid, { doneAt: new Date().toISOString(), outcome: "Done" });
     setAutoDone(null);
-    advanceFrom(sid);
+    // Ticked done: what's next is asked at once, with the plan's next step
+    // or a blank to name one (Derek, 2026-10-12: "a way to create the next step").
+    const nextId = advanceFrom(sid);
+    if (nextId && sub) setSentNext({ taskId: task.id, stepId: nextId, done: sub.title });
   };
   // The current step's date is the follow up's: one date, written to both.
   // The task's follow up date, managed by the task (Derek, 2026-10-11), apart
@@ -2176,14 +2182,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // here's my suggestion and dates, approve or change"; "a pop up marked
   // Approved"): the step it made or started, as a sentence to say yes to or
   // change. Closing keeps it as it is.
-  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string } | null>(null);
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
   // Escape closes this box first, not the task behind it.
   useEscapeToClose(closeSentNext, !!sentStep);
   // The suggestion comes off: a check in is removed; an approval keeps its
   // record, done, without the question.
-  const dropSuggestion = (st: Subtask) => taskRef.current.subtasks.flatMap((x) => (x.id !== st.id ? [x]
+  const dropSuggestion = (st: Subtask) => sentNext?.done && !asksWhatsNext(st) && st.title
+    // After a tick the suggestion is a step already in the plan: it stays.
+    ? taskRef.current.subtasks
+    : taskRef.current.subtasks.flatMap((x) => (x.id !== st.id ? [x]
     : sentNext?.approved && x.addedFor?.startsWith("ok:") ? [{ ...x, title: x.title.replace(/: what's next\?$/, ""), done: true, doneAt: x.doneAt ?? new Date().toISOString() }] : []));
   // Telling the client their approval landed, drafted on the step to read and send.
   const emailApproved = (st: Subtask, name: string) => {
@@ -2197,13 +2206,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const sentNextPanel = sentStep && typeof document !== "undefined" ? (() => {
     const stg = stepStage(sentStep, task.assigneeId);
-    const asking = asksWhatsNext(sentStep);
+    const asking = asksWhatsNext(sentStep) || !sentStep.title;
     return createPortal(
     <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
       <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
         className="w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
-        <div className="text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : `✓ Sent to ${firstName}.`}</div>
+        <div className="text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}` : `✓ Sent to ${firstName}.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
         <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
           onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
@@ -2227,6 +2236,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <ActionMenu label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
             items={[
               // Instead of the suggestion: it comes off, the pick goes on.
+              // After a tick: a new step in front of the plan's next one, named here.
+              !!sentNext?.done && !asking && { label: "Put a new step first", onClick: () => {
+                const id = newId("s_");
+                const list = [...taskRef.current.subtasks];
+                list.splice(list.findIndex((x) => x.id === sentStep.id), 0, { id, title: "", done: false, startedAt: new Date().toISOString(), ...stepOwnerFields() });
+                onPatch({ subtasks: list.map((x) => (x.id === sentStep.id ? { ...x, startedAt: undefined } : x)) });
+                setSentNext((n) => (n ? { ...n, stepId: id } : n));
+              } },
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
               { label: "The task is finished", onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); } },
             ]} />
