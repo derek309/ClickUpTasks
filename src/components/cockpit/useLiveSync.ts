@@ -60,7 +60,20 @@ export function useLiveSync({
         // then overwrites the reply that was never applied locally.
         if (row.updated_by && row.updated_by === meId) return; // server-confirmed own write
         const t = rowToTask(row);
-        setTasks((ts) => (ts.some((x) => x.id === t.id) ? ts.map((x) => (x.id === t.id ? t : x)) : [...ts, t]));
+        // A large column the update didn't touch can be left out of the live
+        // row (Postgres keeps it aside, "TOAST"): the task's steps came through
+        // as none and vanished from screen (Derek, 2026-10-12). What is left
+        // out keeps what was already here.
+        const kept = (x: Task): Task => ({
+          ...t,
+          ...(!("subtasks" in row) ? { subtasks: x.subtasks } : {}),
+          ...(!("attachments" in row) ? { attachments: x.attachments } : {}),
+          ...(!("comments" in row) ? { comments: x.comments } : {}),
+          ...(!("description" in row) ? { description: x.description } : {}),
+          ...(!("draft_email" in row) ? { draftEmail: x.draftEmail } : {}),
+          ...(!("client_response" in row) ? { clientResponse: x.clientResponse } : {}),
+        });
+        setTasks((ts) => (ts.some((x) => x.id === t.id) ? ts.map((x) => (x.id === t.id ? kept(x) : x)) : [...ts, t]));
       },
       onClient: (p) => {
         if (p.eventType === "DELETE") {

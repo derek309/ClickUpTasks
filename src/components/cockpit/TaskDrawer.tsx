@@ -1917,6 +1917,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
+  const [showAllSteps, setShowAllSteps] = useState<string | null>(null);
   const renderPlan = () => (
     <section className="mt-6" aria-labelledby="task-steps">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1967,7 +1968,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="mb-2 h-2 overflow-hidden rounded-[5px] bg-background"><div className="h-full rounded-[5px] bg-accent transition-all" style={{ width: `${progress.pct}%` }} /></div>
       )}
       <ol className="list-none rounded-[5px] border bg-surface shadow-soft">
-        {steps.map(stepRow)}
+        {/* A long plan folds the steps already done above the current one into
+            a line to unfold (Derek, 2026-10-12: "so the page doesn't get too
+            long"); the last one done stays, for where things stand. */}
+        {(() => {
+          const firstOpen = steps.findIndex((x) => !x.done);
+          const cut = firstOpen < 0 ? steps.length : firstOpen;
+          const foldable = steps.length > 6 && cut > 1;
+          const folded = foldable && showAllSteps !== task.id ? cut - 1 : 0;
+          return (<>
+            {folded > 0 && (
+              <li><button onClick={() => setShowAllSteps(task.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-[16px] text-muted hover:bg-background hover:text-foreground">
+                <I.chevron className="h-4 w-4 -rotate-90" /> {folded} earlier {folded === 1 ? "step" : "steps"} done <span className="font-semibold text-accent">Show</span>
+              </button></li>
+            )}
+            {steps.map((x, i) => (i < folded ? null : stepRow(x, i)))}
+            {foldable && showAllSteps === task.id && (
+              <li className="border-t"><button onClick={() => setShowAllSteps(null)} className="w-full px-4 py-2 text-left text-[16px] font-semibold text-accent hover:bg-background">Fold the done steps</button></li>
+            )}
+          </>);
+        })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
         <li className={`flex items-center gap-2 px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>

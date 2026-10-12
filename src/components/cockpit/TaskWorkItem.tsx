@@ -408,7 +408,7 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
             {chip && <span className="shrink-0 rounded-[5px] bg-background px-2 text-[16px] text-muted">{place}</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">
               {/* Said in words, so what it does is plain (Derek, 2026-09-14 redesign). */}
-              <button aria-pressed={done} title={done ? "Open it again" : "Mark it resolved"}
+              <button aria-pressed={done} title={done ? `Resolved${c.completedBy ? ` by ${c.completedBy}` : ""}. Click to open it again` : "Mark it resolved"}
                 onClick={() => void act(c.id, async () => { const ok = await onToggleDone(c.id, !done); if (ok && !done) setJustDone((j) => [...j, c.id]); return ok; })} disabled={busy}
                 className={`whitespace-nowrap rounded-[5px] px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
                 {done ? "Resolved ✓" : "Resolve"}
@@ -452,7 +452,6 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
             <span>{when(c.createdAt)}{c.editedAt ? " · edited" : ""}</span>
             {onReply && <button onClick={() => { setReplyFor(replyFor === c.id ? null : c.id); setReplyText(""); }} className="text-[16px] font-semibold text-accent hover:underline">Reply</button>}
           </p>
-          {done && <p className="text-[16px] font-semibold text-success">✓ Resolved{c.completedBy ? ` by ${c.completedBy}` : ""}</p>}
           {repliesOf(c.id).length > 0 && (
             <ul className="mt-2 space-y-2 border-l-2 pl-3">
               {repliesOf(c.id).map((r) => (
