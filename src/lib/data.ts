@@ -3249,6 +3249,16 @@ export function stepForReview(subtasks: Subtask[], kind: DeliverableKey, ownerId
     ?? (() => { const cur = currentStep(subtasks); return cur && !cur.onClient && !isHandoffStep(cur, ownerId) ? cur : null; })();
 }
 
+/** New steps the app added by itself go on the task's owner (Derek,
+ *  2026-10-12: "default assign it to the task owner"): not the client's own
+ *  waiting step, a client's request, a step someone already has, one a
+ *  teammate added, or a handoff still waiting for its teammate. */
+export function ownNewSteps(before: Subtask[], after: Subtask[], ownerId: string | null): Subtask[] {
+  if (!ownerId) return after;
+  const had = new Set(before.map((x) => x.id));
+  return after.map((x) => (had.has(x.id) || x.onClient || x.fromClient || x.assigneeId || x.addedBy || x.handoff ? x : { ...x, assigneeId: ownerId }));
+}
+
 /** What a finished step hands to the next: its client work still under way
  *  (a document or review not yet approved, instructions, a draft email).
  *  Links and files stay where they were used (Derek, 2026-10-11: "carry over

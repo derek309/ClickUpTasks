@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, holdOnStep, isHandoffStep, planSteps, stepAfter, stepForReview,
+  addApprovalStep, addBusinessDaysIso, addChangesRound, addClientReviewStep, changesStepFor, currentStep, holdOnStep, isHandoffStep, ownNewSteps, planSteps, stepAfter, stepForReview,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -26,8 +26,9 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     if (!row) return false;
     const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", (row as TaskRow).client_id).maybeSingle();
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
-    const next = await change(row as TaskRow, firstName);
-    if (!next) return false;
+    const changed = await change(row as TaskRow, firstName);
+    if (!changed) return false;
+    const next = ownNewSteps((row as TaskRow).subtasks ?? [], changed, (row as TaskRow).assignee_id);
     // A changes step just made: the task's follow up is its due date (Derek, 2026-10-11).
     const before = new Set(((row as TaskRow).subtasks ?? []).map((x) => x.id));
     const made = followUpFromNew ? next.find((x) => !before.has(x.id) && x.stage === "changes_requested" && x.due) : null;

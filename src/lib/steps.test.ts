@@ -334,3 +334,13 @@ describe("a browser save keeps what the server did meanwhile", () => {
     expect(mergeSubtasks([a, b], [{ ...a, title: "Mine" }], remote).map((x) => x.title)).toEqual(["Mine"]);
   });
 });
+
+import { ownNewSteps } from "./data";
+
+describe("new automatic steps go on the task's owner", () => {
+  it("assigns new steps only, never the client's or a handoff", () => {
+    const before = [s("a", "Write")];
+    const after = [s("a", "Write"), s("c", "Changes from Pam"), s("w", "Waiting", { onClient: true }), s("r", "Request", { fromClient: true }), s("h", "Handoff", { handoff: {} })];
+    expect(ownNewSteps(before, after, "u_derek").map((x) => x.assigneeId ?? null)).toEqual([null, "u_derek", null, null, null]);
+  });
+});
