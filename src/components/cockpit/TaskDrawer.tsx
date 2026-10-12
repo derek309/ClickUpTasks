@@ -1395,10 +1395,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {descEditing ? (
         <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
       ) : (
+        // The full width and up to three lines, then Read more (Derek, 2026-10-12).
         <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add a description"} aria-label={hasDescription ? "Description, show all or edit" : "Add a description"}
-          className="-mx-1 flex min-h-8 w-full max-w-[760px] items-center gap-2 rounded-[5px] px-1 text-left text-[16px] text-muted hover:bg-background hover:text-foreground">
-          <span className="min-w-0 flex-1 truncate">{hasDescription ? htmlToText(task.description).replace(/\s+/g, " ").trim() : <span className="text-accent underline decoration-dotted underline-offset-4">Add a description</span>}</span>
-          {hasDescription && <I.chevron className="h-4 w-4 shrink-0 -rotate-90" />}
+          className="-mx-1 block min-h-8 w-full rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted hover:bg-background hover:text-foreground">
+          {hasDescription ? (<>
+            <span className="line-clamp-3 whitespace-pre-line [overflow-wrap:anywhere]">{htmlToText(task.description).trim()}</span>
+            {htmlToText(task.description).trim().length > 240 && <span className="mt-0.5 inline-block font-semibold text-accent">Read more</span>}
+          </>) : <span className="text-accent underline decoration-dotted underline-offset-4">Add a description</span>}
         </button>
       )}
       {descEditing && (
