@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { EMAIL_FORMAT, stripSignOff } from "@/lib/emailStyle";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     "You are drafting a client-facing message on behalf of an agency account manager.",
     "Respond in EXACTLY this format, plain text only — no markdown, no preamble:",
     channel === "email"
-      ? "SUBJECT: <a short, specific subject line>\nBODY: <the email body, friendly and professional, 3-6 short paragraphs or bullet points>"
+      ? `SUBJECT: <a short, specific subject line>\nBODY: <the email body>\n${EMAIL_FORMAT.join("\n")}`
       : "BODY: <the text message, under 300 characters, friendly and concise>",
     "",
     // When the account manager typed an instruction, that steers the message;
@@ -89,11 +90,8 @@ export async function POST(req: NextRequest) {
       ? `The account manager's instruction for this message: "${instruction}"\nWrite the message to accomplish that. Use the context below for real facts — never invent anything not present below.`
       : "Structure the body around two things: what's been completed recently, and what (if anything) we're waiting on from the client. Never invent facts not present below — if there's nothing completed or nothing needed, say so briefly.",
     "",
-    channel === "email"
-      ? (senderFirstName
-        ? `Sign off with the sender's actual first name: "${senderFirstName}" (e.g. "Best,\n${senderFirstName}"). Never use a placeholder title like "Your Account Manager" or "The Team".`
-        : "Sign off with a brief, generic closing — no name is available, so don't invent one.")
-      : null,
+    // No sign off: the signature is added on its own (Derek, 2026-10-12).
+    channel === "email" && senderFirstName ? `You are writing as ${senderFirstName}.` : null,
     "",
     context ? "What this message is about (use it for facts; don't paste it back whole):" : null,
     context || null,
@@ -120,7 +118,8 @@ export async function POST(req: NextRequest) {
     if (!text) return NextResponse.json({ error: "Gemini returned no text." }, { status: 502 });
     const subjectMatch = text.match(/SUBJECT:\s*(.+)/i);
     const bodyMatch = text.match(/BODY:\s*([\s\S]+)/i);
-    return NextResponse.json({ subject: channel === "email" ? (subjectMatch?.[1]?.trim() || undefined) : undefined, body: bodyMatch?.[1]?.trim() || text });
+    const body = (bodyMatch?.[1]?.trim() || text);
+    return NextResponse.json({ subject: channel === "email" ? (subjectMatch?.[1]?.trim() || undefined) : undefined, body: channel === "email" ? stripSignOff(body) : body });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Gemini request failed." }, { status: 502 });
   }

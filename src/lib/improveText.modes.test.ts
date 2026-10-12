@@ -12,7 +12,8 @@ describe("Improve, Shorter and Draft prompts", () => {
   });
   it("puts the task after the conversation and leaves the sign off to the signature", () => {
     const p = draftReplyPrompt({ me: "Derek Fox", them: "James", conversation: "THEM: hi", task: "Title: Homepage" });
-    expect(p).toMatch(/Do not add a sign off/);
+    expect(p).toMatch(/No sign off/);
+    expect(p).toMatch(/end with exactly what we need from them/);
     expect(p.indexOf("THEM: hi")).toBeLessThan(p.indexOf("Title: Homepage"));
   });
 });
@@ -28,5 +29,14 @@ describe("suggest times", async () => {
     const p = proposeTimesPrompt({ me: "Derek", them: "James", conversation: "THEM: can we meet?", times: ["Tue, Oct 6, 9:00 AM"], minutes: 45 });
     expect(p).toMatch(/- Tue, Oct 6, 9:00 AM/);
     expect(p).toMatch(/\[\[LINK\]\]/);
+  });
+});
+
+describe("email sign offs come off", async () => {
+  const { stripSignOff } = await import("./emailStyle");
+  it("drops Thanks and a name at the end, keeps the rest", () => {
+    expect(stripSignOff("Hi Pam,\n\nCan you reply with it by Friday?\n\nThanks,\nDerek")).toBe("Hi Pam,\n\nCan you reply with it by Friday?");
+    expect(stripSignOff("Hi Pam,\n\nBest regards")).toBe("Hi Pam,");
+    expect(stripSignOff("Thanks for the photos. Can you send the logo?")).toBe("Thanks for the photos. Can you send the logo?");
   });
 });

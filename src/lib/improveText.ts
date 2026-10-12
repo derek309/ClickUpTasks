@@ -1,3 +1,4 @@
+import { EMAIL_FORMAT } from "./emailStyle";
 // The prompt and clean up behind Improve with AI and Shorter (api/ai/improve).
 
 export type ImproveMode = "fix" | "shorter";
@@ -36,10 +37,10 @@ export function cleanImproved(out: string): string {
 export function draftReplyPrompt(o: { me: string | null; them: string | null; conversation: string; task: string | null }): string {
   return [
     `Write a reply email${o.me ? ` from ${o.me}` : ""}${o.them ? ` to ${o.them}` : ""}, answering the newest message from them in the conversation below.`,
-    "Sound like a friendly small business owner: plain, warm, short. Two or three short paragraphs at most.",
-    "Start with a short greeting using their first name. Do not add a sign off or a name at the end; the signature is added on its own.",
+    "Sound like a friendly small business owner: plain, warm, short.",
+    ...EMAIL_FORMAT,
     "Use only facts from the conversation and the task. Never invent dates, prices or promises. Where you would need something you don't know, write [ADD: what is needed] for the writer to fill in.",
-    "Never write a web address. Never use em dashes or en dashes.",
+    "Never invent a web address: only use links that appear in the conversation or the task.",
     "Reply with the email text only, paragraphs separated by a blank line: no subject, no quotes, no notes.",
     "",
     "CONVERSATION:",

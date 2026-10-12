@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { stripSignOff } from "@/lib/emailStyle";
 import { requireUser, callerCanSeeTask } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     const json: any = await res.json();
     const out: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!out?.trim()) return NextResponse.json({ error: "The AI returned nothing. Try again." }, { status: 502 });
-    return NextResponse.json({ text: cleanImproved(out), usedTask: !!task });
+    return NextResponse.json({ text: stripSignOff(cleanImproved(out)), usedTask: !!task });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "AI request failed." }, { status: 502 });
   }

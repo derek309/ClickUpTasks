@@ -44,6 +44,10 @@ const stripHtml = (html) => (html || "")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
 const nowIso = () => new Date().toISOString();
+// How every client email is written: word for word src/lib/emailStyle.ts
+// (Derek, 2026-10-12: drafts were long, over explained and signed off).
+const EMAIL_FORMAT = "How to write it: about 60 to 120 words, plain and friendly, no filler or over explaining. A greeting with their first name; one line on why you are writing; only the facts they need, as short bullets when there is more than one; links to anything they should look at; then end with exactly what we need from them, by when if there is a date, and how to get it to us (for example: just reply to this email with it). No sign off and no name at the end, the signature is added on its own. No em or en dashes.";
+const stripSignOff = (text) => String(text).replace(/(\n\s*)+(thanks( again| so much)?|thank you|many thanks|best( regards)?|kind regards|warm regards|regards|cheers|talk soon|warmly|sincerely)[,.!]?\s*(\n+\s*[A-Z][\w.' -]{0,40})?\s*$/i, "").trimEnd();
 // Where the client-facing portal lives. Same shape the web app builds in
 // getClientShareUrl (src/components/Cockpit.tsx): /waiting/<token>.
 const APP_URL = process.env.APP_URL || "https://clickuptasks.vercel.app";
@@ -758,7 +762,7 @@ export function createServer(opts = {}) {
   }
 
   server.tool("draft_message",
-    "Write an email or a text for a teammate to check and send from their Inbox (it appears in Inbox, Drafts, at the top, marked From Claude). Never sends anything. Give either `to` (an email address or phone number) or `client_id` (from list_clients) and the client's contact is used. A text needs someone in GoHighLevel with a phone number. Prefer this over draft_email for messages to clients.",
+    "Write an email or a text for a teammate to check and send from their Inbox (it appears in Inbox, Drafts, at the top, marked From Claude). Never sends anything. Give either `to` (an email address or phone number) or `client_id` (from list_clients) and the client's contact is used. A text needs someone in GoHighLevel with a phone number. Prefer this over draft_email for messages to clients. " + EMAIL_FORMAT,
     {
       channel: z.enum(["email", "text"]),
       to: z.string().optional().describe("email address, or phone number for a text"),
@@ -768,7 +772,8 @@ export function createServer(opts = {}) {
       for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members). Defaults to Derek when you are connected as Claude, else you."),
       replace_id: z.string().optional().describe("a draft id (from list_drafts or an earlier draft_message) this one replaces, for a correction"),
     },
-    async ({ channel, to, client_id, subject, body, for_member, replace_id }) => {
+    async ({ channel, to, client_id, subject, body: rawBody, for_member, replace_id }) => {
+      const body = channel === "email" ? stripSignOff(rawBody) : rawBody;
       const owner = await draftOwner(for_member);
       if (!owner) return { content: [{ type: "text", text: `No teammate "${for_member}" whose Drafts you can use. Call list_members.` }] };
       if (!to && !client_id) return { content: [{ type: "text", text: "Give `to` (an address or number) or `client_id`." }] };
@@ -796,10 +801,11 @@ export function createServer(opts = {}) {
     });
 
   server.tool("draft_email",
-    "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel.",
+    "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel. " + EMAIL_FORMAT + "",
     { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task"),
       step: z.string().optional().describe("a step's id or title to put the draft on; left out, the email gets a step of its own (\"Email <client>: <subject>\") right after the current step, unless the current step is already about emailing them. Finish the current step with check_item afterwards and the email step is next.") },
-    async ({ id, subject, body, replace, step }) => {
+    async ({ id, subject, body: rawBody, replace, step }) => {
+      const body = stripSignOff(rawBody);
       if (!await loadTask(id, "id")) return noTask(id);
       const now = nowIso();
       const draft_email = { subject, body: draftPlainTextToHtml(body), createdAt: now, updatedAt: now };
@@ -923,14 +929,15 @@ export function createServer(opts = {}) {
     });
 
   server.tool("draft_email_reply",
-    "Write a reply to an Inbox conversation (from get_email_thread) for a teammate to check and send. Never sends anything. It goes in their Inbox, Drafts, at the top, marked From Claude, addressed to the person on the other end: an email thread gets an email with \"Re:\" on its subject, a GoHighLevel conversation gets a text. For a Gmail thread it goes to whoever's mailbox the thread is in unless for_member says otherwise.",
+    "Write a reply to an Inbox conversation (from get_email_thread) for a teammate to check and send. Never sends anything. It goes in their Inbox, Drafts, at the top, marked From Claude, addressed to the person on the other end: an email thread gets an email with \"Re:\" on its subject, a GoHighLevel conversation gets a text. For a Gmail thread it goes to whoever's mailbox the thread is in unless for_member says otherwise. " + EMAIL_FORMAT,
     {
       thread: THREAD_INPUT,
       body: z.string().min(1).describe("plain text, paragraphs separated by a blank line"),
       subject: z.string().optional().describe('email only; defaults to "Re: " and the conversation\'s subject'),
       for_member: z.string().optional().describe("whose Inbox it goes in: a member id or first name (list_members)"),
     },
-    async ({ thread, body, subject, for_member }) => {
+    async ({ thread, body: rawBody, subject, for_member }) => {
+      const body = stripSignOff(rawBody);
       const got = await loadThread(thread);
       if (got.error) return got.error;
       const { ref, rows, conv } = got;
