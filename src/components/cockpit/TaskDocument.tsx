@@ -1032,11 +1032,6 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const copyLinkButton = link?.live && link.copyable
     ? <button onClick={() => void copyLink()} disabled={busy !== null} className={quiet}>Copy link</button>
     : null;
-  // Off when it is on, a new one when it is off (admins, as the server
-  // requires); only once it has been sent.
-  const linkToggleButton = !doc.version || !link ? null : link.live
-    ? <button onClick={() => void linkOff()} disabled={busy !== null} className={quiet}>Link off</button>
-    : canAdmin ? <button onClick={() => void linkNew()} disabled={busy !== null} className={quiet}>New link</button> : null;
   // The version the client approved, else the last one sent, else the draft:
   // the one someone scheduling the email should be pasting.
   const codeBody = kind === "doc"
@@ -1071,7 +1066,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}{linkToggleButton}</>}
+    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}</>}
+      // Turning the client's link off or making a new one is rare: in the ⋯ menu.
+      more={!doc.version || !link || busy !== null ? [] : link.live ? [{ label: "Turn the link off", onClick: () => void linkOff() }] : canAdmin ? [{ label: "Make a new link", onClick: () => void linkNew() }] : []}
       onOpen={() => switchView({ full: true })} onDelete={() => void deleteDocument()} />
   );
   const openList = comments.filter((c) => !c.completedAt);

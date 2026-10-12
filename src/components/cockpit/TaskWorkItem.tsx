@@ -16,7 +16,8 @@ import { shortcut } from "@/lib/platform";
 export const quietButton = "rounded-[5px] border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
 export function WorkItemBadge({ label, chip, dot }: { label: string; chip: string; dot: string }) {
-  return <span className="shrink-0 rounded-[5px] px-2.5 py-0.5 text-[16px] font-semibold" style={{ background: chip, color: dot }}>{label}</span>;
+  // Ringed in its own colour, so it still reads on a box washed the same colour.
+  return <span className="shrink-0 rounded-[5px] px-2 py-0.5 text-[15px] font-semibold" style={{ background: chip, color: dot, boxShadow: `inset 0 0 0 1px ${dot}` }}>{label}</span>;
 }
 
 /** The line in the task. Clicking the name opens it too. */
@@ -38,13 +39,15 @@ const ROW_TONE = {
   brief: { box: "border-l-accent", tile: "bg-highlight-soft" },
 } as const;
 
-export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelete, deleteLabel = "Delete", tone, wash }: {
+export function WorkItemRow({ icon, title, badge, meta, actions, more = [], onOpen, onDelete, deleteLabel = "Delete", tone, wash }: {
   icon: string;
   title: string;
   badge?: React.ReactNode;
   meta?: string;
   /** Quiet buttons before Open, like Copy link. */
   actions?: React.ReactNode;
+  /** The rarer actions (Link off), in the ⋯ menu with Delete (Derek, 2026-10-12). */
+  more?: { label: string; onClick: () => void; danger?: boolean }[];
   onOpen: () => void;
   /** Delete from the row (Derek, 2026-10-11). Whoever passes it says how it
    *  comes back: a review goes to its Restore list, a draft has Undo. */
@@ -64,18 +67,23 @@ export function WorkItemRow({ icon, title, badge, meta, actions, onOpen, onDelet
       className="mt-3 flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 rounded-[5px] border bg-surface px-4 py-3 transition hover:border-accent">
       <span className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <span aria-hidden className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[5px] text-[22px] ${colors.tile}`}>{icon}</span>
-        <span className="min-w-0">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate text-[17px] font-semibold">{title}</span>
             {badge}
           </span>
-          {meta && <span className="block truncate text-[16px] text-muted">{meta}</span>}
+          {/* Two lines at most, not cut off mid word. */}
+          {meta && <span className="line-clamp-2 text-[16px] text-muted">{meta}</span>}
         </span>
       </span>
       <span className="flex shrink-0 flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
         {actions}
-        {/* No Open button: the whole box opens it (Derek, 2026-10-11). */}
-        {onDelete && (
+        {/* No Open button: the whole box opens it (Derek, 2026-10-11). The
+            rarer actions and Delete share one ⋯ menu. */}
+        {more.length > 0 ? (
+          <ActionMenu label={<I.dots />} title={`More for ${title}`} triggerClassName="flex h-9 w-9 items-center justify-center rounded-[5px] text-muted transition hover:bg-background hover:text-foreground"
+            items={[...more, onDelete && { label: deleteLabel, onClick: onDelete, danger: true }]} />
+        ) : onDelete && (
           <button onClick={onDelete} title={deleteLabel} aria-label={`${deleteLabel}: ${title}`}
             className="flex h-9 w-9 items-center justify-center rounded-[5px] text-muted transition hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /></button>
         )}
