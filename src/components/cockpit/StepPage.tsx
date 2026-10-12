@@ -380,8 +380,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   {(sub.done || !doneActions) && (
                     <button onClick={sub.done ? onReopen : onMarkDone} aria-pressed={sub.done}
                       title={sub.done ? "Done. Click to reopen this step" : "Mark this step done"} aria-label={sub.done ? "Reopen this step" : "Mark this step done"}
-                      className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "border-2 border-accent text-accent hover:bg-accent hover:text-white"}`}>
-                      <I.check className={`h-4 w-4 ${sub.done ? "" : "opacity-0 group-hover/tick:opacity-100"}`} />
+                      className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "text-accent ring-2 ring-inset ring-accent hover:bg-accent hover:text-white"}`}>
+                      {/* A ring, not a border: globals.css recolours every border. */}
+                      <I.check className={`h-4 w-4 ${sub.done ? "" : "opacity-30 group-hover/tick:opacity-100"}`} />
                     </button>
                   )}
                   <textarea value={sub.title} onChange={(e) => onRename(e.target.value)} rows={1} aria-label="Step"

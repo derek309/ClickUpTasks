@@ -1723,7 +1723,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           ) : isActive ? (
             <span className="group/tick flex h-6 w-6 items-center justify-center rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[st].dot }} />
           ) : (
-            <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 text-accent"><I.check className="h-3.5 w-3.5 opacity-0 group-hover/tick:opacity-100" /></span>
+            <span className="flex h-6 w-6 items-center justify-center rounded-full text-accent ring-2 ring-inset ring-accent/60 group-hover/tick:bg-accent group-hover/tick:text-white"><I.check className="h-3.5 w-3.5 opacity-30 group-hover/tick:opacity-100" /></span>
           );
           return tickable ? (
             <button onClick={() => (sub.done ? onToggleSub(sub.id) : completeStep(sub.id))} aria-pressed={sub.done}
