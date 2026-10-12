@@ -2445,11 +2445,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // as a component defined during render.
   const settingsClient = clientSettingsOpen && activeClient !== "all" ? clientById(activeClient) : null;
   // The Overdue, Waiting and Meeting boxes (Derek, 2026-10-05, mockup C).
-  // Overdue, beside the name (mockup D): open past-due work that isn't waiting
-  // on the client or on hold, oldest first.
-  const clientLate = clientView && clientById(activeClient)
-    ? (scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && t.status !== "on_hold" && !t.waitingOnClient && t.due && t.due < TODAY).sort((x, y) => (x.due ?? "").localeCompare(y.due ?? ""))
-    : [];
   // Not on ClickUpLocal's own projects: messages, waiting and meetings are
   // about a client (Derek, 2026-10-08).
   const needsStrip = clientView && clientTab !== "chat" && activeClient !== WORKSPACE_CLIENT_ID && clientById(activeClient) ? (() => {
@@ -2865,10 +2860,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                     onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)}
                     onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}
-                {clientLate.length > 0 && (
-                  <button onClick={() => setOpenTaskId(clientLate[0].id)} title={`Open the oldest: ${clientLate[0].title}`}
-                    className="rounded-[5px] bg-danger-soft px-2 py-0.5 text-[13px] font-bold text-danger ring-1 ring-danger/30 hover:ring-danger">{clientLate.length} overdue</button>
-                )}
+                {/* No "N overdue" chip here (Derek, 2026-10-12): the list shows what's late. */}
               </h1>
               <div className="hidden items-center gap-1.5 text-[13px] text-muted sm:flex">
                 {/* Breadcrumb back to the Clients directory — only meaningful
