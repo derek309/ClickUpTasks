@@ -1362,3 +1362,17 @@ describe("a teammate's own follow up", () => {
     expect(delegatedDueFor({ ...task, subtasks: [{ ...task.subtasks[0], followUpAt: null }] }, "u_michaella")).toBe("2026-10-15");
   });
 });
+
+describe("the task's dates follow its current step", () => {
+  it("moves the follow up to the new current step's date, and a sooner due date with it", async () => {
+    const { datesForCurrentStep } = await import("./data");
+    const before = [{ id: "a", title: "Send", done: false }, { id: "w", title: "Waiting on Brian", done: false, onClient: true, due: "2026-10-16" }];
+    const after = [{ ...before[0], done: true }, before[1]];
+    expect(datesForCurrentStep(before, after, { assigneeId: "u_derek", due: "2026-10-12", followUpAt: "2026-10-12" })).toEqual({ followUpAt: "2026-10-16", due: "2026-10-16" });
+    // A teammate's step: back to the owner the business day after.
+    const handoff = [{ id: "h", title: "Hand off", done: false, assigneeId: "u_mich", due: "2026-10-15" }];
+    expect(datesForCurrentStep([], handoff, { assigneeId: "u_derek", due: "2026-10-20", followUpAt: null })).toEqual({ followUpAt: "2026-10-16" });
+    // Nothing changed: nothing moves.
+    expect(datesForCurrentStep(after, after, { assigneeId: "u_derek", due: "2026-10-12", followUpAt: null })).toEqual({});
+  });
+});

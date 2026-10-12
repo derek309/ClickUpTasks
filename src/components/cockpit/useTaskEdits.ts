@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, datesForCurrentStep, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -201,6 +201,10 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     } else if (synced.status && synced.status !== "done" && before.status === "done") {
       const base = synced.subtasks ?? before.subtasks;
       if (base.some((x) => x.addedFor === "finished")) synced.subtasks = base.filter((x) => x.addedFor !== "finished");
+    }
+    // The dates follow the current step, unless this edit sets them itself.
+    if (synced.subtasks && synced.due === undefined && synced.followUpAt === undefined && synced.status !== "done") {
+      Object.assign(synced, datesForCurrentStep(before.subtasks, synced.subtasks, before));
     }
     const checkBack = waitingFollowUp(before, synced);
     if (checkBack) synced.followUpAt = checkBack;

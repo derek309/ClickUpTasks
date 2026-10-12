@@ -3071,6 +3071,23 @@ export function taskDoneStep(task: Pick<Task, "createdAt" | "subtasks">, byId: s
   return { id: makeId(), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${byName} · ${when}`, notes: lines, ...(byId ? { assigneeId: byId } : {}) };
 }
 
+/** The task's dates follow its current step (Derek, 2026-10-12: "the due date
+ *  and follow up dates should change as well"). When the current step changes,
+ *  or its date does: the follow up is that step's date (a teammate's step, the
+ *  business day after, to check their work), and a due date before it moves to
+ *  it; never earlier. Empty when nothing moves. */
+export function datesForCurrentStep(before: Subtask[], after: Subtask[], task: { assigneeId: string | null; due: string | null; followUpAt?: string | null }): { due?: string; followUpAt?: string } {
+  const was = currentStep(before);
+  const now = currentStep(after);
+  if (!now?.due || (was?.id === now.id && was.due === now.due)) return {};
+  const teammate = !!now.assigneeId && now.assigneeId !== task.assigneeId && !now.onClient;
+  const followUp = teammate ? addBusinessDaysIso(now.due, 1) : now.due;
+  return {
+    ...(followUp !== (task.followUpAt ?? null) ? { followUpAt: followUp } : {}),
+    ...(task.due && task.due < now.due ? { due: now.due } : {}),
+  };
+}
+
 /** A client's email as a step keeps it. */
 export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string };
 

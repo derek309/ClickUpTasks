@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addReplyStep, emailOwnWords, htmlToText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
+  addApprovalStep, addReplyStep, datesForCurrentStep, emailOwnWords, htmlToText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
   isHandoffStep, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
@@ -17,14 +17,14 @@ type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const KIND_NAME: Record<ReviewKindKey, string> = { doc: "the document", image: "the image", page: "the page", video: "the video" };
 
-type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | null; client_id: string; status: TaskStatus; updated_at: string };
+type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | null; client_id: string; status: TaskStatus; due: string | null; follow_up_at: string | null; updated_at: string };
 
 /** Reads the task, works out its new steps and writes them only if nobody
  *  changed the task in between (tries again a few times if they did). */
 async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: string) => Promise<Subtask[] | null> | Subtask[] | null, followUpFromNew = false,
   extra?: () => Record<string, unknown> | null): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { data: row } = await supabaseAdmin.from("tasks").select("id, subtasks, assignee_id, client_id, status, updated_at").eq("id", taskId).maybeSingle();
+    const { data: row } = await supabaseAdmin.from("tasks").select("id, subtasks, assignee_id, client_id, status, due, follow_up_at, updated_at").eq("id", taskId).maybeSingle();
     if (!row) return false;
     const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", (row as TaskRow).client_id).maybeSingle();
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
@@ -34,8 +34,11 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     // A changes step just made: the task's follow up is its due date (Derek, 2026-10-11).
     const before = new Set(((row as TaskRow).subtasks ?? []).map((x) => x.id));
     const made = followUpFromNew ? next.find((x) => !before.has(x.id) && x.stage === "changes_requested" && x.due) : null;
+    // The task's dates follow its current step, as in the app (data.ts).
+    const r = row as TaskRow;
+    const dates = datesForCurrentStep(r.subtasks ?? [], next, { assigneeId: r.assignee_id, due: r.due, followUpAt: r.follow_up_at });
     const { data: wrote } = await supabaseAdmin.from("tasks")
-      .update({ subtasks: next, updated_by: null, ...(made ? { follow_up_at: made.due } : {}), ...(extra?.() ?? {}) }).eq("id", taskId).eq("updated_at", (row as TaskRow).updated_at).select("id");
+      .update({ subtasks: next, updated_by: null, ...(dates.due ? { due: dates.due } : {}), ...(dates.followUpAt ? { follow_up_at: dates.followUpAt } : {}), ...(made ? { follow_up_at: made.due } : {}), ...(extra?.() ?? {}) }).eq("id", taskId).eq("updated_at", (row as TaskRow).updated_at).select("id");
     if (wrote?.length) return true;
   }
   return false;
