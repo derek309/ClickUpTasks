@@ -1958,11 +1958,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {title}{extra}
     </h2>
   );
+  // Client work and Links and files look alike: a card, and while empty one
+  // line, the hint beside the heading (Derek, 2026-10-12: "make these
+  // consistent and make it one line, not two, if nothing is there").
+  const CARD = "mt-8 rounded-[5px] border bg-surface p-4 shadow-soft";
+  const emptyHint = (text: string) => <span className="hidden min-w-0 flex-1 truncate text-[16px] text-muted sm:block">{text}</span>;
+  const noFiles = task.attachments.length === 0 && conversationFiles.length === 0 && !uploadProgress && !linkOpen;
   const attachmentsBlock = (
-    <div id="task-files" className="mt-8 rounded-[5px] border bg-surface p-4 shadow-soft">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+    <div id="task-files"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
+      className={`${CARD} transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
+      <div className={`flex items-center justify-between gap-3 ${noFiles ? "" : "mb-3"}`}>
         {heading("Links and files", task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>)}
-        <span className="flex items-center gap-3">
+        {noFiles && emptyHint("Drop, paste or attach · max 25MB each")}
+        <span className="flex shrink-0 items-center gap-3">
           {/* Sorting two things is not a job. It earns its place at five. */}
           {task.attachments.length >= 5 && (
             <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
@@ -1988,14 +1999,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           Uploading {uploadProgress.done + 1} of {uploadProgress.total}…
         </div>
       )}
-      <div
-        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
-        onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
-        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
-        className={`grid grid-cols-3 gap-2 rounded-lg transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}
-      >
-        {task.attachments.length === 0 && conversationFiles.length === 0 && !uploadProgress && (<div className="col-span-full rounded-lg border border-dashed px-3 py-2 text-[16px] text-muted">Drop, paste, or click Attach · max 25MB each</div>)}
-      </div>
+
       {/* Pictures as a gallery with no names, the task's own then the ones
           from the conversation (Derek, 2026-10-09: "same as in mail"). A
           click opens the lightbox; the name is on hover. */}
@@ -2430,10 +2434,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // it is not, and nothing you do in here moves it between the two.
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
-  const section = (title: string, children: React.ReactNode, right?: React.ReactNode) => (
-    <section className="mt-8" id={title === "Client work" ? "task-deliverables" : undefined}>
-      <div className="mb-3 flex items-center justify-between gap-3">
+  const section = (title: string, children: React.ReactNode, right?: React.ReactNode, empty?: string) => (
+    <section className={CARD} id={title === "Client work" ? "task-deliverables" : undefined}>
+      <div className={`flex items-center justify-between gap-3 ${empty ? "" : "mb-3"}`}>
         {heading(title)}
+        {empty && emptyHint(empty)}
         {right}
       </div>
       {children}
@@ -2635,11 +2640,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
             </button>
           )}
-          {!anyWork && (
-            <p className="rounded-[5px] border border-dashed px-4 py-3 text-[16px] text-muted">{steps.length ? "Client documents, reviews and draft emails show here. Add them from a step's page." : "Client documents, reviews and draft emails show here."}</p>
-          )}
         </>
-      ), addMenu)}
+      ), addMenu, !anyWork && !(deletedTotal > 0 && deletedOpen === 0) ? (steps.length ? "Documents, reviews and emails. Add them from a step's page." : "Documents, reviews and emails show here.") : undefined)}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {attachmentsBlock}
