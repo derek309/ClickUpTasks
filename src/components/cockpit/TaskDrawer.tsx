@@ -1457,12 +1457,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add a description"} aria-label={hasDescription ? "Description, show all or edit" : "Add a description"}
           className="-mx-1 block min-h-8 w-full rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted hover:bg-background hover:text-foreground">
           {hasDescription ? (<>
-            {/* Closed up: paragraphs run on, so three lines are three lines of
-                words, not a blank line and "…" (Derek, 2026-10-12). */}
-            <span className="line-clamp-3 [overflow-wrap:anywhere]">
-              {htmlToText(task.description).replace(/\s*\n\s*/g, " ").trim()}
-            </span>
-            {htmlToText(task.description).trim().length > 240 && <span className="font-semibold text-accent">Read more</span>}
+            {/* Closed up: paragraphs run on, cut at a word, with "… Read more"
+                on the same line (Derek, 2026-10-12). */}
+            {(() => {
+              const full = htmlToText(task.description).replace(/\s*\n\s*/g, " ").trim();
+              if (full.length <= 260) return <span className="[overflow-wrap:anywhere]">{full}</span>;
+              const cut = full.slice(0, 260).replace(/\s+\S*$/, "");
+              return <span className="[overflow-wrap:anywhere]">{cut}… <span className="whitespace-nowrap font-semibold text-accent">Read more</span></span>;
+            })()}
           </>) : <span className="text-accent underline decoration-dotted underline-offset-4">Add a description</span>}
         </button>
       )}
