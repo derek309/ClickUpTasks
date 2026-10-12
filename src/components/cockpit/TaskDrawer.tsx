@@ -2,7 +2,7 @@
 
 // The task detail window (sidebar or full-page "document" view).
 import { reviewTone } from "@/lib/reviewTone";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
@@ -735,6 +735,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // order, each with a stage; the client's own change requests sit under the
   // current step instead of in the plan.
   const steps = planSteps(task.subtasks);
+  // A sent email kept on a step (mail:<id>), from this task's messages.
+  const sentMail = (k: string) => (k.startsWith("mail:") ? (messages ?? []).find((m) => sentEmailKey(m.id) === k) ?? null : null);
   const clientChanges = task.subtasks.filter((s) => s.fromClient);
   const activeStep = currentStep(task.subtasks);
   const progress = stepProgress(task.subtasks);
@@ -1664,15 +1666,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Client work, not on the step (Derek, 2026-10-11: "just what needs to be
     // completed").
     const holds = sub.onClient ? [] : withSentHolds(sub).holds ?? [];
-    const heldNames = [
-      ...holds.filter((k): k is DeliverableKey => (DELIVERABLE_KEYS as string[]).includes(k)).filter(deliverablePresent).map(deliverableName),
-      ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`${n} ${n === 1 ? "link or file" : "links and files"}`] : []; })(),
-      ...(sub.fromEmails?.length ? [`${sub.fromEmails.length === 1 ? "their email" : `${sub.fromEmails.length} emails from them`}`] : []),
+    // What a step holds, as small markers ("✉ 1"); the current step shows the
+    // work itself under its row (Derek, 2026-10-12: "I should be working in
+    // the email").
+    const markers = [
+      ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
+      ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
+      ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
+      ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
     ];
+    const heldHere = isActive && !sub.onClient ? stepHeld(withSentHolds(sub)) : null;
     const missing = !sub.done ? missingNeeds(sub) : [];
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
     return (
-      <li key={sub.id} draggable={dragSub === sub.id}
+      <Fragment key={sub.id}>
+      <li draggable={dragSub === sub.id}
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", sub.id); }}
         onDragEnd={() => { setDragSub(null); setDropSub(null); }}
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
@@ -1721,7 +1729,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {sub.emailedAt && !sub.done && <span className="text-muted">Email sent {formatDue(sub.emailedAt.slice(0, 10))}</span>}
               {!sub.done && sentReviews(sub).map((k) => <span key={k} className="text-muted">{viewedLine(k)}</span>)}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
-              {heldNames.length > 0 && <span className="min-w-0 truncate text-muted">{heldNames.join(" · ")}</span>}
+              {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Client work on this step">{markers.join("  ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
               {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
               {sub.onClient && !sub.done && <span className="font-semibold text-sky-700 dark:text-sky-300">Waiting on {firstName}</span>}
@@ -1736,6 +1744,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </span>
         </button>
       </li>
+      {heldHere && <li key={`${sub.id}-work`} className={`px-3 pb-3 sm:pl-12 sm:pr-4 ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""}`}>{heldHere}</li>}
+      </Fragment>
     );
   };
   const offeredTemplates = templatesFor(templates, task.clientId);
@@ -2158,6 +2168,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // assets"). A deliverable or a link or file sits on one step at most; each
   // deliverable block is drawn once, on its step or under Deliverables.
   const DELIVERABLE_KEYS: DeliverableKey[] = ["doc", "brief", "image", "page", "video", "email"];
+  const WORK_ICON: Record<DeliverableKey, string> = { doc: "📄", image: "🖼", page: "🌐", video: "🎬", brief: "📋", email: "✉" };
   const KIND_LABEL: Record<DeliverableKey, string> = { doc: "Client document", image: "Image review", page: "HTML review", video: "Video review", brief: "Project instructions", email: "Draft email" };
   const deliverableBlock = (key: DeliverableKey, onCurrentStep: boolean) =>
     key === "doc" ? documentBlock(onCurrentStep) : key === "brief" ? briefBlock : key === "email" ? draftEmailBlock : reviewBlock(key, onCurrentStep);
@@ -2170,18 +2181,44 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Client work lives here, all of it, wherever its step is (Derek,
   // 2026-10-11: "bring it down below so we can get to it easily"). Each block
   // is drawn once, here; a step's page lists what is on it with Open.
-  const anyWork = DELIVERABLE_KEYS.some(deliverablePresent);
+  const anyWork = DELIVERABLE_KEYS.some(deliverablePresent) || steps.some((st) => (st.holds ?? []).some((k) => !!sentMail(k)));
+  // Work on a step is a one line row here, the record of what was made
+  // (Derek, 2026-10-12): its box is on its step. Work on no step keeps its
+  // full box, and so does everything while deleted work is being restored.
+  // The full blocks stay mounted (hidden) since they own the windows.
+  const stepNumberOf = (id: string) => steps.findIndex((x) => x.id === id) + 1;
+  const workLine = (k: DeliverableKey, on: Subtask) => {
+    const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
+    return (
+      <button onClick={() => openWork(k)} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
+        <span className="w-7 shrink-0 tabular-nums text-muted" title={on.title}>{stepNumberOf(on.id) || ""}</span>
+        <span aria-hidden className="shrink-0">{WORK_ICON[k]}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{deliverableName(k)}</span>
+        {r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? "Draft" : KIND_LABEL[k]}</span>}
+      </button>
+    );
+  };
   const workBlocks = DELIVERABLE_KEYS.map((k) => {
     const on = deliverablePresent(k) ? homeOf(stepHolding(steps, k)) : null;
+    const compact = !!on && deletedOpen === 0;
     return (
       <div key={k}>
-        {on ? <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>
+        {compact ? workLine(k, on!) : on ? <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>
           // Said plainly, so a review on no step does not look like a mistake.
           : deliverablePresent(k) && steps.length > 0 && <div className="mt-3 -mb-2 text-[16px] text-muted">Not on a step</div>}
-        {deliverableBlock(k, !!on && on.id === activeStep?.id)}
+        <div className={compact ? "hidden" : ""}>{deliverableBlock(k, !!on && on.id === activeStep?.id)}</div>
       </div>
     );
   });
+  // Sent emails kept on steps, in the same record.
+  const sentWorkLines = steps.flatMap((st) => (st.holds ?? []).filter((k) => k.startsWith("mail:")).map((k) => ({ st, m: sentMail(k) }))).filter((x) => !!x.m).map(({ st, m }) => (
+    <button key={m!.id} onClick={() => setOpenStepPage({ taskId: task.id, id: st.id, full: false })} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
+      <span className="w-7 shrink-0 tabular-nums text-muted" title={st.title}>{stepNumberOf(st.id) || ""}</span>
+      <span aria-hidden className="shrink-0">✉</span>
+      <span className="min-w-0 flex-1 truncate font-medium">{m!.subject?.trim() || "Email"}</span>
+      <span className="shrink-0 text-muted">Sent {timeAgo(m!.at)}</span>
+    </button>
+  ));
   // Opens a piece of client work's own window from anywhere (a step's page).
   const openWork = (k: DeliverableKey) => {
     if (k === "doc") setDocStartNonce((n) => n + 1);
@@ -2316,7 +2353,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(j, 0, from);
     onPatchSub(sub.id, { holds: list });
   };
-  const sentMail = (k: string) => (k.startsWith("mail:") ? (messages ?? []).find((m) => sentEmailKey(m.id) === k) ?? null : null);
   const stepHeld = (sub: Subtask) => {
     const keys = (sub.holds ?? []).filter((k) =>
       (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)) || !!sentMail(k));
@@ -2615,6 +2651,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {section("Client work", (
         <>
           {workBlocks}
+          {sentWorkLines}
           {deletedTotal > 0 && deletedOpen === 0 && (
             <button onClick={() => setDeletedOpen((n) => n + 1)} className="mt-2 px-1 text-[16px] text-muted hover:text-foreground">
               {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
