@@ -935,17 +935,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </div>
   );
   // Only a custom repeat needs more room than a word: its own line below.
+  // Kept off the client's portal and reminder emails (Derek, 2026-10-12). A
+  // task in a private list is hidden with it, so there is nothing to switch.
+  const hideItem = !task.private && !project?.hiddenFromClient && {
+    label: task.hiddenFromClient ? "🔒 Show to client again" : "🔒 Hide from client",
+    onClick: () => onPatch({ hiddenFromClient: !task.hiddenFromClient }),
+  };
   const chipRow = (
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {/* Kept off the client's portal and reminder emails (Derek, 2026-10-12).
           A task in a private list is hidden with it. */}
-      {!task.private && (
-        <label title={project?.hiddenFromClient ? "Its list is private to the team" : "The client won't see this task in their portal or reminder emails"}
-          className={`inline-flex cursor-pointer items-center gap-1.5 text-[16px] ${task.hiddenFromClient || project?.hiddenFromClient ? "font-semibold text-foreground" : "text-muted"}`}>
-          <input type="checkbox" checked={!!task.hiddenFromClient || !!project?.hiddenFromClient} disabled={!!project?.hiddenFromClient}
-            onChange={(e) => onPatch({ hiddenFromClient: e.target.checked })} className="h-4 w-4 cursor-pointer accent-[var(--accent)]" />
-          🔒 Hide from client{project?.hiddenFromClient ? " (its list is private)" : ""}
-        </label>
+      {/* Rarely needed, so it lives in the ⋯ menu (Derek, 2026-10-12); this
+          only says so while the task is hidden. */}
+      {!task.private && (task.hiddenFromClient || project?.hiddenFromClient) && (
+        <span title={project?.hiddenFromClient ? "Its list is private to the team" : "The client won't see this task in their portal or reminder emails. Show it again from the ⋯ menu."}
+          className="inline-flex items-center gap-1.5 text-[16px] font-semibold">
+          🔒 Hidden from client{project?.hiddenFromClient ? " (its list is private)" : ""}
+        </span>
       )}
       {task.recurrence === "custom" && (
         <span className={`${chip} flex-wrap py-1 text-muted`}>
@@ -2934,6 +2940,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         { label: "Labels", onClick: () => setLabelOpen(true) },
         { label: "Copy link to task", onClick: onCopyLink },
         onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
+        hideItem,
         { label: "Duplicate here", onClick: () => onDuplicate() },
         task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
         { label: "Delete task", onClick: onDelete, danger: true },
@@ -3008,6 +3015,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 { label: "Labels", onClick: () => setLabelOpen(true) },
                 { label: "Copy link to task", onClick: onCopyLink },
         onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
+                hideItem,
                 { label: "Duplicate here", onClick: () => onDuplicate() },
                 { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
                 task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
