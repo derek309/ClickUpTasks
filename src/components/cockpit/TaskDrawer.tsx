@@ -16,6 +16,7 @@ import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon }
 import { usePersisted } from "@/lib/usePersisted";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
+import { pickThreeTimes } from "@/lib/improveText";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
@@ -146,8 +147,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     id: task.clientId, name: "Not shared with you", color: "#94a3b8",
     ghlLocationId: "", status: "active_client" as const, type: "client" as const, assignedTo: [],
   };
-  /** The client's first name, as the steps and their emails say it. */
-  const firstName = client.name.split(" ")[0];
   const project = projectById(task.projectId) ?? {
     id: task.projectId, clientId: task.clientId, name: "List", description: "",
   };
@@ -160,6 +159,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   ];
   const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
   const messageDest = linkedContactInfo ?? linkedContact;
+  /** The client's first name, as the steps and their emails say it: the
+   *  person's own when we have one, and never "The" (The Artist Workshop
+   *  read "Email The", Derek, 2026-10-13). */
+  const firstName = [messageDest?.name, client.name].map((n) => (n ?? "").trim().split(/\s+/).find((w) => !/^the$/i.test(w)) ?? "").find(Boolean) || "them";
   // A reply goes to whoever wrote the email it answers, not the client's main
   // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
   // Same rule as the server's replyRecipientFor.
@@ -2082,26 +2085,49 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Asking them to pick a time: a step with a short draft carrying your own
   // booking link, to read and send (Derek, 2026-10-12).
-  const bookingEmailStep = async () => {
+  // Ask them to meet (Derek, 2026-10-13: "the request to meet by email or
+  // text"), as the client page's Request does: three open times from your
+  // calendar and its booking page, on a step that holds the email or text.
+  const requestMeetingStep = async (channel: "email" | "sms") => {
+    if (channel === "email") {
+      const cur = taskRef.current.draftEmail;
+      if (cur && htmlToText(cur.body).trim() && !window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with one asking ${firstName} to meet?`)) return;
+    }
     const id = newId("s_");
     if (asking) setAskNext(null);
-    const cur = taskRef.current.draftEmail;
-    if (cur && htmlToText(cur.body).trim() && !window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with one asking ${firstName} to book a time?`)) return;
     const links = await loadBookingLinks().catch(() => [] as BookingLink[]);
     const mine = links.filter((l) => l.memberId === meId);
-    const link = mine.find((l) => /phone|call/i.test(l.label)) ?? mine[0] ?? links.find((l) => l.shared) ?? null;
-    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-    const now = new Date().toISOString();
-    onPatch({
-      subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Book a time with ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
-      draftEmail: {
-        subject: `Can we find a time to talk about ${task.title}?`.slice(0, 120),
-        body: `${greetingHtml(messageDest?.name)}<p>Could we set up a quick call about <strong>${esc(task.title)}</strong>?</p>${link ? `<p>Pick a time that works for you here: <a href="${esc(link.url)}">book a time</a>. It goes straight on my calendar.</p>` : "<p>[booking link]</p>"}`,
-        replyTo: null, createdAt: now, updatedAt: now,
-      },
-    });
-    setEmailOpenNonce((n) => n + 1);
-    if (!link) pushToast("No booking page found for you. Add one with Copy booking link in the email.");
+    const link = mine[0] ?? links.find((l) => l.shared) ?? links[0] ?? null;
+    let times: string[] = [];
+    if (link) {
+      try {
+        const r = await authedFetch(`/api/calendar/slots?calendarId=${encodeURIComponent(link.calendarId)}&days=7`);
+        const j = await r.json().catch(() => ({}));
+        times = pickThreeTimes(j.slots ?? [], new Date().getTime());
+      } catch { /* the link alone still works */ }
+    }
+    const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const title = `Request a meeting with ${firstName}`;
+    if (channel === "sms") {
+      const body = [`Hi ${firstName}, do you have time to meet this week about ${task.title}?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", link ? `Or pick any time here: ${link.url}` : ""].filter(Boolean).join(" ");
+      onPatch({ subtasks: [...taskRef.current.subtasks, { id, title, done: false, draftMessage: { channel: "sms", body }, ...stepOwnerFields() }] });
+      setOpenStepPage({ taskId: task.id, id, full: false });
+    } else {
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const now = new Date().toISOString();
+      onPatch({
+        subtasks: holdOnStep([...taskRef.current.subtasks, { id, title, done: false, ...stepOwnerFields() }], id, "email"),
+        draftEmail: {
+          subject: `Time to meet about ${task.title}?`.slice(0, 120),
+          body: `${greetingHtml(messageDest?.name)}<p>Do you have time to meet this week about <strong>${esc(task.title)}</strong>?${times.length ? " Here are a few times that work for me (Pacific):" : ""}</p>`
+            + (times.length ? `<ul>${times.map((t) => `<li><p>${esc(fmt(t))}</p></li>`).join("")}</ul>` : "")
+            + (link ? `<p>Or pick any time that works for you here: <a href="${esc(link.url)}">book a time</a>. It goes straight on my calendar.</p>` : "<p>[booking link]</p>"),
+          replyTo: null, createdAt: now, updatedAt: now,
+        },
+      });
+      setEmailOpenNonce((n) => n + 1);
+    }
+    if (!link) pushToast("No booking page found for you, so there are no open times in it.");
   };
   // Quick step in three groups (Derek, 2026-10-13: "organize quick links"):
   // talking to the client, making something for them to review, and handing
@@ -2118,7 +2144,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", group: "talk" as const, label: "Book a meeting", disabled: false, onPick: meetingStep }] : []),
     ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: remindStep }] : []),
-    ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", group: "talk" as const, label: `Send ${firstName} my booking link`, disabled: false, onPick: () => void bookingEmailStep() }] : []),
+    ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
+    ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
     { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },
     { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
