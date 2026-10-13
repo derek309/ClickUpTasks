@@ -175,6 +175,13 @@ describe("refreshing the Inbox", () => {
     expect(out.get("gm:1")?.doneAt).toBe("2026-10-01T10:00:00Z");
     expect(out.get("gm:2")?.doneAt).toBe("2026-10-01T09:00:00Z");
   });
+  it("keeps a Delete the read began too early to see", async () => {
+    const { mergeStates } = await import("./inboxModel");
+    const local = { threadKey: "gm:3", readAt: null, snoozedUntil: null, doneAt: null, trashedAt: "2026-10-13T18:14:00Z", updatedAt: "2026-10-13T18:14:00Z" };
+    const stale = { threadKey: "gm:3", readAt: null, snoozedUntil: null, doneAt: null, trashedAt: null, updatedAt: "2026-10-13T17:00:00Z" };
+    const out = mergeStates(new Map([["gm:3", local]]), new Map([["gm:3", stale]]), new Map([["gm:3", 500]]), 1000);
+    expect(out.get("gm:3")?.trashedAt).toBe("2026-10-13T18:14:00Z");
+  });
 });
 
 describe("texts as a chat", () => {

@@ -255,8 +255,13 @@ export function mergeById<T extends { id: string }>(prev: T[], changed: T[]): T[
 export function mergeStates(cur: Map<string, InboxState>, read: Map<string, InboxState>, touched: Map<string, number>, readStartedAt: number): Map<string, InboxState> {
   const out = new Map(read);
   for (const [k, at] of touched) {
-    if (at < readStartedAt) continue;
     const local = cur.get(k);
+    const saved = read.get(k);
+    // Changed after this read began: yours. Changed before it, but the read
+    // came back without that change (it began before the save landed): still
+    // yours, or a Delete flashed back for two minutes (Derek, 2026-10-13).
+    const newer = !!local && (local.updatedAt ?? "") > (saved?.updatedAt ?? "");
+    if (at < readStartedAt && !newer) continue;
     if (local) out.set(k, local); else out.delete(k);
   }
   return out;
