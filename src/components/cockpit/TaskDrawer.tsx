@@ -31,7 +31,7 @@ import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
-import { StepPage } from "./StepPage";
+import { NextChoices, StepPage } from "./StepPage";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
 // when the app loads, because the app rewrites the address as you move around,
@@ -1146,16 +1146,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       pushToast(`Task done. The email to ${firstName} is drafted for you to read.`);
     } else pushToast("Task done");
   };
-  const whatsNextActions = (sid: string) => (
-    <div className="flex flex-wrap items-center gap-2 text-[16px]">
-      <span className="min-w-0 flex-1 text-muted">Name the next step above, add an action below, or:</span>
-      <button onClick={() => finishTask(sid)} className="shrink-0 rounded-[5px] bg-success px-3 py-1.5 font-semibold text-white hover:opacity-90">The task is finished</button>
-      {hasMessaging && !!messageDest?.email && (
-        <button onClick={() => finishTask(sid, true)} title={`Finish it and draft an email telling ${firstName} it's done`}
-          className="shrink-0 rounded-[5px] border border-success px-3 py-1.5 font-semibold text-success hover:bg-success-soft">Finish and email {firstName}</button>
-      )}
-    </div>
-  );
+  // A "What's next?" step: suggestions that make this step the next piece of
+  // work, then the ways to end the task (Derek, 2026-10-13: "quick links or
+  // suggestions for next steps").
+  const whatsNextActions = (sid: string) => {
+    const sub = task.subtasks.find((x) => x.id === sid);
+    const SAYS: Record<string, [string, string]> = {
+      email: [`Email ${firstName}`, "Write an email on this step, to read and send."],
+      text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
+      doc: ["Write a document", `A document on this step, for ${firstName} to review.`],
+      page: ["Build a web page", `An HTML page on this step, for ${firstName} to review.`],
+    };
+    const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
+    return (
+      <NextChoices intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
+        ...ideas,
+        { label: "Give it to Claude", says: "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
+        { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: true, onClick: () => finishTask(sid) },
+        ...(hasMessaging && !!messageDest?.email ? [{ label: `Finish and email ${firstName}`, says: `Marks it done and opens an email telling ${firstName} it's done, to read and send.`, onClick: () => finishTask(sid, true) }] : []),
+      ]} />
+    );
+  };
   const completeStep = (sid: string) => {
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
@@ -1790,24 +1801,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const k = sentReviews(sub)[0];
     if (!k || sub.done) return null;
     const sent = followUpsLine(sub.followUps);
-    const choices: { label: string; says: string; primary?: boolean; onClick: () => void }[] = [
-      { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
-      { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
-      ...(hasMessaging && messageDest?.email ? [{ label: "Send a reminder", says: `An email nudging ${firstName} to look. This step keeps waiting.`, onClick: () => remindStep(sub) }] : []),
-    ];
     return (
-      <div className="flex flex-col gap-2">
-        <b className="text-[16px]">What&apos;s next?</b>
-        <span className="text-[16px] text-muted">Still waiting? Send a reminder. Heard back by phone or email? Mark what {firstName} said.{sent ? ` ${sent}.` : ""}</span>
-        <div className="flex flex-col divide-y rounded-[5px] border">
-          {choices.map((c) => (
-            <div key={c.label} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-              <button onClick={c.onClick} className={`h-10 min-w-[11rem] rounded-[5px] px-4 text-[16px] font-semibold ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
-              <span className="min-w-0 flex-1 text-[16px] text-muted">{c.says}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <NextChoices intro={`Still waiting? Send a reminder. Heard back by phone or email? Mark what ${firstName} said.${sent ? ` ${sent}.` : ""}`} choices={[
+        { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
+        { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
+        ...(hasMessaging && messageDest?.email ? [{ label: "Send a reminder", says: `An email nudging ${firstName} to look. This step keeps waiting.`, onClick: () => remindStep(sub) }] : []),
+      ]} />
     );
   };
   // Whose move a step is, as a colour and one sentence (Derek, 2026-10-13:
@@ -2676,26 +2675,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Following up while waiting on them (Derek, 2026-10-13: "follow up by
   // email, text, call or task chat"): each one is a follow up on this same
   // check in, never a new step. Email and Text draft on it; a call is noted.
+  // A check in waiting on their reply ends the same way as every step: What's
+  // next, each follow up saying what it does (Derek, 2026-10-13).
   const followUpBox = (ps: Subtask) => {
     const since = ps.startedAt ? formatDue(ps.startedAt.slice(0, 10)) : null;
     const done = followUpsLine(ps.followUps);
-    const btn = "h-10 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold hover:bg-background";
     const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
     return (
-      <div className="flex flex-col gap-2 rounded-[5px] bg-amber-50 px-3 py-2.5 text-[16px] shadow-[inset_4px_0_0_#f59e0b] dark:bg-amber-500/10">
-        <div className="font-semibold text-amber-800 dark:text-amber-300">Waiting on {firstName}{since ? ` since ${since}` : ""}{done ? ` · ${done}` : ""}</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted">Follow up:</span>
-          {hasMessaging && messageDest?.email && <button onClick={() => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); }} className={btn}>Email</button>}
-          {messageDest?.phone && <button onClick={() => draftOn("sms")} className={btn}>Text</button>}
-          <button onClick={() => {
-            const due = addBusinessDaysIso(TODAY, 3);
-            onPatch({ subtasks: recordFollowUp(taskRef.current.subtasks, ps.id, "call", due), followUpAt: due });
-            pushToast(`Call noted. Checking again ${formatDue(due)}.`);
-          }} className={btn}>Call</button>
-          {hasMessaging && <button onClick={() => draftOn("chat")} className={btn}>Task chat</button>}
-        </div>
-      </div>
+      <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies. Still nothing? Follow up:`} choices={[
+        ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); } }] : []),
+        ...(messageDest?.phone ? [{ label: "Text a follow up", says: "A text to write and send here. It keeps waiting.", onClick: () => draftOn("sms") }] : []),
+        { label: "I called them", says: "Notes the call and checks again in 3 business days.", onClick: () => {
+          const due = addBusinessDaysIso(TODAY, 3);
+          onPatch({ subtasks: recordFollowUp(taskRef.current.subtasks, ps.id, "call", due), followUpAt: due });
+          pushToast(`Call noted. Checking again ${formatDue(due)}.`);
+        } },
+        ...(hasMessaging ? [{ label: "Task chat", says: `A message in ${firstName}'s portal. It keeps waiting.`, onClick: () => draftOn("chat") }] : []),
+        { label: `${firstName} answered`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => setNextStepDone(ps.id, true) },
+      ]} />
     );
   };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
@@ -3497,7 +3494,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
                 setOpenStepPage(null);
                 toClaude(ps.id);
-              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
+              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
@@ -3526,7 +3523,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 } else startDraftEmail();
               }}
               onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
-              followBox={!ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : isCur && canNudge ? (
+              followBox={!ps.done && ps.finishWhen === "reply" ? undefined : isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                   <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${firstName} hasn't approved yet` : `${firstName} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
                   <button onClick={nudge} className="rounded-[5px] bg-surface px-3 py-1.5 font-semibold text-foreground ring-1 ring-border hover:ring-accent">Nudge {firstName}</button>

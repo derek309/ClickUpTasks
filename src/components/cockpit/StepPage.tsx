@@ -20,6 +20,28 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
+/** The end of every step (Derek, 2026-10-13: "more guidance at the end of
+ *  the step for next steps", asked several times): "What's next?", a line on
+ *  where things stand, then each choice with what it does. Sits above the
+ *  step's messages. */
+export type NextChoice = { label: string; says: string; primary?: boolean; onClick: () => void };
+export function NextChoices({ intro, choices }: { intro?: React.ReactNode; choices: NextChoice[] }) {
+  return (
+    <section aria-label="What's next" className="flex flex-col gap-2">
+      <h3 className="text-[18px] font-bold">What&apos;s next?</h3>
+      {intro && <p className="text-[16px] text-muted">{intro}</p>}
+      <div className="flex flex-col divide-y rounded-[5px] border bg-surface">
+        {choices.map((c) => (
+          <div key={c.label} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+            <button onClick={c.onClick} className={`h-10 min-w-[12rem] rounded-[5px] px-4 text-left text-[16px] font-semibold ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
+            <span className="min-w-0 flex-1 text-[16px] text-muted">{c.says}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
   controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, onGiveToClaude, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
@@ -593,12 +615,14 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 // finished, not up top (Derek, 2026-10-13).
                 <div className="border-t pt-4">{doneActions}</div>
               ) : !sub.done && !doneActions && !sub.onClient ? (
-                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                <div className="border-t pt-4">
                   {/* Said as the next move, not "done" (Derek, 2026-10-13: "I still feel
                       weird clicking it"): it ticks this step and What's next opens. */}
-                  <button onClick={onMarkDone} title="Marks this step done and opens What's next below" className="inline-flex h-11 items-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Create next step <span aria-hidden>→</span></button>
-                  {onGiveToClaude && <button onClick={onGiveToClaude} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">Give this step to Claude</button>}
-                  {onFinishTask && <button onClick={onFinishTask} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">The task is finished</button>}
+                  <NextChoices choices={[
+                    { label: "Create next step →", says: "Ticks this step and asks what comes next.", primary: true, onClick: onMarkDone },
+                    ...(onGiveToClaude ? [{ label: "Give this step to Claude", says: "Claude works it, due today, and you watch it here.", onClick: onGiveToClaude }] : []),
+                    ...(onFinishTask ? [{ label: "The task is finished", says: "Marks the whole task done.", onClick: onFinishTask }] : []),
+                  ]} />
                 </div>
               ) : null}
             </div>
