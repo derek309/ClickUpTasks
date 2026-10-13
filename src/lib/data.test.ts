@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  AUTO_PRIORITY_ON,
   clientEmailText,
   waitingFollowUp,
   isReplyTask,
@@ -935,7 +936,7 @@ describe("priority from the due date", () => {
     expect(derivedPriority("2026-09-05", today)).toBe("normal");   // 4 days
     expect(derivedPriority("2026-08-28", today)).toBe("urgent");   // overdue
   });
-  it("follows the date while the task is on automatic", () => {
+  it.skipIf(!AUTO_PRIORITY_ON)("follows the date while the task is on automatic", () => {
     expect(effectivePriority({ priority: "none", due: "2026-09-02", priorityAuto: true }, today)).toBe("urgent");
   });
   it("keeps a hand-set priority forever", () => {

@@ -1411,8 +1411,13 @@ export function derivedPriority(due: string | null, today: string = TODAY): Prio
 // client_request and conversation are never derived: they are assigned by the
 // system to mark where a task came from, and a due date says nothing about
 // that.
+/** Priority that rises as the due date nears is off (Derek, 2026-10-13: the
+ *  list said Urgent while the task said Normal). A task's priority is the one
+ *  set on it; true brings the automatic one back for tasks still marked auto. */
+export const AUTO_PRIORITY_ON = false;
+
 export function effectivePriority(task: { priority: Priority; due: string | null; priorityAuto?: boolean }, today: string = TODAY): Priority {
-  if (!task.priorityAuto) return task.priority;
+  if (!AUTO_PRIORITY_ON || !task.priorityAuto) return task.priority;
   if (task.priority === "client_request" || task.priority === "conversation") return task.priority;
   return derivedPriority(task.due, today);
 }
