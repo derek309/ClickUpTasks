@@ -77,7 +77,11 @@ export default function GranolaPanel() {
               <li>Paste it here and click Connect.</li>
             </ol>
             <div className="flex flex-wrap gap-2">
-              <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Your Granola key" autoComplete="off"
+              {/* Masked text, not a password field: a password field brings up the
+                  browser's password manager over the panel. */}
+              <input type="text" name="granola-api-key" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Your Granola key"
+                autoComplete="off" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true"
+                style={{ WebkitTextSecurity: "disc" } as React.CSSProperties}
                 onKeyDown={(e) => { if (e.key === "Enter" && key.trim()) void save(); }}
                 className="h-10 min-w-0 flex-1 rounded-[5px] border bg-surface px-3 outline-none focus:border-accent" />
               <button onClick={() => void save()} disabled={!key.trim() || busy !== null} className="rounded-[5px] bg-accent px-4 font-medium text-white disabled:opacity-40">{busy === "save" ? "Checking…" : "Connect"}</button>
