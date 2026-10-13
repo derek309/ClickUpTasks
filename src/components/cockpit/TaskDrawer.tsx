@@ -2723,9 +2723,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const followUpBox = (ps: Subtask) => {
     const since = ps.startedAt ? formatDue(ps.startedAt.slice(0, 10)) : null;
     const done = followUpsLine(ps.followUps);
+    // The email it waits on, named (Derek, 2026-10-13: "I don't see the email
+    // in there"): the one held on the step before, else the last one we sent.
+    const plan = planSteps(task.subtasks);
+    const before = plan[plan.findIndex((x) => x.id === ps.id) - 1];
+    const heldMail = before?.holds?.find((k) => k.startsWith("mail:"))?.slice(5);
+    const mail = messages ?? [];
+    const by = ps.startedAt ? Date.parse(ps.startedAt) + 60_000 : Infinity;
+    const sentOne = (heldMail ? mail.find((m) => m.id === heldMail) : undefined)
+      ?? mail.filter((m) => m.direction === "outbound" && m.channel === "email" && Date.parse(m.at) <= by).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+    const waitingFor = sentOne?.subject ? ` for a reply to "${sentOne.subject}"` : "";
     const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
     return (
-      <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies${stepAfter(task.subtasks, ps.id) ? `, and "${stepAfter(task.subtasks, ps.id)!.title}" starts` : ""}. Still nothing? Follow up:`} choices={[
+      <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${waitingFor}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies${stepAfter(task.subtasks, ps.id) ? `, and "${stepAfter(task.subtasks, ps.id)!.title}" starts` : ""}. Still nothing? Follow up:`} choices={[
         ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); } }] : []),
         ...(messageDest?.phone ? [{ label: "Text a follow up", says: "A text to write and send here. It keeps waiting.", onClick: () => draftOn("sms") }] : []),
         { label: "I called them", says: "Notes the call and checks again in 3 business days.", onClick: () => {
