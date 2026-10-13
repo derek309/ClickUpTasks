@@ -86,11 +86,13 @@ export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDi
     const rest = t.subtasks.filter((x) => x.id !== subId);
     const lastOne = isDelegation && !delegateeOf({ assigneeId: t.assigneeId, subtasks: rest });
     setConfirmDialog({
-      title: isDelegation ? `Take this back from ${who}?` : `Delete “${s.title || "this checklist item"}”?`,
+      // Plain words (Derek, 2026-10-13: "Take this back from Claude?" read as
+      // a confusing question).
+      title: `Delete the step “${s.title || "this step"}”?`,
       message: isDelegation
-        ? `${who} loses access to this task${lastOne ? ", and it leaves the Delegated stage" : ""}. What they were asked to do is deleted with it, and this can't be undone.`
+        ? `It's ${who}'s step. Deleting it takes it off ${who}'s list${lastOne ? ", and the task stops showing as Delegated" : ""}. You can't undo this.`
         : "You can undo this right after.",
-      confirmLabel: isDelegation ? "Take it back" : "Delete",
+      confirmLabel: isDelegation ? "Delete step" : "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
         // Read the list now, not when the dialog opened: steps added meanwhile
