@@ -237,6 +237,12 @@ export default function SettingsPanel({
                   className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
                   {granolaStatus.kind === "busy" ? "Syncing…" : "Sync recent meetings"}</button>
               )}
+              {/* After swapping in a new key (the team's workspace key, 2026-10-12):
+                  register a webhook under it; its secret replaces GRANOLA_WEBHOOK_SECRET. */}
+              {granolaApiKeyConfigured && granolaWebhookConfigured && (
+                <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"} title="After changing the Granola key: register its webhook, then put the new signing secret in GRANOLA_WEBHOOK_SECRET and redeploy"
+                  className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">Reconnect webhook</button>
+              )}
             </div>
             {granolaStatus.kind !== "busy" && granolaStatus.msg && (
               <div className={`mt-1.5 break-all text-[15px] ${granolaStatus.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{granolaStatus.msg}</div>
