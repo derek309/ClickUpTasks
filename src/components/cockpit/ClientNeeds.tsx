@@ -6,24 +6,11 @@
 // (mockup D: overdue moved beside the name). Each box
 // carries the one button that deals with it.
 import { useEffect, useState } from "react";
-import { authedFetch } from "@/lib/supabase";
-import type { CalendarEvent } from "./useCalendar";
+import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
 import { htmlToText, timeAgo } from "@/lib/data";
 import { fetchClientEmailDraft } from "@/lib/db";
 
 const TZ = "America/Los_Angeles";
-
-// The next two weeks of meetings, read once and shared by every client page
-// for two minutes (the server caches GoHighLevel for one).
-let eventsAt = 0;
-let eventsOnce: Promise<CalendarEvent[]> | null = null;
-function loadEvents(): Promise<CalendarEvent[]> {
-  if (eventsOnce && Date.now() - eventsAt < 120_000) return eventsOnce;
-  eventsAt = Date.now();
-  eventsOnce = authedFetch("/api/calendar?days=30").then((r) => (r.ok ? r.json() : null))
-    .then((j) => (j?.events ?? []) as CalendarEvent[]).catch(() => { eventsOnce = null; return []; });
-  return eventsOnce;
-}
 
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -31,7 +18,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: 
 /** An unsent email or text for this client, picked from the Drafts button. */
 export type ClientDraftItem = { id: string; title: string; where: string; at: string; open: () => void };
 
-export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, drafts, onOpenClientDraft, composerOpen, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest }: {
+export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, drafts, onOpenClientDraft, composerOpen, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest, meId, pushToast, defaultCalendarId, onSetDefault }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -55,6 +42,11 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   onBook: () => void;
   /** Ask them to pick a time, by email or text (Derek, 2026-10-05). */
   onRequest: ((channel: "email" | "sms") => void) | null;
+  /** For Move and Cancel on their next meeting (Derek, 2026-10-13). */
+  meId: string;
+  pushToast: (text: string) => void;
+  defaultCalendarId?: string | null;
+  onSetDefault?: (id: string | null) => void;
 }) {
   const [askOpen, setAskOpen] = useState(false);
   // Their drafts, here on their page (Derek, 2026-10-07: "bring in the drafted
@@ -77,18 +69,7 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   const ownItem = own?.clientId === clientId && onOpenClientDraft ? own.item : null;
   const allDrafts = [...(ownItem ? [{ ...ownItem, open: onOpenClientDraft! }] : []), ...drafts].sort((a, b) => b.at.localeCompare(a.at));
   // undefined while reading; null when nothing is booked.
-  const [next, setNext] = useState<{ clientId: string; event: CalendarEvent | null } | null>(null);
-  useEffect(() => {
-    let live = true;
-    loadEvents().then((evs) => {
-      if (!live) return;
-      const now = new Date().toISOString();
-      const event = evs.filter((e) => !e.busy && (e.clientId === clientId || (!!ghlContactId && e.ghlContactId === ghlContactId)) && Date.parse(e.end) > Date.parse(now)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))[0] ?? null;
-      setNext({ clientId, event });
-    });
-    return () => { live = false; };
-  }, [clientId, ghlContactId]);
-  const meeting = next?.clientId === clientId ? next.event : undefined;
+  const meeting = useNextMeeting(clientId, ghlContactId);
 
   // Our turn when their latest came after ours.
   const theirTurn = !!lastIn && (!lastOut || lastIn.at > lastOut.at);
@@ -153,6 +134,7 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
             </>}
           </span>
         )}
+        {meeting && <MeetingMenu event={meeting} first={first} meId={meId} pushToast={pushToast} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} />}
         {canBook && <button onClick={onBook} title="Book a time, or pick times to text them" className={`${btn} ring-[var(--border)]`}>Book</button>}
       </div>
     </div>

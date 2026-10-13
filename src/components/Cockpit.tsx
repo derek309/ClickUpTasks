@@ -2532,7 +2532,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 composerOpen={clientEmail?.clientId === activeClient}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
-                onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null} />
+                onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null}
+                meId={me.id} pushToast={(m) => pushToast(m)}
+                defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
           );
         })() : null;
   const overflowControl = (

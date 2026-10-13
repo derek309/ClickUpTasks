@@ -47,6 +47,7 @@ import { type FileKind } from "@/lib/reviewKinds";
 import { QuickLinksBar } from "./ClientLinks";
 import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
+import { MeetingMenu, meetingWhen, useNextMeeting } from "./MeetingMenu";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
@@ -3140,6 +3141,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // column, the quick link chips and "Where it lives".
   const [topPanel, setTopPanel] = useState<"client" | "move" | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
+  // Their next meeting, to move or cancel from the calendar button (Derek, 2026-10-13).
+  const nextMeeting = useNextMeeting(client.id, messageDest?.ghlContactId ?? null);
   // The dock opens in Chat, Text or Call from here; n changes to ask again.
   const [dockRequest, setDockRequest] = useState<{ mode: "note" | "chat" | "sms" | "call" | "delegate"; text?: string; n: number } | null>(null);
   const askDock = (mode: "note" | "chat" | "sms" | "call" | "delegate", text?: string) => setDockRequest((r) => ({ mode, text, n: (r?.n ?? 0) + 1 }));
@@ -3219,7 +3222,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             { label: "Call", onClick: () => askDock("call"), disabled: !phone },
             { label: "Text", onClick: () => askDock("sms"), disabled: !phone },
           ]} />
-        {canBook && <button onClick={() => setBookOpen(true)} title="Book" aria-label="Book" className={topIcon}><I.calendar className="h-5 w-5" /></button>}
+        {nextMeeting && mayContactClient ? (
+          <MeetingMenu event={nextMeeting} first={(messageDest?.name || client.name).trim().split(/\s+/)[0] || "them"} meId={meId} pushToast={(m) => pushToast(m)}
+            onBook={canBook ? () => setBookOpen(true) : undefined} title={`Next meeting ${meetingWhen(nextMeeting.start)}: move or cancel`}
+            triggerClassName="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-accent transition hover:bg-background"
+            label={<><I.calendar className="h-5 w-5" /><span className="text-[16px] font-semibold">{new Date(nextMeeting.start).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" })}</span></>} />
+        ) : canBook && <button onClick={() => setBookOpen(true)} title="Book" aria-label="Book" className={topIcon}><I.calendar className="h-5 w-5" /></button>}
       </>)}
     </div>
   );
