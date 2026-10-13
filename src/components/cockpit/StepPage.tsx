@@ -497,7 +497,13 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   </div>
                 )}
                 {/* Whose move it is, as on the step's row (2026-10-13). */}
-                {tone?.say && !sub.done && <div className={`rounded-[5px] px-3 py-2 text-[16px] font-semibold ${tone.rowTone} ${tone.sayTone}`}>{tone.say}</div>}
+                {tone?.say && !sub.done && (
+                  <div className={`flex flex-wrap items-center gap-x-3 rounded-[5px] px-3 py-2 text-[16px] font-semibold ${tone.rowTone} ${tone.sayTone}`}>
+                    <span>{tone.say}</span>
+                    {/* The cloud session working it (lib/claudeCloud). */}
+                    {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
+                  </div>
+                )}
                 {controls}
                 {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>

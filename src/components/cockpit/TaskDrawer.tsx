@@ -1664,6 +1664,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <InlineAssignee value={sub.assigneeId ?? null} size={24}
             label={sub.assigneeId ? <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span> : undefined}
             onChange={(a) => {
+              // Claude: due today, no follow up, started in the cloud (2026-10-13).
+              if (a === CLAUDE_ID) { toClaude(sub.id); return; }
               // Given to a teammate: on their list today unless a follow up is already set.
               onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
               // The current step's owner decides the status: a teammate makes it
@@ -1984,18 +1986,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // so it is on Claude's list (MCP list_my_tasks for_claude). Nothing opens:
   // "nine times out of ten we just want to delegate it and move on", the task
   // has what Claude needs. One open Claude step at a time.
+  // Given to Claude: due today, no follow up (Derek, 2026-10-13), and Claude
+  // starts on it in the cloud when the routine is set up (lib/claudeCloud).
+  // Without it the step is still on Claude's list, as before.
+  const toClaude = (stepId: string, make?: Subtask, insertBefore?: string | null) => {
+    let list = [...taskRef.current.subtasks];
+    if (make) list.splice(insertBefore ? list.findIndex((x) => x.id === insertBefore) : list.length, 0, make);
+    list = list.map((x) => (x.id === stepId ? { ...x, assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined } : x));
+    const step = list.find((x) => x.id === stepId)!;
+    const st = statusForStep(task.status, stepStage(step, task.assigneeId));
+    onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
+    void authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) })
+      .then(async (res) => {
+        const j = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
+        if (res.ok) pushToast("Claude is on it", j.url ? { label: "Watch", run: () => window.open(j.url!, "_blank", "noopener") } : undefined);
+        else if (res.status !== 501) pushToast(`On Claude's list. Claude couldn't start in the cloud: ${j.error ?? "error"}`);
+        else pushToast("Given to Claude");
+      })
+      .catch(() => pushToast("Given to Claude"));
+  };
   const claudeStep = () => {
     if (asking) setAskNext(null);
     if (taskRef.current.subtasks.some((x) => !x.done && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
     const id = newId("s_");
-    const list = [...taskRef.current.subtasks];
-    const cur = currentStep(list);
-    const due = addBusinessDaysIso(TODAY, 3);
-    const step: Subtask = { id, title: "For Claude", done: false, due, assigneeId: CLAUDE_ID, followUpAt: TODAY, startedAt: new Date().toISOString() };
-    list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, step);
-    const status = statusForStep(task.status, stepStage(step, task.assigneeId));
-    onPatch({ subtasks: list, ...(status ? { status } : {}), ...(task.assigneeId !== CLAUDE_ID ? handoffDates(due) : {}) });
-    pushToast("Delegated to Claude");
+    const cur = currentStep(taskRef.current.subtasks);
+    toClaude(id, { id, title: "For Claude", done: false, startedAt: new Date().toISOString() }, cur?.id ?? null);
   };
   // A teammate has the current step: the task is theirs until that date, and
   // comes back to its owner the business day after (Derek, 2026-10-12: "check
@@ -2491,10 +2506,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               "now the next step is for me to delegate it to Claude"). */}
           {!asking && !sentStep.onClient && sentStep.assigneeId !== CLAUDE_ID && (
             <button onClick={() => {
-              const st = statusForStep(task.status, stepStage({ ...sentStep, assigneeId: CLAUDE_ID }, task.assigneeId));
-              onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sentStep.id ? { ...x, assigneeId: CLAUDE_ID, followUpAt: TODAY } : x)), ...(st ? { status: st } : {}) });
               closeSentNext();
-              pushToast("Given to Claude");
+              toClaude(sentStep.id);
             }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Give it to Claude</button>
           )}
           {/* After an approval: tell the client, drafted to read and send. */}
@@ -3375,10 +3388,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               nextPanel={sentStep ? nextBody(true) : undefined}
               onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
-                const st = statusForStep(task.status, stepStage({ ...ps, assigneeId: CLAUDE_ID }, task.assigneeId));
-                onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, assigneeId: CLAUDE_ID, followUpAt: TODAY } : x)), ...(st ? { status: st } : {}), ...(isCur ? handoffDates(ps.due) : {}) });
                 setOpenStepPage(null);
-                pushToast("Given to Claude. It comes back to you when Claude is done.");
+                toClaude(ps.id);
               }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}

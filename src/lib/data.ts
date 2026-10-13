@@ -893,6 +893,8 @@ export interface Subtask {
    *  it waits, so a text after an email joins the same wait instead of
    *  starting a second one (Derek, 2026-10-13). */
   followUps?: { via: "email" | "sms" | "chat" | "call"; at: string }[];
+  /** A Claude Code cloud session working this step, to watch (lib/claudeCloud). */
+  cloudSession?: { url: string | null; at: string };
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;

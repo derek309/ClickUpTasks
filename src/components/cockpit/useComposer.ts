@@ -9,6 +9,7 @@ import { type ParsedRow } from "./MindDumpModal";
 import { newId } from "./ui";
 import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
 import { bulkUpsertTasks, tidyIfLong, upsertProject } from "@/lib/db";
+import { authedFetch } from "@/lib/supabase";
 
 // A dumped task's description: what the AI summarised, then the client's own
 // wording underneath as a blockquote so it stays visibly theirs. The verbatim
@@ -96,8 +97,10 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
       // Delegated as it is made (Derek, 2026-10-13): step 1 is theirs, the task
       // stays yours and comes back the business day after it is due.
       const to = r.delegateTo && r.delegateTo !== owner ? r.delegateTo : null;
-      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: r.due, followUpAt: TODAY, startedAt: now } : null;
-      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: r.due ? addBusinessDaysIso(r.due, 1) : r.followUpAt } : null;
+      // Claude's step is due today with no follow up (Derek, 2026-10-13).
+      const claude = to === "u_claude";
+      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : r.due, ...(claude ? {} : { followUpAt: TODAY }), startedAt: now } : null;
+      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : r.due ? addBusinessDaysIso(r.due, 1) : r.followUpAt } : null;
       return {
         id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: describeDumpRow(r),
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
@@ -127,7 +130,12 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     synced.forEach((t) => pinJustAdded(t.id));
     // A task typed as the whole request gets its short name and the request
     // as step 1's directions once saved (lib/tidyTitle).
-    const write = () => { void Promise.resolve(bulkUpsertTasks(synced, me.id)).then(() => synced.forEach((t) => tidyIfLong(t.id, t.title))); attachDumpFiles(synced, files); };
+    const write = () => { void Promise.resolve(bulkUpsertTasks(synced, me.id)).then(() => synced.forEach((t) => {
+      tidyIfLong(t.id, t.title);
+      // Delegated to Claude as it was made: Claude starts in the cloud (lib/claudeCloud).
+      const claudeStep = t.subtasks.find((x) => x.assigneeId === "u_claude" && !x.done);
+      if (claudeStep) void authedFetch(`/api/tasks/${encodeURIComponent(t.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId: claudeStep.id }) }).catch(() => undefined);
+    })); attachDumpFiles(synced, files); };
     if (projectWrite) projectWrite.then(write); else write();
     setDumpGroup(null);
     pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
