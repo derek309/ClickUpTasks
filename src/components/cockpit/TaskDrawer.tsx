@@ -1573,7 +1573,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     meetings: clientMeetings,
     actions, onDeleteAction: deleteAction, onEditAction: editAction, onLogAction: logAction, meId, onSendDm, onDeleteComment,
     // With steps, the steps say what's next; the old panel asks only without them.
-    onMessageSent: (channel, body) => { if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: channel, body }); },
+    onMessageSent: (channel, body) => {
+      if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: channel, body });
+      else if (channel === "email") finishEmailStep();
+    },
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     onNoteInDock: (text) => askDock("note", text),
@@ -2370,6 +2373,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     </div>, document.body);
   })();
+  // An email to the client finishes the current step when that step is the
+  // emailing kind: it holds the email, or its name says so ("Email Pam",
+  // "Let Pam know…", "Tell", "Send", "Reply"). From the draft, the task's
+  // Email box or a step's own Email (Derek, 2026-10-13: an email written in
+  // the Email box left "Let Pamela know the changes are done" open and asked
+  // nothing). The check in follows and What's next opens.
+  const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
+  const finishEmailStep = (followUpDate?: string | null): boolean => {
+    const cur = currentStep(taskRef.current.subtasks);
+    if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
+    if (!cur.holds?.includes("email") && !EMAILING.test(cur.title.trim())) return false;
+    // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
+    // the task's follow up, and a due date already earlier all move to it.
+    // Three business days when none was picked.
+    const due = followUpDate || addBusinessDaysIso(TODAY, 3);
+    const list = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"));
+    if (!list) return false;
+    if (openStep) setNextStepDone(openStep.id, true);
+    const status = statusForStep(task.status, "waiting");
+    onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
+    const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`);
+    if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id });
+    setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
+    return true;
+  };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
   const draftEmailBlock = (
@@ -2419,23 +2447,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           if (list) onPatch({ subtasks: list });
           return;
         }
-        const sentFrom = activeStep && activeStep.holds?.includes("email") ? activeStep : null;
-        if (sentFrom) {
-          // The "Follow up in" picked beside Send (Derek, 2026-10-12): the
-          // check in, the task's follow up, and a due date already earlier
-          // all move to it. Three business days when none was picked.
-          const due = email.followUpDate || addBusinessDaysIso(TODAY, 3);
-          const list = addCheckInStep(task.subtasks, sentFrom.id, firstName, due, () => newId("s_"));
-          if (list) {
-            if (openStep) setNextStepDone(openStep.id, true);
-            const status = statusForStep(task.status, "waiting");
-            onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
-            const checkIn = list.find((x) => x.addedFor === `checkin:${sentFrom.id}`);
-            if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id });
-            setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
-            return;
-          }
-        }
+        if (finishEmailStep(email.followUpDate)) return;
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
         // A due date inside that window already brings it back: no follow up then.
@@ -3167,7 +3179,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   setEmailOpenNonce((n) => n + 1);
                 } else startDraftEmail();
               }}
-              onSendEmail={onSendTaskMessage ? (subject, body) => onSendTaskMessage("email", subject, plainTextToHtml(body)) : undefined}
+              onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); if (isCur) finishEmailStep(); } : undefined}
               followBox={isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                   <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${firstName} hasn't approved yet` : `${firstName} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
