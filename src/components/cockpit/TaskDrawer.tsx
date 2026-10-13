@@ -2921,7 +2921,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="flex flex-col gap-2">
         {/* A text or chat for the client, read and sent from here (2026-10-13). */}
         {dm && (
-          <DraftMessageBox key={`${sub.id}-${dm.channel}`} channel={dm.channel} body={dm.body} firstName={firstName} tone={!sub.done ? stepTone(sub) : null}
+          <DraftMessageBox key={`${sub.id}-${dm.channel}`} channel={dm.channel} body={dm.body} firstName={firstName} tone={!sub.done && sub.assigneeId !== CLAUDE_ID ? stepTone(sub) : null} waiting={!sub.done && sub.assigneeId === CLAUDE_ID}
             onSave={(body) => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: dm.channel, body } } : x)) })}
             onDiscard={() => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) })}
             onSend={(body) => {
@@ -2983,7 +2983,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   // An email not yet sent on an open step is the work to do:
                   // the step's own colour, said plainly (Derek, 2026-10-13: "we
                   // need to see it and pull it out").
-                  const toSend = d === "email" && !sub.done ? stepTone(sub) : null;
+                  // With Claude, it is not ready to send yet: you review Claude's
+                  // work first (Derek, 2026-10-13).
+                  const withClaude = d === "email" && !sub.done && sub.assigneeId === CLAUDE_ID;
+                  const toSend = d === "email" && !sub.done && !withClaude ? stepTone(sub) : null;
                   return (
                     // The whole box opens it (Derek, 2026-10-11), not only its button.
                     <span role="button" tabIndex={0} onClick={() => openWork(d)} onKeyDown={(e) => { if (e.key === "Enter") openWork(d); }}
@@ -2991,7 +2994,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border px-3 py-2 hover:border-accent ${toSend ? `${toSend.rowTone} pl-4` : "bg-surface hover:bg-background"}`}>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
-                        <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : KIND_LABEL[d]}{r && stageChip(r.status)}</span>
+                        <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : withClaude ? "Draft email · waiting on Claude" : KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
                       <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend ? "bg-accent text-white" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Actions)"} aria-label={`Take ${deliverableName(d)} off this step`}
