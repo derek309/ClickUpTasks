@@ -1306,8 +1306,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // What the client sends from their portal lands on the open changes step,
   // made in front of the current step when there is none (Derek, 2026-10-11:
-  // "what counts as a change is when the client submits something").
-  const looseClientIds = steps.length > 0 ? clientChanges.filter((c) => !c.stepId && !c.done).map((c) => c.id).join(",") : "";
+  // "what counts as a change is when the client submits something"). A task
+  // with no steps gets one too (Derek, 2026-10-13: Carol's answer sat loose
+  // under "From Carol's portal").
+  const looseClientIds = clientChanges.filter((c) => !c.stepId && !c.done).map((c) => c.id).join(",");
   useEffect(() => {
     if (!looseClientIds) return;
     const ids = looseClientIds.split(",");

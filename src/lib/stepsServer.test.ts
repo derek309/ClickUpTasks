@@ -84,6 +84,14 @@ describe("steps added on the server", () => {
     expect(await stepsOnClientChanges("t1")).toBe(false);
   });
 
+  it("a portal request on a task with no steps gets its changes step too", async () => {
+    setup([{ id: "r1", title: "Why do we need to state that?", done: false, fromClient: true }]);
+    expect(await stepsOnClientChanges("t1")).toBe(true);
+    const made = steps().find((s) => s.title === "Changes from Brian")!;
+    expect(made.startedAt).toBeTruthy();
+    expect(steps().find((s) => s.id === "r1")!.stepId).toBe(made.id);
+  });
+
   it("a comment after approval is a to-do on a changes step holding the review", async () => {
     setup([{ id: "a", title: "Write it", done: true, holds: ["doc"] }, { id: "b", title: "Schedule it", done: false }]);
     expect(await stepsOnCommentAfterApproval("t1", "doc", { id: "c9", body: "Actually change the date" })).toBe(true);

@@ -188,11 +188,11 @@ export async function stepsOnMeetingTranscript(taskId: string, attachmentId: str
 
 /** What the client sent from their portal goes on the open changes step,
  *  made in front of the current step when there is none (the task page's
- *  rule, now with nobody watching). Only on a task that has steps. */
+ *  rule, now with nobody watching). A task with no steps gets one too. */
 export async function stepsOnClientChanges(taskId: string): Promise<boolean> {
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
-    if (!planSteps(list).length) return null;
+    // A task with no steps gets one too (Derek, 2026-10-13).
     const loose = list.filter((x) => x.fromClient && !x.stepId && !x.done).map((x) => x.id);
     if (!loose.length) return null;
     const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
