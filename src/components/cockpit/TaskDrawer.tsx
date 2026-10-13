@@ -2220,7 +2220,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
                   title={isLink ? a.url! : a.name}
                   className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
-                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />} <span className="min-w-0 [overflow-wrap:anywhere]">{a.name}</span>{a.size && <span className="shrink-0 font-normal text-muted"> · {a.size}</span>}{stepTitleHolding(attachmentKey(a.id)) && <span className="shrink-0 font-normal text-muted"> · on {stepTitleHolding(attachmentKey(a.id))}</span>}
+                  {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />}
+                  {/* The name on its own line and the size and step under it: side
+                      by side, a phone squeezed the name to a letter a line
+                      (Derek, 2026-10-13). */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{a.name}</span>
+                    {(a.size || stepTitleHolding(attachmentKey(a.id))) && (
+                      <span className="block truncate font-normal text-muted">{[a.size, stepTitleHolding(attachmentKey(a.id)) && `on ${stepTitleHolding(attachmentKey(a.id))}`].filter(Boolean).join(" · ")}</span>
+                    )}
+                  </span>
                 </a>
                 )}
                 {!editing && isLink && (
