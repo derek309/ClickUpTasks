@@ -11,6 +11,7 @@ export const STEP_TOOLS = [
   "- Tick a to-do with check_todo <task id> <to-do id>; a client's change request is resolved on their page too.",
   "- An email to the client: draft_email (it gets its own step after the current one, or pass step to put it on one). Nothing is sent; a teammate reads and sends it.",
   "- Review comments: get_review lists them with ids, and the files on them (open one with view_review_file). A new version (write_document or add_review_version) takes resolve_comments with the ids it answers, or \"all\"; update_review_comment resolves one.",
+  "- Before you stop: tick every step and to-do your work finished, not only the step you were given (For Claude), so the current step is what the person does next. An answer to a client's question that goes out in an email: put that email on the step holding the question (draft_email with step), so sending it finishes that step.",
   "- Found more to do? add_checklist_items adds steps. Last step done and nothing left: set_task_status done.",
 ].join("\n");
 

@@ -24,7 +24,7 @@ const WORKING_RULES = `ClickUpTasks is the team's task manager. When you WORK on
    - "done" only when nothing is left for anyone,
    - "waiting" when it's waiting on the client,
    - leave it "in_progress" if you're stopping partway; say so in the comment.
-4. A task's checklist is its STEPS, in order; get_task marks the current one. Tick a step you finished (check_item), which starts the next step the way the app does, and tick a step's to-dos as you finish them (check_todo). Add steps you discovered (add_checklist_items) rather than listing them only in a comment.
+4. A task's checklist is its STEPS, in order; get_task marks the current one. Tick a step you finished (check_item), which starts the next step the way the app does, and tick a step's to-dos as you finish them (check_todo). Add steps you discovered (add_checklist_items) rather than listing them only in a comment. Before you stop, tick every step and to-do your work finished, not only the step you were given (\"For Claude\"), so the current step is the person's next move. A client's question answered in an email still to be sent: put that email on the step holding the question (draft_email with step), so sending it finishes that step.
 5. Review comments you deal with get resolved, always: pass their ids as resolve_comments on the new version (write_document, add_review_version), or update_review_comment with done, or check_todo for the step's to-do it came from. Leave open only the ones you did not finish, and say why in your Done comment.
 6. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
 

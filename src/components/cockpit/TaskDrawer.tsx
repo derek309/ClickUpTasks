@@ -1812,6 +1812,30 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     })() : null;
     const missing = !sub.done ? missingNeeds(sub) : [];
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
+    // Whose move it is, as the row's colour and one sentence (Derek,
+    // 2026-10-13: "red needs your attention, yellow waiting, orange Claude's
+    // working on it, gray done"; a little circle "is not enough for the eye").
+    const person = sub.assigneeId ?? task.assigneeId;
+    const state: "done" | "claude" | "waiting" | "mine" | "later" = sub.done ? "done"
+      : sub.assigneeId === CLAUDE_ID ? "claude"
+      : sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? "waiting"
+      : isActive ? (person && meId && person !== meId ? "waiting" : "mine")
+      : "later";
+    const ROW_TONE: Record<typeof state, string> = {
+      mine: "bg-red-50 shadow-[inset_4px_0_0_#ef4444] dark:bg-red-500/10",
+      waiting: "bg-amber-50 shadow-[inset_4px_0_0_#f59e0b] dark:bg-amber-500/10",
+      claude: "bg-orange-50 shadow-[inset_4px_0_0_#ea580c] dark:bg-orange-500/10",
+      done: "bg-background/60",
+      later: "",
+    };
+    const sayTone = state === "mine" ? "text-red-700 dark:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
+    const say = state === "claude" ? "Claude is working on it"
+      : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `Waiting on ${firstName}` : `With ${userById(person ?? null)?.name.split(" ")[0] ?? "a teammate"}`)
+      : state === "mine" ? (
+        tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
+        : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
+        : (() => { const prev = steps[steps.findIndex((x) => x.id === sub.id) - 1]; return prev?.done && prev.assigneeId === CLAUDE_ID ? "Claude finished its part. Your turn" : "Your turn"; })()
+      ) : null;
     return (
       <Fragment key={sub.id}>
       <li draggable={dragSub === sub.id}
@@ -1820,7 +1844,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
         onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== sub.id) moveSub(dragSub, sub.id); setDragSub(null); setDropSub(null); }}
         aria-current={isActive ? "step" : undefined}
-        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
+        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${ROW_TONE[state]} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
         {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
           className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
@@ -1850,6 +1874,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {!sub.fromClient && steps.some((x) => x.id === sub.id) && <span className="mr-1.5 tabular-nums text-muted">{steps.findIndex((x) => x.id === sub.id) + 1}.</span>}
               {sub.title}
             </span>
+            {say && <span className={`text-[16px] font-semibold ${sayTone}`}>{say}</span>}
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
               {sub.done && <span className="text-muted">{sub.outcome ?? "Done"}{sub.doneAt ? ` · ${formatDue(sub.doneAt.slice(0, 10))}` : ""}</span>}
               {/* Each step's own due date (Derek, 2026-10-11). */}
@@ -1867,7 +1892,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Client work on this step">{markers.join("  ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
               {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
-              {sub.onClient && !sub.done && <span className="font-semibold text-sky-700 dark:text-sky-300">Waiting on {firstName}</span>}
               {reason && !sub.onClient && <span className="text-muted">{reason}</span>}
             </span>
           </span>
@@ -2083,21 +2107,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* A long plan folds the steps already done above the current one into
             a line to unfold (Derek, 2026-10-12: "so the page doesn't get too
             long"); the last one done stays, for where things stand. */}
+        {/* Every finished step folds into one line while any is open, wherever
+            it sits (Derek, 2026-10-13: steps added in front left done ones
+            below the current one, "starting to go out of order"). */}
         {(() => {
-          const firstOpen = steps.findIndex((x) => !x.done);
-          const cut = firstOpen < 0 ? steps.length : firstOpen;
-          const foldable = steps.length > 6 && cut > 1;
-          const folded = foldable && showAllSteps !== task.id ? cut - 1 : 0;
+          const doneCount = steps.filter((x) => x.done).length;
+          const anyOpen = steps.some((x) => !x.done);
+          const fold = anyOpen && doneCount > 0 && showAllSteps !== task.id;
+          const shown = fold ? steps.filter((x) => !x.done) : steps;
           return (<>
-            {folded > 0 && (
-              <li><button onClick={() => setShowAllSteps(task.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-[16px] text-muted hover:bg-background hover:text-foreground">
-                <I.chevron className="h-4 w-4 -rotate-90" /> {folded} earlier {folded === 1 ? "step" : "steps"} done <span className="font-semibold text-accent">Show</span>
+            {anyOpen && doneCount > 0 && (
+              <li><button onClick={() => setShowAllSteps(fold ? task.id : null)} aria-expanded={!fold} className="flex w-full items-center gap-2 bg-background/60 px-4 py-2.5 text-left text-[16px] text-muted hover:text-foreground">
+                <I.check className="h-4 w-4" /> {doneCount} {doneCount === 1 ? "step" : "steps"} done <span className="font-semibold text-accent">{fold ? "Show" : "Hide"}</span>
               </button></li>
             )}
-            {steps.map((x, i) => (i < folded ? null : stepRow(x, i)))}
-            {foldable && showAllSteps === task.id && (
-              <li className="border-t"><button onClick={() => setShowAllSteps(null)} className="w-full px-4 py-2 text-left text-[16px] font-semibold text-accent hover:bg-background">Fold the done steps</button></li>
-            )}
+            {shown.map((x, i) => stepRow(x, i + (anyOpen && doneCount > 0 ? 1 : 0)))}
           </>);
         })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
