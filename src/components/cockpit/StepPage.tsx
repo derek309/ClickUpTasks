@@ -584,7 +584,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
               ) : !sub.done && !doneActions && !sub.onClient ? (
                 <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                  <button onClick={onMarkDone} className="inline-flex h-11 items-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"><I.check className="h-4 w-4" /> Mark this step done</button>
+                  {/* Said as the next move, not "done" (Derek, 2026-10-13: "I still feel
+                      weird clicking it"): it ticks this step and What's next opens. */}
+                  <button onClick={onMarkDone} title="Marks this step done and opens What's next below" className="inline-flex h-11 items-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Create next step <span aria-hidden>→</span></button>
                   {onGiveToClaude && <button onClick={onGiveToClaude} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">Give this step to Claude</button>}
                   {onFinishTask && <button onClick={onFinishTask} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">The task is finished</button>}
                 </div>
