@@ -2654,7 +2654,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
             {/* Links, so right click offers new tab, new window or side panel (Derek, 2026-10-05). */}
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
             <a href="/?view=mail" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); goToView("inbox"); }} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
@@ -2667,7 +2667,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {([["c_agency", "7B0Y8xCOblcTHzYnM1Kc", "Agency", "🏢"], ["c_directory", "GN4HK1ybbTBWcolEjLHl", "Directory", "📍"]] as const).map(([cid, fallback, label, icon]) => (
               <a key={cid} href={`https://app.gohighlevel.com/v2/location/${clientById(cid)?.ghlLocationId || fallback}/dashboard`} target="_blank" rel="noopener noreferrer"
                 title={`Open the ${label} sub-account in GoHighLevel`} aria-label={`${label} in GoHighLevel`}
-                className="grid h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background">{icon}</a>
+                // GoHighLevel's site, not its app: no use on a phone (Derek, 2026-10-13).
+                className="hidden h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background sm:grid">{icon}</a>
             ))}
           </div>
           <SideItem href="/?view=work" active={myWork} title="Clients (press 2)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
@@ -2812,6 +2813,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
+            {/* A client's page keeps everything on this one row (Derek,
+                2026-10-13: "move all to one line on mobile"); the name
+                shortens to make room. */}
+            {isClientDetail && clientTab === "tasks" && <>{followingControl}{viewControlPhone}</>}
             {/* Icon only here — the phone header has a title and two controls
                 already, and a labelled button would push one of them off. */}
             {!inboxView && !settingsView && !dirView && (
@@ -2820,19 +2825,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             )}
             {isClientDetail && overflowControl}
           </div>
-          {isClientDetail ? (
-            <div className="flex items-center gap-2">
-              {/* No Tasks/Journal segmented control: Journal has one home now,
-                  the ⋮ menu, which this header already carries. */}
-              <div className="flex-1" />
-              {clientTab === "tasks" && (
-                <div className="flex items-center gap-1.5">
-                  {followingControl}
-                  {viewControlPhone}
-                </div>
-              )}
-            </div>
-          ) : myWork ? (
+          {isClientDetail ? null : myWork ? (
             <div className="flex flex-col gap-2">
               {/* Reviews and Drafts moved into the Inbox (Derek, 2026-10-06). */}
               {/* The desktop header's Add client, which a phone would otherwise
