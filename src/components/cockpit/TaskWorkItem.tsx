@@ -173,7 +173,11 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ comments: allComments, onReply, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ showDoneFirst = false, comments: allComments, onReply, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
+  /** Resolved comments open rather than folded: an older version, or one
+   *  with nothing left open (Derek, 2026-10-13: "I want to see all the
+   *  comments that have been resolved so that I can check it"). */
+  showDoneFirst?: boolean;
   comments: ThreadComment[];
   /** Resolves true once the comment is in, which clears the box. quote: the words
    *  it is about; attachmentFileId: a file added with it. */
@@ -227,7 +231,11 @@ export function CommentThread({ comments: allComments, onReply, onPost, when, vi
   const [attached, setAttached] = useState<{ id: string; name: string } | null>(null);
   const [attaching, setAttaching] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
-  const [showDone, setShowDone] = useState(false);
+  const [showDone, setShowDone] = useState(showDoneFirst);
+  // Follows the version picked: open on an older one, folded again on the
+  // newest (reset while drawing, React's pattern for a prop that changes).
+  const [doneFirstWas, setDoneFirstWas] = useState(showDoneFirst);
+  if (doneFirstWas !== showDoneFirst) { setDoneFirstWas(showDoneFirst); setShowDone(showDoneFirst); }
   // Resolved just now: stays in view, green, so it plainly took (Derek, 2026-10-12).
   const [justDone, setJustDone] = useState<string[]>([]);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);

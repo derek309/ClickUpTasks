@@ -1527,7 +1527,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
             )}
           </FileDropLine>
         )}
-        <CommentThread onReply={postReply} comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
+        <CommentThread showDoneFirst={(versioned && shownFileId !== doc.body) || (versioned ? commentsFor(comments, shownIds) : comments).every((c) => !!c.completedAt)}
+          onReply={postReply} comments={versioned ? commentsFor(comments, shownIds) : comments} onPost={postComment} when={timeAgo} viewer="team"
           pinLabel={versioned ? imagePlace : undefined} pinGroups={image || shownItems.length > 1 ? shownItems.map((_, i) => itemLabel(shownItems, i)) : undefined}
           alignGroup={versioned ? (label) => {
             const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);
