@@ -1757,7 +1757,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .slice(0, 5);
     const ghlUrl = ghlContactUrlFor(activeClient);
     const brief = [
-      `Work on this client/project from ClickUpTasks (https://clickuptasks.vercel.app):`,
+      `Work on this client/project from ClickUpTasks (${window.location.origin}):`,
       ``,
       `Client: ${client.name}${contact?.email ? ` (${contact.email})` : ""}`,
       `List: ${project ? `${project.name} (list id ${project.id})` : "All lists"}`,
