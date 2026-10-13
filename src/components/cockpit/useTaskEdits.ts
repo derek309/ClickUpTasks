@@ -394,6 +394,45 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     pushToast(target && target.projectId !== src.projectId ? `Duplicated into ${projectById(target.projectId)?.name ?? "another list"}` : "Task duplicated", { label: "Undo", run: () => { setTasks((ts) => ts.filter((t) => t.id !== copy.id)); deleteTaskDb(copy.id, me.id); setOpenTaskId(id); } });
   };
 
+  // A step that is really its own piece of work (Derek, 2026-10-13: "convert
+  // a step into a task, like decide the pet care page"): a new task for the
+  // same client and list, the step (directions, to dos, the client's asks on
+  // it) its step 1, and gone from here with a note saying where it went.
+  const stepToTask = (id: string, stepId: string) => {
+    const src = tasksRef.current.find((x) => x.id === id);
+    const sub = src?.subtasks.find((x) => x.id === stepId);
+    if (!src || !sub) return;
+    const now = new Date().toISOString();
+    const newStepId = newId("s_");
+    const theirs = src.subtasks.filter((x) => x.fromClient && x.stepId === stepId);
+    const made: Task = {
+      ...src,
+      id: newId("t_"),
+      title: sub.title,
+      description: "",
+      status: "todo",
+      assigneeId: sub.assigneeId ?? src.assigneeId,
+      due: sub.due ?? src.due,
+      subtasks: [
+        { ...sub, id: newStepId, done: false, doneAt: undefined, outcome: undefined, startedAt: now, holds: undefined, madeHere: undefined, waitsOn: undefined, addedFor: undefined, onClient: undefined },
+        ...theirs.map((x) => ({ ...x, id: newId("s_"), stepId: newStepId })),
+      ],
+      attachments: [],
+      comments: [{ id: newId("cm_"), authorId: me.id, body: `made this from the step "${sub.title}" on "${src.title}"`, at: now, kind: "event" as const }],
+      draftEmail: null,
+      ghlTaskId: null,
+      followUpAt: null,
+      recurrence: "none",
+      createdAt: now,
+      createdBy: me.id,
+    };
+    setTasks((ts) => [...ts, made]);
+    upsertTask(made, me.id);
+    patchTask(id, { subtasks: src.subtasks.filter((x) => x.id !== stepId && !(x.fromClient && x.stepId === stepId)) });
+    addComment(id, `Moved the step "${sub.title}" to its own task: ${typeof window !== "undefined" ? `${window.location.origin}/?task=${made.id}` : made.id}`);
+    pushToast(`"${sub.title}" is its own task now`, { label: "Open it", run: () => setOpenTaskId(made.id) });
+  };
+
   const deleteTask = (id: string) => {
     setConfirmDialog({
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
@@ -432,5 +471,5 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
   };
-  return { patchTask, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment };
+  return { patchTask, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask };
 }

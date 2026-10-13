@@ -42,7 +42,7 @@ export function NextChoices({ intro, choices }: { intro?: React.ReactNode; choic
   );
 }
 
-export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
+export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
   controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, onGiveToClaude, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
@@ -58,6 +58,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   onReopen: () => void;
   /** Deletes the step; at the very bottom of its page (Derek, 2026-10-11). */
   onDelete?: () => void;
+  /** Make this step its own task (Derek, 2026-10-13). */
+  onToTask?: () => void;
   /** The step's date, who has it, its stage, attach and delete. */
   controls?: React.ReactNode;
   /** Where it sits in the steps, and the arrows to the one before and after
@@ -628,9 +630,10 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
             </div>
             <div className={`min-w-0 ${full ? "mt-8 md:mt-0" : "mt-8"}`}>{conversation}</div>
           </div>
-          {onDelete && (
-            <div className="mx-auto mt-10 flex w-full max-w-[1280px] justify-end border-t px-4 pb-8 pt-4 sm:px-8">
-              <button onClick={onDelete} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>
+          {(onDelete || onToTask) && (
+            <div className="mx-auto mt-10 flex w-full max-w-[1280px] flex-wrap justify-end gap-2 border-t px-4 pb-8 pt-4 sm:px-8">
+              {onToTask && <button onClick={onToTask} title="Moves this step, its directions and to dos into a new task for the same client" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Make it its own task</button>}
+              {onDelete && <button onClick={onDelete} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>}
             </div>
           )}
         </div>
