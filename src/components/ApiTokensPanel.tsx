@@ -1,8 +1,11 @@
 "use client";
 
 // Self-service personal API tokens — reachable by any signed-in user (not
-// admin-gated like TeamPanel), since the Gmail extension is a per-person
-// credential, not a team-management concern.
+// admin-gated like TeamPanel): a token is a per-person credential for scripts
+// and tools, not a team-management concern. The Gmail extension (the Clipper)
+// that used to be set up here was retired on 2026-10-12: the Inbox and the
+// task page cover email, the sites' feedback plugin covers reviews. Its
+// source stays in chrome-extension/ and its /api/extension routes still serve.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { ConfirmModal, type ConfirmSpec } from "./cockpit/modals";
@@ -10,13 +13,6 @@ import { I } from "./cockpit/ui";
 
 type TokenRow = { id: string; name: string; created_at: string; last_used_at: string | null; copyable?: boolean };
 
-// Shown on the download link so a stale copy is visible rather than silent.
-// The zip served here sat at 1.4.0 for six weeks while the source reached
-// 1.9.2, and nothing on screen said so — people were told to reload an
-// extension to get a fix that had never been in their build. Bump this with
-// chrome-extension/manifest.json; `npm run build` repackages the zip from
-// source, so the two cannot drift apart again.
-const EXTENSION_VERSION = "1.14.0";
 
 /** Copy text that is still being fetched. The copy starts inside the click
  *  (Safari and some Chrome setups refuse a copy made after a fetch: "Write
@@ -136,7 +132,7 @@ export default function ApiTokensPanel() {
   function revoke(t: TokenRow) {
     setConfirmDialog({
       title: `Revoke "${t.name}"?`,
-      message: "Anything using this token (like the Chrome extension) will stop working immediately.",
+      message: "Anything using this token will stop working immediately.",
       confirmLabel: "Revoke",
       onConfirm: async () => {
         setConfirmDialog(null);
@@ -231,7 +227,7 @@ export default function ApiTokensPanel() {
           </div>
         ) : (
           <form onSubmit={createToken} className="flex items-center gap-2 border-b bg-background/40 px-5 py-3">
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Token name (e.g. Gmail extension)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Token name (e.g. Claude on my laptop)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
             <button type="submit" disabled={creating} className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40"><I.plus className="mr-1 inline h-3.5 w-3.5" />{creating ? "Creating…" : "New token"}</button>
           </form>
         )}
@@ -265,17 +261,6 @@ export default function ApiTokensPanel() {
           {!loading && !error && tokens.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No tokens yet.</div>}
         </div>
 
-        <div className="border-t bg-background/40 px-5 py-4">
-          <div className="mb-2 text-[15px] font-semibold">Gmail extension</div>
-          <p className="mb-2 text-[13px] text-muted">Create a ClickUpTasks task straight from an email you&apos;re viewing in Gmail.</p>
-          <ol className="mb-3 list-decimal space-y-1 pl-4 text-[13px] text-muted">
-            <li><a href="/clickuptasks-gmail-extension.zip" download className="font-medium text-accent hover:underline">Download the extension (v{EXTENSION_VERSION})</a> and unzip it.</li>
-            <li>In Chrome, go to <code className="rounded bg-surface px-1 py-0.5">chrome://extensions</code> and turn on <b>Developer mode</b> (top right).</li>
-            <li>Click <b>Load unpacked</b> and select the unzipped <code className="rounded bg-surface px-1 py-0.5">chrome-extension</code> folder.</li>
-            <li>It&apos;ll open a settings page &mdash; create a token above and paste it there.</li>
-            <li>Open any email in Gmail and click the extension&apos;s icon in Chrome&apos;s toolbar.</li>
-          </ol>
-        </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </>
   );
