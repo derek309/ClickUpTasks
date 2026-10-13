@@ -889,6 +889,10 @@ export interface Subtask {
    *  someone reads and sends it, like the draft email (Derek, 2026-10-13: the
    *  client is written to through the step's Actions, not a box on the page). */
   draftMessage?: { channel: "sms" | "chat"; body: string };
+  /** On a check in waiting for the client: each follow up sent or made while
+   *  it waits, so a text after an email joins the same wait instead of
+   *  starting a second one (Derek, 2026-10-13). */
+  followUps?: { via: "email" | "sms" | "chat" | "call"; at: string }[];
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;
@@ -3027,14 +3031,32 @@ export function addTellClientStep(subtasks: Subtask[], doneId: string, clientFir
 
 /** The email went: that step is done, and a check-in waits three business
  *  days, finished by the client's reply. */
-export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstName: string, due: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstName: string, due: string, makeId: () => string, now = new Date().toISOString(), via: "email" | "sms" | "chat" = "email"): Subtask[] | null {
   const key = `checkin:${sentId}`;
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === sentId);
   if (at < 0) return null;
-  const list = subtasks.map((s) => (s.id === sentId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `Email sent to ${clientFirstName}` } : s));
+  const word = via === "sms" ? "Text" : via === "chat" ? "Chat" : "Email";
+  const sent = subtasks.map((s) => (s.id === sentId ? { ...s, done: true, doneAt: s.doneAt ?? now, outcome: `${word} sent to ${clientFirstName}` } : s));
+  // Already waiting on them: this joins that wait as a follow up and moves its
+  // date, rather than a second "Check in" step (Derek, 2026-10-13).
+  const waiting = sent.find((s) => !s.done && s.finishWhen === "reply" && s.id !== sentId);
+  if (waiting) return recordFollowUp(sent, waiting.id, via, due, now);
+  const list = sent;
   list.splice(at + 1, 0, { id: makeId(), title: `Check in if ${clientFirstName} hasn't replied`, done: false, stage: "waiting", addedFor: key, due, finishWhen: "reply", startedAt: now });
   return list;
+}
+
+/** A follow up while a check in waits: noted on it, and its date moves on. */
+export function recordFollowUp(subtasks: Subtask[], stepId: string, via: "email" | "sms" | "chat" | "call", due: string, now = new Date().toISOString()): Subtask[] {
+  return subtasks.map((s) => (s.id === stepId ? { ...s, due, followUps: [...(s.followUps ?? []), { via, at: now }] } : s));
+}
+
+/** "Emailed Oct 13, texted Oct 14": a check in's follow ups, in one line. */
+export function followUpsLine(f: Subtask["followUps"]): string | null {
+  if (!f?.length) return null;
+  const verb = { email: "Emailed", sms: "Texted", chat: "Chatted", call: "Called" } as const;
+  return f.map((x, i) => `${i ? verb[x.via].toLowerCase() : verb[x.via]} ${new Date(x.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`).join(", ");
 }
 
 /** What a changes step does about telling the client once it is done:

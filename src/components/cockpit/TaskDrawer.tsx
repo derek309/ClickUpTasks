@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, 
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
@@ -1899,6 +1899,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {sub.emailedAt && !sub.done && <span className="text-muted">Email sent {formatDue(sub.emailedAt.slice(0, 10))}</span>}
               {!sub.done && sentReviews(sub).map((k) => <span key={k} className="text-muted">{viewedLine(k)}</span>)}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
+              {!sub.done && followUpsLine(sub.followUps) && <span className="text-muted">{followUpsLine(sub.followUps)}</span>}
               {(() => { const n = (sub.todos ?? []).filter((t) => todoWaiting(t, messages) === "waiting").length; return n > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{n} waiting on {firstName}</span>; })()}
               {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Actions on this step">{markers.join("  ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
@@ -2506,24 +2507,57 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : currentStep(taskRef.current.subtasks);
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
     const name = cur.title.trim();
-    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
-      : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
-    if (!fits) return false;
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
     // the task's follow up, and a due date already earlier all move to it.
     // Three business days when none was picked.
     const due = followUpDate || addBusinessDaysIso(TODAY, 3);
-    const made = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"));
+    // Sent while waiting on them (a check in is current): a follow up on that
+    // wait, its date moved, not a step done (Derek, 2026-10-13).
+    if (cur.finishWhen === "reply") {
+      const list = recordFollowUp(taskRef.current.subtasks, cur.id, channel, due).map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
+      onPatch({ subtasks: list, followUpAt: due });
+      pushToast(`${channel === "sms" ? "Text" : channel === "chat" ? "Chat" : "Email"} sent. Still waiting on ${firstName}; checking again ${formatDue(due)}.`);
+      return true;
+    }
+    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
+      : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
+    if (!fits) return false;
+    const made = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"), undefined, channel);
     if (!made) return false;
     // A sent text or chat leaves no draft behind on its step.
     const list = channel === "email" ? made : made.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
     if (openStep) setNextStepDone(openStep.id, true);
     const status = statusForStep(task.status, "waiting");
     onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
-    const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`);
+    const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`) ?? list.find((x) => !x.done && x.finishWhen === "reply");
     if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id, via: channel });
-    setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
+    if (checkIn?.addedFor === `checkin:${cur.id}`) setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
     return true;
+  };
+  // Following up while waiting on them (Derek, 2026-10-13: "follow up by
+  // email, text, call or task chat"): each one is a follow up on this same
+  // check in, never a new step. Email and Text draft on it; a call is noted.
+  const followUpBox = (ps: Subtask) => {
+    const since = ps.startedAt ? formatDue(ps.startedAt.slice(0, 10)) : null;
+    const done = followUpsLine(ps.followUps);
+    const btn = "h-10 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold hover:bg-background";
+    const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
+    return (
+      <div className="flex flex-col gap-2 rounded-[5px] bg-amber-50 px-3 py-2.5 text-[16px] shadow-[inset_4px_0_0_#f59e0b] dark:bg-amber-500/10">
+        <div className="font-semibold text-amber-800 dark:text-amber-300">Waiting on {firstName}{since ? ` since ${since}` : ""}{done ? ` · ${done}` : ""}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted">Follow up:</span>
+          {hasMessaging && messageDest?.email && <button onClick={() => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); }} className={btn}>Email</button>}
+          {messageDest?.phone && <button onClick={() => draftOn("sms")} className={btn}>Text</button>}
+          <button onClick={() => {
+            const due = addBusinessDaysIso(TODAY, 3);
+            onPatch({ subtasks: recordFollowUp(taskRef.current.subtasks, ps.id, "call", due), followUpAt: due });
+            pushToast(`Call noted. Checking again ${formatDue(due)}.`);
+          }} className={btn}>Call</button>
+          {hasMessaging && <button onClick={() => draftOn("chat")} className={btn}>Task chat</button>}
+        </div>
+      </div>
+    );
   };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
@@ -3337,7 +3371,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 } else startDraftEmail();
               }}
               onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
-              followBox={isCur && canNudge ? (
+              followBox={!ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                   <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${firstName} hasn't approved yet` : `${firstName} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
                   <button onClick={nudge} className="rounded-[5px] bg-surface px-3 py-1.5 font-semibold text-foreground ring-1 ring-border hover:ring-accent">Nudge {firstName}</button>

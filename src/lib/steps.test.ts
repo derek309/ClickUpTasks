@@ -375,3 +375,19 @@ describe("needs you", () => {
     expect(needsYou({ ...base, subtasks: [{ id: "p", title: "Plain", done: false }] }, "u_derek")).toBeNull();
   });
 });
+
+describe("following up while waiting", () => {
+  it("a text after an email joins the open check in, says Text, and moves its date", async () => {
+    const { addCheckInStep, followUpsLine } = await import("./data");
+    const list = [
+      { id: "e", title: "Email Ryan", done: true, outcome: "Email sent to Ryan" },
+      { id: "c", title: "Check in if Ryan hasn't replied", done: false, finishWhen: "reply" as const, due: "2026-10-15", addedFor: "checkin:e" },
+      { id: "t", title: "Text Ryan", done: false },
+    ];
+    const out = addCheckInStep(list, "t", "Ryan", "2026-10-16", () => "new", "2026-10-13T12:00:00Z", "sms")!;
+    expect(out.filter((x) => x.finishWhen === "reply")).toHaveLength(1);
+    expect(out.find((x) => x.id === "t")).toMatchObject({ done: true, outcome: "Text sent to Ryan" });
+    expect(out.find((x) => x.id === "c")).toMatchObject({ due: "2026-10-16", followUps: [{ via: "sms", at: "2026-10-13T12:00:00Z" }] });
+    expect(followUpsLine([{ via: "email", at: "2026-10-13T12:00:00Z" }, { via: "call", at: "2026-10-14T12:00:00Z" }])).toBe("Emailed Oct 13, called Oct 14");
+  });
+});
