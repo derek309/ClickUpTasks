@@ -49,6 +49,32 @@ export type ParsedRow = TaskRow;
 // than waiting a day to resurface (Derek, 2026-09-04: "default do in 3 days
 // and follow up today").
 export const DEFAULT_DUE = () => addBusinessDaysIso(TODAY, 3);
+
+// A word in the sentence that is a picker, like the task page's.
+const WORD = "cursor-pointer appearance-none [field-sizing:content] bg-transparent font-semibold text-foreground underline decoration-dotted underline-offset-4 outline-none hover:text-accent";
+
+/** A date in the sentence: the quick picks by name, or any date. */
+function DayWord({ value, onChange, label }: { value: string | null; onChange: (d: string | null) => void; label: string }) {
+  const pick = useRef<HTMLInputElement | null>(null);
+  const picks = dateQuickPicks();
+  const named = picks.find((p) => p.date === value);
+  return (
+    <span className="relative inline-block">
+      <select aria-label={label} value={value ?? ""} className={`${WORD} text-accent`}
+        onChange={(e) => {
+          if (e.target.value === "__pick") { const el = pick.current; if (el) { try { el.showPicker(); } catch { el.click(); } } return; }
+          onChange(e.target.value || null);
+        }}>
+        {value && !named && <option value={value}>{formatDue(value)}</option>}
+        {picks.map((p) => <option key={p.label} value={p.date}>{p.label.toLowerCase()} ({formatDue(p.date)})</option>)}
+        <option value="">not set</option>
+        <option value="__pick">pick a date…</option>
+      </select>
+      <input ref={pick} type="date" tabIndex={-1} aria-hidden value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}
+        className="pointer-events-none absolute bottom-0 left-0 h-0 w-0 opacity-0" />
+    </span>
+  );
+}
 export const DEFAULT_FOLLOW_UP = () => TODAY;
 
 type PastedFile = { file: File; url: string; row: number };
@@ -94,10 +120,6 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const [priorityTouched, setPriorityTouched] = useState(false);
   const [size, setSize] = useState<TaskSize | null>(null);
   const [clientId, setClientId] = useState<string>(defaultClientId ?? "");
-  // Due, follow up, priority, owner and size are answered by their defaults;
-  // this opens them for the times the default is wrong (Derek, 2026-09-28: the
-  // fast path should not make you look at five controls first).
-  const [showFields, setShowFields] = useState(false);
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
   // Which button is waiting on its request — busy alone can't tell the two
   // apart since both routes through the same in-flight flag one level up.
@@ -298,45 +320,27 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 </div>
               )}
 
-              <button onClick={() => setShowFields((v) => !v)}
-                className="mt-3 flex shrink-0 items-center gap-1.5 self-start rounded-md px-1 text-[16px] font-medium text-muted hover:text-foreground">
-                <I.chevron className={`transition ${showFields ? "-rotate-90" : "rotate-180"}`} />
-                {showFields ? "Hide the details" : `Due ${due ? formatDue(due) : "not set"}, ${PRIORITY_META[priority].label.toLowerCase()}, ${owner ? owner : "yours"}`}
-              </button>
-
-              <div className={`mt-2 shrink-0 space-y-2 rounded-xl border bg-background/50 px-4 py-3 ${showFields ? "" : "hidden"}`}>
-                <div className="flex flex-wrap items-center gap-2">{fieldLabel("Due")}{dayChips(due, setDue)}</div>
-                <div className="flex flex-wrap items-center gap-2">{fieldLabel("Follow up")}{dayChips(followUpAt, setFollowUpAt)}</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {fieldLabel("Priority")}
-                  <select value={priority} onChange={(e) => { setPriority(e.target.value as Priority); setPriorityTouched(true); }}
-                    className="rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none">
-                    {manualPriorityOptions(priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
-                  </select>
-                  <span className="text-[16px] text-muted">
-                    {priorityTouched ? "Set by hand, so it stays put." : "Left alone it follows the due date, like every other task."}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {fieldLabel("Owner")}
-                  <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)}
-                    className="rounded-md border bg-surface px-2.5 py-1 text-[14px] outline-none">
-                    <option value="">Me</option>
-                    <option value="client">⏳ Waiting on {clientName}</option>
-                    {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
-                  </select>
-                  <span className="text-[16px] text-muted">A task the notes name someone else for goes to them instead.</span>
-                </div>
-                {SIZING_ON && <div className="flex flex-wrap items-center gap-2">
-                  {fieldLabel("How long")}
-                  <select value={size ?? ""} onChange={(e) => setSize((e.target.value || null) as TaskSize | null)}
-                    className="rounded-md border bg-surface px-2.5 py-1 text-[16px] outline-none">
-                    <option value="">Not sized</option>
+              {/* The task page's own sentence, always showing (Derek, 2026-10-13:
+                  "don't hide the details, convert it into the sentence we have
+                  on the task so it's all consistent"). Each word is a picker. */}
+              <p className="mt-3 shrink-0 text-[16px] leading-loose text-muted">
+                On{" "}
+                <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)} aria-label="Owner" className={WORD}>
+                  <option value="">me</option>
+                  <option value="client">waiting on {clientName}</option>
+                  {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+                </select>,{" "}
+                <select value={priority} onChange={(e) => { setPriority(e.target.value as Priority); setPriorityTouched(true); }} aria-label="Priority"
+                  title={priorityTouched ? "Set by hand, so it stays put" : "Left alone it follows the due date"} className={WORD}>
+                  {manualPriorityOptions(priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
+                </select>
+                {SIZING_ON && <>,{" "}
+                  <select value={size ?? ""} onChange={(e) => setSize((e.target.value || null) as TaskSize | null)} aria-label="How long" className={WORD}>
+                    <option value="">not sized</option>
                     {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
-                  </select>
-                  <span className="text-[16px] text-muted">An unsized task is counted at four hours wherever time is added up.</span>
-                </div>}
-              </div>
+                  </select></>},{" "}
+                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
+              </p>
             </div>
             {/* Two pairs rather than a row of four: one task or a list, and
                 within each, your words or the AI's (Derek, 2026-09-28: "we
