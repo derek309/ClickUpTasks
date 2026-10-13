@@ -360,3 +360,18 @@ describe("step history", () => {
     expect(ev[1]).toMatchObject({ step: before[1], stepAt: 1 });
   });
 });
+
+describe("needs you", () => {
+  it("says why the current step is your move after someone else acted, and nothing otherwise", async () => {
+    const { needsYou, CLAUDE_ID } = await import("./data");
+    const base = { status: "in_progress" as const, assigneeId: "u_derek" };
+    const claude = { ...base, subtasks: [{ id: "a", title: "Draft it", done: true, assigneeId: CLAUDE_ID }, { id: "b", title: "Send it", done: false, startedAt: "x" }] };
+    expect(needsYou(claude, "u_derek", "Pam")).toBe("Claude finished. Your turn");
+    expect(needsYou(claude, "u_justin", "Pam")).toBeNull();
+    const changes = { ...base, subtasks: [{ id: "c", title: "Changes from Pam", done: false, addedFor: "changes", startedAt: "x" }, { id: "r", title: "Bigger logo", done: false, fromClient: true, stepId: "c" }] };
+    expect(needsYou(changes, "u_derek", "Pam")).toBe("Pam sent changes: 1 to do");
+    const waiting = { ...base, subtasks: [{ id: "w", title: "Check in", done: false, finishWhen: "reply" as const, startedAt: "x" }] };
+    expect(needsYou(waiting, "u_derek", "Pam")).toBeNull();
+    expect(needsYou({ ...base, subtasks: [{ id: "p", title: "Plain", done: false }] }, "u_derek")).toBeNull();
+  });
+});

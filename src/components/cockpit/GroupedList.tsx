@@ -9,7 +9,7 @@ import {
   users, assignableUsers, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedItemFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
-  addDaysIso, dateQuickPicks, stepDateLabel,
+  addDaysIso, dateQuickPicks, stepDateLabel, needsYou,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, LIST_COLUMNS, MENU_MAX, menuPos, menuStyle } from "./ui";
@@ -313,6 +313,9 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
   const listName = project && (showClient || project.name !== "Tasks") ? project.name : "";
   const crumb = [folder?.name, listName].filter(Boolean).join(" / ");
   const subline = [shownTitle !== task.title && task.title, showCrumb && crumb].filter(Boolean).join(" · ");
+  // Why it needs the person looking, said in red instead of the preview
+  // (Derek, 2026-10-13: "Claude needs you to review this").
+  const need = needsYou(task, meId, clientById(task.clientId)?.name.split(" ")[0]);
   const isDone = task.status === "done";
   // Priority used to be its own column; it's now a 3px bar on the row's
   // leading edge so it reads at a glance without repeating the group
@@ -395,7 +398,7 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
         onDragOver={(e) => { if (onRowDragOver) { e.preventDefault(); onRowDragOver(); } }}
         onDragLeave={onRowDragLeave}
         onDrop={(e) => { if (onRowDrop) { e.preventDefault(); onRowDrop(); } }}
-        className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${mineByDelegation ? "border-l-accent bg-accent-soft/30" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
+        className={`group/tr block border-b border-l-[3px] px-4 pb-1.5 transition-colors hover:bg-accent-soft/50 sm:table-row sm:px-0 sm:pb-0 ${mineByDelegation ? "border-l-accent bg-accent-soft/30" : ""} ${need && !selected ? "bg-red-50/70 dark:bg-red-500/10" : ""} ${selected ? "bg-accent-soft" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} ${isMergeDropTarget ? "bg-accent-soft" : ""}`}
         style={{ borderLeftColor: mineByDelegation ? undefined : priorityBarColor }}>
         <td className="block w-full py-1 pr-3 align-middle sm:table-cell sm:max-w-0 sm:pl-4">
         <div className="flex min-w-0 items-start gap-0.5 sm:items-center">
@@ -462,7 +465,8 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
                 phone, where one line is the subject and nothing else. It is a
                 glance; the whole message is in the task. Words only, in
                 keeping with the no icon rule below. */}
-            {preview && !isDone && <span className="line-clamp-2 min-w-0 break-words text-[16px] leading-snug text-muted sm:line-clamp-1 sm:text-[13px]" title={preview}>{preview}</span>}
+            {need ? <span className="min-w-0 text-[16px] font-semibold leading-snug text-red-700 dark:text-red-300">{need}</span>
+              : preview && !isDone && <span className="line-clamp-2 min-w-0 break-words text-[16px] leading-snug text-muted sm:line-clamp-1 sm:text-[13px]" title={preview}>{preview}</span>}
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
                 on tasks list view"). A repeat arrow, a paperclip, a comment
                 bubble and a subtask count on every row is four pieces of

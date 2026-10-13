@@ -2127,17 +2127,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             it sits (Derek, 2026-10-13: steps added in front left done ones
             below the current one, "starting to go out of order"). */}
         {(() => {
-          const doneCount = steps.filter((x) => x.done).length;
+          // The last two finished stay in view for context (Derek, 2026-10-13).
+          const done = steps.filter((x) => x.done);
+          const recent = new Set([...done].sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "") || steps.indexOf(b) - steps.indexOf(a)).slice(0, 2).map((x) => x.id));
+          const hidden = done.length - recent.size;
           const anyOpen = steps.some((x) => !x.done);
-          const fold = anyOpen && doneCount > 0 && showAllSteps !== task.id;
-          const shown = fold ? steps.filter((x) => !x.done) : steps;
+          const fold = anyOpen && hidden > 0 && showAllSteps !== task.id;
+          const shown = fold ? steps.filter((x) => !x.done || recent.has(x.id)) : steps;
+          const lead = anyOpen && hidden > 0 ? 1 : 0;
           return (<>
-            {anyOpen && doneCount > 0 && (
+            {lead > 0 && (
               <li><button onClick={() => setShowAllSteps(fold ? task.id : null)} aria-expanded={!fold} className="flex w-full items-center gap-2 bg-background/60 px-4 py-2.5 text-left text-[16px] text-muted hover:text-foreground">
-                <I.check className="h-4 w-4" /> {doneCount} {doneCount === 1 ? "step" : "steps"} done <span className="font-semibold text-accent">{fold ? "Show" : "Hide"}</span>
+                <I.check className="h-4 w-4" /> {fold ? `${hidden} earlier ${hidden === 1 ? "step" : "steps"} done` : `${done.length} steps done`} <span className="font-semibold text-accent">{fold ? "Show" : "Hide"}</span>
               </button></li>
             )}
-            {shown.map((x, i) => stepRow(x, i + (anyOpen && doneCount > 0 ? 1 : 0)))}
+            {shown.map((x, i) => stepRow(x, i + lead))}
           </>);
         })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}

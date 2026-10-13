@@ -3164,6 +3164,32 @@ export function stepChangeEvents(before: Subtask[], after: Subtask[]): { body: s
   return out;
 }
 
+/** Why a task needs the person looking, or null (Derek, 2026-10-13: "after
+ *  Claude is done or a client responds, I'm missing it"). Only when its
+ *  current step is that person's move because someone else just acted: the
+ *  client wrote or sent changes, a review came back, Claude or a teammate
+ *  finished their step. It stops on its own once they act, because the
+ *  current step moves on. Tasks without steps are left to the old signals. */
+export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">, meId: string | null | undefined, clientFirst = "The client"): string | null {
+  if (!meId || task.status === "done") return null;
+  const plan = planSteps(task.subtasks);
+  const cur = currentStep(task.subtasks);
+  if (!cur || !plan.length) return null;
+  if ((cur.assigneeId ?? task.assigneeId) !== meId) return null;
+  if (cur.onClient || cur.assigneeId === CLAUDE_ID || cur.finishWhen === "reply" || stepStage(cur, task.assigneeId) === "waiting") return null;
+  if (cur.fromEmails?.length) return `${clientFirst} wrote. Reply`;
+  const portal = task.subtasks.filter((x) => x.fromClient && !x.done && x.stepId === cur.id).length;
+  if (portal || cur.addedFor === "changes") return `${clientFirst} sent changes${portal ? `: ${portal} to do` : ""}`;
+  if (/^(doc|image|page|video):\d+$/.test(cur.addedFor ?? "")) return `${clientFirst} asked for changes`;
+  const at = plan.findIndex((x) => x.id === cur.id);
+  const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
+  if (!prev) return null;
+  if (prev.addedFor?.startsWith("ok:")) return `${clientFirst} approved. Your turn`;
+  if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
+  if (prev.assigneeId && prev.assigneeId !== meId) return `${userById(prev.assigneeId)?.name.split(" ")[0] ?? "A teammate"} finished. Your turn`;
+  return null;
+}
+
 /** Step templates are off (Derek, 2026-10-13: "use it naturally as we work
  *  through it ... trying to pre-design it before we use it causes more
  *  confusion"). Saved templates are kept; true brings back Save as template,

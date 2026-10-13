@@ -1,6 +1,6 @@
 "use client";
 
-import { addBusinessDaysIso, addReplyStep, clientEmailText } from "@/lib/data";
+import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou } from "@/lib/data";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -2075,7 +2075,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const dueBucket = (t: Task) => dueBucketOf(viewerDueDate(t, lensUserId), t.status === "done");
 
   type Grp = { key: string; label: string; color: string; tasks: Task[] };
+  // "Needs you" first, whatever the grouping (Derek, 2026-10-13: "after Claude
+  // is done or a client responds I'm missing it"): tasks whose current step
+  // turned to your move because someone else acted (data.ts needsYou).
   const buildGroups = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
+    const needs = list.filter((t) => !!needsYou(t, me.id, clientById(t.clientId)?.name.split(" ")[0]));
+    if (!needs.length) return buildGroupsBy(list, dim);
+    const ids = new Set(needs.map((t) => t.id));
+    return [{ key: "needs_you", label: "Needs you", color: "#ef4444", tasks: needs }, ...buildGroupsBy(list.filter((t) => !ids.has(t.id)), dim)];
+  };
+  const buildGroupsBy = (list: Task[], dim: typeof groupBy = groupBy): Grp[] => {
     // A hidden stage gets a column only when something is actually in it, so
     // nobody is looking at an empty Delegated column on the thirty three
     // clients where nothing has been handed off.
@@ -2146,6 +2155,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // don't have an unambiguous single-field patch, so drag is disabled there;
   // see the onDropInGroup wiring on the main GroupedList render below).
   const dropTaskInGroup = (taskId: string, groupKey: string) => {
+    // Needs you is not a stage or a priority: nothing to set by dropping there.
+    if (groupKey === "needs_you" || groupKey === "needs_reply") return;
     if (groupBy === "status") patchTask(taskId, { status: groupKey as TaskStatus });
     else if (groupBy === "priority") {
       if (!isManuallyAssignable(groupKey as Priority)) { pushToast("Interaction is assigned automatically, not manually."); return; }
