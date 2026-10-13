@@ -22,8 +22,10 @@ export async function buildPortalReminder(clientId: string, o: { today: string; 
   if (!contact?.email) return { ok: false, reason: "no_email" };
   const { data: waiting } = await supabaseAdmin.from("tasks").select("title, due, follow_up_at")
     .eq("client_id", clientId).eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).limit(200);
-  const needs = ((waiting ?? []) as any[])
-    .map((t) => ({ title: t.title as string, due: (t.due ?? null) as string | null, followUpAt: (t.follow_up_at ?? null) as string | null }))
+  const everything = ((waiting ?? []) as any[])
+    .map((t) => ({ title: t.title as string, due: (t.due ?? null) as string | null, followUpAt: (t.follow_up_at ?? null) as string | null }));
+  // This week's decide whether an email goes; the counts in it cover all.
+  const needs = everything
     .filter((t) => thisWeek([t], o.today).length || (!!t.followUpAt && t.followUpAt <= o.today))
     .map(({ title, due }) => ({ title, due }));
   const { data: working } = client.portal_shows_all_tasks
@@ -40,6 +42,7 @@ export async function buildPortalReminder(clientId: string, o: { today: string; 
   const email = portalReminderEmail({
     firstName: firstName ? firstName[0].toUpperCase() + firstName.slice(1) : null,
     needs: [...needs].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")),
+    all: everything.map(({ title, due }) => ({ title, due })),
     working: thisWeek(((working ?? []) as any[]).map((t) => ({ title: t.title, due: t.due ?? null })), o.today),
     showWorking: client.portal_shows_all_tasks === true, portalUrl: `${APP_URL}/waiting/${token ?? "<made when sent>"}`, monday: o.monday, today: o.today,
   });

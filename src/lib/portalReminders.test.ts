@@ -10,14 +10,18 @@ describe("Monday client reminders", () => {
     expect(isReminderHour(Date.parse("2026-10-06T15:00:00Z"))).toBe(false); // Tuesday
     expect(isReminderHour(Date.parse("2026-10-10T15:00:00Z"))).toBe(false); // Saturday
   });
-  it("lists what we need, with dates, and skips when nothing is waiting", () => {
-    const e = portalReminderEmail({ firstName: "James", needs: [{ title: "Send plan counts", due: "2026-10-01" }, { title: "PlanEnroll link", due: null }], working: [{ title: "Homepage", due: null }], showWorking: true, portalUrl: "https://x/waiting/abc", monday: true, today: "2026-10-05" })!;
-    expect(e.subject).toBe("This week: 2 things we need from you");
+  it("counts overdue, due today and coming up, never names them, and skips when nothing is waiting", () => {
+    const e = portalReminderEmail({ firstName: "James", needs: [{ title: "Send plan counts", due: "2026-10-01" }, { title: "Today one", due: "2026-10-05" }],
+      all: [{ title: "Send plan counts", due: "2026-10-01" }, { title: "Today one", due: "2026-10-05" }, { title: "Later", due: "2026-10-20" }, { title: "PlanEnroll link", due: null }],
+      portalUrl: "https://x/waiting/abc", monday: true, today: "2026-10-05" })!;
+    expect(e.subject).toBe("Your attention needed: 1 overdue, 1 due today, 2 coming up");
     expect(e.body).toMatch(/Hi James/);
-    expect(e.body).toMatch(/Send plan counts <span[^>]*>\(needed by Thu, Oct 1, late\)/);
-    expect(e.body).toMatch(/Homepage/);
+    expect(e.body).toMatch(/<b[^>]*>1<\/b> task is overdue/);
+    expect(e.body).toMatch(/<b[^>]*>2<\/b> are coming up/);
+    expect(e.body).not.toMatch(/Send plan counts|PlanEnroll/);
+    expect(e.body).toMatch(/New task/);
     expect(e.body).toMatch(/https:\/\/x\/waiting\/abc/);
-    expect(portalReminderEmail({ firstName: null, needs: [], working: [], showWorking: true, portalUrl: "u", monday: false, today: "2026-10-05" })).toBeNull();
+    expect(portalReminderEmail({ firstName: null, needs: [], portalUrl: "u", monday: false, today: "2026-10-05" })).toBeNull();
   });
   it("keeps only this week's: late or due by Sunday, nothing undated", () => {
     expect(endOfWeek("2026-10-05")).toBe("2026-10-11"); // Monday → Sunday

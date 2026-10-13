@@ -44,26 +44,30 @@ export function thisWeek<T extends ReminderTask>(tasks: T[], today: string): T[]
  *  never picks up; Send there moves it on. */
 export const REVIEW_STATUS = "review";
 
-/** The email, or null when nothing is waiting on them (no reminder then). */
-export function portalReminderEmail(o: { firstName: string | null; needs: ReminderTask[]; working: ReminderTask[]; showWorking: boolean; portalUrl: string; monday: boolean; today: string }): { subject: string; body: string } | null {
+/** The email, or null when nothing is waiting on them this week (no reminder
+ *  then). Counts only, never what the items are (Derek, 2026-10-13: Carol
+ *  answered a listed email item by item instead of opening her tasks): how
+ *  many are overdue, due today and coming up, and one button to her tasks,
+ *  where she answers, adds a task or talks to us. */
+export function portalReminderEmail(o: { firstName: string | null; needs: ReminderTask[]; all?: ReminderTask[]; working?: ReminderTask[]; showWorking?: boolean; portalUrl: string; monday: boolean; today: string }): { subject: string; body: string } | null {
   if (!o.needs.length) return null;
-  const item = (t: ReminderTask) => {
-    const late = t.due && t.due < o.today;
-    const when = t.due ? ` <span style="color:${late ? "#b91c1c" : "#b45309"}">(needed by ${shortDate(t.due)}${late ? ", late" : ""})</span>` : "";
-    return `<li>${escapeHtml(t.title)}${when}</li>`;
-  };
-  const working = o.showWorking && o.working.length
-    ? `<p>And here is what we are working on for you right now:</p><ul>${o.working.slice(0, 5).map((t) => `<li>${escapeHtml(t.title)}</li>`).join("")}</ul>${o.working.length > 5 ? `<p>Plus ${o.working.length - 5} more.</p>` : ""}`
-    : "";
+  const every = o.all?.length ? o.all : o.needs;
+  const overdue = every.filter((t) => t.due && t.due < o.today).length;
+  const today = every.filter((t) => t.due === o.today).length;
+  const later = every.length - overdue - today;
+  const parts = [overdue && `${overdue} overdue`, today && `${today} due today`, later && `${later} coming up`].filter(Boolean) as string[];
+  const line = (n: number, what: string, color: string) => n ? `<li><b style="color:${color}">${n}</b> ${what}</li>` : "";
   const button = { url: o.portalUrl, label: "Open your tasks" };
-  const n = o.needs.length;
   return {
-    subject: o.monday ? `This week: ${n} ${n === 1 ? "thing" : "things"} we need from you` : `Quick check in: ${n} ${n === 1 ? "thing" : "things"} still waiting on you`,
+    subject: `${overdue ? "Your attention needed" : o.monday ? "This week" : "Quick check in"}: ${parts.join(", ")}`,
     body: draftLinkAsButton(
       `<p>Hi${o.firstName ? ` ${escapeHtml(o.firstName)}` : ""},</p>` +
-      `<p>${o.monday ? "Here is what we need from you to keep things moving this week:" : "A quick reminder of what is still waiting on you:"}</p>` +
-      `<ul>${o.needs.map(item).join("")}</ul>${working}` +
-      `<p>You can answer, send files or start a doc right from your tasks page.</p>${draftLinkHtml(button)}<p>Thanks!</p>`,
+      `<p>${overdue ? "We need your help to keep your project moving." : "Here is where things stand with what we need from you."} On your tasks page right now:</p>` +
+      `<ul>${line(overdue, overdue === 1 ? "task is overdue" : "tasks are overdue", "#b91c1c")}${line(today, today === 1 ? "is due today" : "are due today", "#b45309")}${line(later, later === 1 ? "is coming up" : "are coming up", "#334155")}</ul>` +
+      `<p><b>Click the button below to take care of them.</b></p>${draftLinkHtml(button)}` +
+      `<p>On your tasks page you can:</p>` +
+      `<ul><li>Answer each one, or send files, right on the task</li><li>Add something new with <b>New task</b></li><li>Chat with us about any of them</li></ul>` +
+      `<p>Please use your tasks page rather than replying to this email, so nothing gets missed.</p><p>Thanks!</p>`,
       button,
     ),
   };
