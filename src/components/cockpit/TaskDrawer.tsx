@@ -61,7 +61,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -113,6 +113,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
    *  dates, the sizing and the hidden Delegated stage, and pings them. */
   /** Returns the new handoff's id, so its page can be opened to finish the brief. */
   onDelegate?: (spec: DelegateSpec) => string | null;
+  clientPortalUrl?: string | null;
   clientLinks?: ClientLink[];
   clientMeetings?: ClientNote[];
   taskLink?: () => string;
@@ -2033,6 +2034,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
+  // Remind the client (Derek, 2026-10-13: "a reminder email, individual for
+  // the task and the step"): a step holding an email that names this task and
+  // what its current step waits on, with their portal opened on it.
+  const remindStep = () => {
+    const cur = currentStep(taskRef.current.subtasks);
+    const draft = taskRef.current.draftEmail;
+    if (draft && htmlToText(draft.body).trim() && !window.confirm(`Replace the draft email "${draft.subject || "(no subject)"}" with a reminder to ${firstName}?`)) return;
+    if (asking) setAskNext(null);
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const review = cur?.waitsOn && reviews[cur.waitsOn as "doc" | "image" | "page" | "video"] ? (reviews[cur.waitsOn as "doc" | "image" | "page" | "video"]!.title?.trim() || KIND_LABEL[cur.waitsOn]) : null;
+    const asked = (cur?.todos ?? []).filter((t) => !t.done).map((t) => t.title);
+    const theirs = clientChanges.filter((c) => !c.done && (!cur || !c.stepId || c.stepId === cur.id)).map((c) => c.title);
+    const items = [...asked, ...theirs].slice(0, 8);
+    const what = review ? `<p><strong>${esc(review)}</strong> is ready for you to look over.</p>`
+      : items.length ? `<p>We are still waiting on:</p><ul>${items.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`
+      : cur && !asksWhatsNext(cur) ? `<p>We need your input to move on: ${esc(cur.title)}.</p>` : "";
+    const where = clientPortalUrl ? `<p>You can answer right on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>";
+    const id = newId("s_");
+    const now = new Date().toISOString();
+    onPatch({
+      subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
+      draftEmail: { subject: `Reminder: ${task.title}`.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>A quick reminder about <strong>${esc(task.title)}</strong>.</p>${what}${where}`, replyTo: null, createdAt: now, updatedAt: now },
+    });
+    setEmailOpenNonce((n) => n + 1);
+  };
   // A meeting (Derek, 2026-10-12): a step for it, and the booking window opens.
   const meetingStep = () => {
     const id = newId("s_");
@@ -2077,6 +2103,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(messageDest?.phone ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", group: "talk" as const, label: "Book a meeting", disabled: false, onPick: meetingStep }] : []),
+    ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: remindStep }] : []),
     ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", group: "talk" as const, label: `Send ${firstName} my booking link`, disabled: false, onPick: () => void bookingEmailStep() }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
     { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },

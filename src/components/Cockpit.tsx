@@ -3417,6 +3417,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           }} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
+          clientPortalUrl={getClientShareUrl(openTask.clientId, { taskId: openTask.id })}
           clientLinks={openTaskClientLinks}
           clientMeetings={openTaskMeetings}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
