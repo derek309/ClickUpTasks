@@ -83,7 +83,7 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
     loadEvents().then((evs) => {
       if (!live) return;
       const now = new Date().toISOString();
-      const event = evs.filter((e) => !e.busy && (e.clientId === clientId || (!!ghlContactId && e.ghlContactId === ghlContactId)) && e.end > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
+      const event = evs.filter((e) => !e.busy && (e.clientId === clientId || (!!ghlContactId && e.ghlContactId === ghlContactId)) && Date.parse(e.end) > Date.parse(now)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))[0] ?? null;
       setNext({ clientId, event });
     });
     return () => { live = false; };

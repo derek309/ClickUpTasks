@@ -25,6 +25,10 @@ const clock = (ms: number, suffix: boolean) => {
 const meridiem = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric" }).slice(-2);
 const range = (a: number, b: number) => `${clock(a, meridiem(a) !== meridiem(b))}–${clock(b, true)}`;
 // Overlapping stretches joined into one.
+// By the moment it starts, never the text: GoHighLevel sends some times in UTC
+// and some with a Pacific offset, so "T14:00Z" sorted after "T13:00-07:00" and
+// a 7 AM meeting listed after 1 PM (Derek, 2026-10-13).
+const byStart = (a: { start: string }, b: { start: string }) => Date.parse(a.start) - Date.parse(b.start);
 const merge = (spans: [number, number][]) => spans.sort((x, y) => x[0] - y[0]).reduce<[number, number][]>((out, [a, b]) => {
   const last = out[out.length - 1];
   if (last && a <= last[1]) last[1] = Math.max(last[1], b); else out.push([a, b]);
@@ -161,7 +165,7 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
       // Blocked time with a meeting link (from Google Calendar) is a meeting.
       else (e.busy && !e.joinUrl ? busy : list).push(e);
     }
-    list.sort((a, b) => a.start.localeCompare(b.start));
+    list.sort(byStart);
     const busySpans = merge(busy.map((e) => [Date.parse(e.start), Date.parse(e.end)] as [number, number]));
     // Open time in your working hours, after everything booked or blocked; half an hour or more.
     const from = Date.parse(pacificToIso(key, workFrom) ?? ""), to = Date.parse(pacificToIso(key, workTo) ?? "");
@@ -170,9 +174,9 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
     let cursor = Math.max(from, key === range7.today ? Math.ceil(now / 1_800_000) * 1_800_000 : from);
     for (const [a, b] of taken) { if (a > cursor) free.push([cursor, Math.min(a, to)]); cursor = Math.max(cursor, b); if (cursor >= to) break; }
     if (cursor < to) free.push([cursor, to]);
-    return { key, list, busy: busy.sort((a, b) => a.start.localeCompare(b.start)), busySpans, allDay, free: free.filter(([a, b]) => b - a >= 30 * 60_000) };
+    return { key, list, busy: busy.sort(byStart), busySpans, allDay, free: free.filter(([a, b]) => b - a >= 30 * 60_000) };
   }), [shown, range7, now, workFrom, workTo]);
-  const nextUp = shown.filter((e) => (!e.busy || !!e.joinUrl) && !isAllDay(e) && Date.parse(e.end) > now).sort((a, b) => a.start.localeCompare(b.start))[0] ?? null;
+  const nextUp = shown.filter((e) => (!e.busy || !!e.joinUrl) && !isAllDay(e) && Date.parse(e.end) > now).sort(byStart)[0] ?? null;
   const meetings = days.reduce((n, d) => n + d.list.length, 0);
   // Working days only: a quiet weekend shows "Nothing booked", so it isn't hours to book.
   const openHours = Math.round(days.filter((d) => ![0, 6].includes(new Date(`${d.key}T12:00:00Z`).getUTCDay()))
@@ -275,11 +279,11 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
         <button onClick={onRefresh} disabled={loading} title="Read GoHighLevel again" className="h-10 rounded-md px-3 font-semibold ring-1 ring-[var(--border)] hover:bg-background disabled:opacity-60"><span className={loading ? "inline-block animate-spin" : ""}>↻</span></button>
       </div>
       {/* The links column is as wide as its longest name needs, within reason. */}
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,max-content)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,max-content)]">
       <div className="min-w-0">
       {error && <div className="mb-3 rounded-md bg-highlight-soft px-3 py-2 font-semibold text-highlight">{error}</div>}
       {(loading && !events.length) || notRead ? <div className="py-10 text-center text-muted">{error && notRead ? "" : "Reading GoHighLevel…"}</div> : (
-        <div className="grid gap-1">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
           {/* Next up (mockup): the next real meeting, with Join and the client. */}
           {nextUp && (
             <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl bg-accent px-5 py-4 text-white">
@@ -305,8 +309,8 @@ export function CalendarBoard({ people, events, links, loading, error, meId, cli
                     eye"); today's is the loud one. */}
                 <div className={`flex items-center gap-3 ${key === range7.today ? "mb-2 mt-1" : "mb-1.5 mt-4"}`}>
                   <h2 className={key === range7.today ? "shrink-0 rounded-md bg-accent px-3 py-1 text-[16px] font-extrabold uppercase tracking-wider text-white" : "shrink-0 text-[16px] font-extrabold uppercase tracking-wider text-muted"}>{dayLabel(key)}</h2>
-                  <span className="h-px flex-1 bg-[var(--border)]" />
-                  <span className="shrink-0 text-[16px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
+                  <span className="h-px min-w-4 flex-1 bg-[var(--border)]" />
+                  <span className="min-w-0 truncate text-[16px] text-muted">{[where, !list.length ? "No meetings" : ""].filter(Boolean).join(" · ")}</span>
                 </div>
                 <div className={`rounded-xl px-4 py-2 ${key === range7.today ? "bg-surface shadow-sm ring-2 ring-accent" : "bg-surface ring-1 ring-[var(--border)]"}`}>
                 {list.map((e) => {
