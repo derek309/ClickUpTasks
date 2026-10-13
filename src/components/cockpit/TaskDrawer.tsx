@@ -1158,7 +1158,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const missing = sub ? missingNeeds(sub) : [];
     const openTodos = (sub?.todos ?? []).filter((t) => !t.done).length;
     const ask = [missing.length ? `still needs: ${missing.join(", ")}` : null, openTodos ? `has ${openTodos} ${openTodos === 1 ? "to do" : "to dos"} open` : null].filter(Boolean).join(", and ");
-    if (ask && !window.confirm(`"${sub!.title}" ${ask}. Mark it done anyway?`)) return;
+    // Said, never asked (Derek, 2026-10-13: a browser box asking to "mark it
+    // done" was the wrong word and in the way). What is left stays on the step.
+    if (ask) pushToast(`"${sub!.title}" ${ask}; it stays on the step.`);
     // Changes done and no client review next: the next step is telling the
     // client, with the email drafted for us to read and send. Nothing goes to
     // the client by itself (Derek, 2026-10-11).
