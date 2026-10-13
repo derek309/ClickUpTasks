@@ -289,7 +289,7 @@ export function TaskBrief({ task, clientName, pushToast, startNonce, onPresence 
   const row = (
     <WorkItemRow tone="brief" icon={ICON} title={brief.title.trim() || BRIEF_TITLE} meta={meta}
       badge={waiting.length ? <span className="shrink-0 rounded-full bg-highlight px-2.5 py-0.5 text-[16px] font-semibold text-white">{waiting.length} new</span> : undefined}
-      actions={copyLinkButton} onOpen={() => open(brief)} />
+      more={link?.live && link.copyable ? [{ label: "Copy link", onClick: () => void copyLink() }] : []} onOpen={() => open(brief)} />
   );
   if (!full) return row;
 

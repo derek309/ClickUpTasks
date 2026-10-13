@@ -1068,9 +1068,13 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   const icon = KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={<>{copyCodeButton}{copyLinkButton}</>}
-      // Turning the client's link off or making a new one is rare: in the ⋯ menu.
-      more={!doc.version || !link || busy !== null ? [] : link.live ? [{ label: "Turn the link off", onClick: () => void linkOff() }] : canAdmin ? [{ label: "Make a new link", onClick: () => void linkNew() }] : []}
+    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={copyCodeButton}
+      // The client's link is rare on the row (Derek, 2026-10-12): copying it,
+      // turning it off or making a new one are in the ⋯ menu, and the review
+      // itself still has Copy link.
+      more={!doc.version || !link || busy !== null ? [] : link.live
+        ? [...(link.copyable ? [{ label: "Copy link", onClick: () => void copyLink() }] : []), { label: "Turn the link off", onClick: () => void linkOff() }]
+        : canAdmin ? [{ label: "Make a new link", onClick: () => void linkNew() }] : []}
       onOpen={() => switchView({ full: true })} onDelete={() => void deleteDocument()} />
   );
   const openList = comments.filter((c) => !c.completedAt);
