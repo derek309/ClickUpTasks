@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const origin = req.nextUrl.origin;
   try {
     const result = await granolaCreateWebhookEndpoint(`${origin}/api/granola/webhook`);
-    return NextResponse.json({ ok: true, id: result.id, signingSecret: result.signing_secret });
+    return NextResponse.json({ ok: true, id: result.id, signingSecret: result.signing_secret, scopes: result.scopes ?? null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Granola webhook registration failed." }, { status: 502 });
   }

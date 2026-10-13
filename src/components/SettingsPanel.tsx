@@ -47,7 +47,7 @@ export default function SettingsPanel({
       const res = await authedFetch("/api/granola/setup-webhook", { method: "POST" });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error ?? "Webhook setup failed");
-      setGranolaStatus({ kind: "ok", msg: `Registered. Signing secret (copy now, shown once): ${j.signingSecret}` });
+      setGranolaStatus({ kind: "ok", msg: `Registered for ${j.scopes?.includes("workspace") ? "the whole team (workspace key)" : "your own notes only (personal key)"}. Signing secret (copy now, shown once): ${j.signingSecret}` });
     } catch (e) {
       setGranolaStatus({ kind: "err", msg: e instanceof Error ? e.message : "Webhook setup failed" });
     }

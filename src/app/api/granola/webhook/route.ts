@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Body is not JSON" }, { status: 400 });
   }
-  if ((payload.event_type === "note.generated" || payload.event_type === "note.regenerated") && payload.note_id) {
+  if ((payload.event_type === "note.generated" || payload.event_type === "note.edited" || payload.event_type === "note.access_granted" || payload.event_type === "note.regenerated") && payload.note_id) {
     try {
       await syncOneGranolaNote(payload.note_id);
     } catch (e) {

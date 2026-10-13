@@ -63,12 +63,18 @@ export async function granolaListNotesSince(createdAfter: string): Promise<{ id:
   return notes;
 }
 
-export async function granolaCreateWebhookEndpoint(url: string): Promise<{ id: string; signing_secret: string }> {
-  const res = await fetch(`${GRANOLA_BASE}/webhook-endpoints`, {
+// A workspace key (the Business plan's team key, 2026-10-12) must register
+// exactly ["workspace"]: every teammate's notes in spaces with API access. A
+// personal key refuses that, so it falls back to ["personal"].
+const WEBHOOK_EVENTS = ["note.generated", "note.edited", "note.access_granted"];
+export async function granolaCreateWebhookEndpoint(url: string): Promise<{ id: string; signing_secret: string; scopes?: string[] }> {
+  const register = (scopes: string[]) => fetch(`${GRANOLA_BASE}/webhook-endpoints`, {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.GRANOLA_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ url, scopes: ["personal"], events: ["note.generated", "note.regenerated"] }),
+    body: JSON.stringify({ url, scopes, events: WEBHOOK_EVENTS }),
   });
+  let res = await register(["workspace"]);
+  if (!res.ok && res.status >= 400 && res.status < 500) res = await register(["personal"]);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Granola API ${res.status}: ${text.slice(0, 300)}`);
