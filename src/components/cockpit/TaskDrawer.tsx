@@ -885,8 +885,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Waiting says who on, and the owner after it, so "Waiting, on Justin"
           no longer reads as waiting on Justin when it waits on James
           (Justin, 2026-10-13 meeting). */}
-      {effectiveStatus(task) === "waiting" && task.clientId !== PERSONAL_CLIENT_ID ? <> on {firstName}, </> : ", on "}
-      {wordPick(effectiveStatus(task) === "waiting" && task.clientId !== PERSONAL_CLIENT_ID ? (task.assigneeId ? `${ownerName}'s task` : "nobody's task") : ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
+      {/* "assigned to", not "on" (Derek and Justin, 2026-10-13): "on Derek"
+          read as who it waits on. */}
+      {effectiveStatus(task) === "waiting" && task.clientId !== PERSONAL_CLIENT_ID ? <> on {firstName}</> : null}, assigned to{" "}
+      {wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
       , {wordPick(PRIORITY_META[task.priority].label, "Priority", task.priority, manualPriorityOptions(task.priority).map((pr) => ({ value: pr, label: PRIORITY_META[pr].label })), (v) => onPatch({ priority: v as Priority }), task.priority === "urgent" ? "text-danger" : "")}
       , {task.due ? "due " : ""}
       <span className="inline-block">
