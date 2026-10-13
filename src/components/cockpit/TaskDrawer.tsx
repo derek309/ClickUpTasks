@@ -2076,15 +2076,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     });
     setEmailOpenNonce((n) => n + 1);
   };
-  // A meeting (Derek, 2026-10-12): a step for it, and the booking window opens.
-  const meetingStep = () => {
-    const id = newId("s_");
-    if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Meeting with ${firstName}`, done: false, ...stepOwnerFields() }] });
-    setBookOpen(true);
-  };
-  // Asking them to pick a time: a step with a short draft carrying your own
-  // booking link, to read and send (Derek, 2026-10-12).
   // Ask them to meet (Derek, 2026-10-13: "the request to meet by email or
   // text"), as the client page's Request does: three open times from your
   // calendar and its booking page, on a step that holds the email or text.
@@ -2142,7 +2133,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging ? [{ key: "email", group: "talk" as const, label: `Email ${firstName}`, disabled: false, note: deliverablePresent("email") ? "uses the draft" : undefined, onPick: emailStep }] : []),
     ...(messageDest?.phone ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
-    ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", group: "talk" as const, label: "Book a meeting", disabled: false, onPick: meetingStep }] : []),
+    // Booking lives on the client page and the calendar button; a step asks
+    // them to meet (Derek, 2026-10-13).
     ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: remindStep }] : []),
     ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
