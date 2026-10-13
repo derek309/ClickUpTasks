@@ -3155,6 +3155,10 @@ export function withMeetingSteps(subtasks: Subtask[], name: string, due: string,
     if (open.due === due) return null;
     return subtasks.map((x) => (x.id === open.id || (!x.done && x.addedFor === "meeting") ? { ...x, due } : x));
   }
+  // This meeting already had its steps and they are finished: the
+  // appointment sync runs again for the same booking and must not add a
+  // second pair (Ryan's task, 2026-10-12).
+  if (subtasks.some((x) => (x.addedFor === "meeting" || x.addedFor === "transcript") && x.due === due)) return null;
   const hasCurrent = subtasks.some((x) => !x.done && x.startedAt);
   return [...subtasks,
     { id: makeId(), title: `Meet with ${name}`, done: false, due, addedFor: "meeting", ...(hasCurrent ? {} : { startedAt: now }) },

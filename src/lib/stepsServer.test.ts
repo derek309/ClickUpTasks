@@ -170,5 +170,7 @@ describe("steps added on the server", () => {
     expect(steps().map((x) => [x.done, x.outcome])).toEqual([[true, "Met"], [true, "Transcript from Granola"]]);
     expect(steps()[1].holds).toEqual(["att:a_1"]);
     expect(await stepsOnMeetingTranscript("t1", "a_2")).toBe(false);
+    // The sync runs again for the same meeting: no second pair.
+    expect(withMeetingSteps(steps(), "Brian", "2026-10-14", () => "y")).toBeNull();
   });
 });
