@@ -107,12 +107,15 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
         {allDrafts.length > 0 && (
           <span className="relative shrink-0">
             <button onClick={() => setDraftsOpen(!draftsOpen)} aria-expanded={draftsOpen} title={`Emails and texts to ${first} not sent yet`}
-              className={`${btn} ring-highlight/40`}>Drafts <span className="ml-1 rounded-full bg-highlight px-1.5 text-[14px] text-white">{allDrafts.length}</span></button>
+              className={`${btn} ring-highlight/40`}>Drafts <span className="ml-1 rounded-[5px] bg-highlight px-1.5 text-[16px] text-white">{allDrafts.length}</span></button>
             {draftsOpen && <>
               <div className="fixed inset-0 z-40" onClick={() => setDraftsOpen(false)} />
-              <div className="absolute left-0 top-11 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              {/* On a phone, a sheet along the bottom of the screen: opened from
+                  the button it ran off the right edge (Derek, 2026-10-13). */}
+              <div className="fixed inset-x-3 bottom-3 z-50 max-h-[60vh] overflow-y-auto rounded-[5px] bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] shadow-[var(--shadow-md)] ring-1 ring-[var(--border)] sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:top-11 sm:w-80 sm:pb-1.5">
+                <div className="px-3 pb-1 pt-1 text-[16px] font-bold sm:hidden">Drafts to {first}</div>
                 {allDrafts.map((d) => (
-                  <button key={d.id} onClick={() => { setDraftsOpen(false); d.open(); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background">
+                  <button key={d.id} onClick={() => { setDraftsOpen(false); d.open(); }} className="block w-full rounded-[5px] px-3 py-2.5 text-left hover:bg-background">
                     <b className="block truncate font-semibold">{d.title}</b>
                     <span className="block truncate text-[16px] text-muted">{d.where} · {shortDay(d.at)}</span>
                   </button>
