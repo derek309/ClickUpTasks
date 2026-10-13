@@ -2441,14 +2441,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Built when drawn, not here: its menu reads work labels defined further
   // down, and reading them before then crashed the page (2026-10-12).
-  const sentNextPanel = () => !sentStep || typeof document === "undefined" ? null : (() => {
-    const stg = stepStage(sentStep, task.assigneeId);
-    const asking = asksWhatsNext(sentStep) || !sentStep.title;
-    return createPortal(
+  // On a step's page, What's next opens at the bottom of that page instead of
+  // over it, and Start it moves on to the next step (Derek, 2026-10-13: "mark
+  // this done, and then it pops open down below"). Elsewhere it is a box.
+  // A function, read when drawn: openStepPage is declared further down, and
+  // reading it here crashed the page before (the 2026-10-12 TDZ crash).
+  const stepPageOpen = () => !!openStepPage && openStepPage.taskId === task.id;
+  const startNext = () => {
+    const next = sentStep;
+    closeSentNext();
+    if (stepPageOpen() && next && !asksWhatsNext(next)) setOpenStepPage({ taskId: task.id, id: next.id, full: openStepPage!.full });
+  };
+  const sentNextPanel = () => !sentStep || stepPageOpen() || typeof document === "undefined" ? null : createPortal(
     <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
       <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
-        className="relative w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
+        className="relative w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">{nextBody(false)}</div>
+    </div>, document.body);
+  const nextBody = (inline: boolean) => !sentStep ? null : (() => {
+    const stg = stepStage(sentStep, task.assigneeId);
+    const asking = asksWhatsNext(sentStep) || !sentStep.title;
+    return (
+      <div className="relative" onKeyDown={inline ? (e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); startNext(); } } : undefined}>
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
         <button onClick={closeSentNext} aria-label="Close" title="Close, change nothing"
           className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.close /></button>
@@ -2470,7 +2484,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </span>.
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button onClick={closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{asking ? "Decide later" : "Looks good"}</button>
+          <button onClick={inline ? startNext : closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
+          {/* Hand the next step straight to Claude and move on (Derek, 2026-10-13:
+              "now the next step is for me to delegate it to Claude"). */}
+          {!asking && !sentStep.onClient && sentStep.assigneeId !== CLAUDE_ID && (
+            <button onClick={() => {
+              const st = statusForStep(task.status, stepStage({ ...sentStep, assigneeId: CLAUDE_ID }, task.assigneeId));
+              onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sentStep.id ? { ...x, assigneeId: CLAUDE_ID, followUpAt: TODAY } : x)), ...(st ? { status: st } : {}) });
+              closeSentNext();
+              pushToast("Given to Claude");
+            }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Give it to Claude</button>
+          )}
           {/* After an approval: tell the client, drafted to read and send. */}
           {sentNext?.approved && hasMessaging && !!messageDest?.email && (
             <button onClick={() => { const nm = sentNext.approved!; closeSentNext(); emailApproved(sentStep, nm); }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Email {firstName} it&apos;s approved</button>
@@ -2489,10 +2513,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
               { label: "The task is finished", onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); } },
             ]} />
-          <span className="ml-auto text-[16px] text-muted">Enter to keep it</span>
+          <span className="ml-auto text-[16px] text-muted">{inline ? "Enter to start it" : "Enter to keep it"}</span>
         </div>
       </div>
-    </div>, document.body);
+    );
   })();
   // An email to the client finishes the current step when that step is the
   // emailing kind: it holds the email, or its name says so ("Email Pam",
@@ -3342,7 +3366,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} tone={stepTone(ps)} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} tone={stepTone(ps)}
+              nextPanel={sentStep ? nextBody(true) : undefined}
+              onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

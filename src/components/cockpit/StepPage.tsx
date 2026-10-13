@@ -21,7 +21,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -51,6 +51,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   meId?: string | null;
   /** Opened from "Create Checklist": the to-do box is out and ready. */
   startWithChecklist?: boolean;
+  /** What's next, once this step is done: shown at the bottom of the page
+   *  (Derek, 2026-10-13: "mark this done, then it pops open down below"). */
+  nextPanel?: React.ReactNode;
+  /** Finish the whole task from the bottom of the step. */
+  onFinishTask?: () => void;
   /** Whose move it is, the same colour and sentence as the step's row. */
   tone?: { say: string | null; sayTone: string; rowTone: string };
   /** A Text or Chat step opens on that box, ready to write (2026-10-13). */
@@ -164,6 +169,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   const [draft, setDraft] = useState("");
+  const nextRef = useRef<HTMLElement | null>(null);
+  const hasNext = !!nextPanel;
+  useEffect(() => { if (hasNext) nextRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [hasNext]);
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
@@ -568,6 +576,15 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
               )}
+              {/* Finish here, then What's next opens in its place (2026-10-13). */}
+              {nextPanel ? (
+                <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
+              ) : !sub.done && !doneActions && !sub.onClient ? (
+                <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                  <button onClick={onMarkDone} className="inline-flex h-11 items-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"><I.check className="h-4 w-4" /> Mark this step done</button>
+                  {onFinishTask && <button onClick={onFinishTask} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">The task is finished</button>}
+                </div>
+              ) : null}
             </div>
             <div className={`min-w-0 ${full ? "mt-8 md:mt-0" : "mt-8"}`}>{conversation}</div>
           </div>
