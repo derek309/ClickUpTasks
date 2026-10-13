@@ -1170,10 +1170,13 @@ export default function WaitingView({ token }: { token: string }) {
                 const theirs = all.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
                 const toggle = all.length > 0 && (
                   <div role="tablist" aria-label="Which tasks" className="grid grid-cols-3 gap-1 rounded-[5px] bg-border/60 p-1">
-                    {([["theirs", "What we need from you", needCount], ["all", "What we're doing", progCount], ["done", "What's been done", doneAll]] as const).map(([k, label, n]) => (
-                      <button key={k} role="tab" aria-selected={showing === k} onClick={() => setView(k)}
-                        className={`flex h-11 items-center justify-center gap-2 rounded-[5px] px-3 text-[16px] font-bold ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
-                        {label}<span className={`rounded-full px-2 text-[15px] ${k === "theirs" && n ? "bg-highlight text-white" : "bg-background text-muted"}`}>{n}</span>
+                    {/* Short names on a phone: the long ones wrapped a word a line and
+                        spilled out of the bar (Derek, 2026-10-13). */}
+                    {([["theirs", "What we need from you", "From you", needCount], ["all", "What we're doing", "Doing", progCount], ["done", "What's been done", "Done", doneAll]] as const).map(([k, label, short, n]) => (
+                      <button key={k} role="tab" aria-selected={showing === k} onClick={() => setView(k)} aria-label={label}
+                        className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-[5px] px-2 text-[16px] font-bold sm:gap-2 sm:px-3 ${showing === k ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`}>
+                        <span className="truncate sm:hidden">{short}</span><span className="hidden sm:inline">{label}</span>
+                        <span className={`shrink-0 rounded-[5px] px-1.5 text-[16px] ${k === "theirs" && n ? "bg-highlight text-white" : "bg-background text-muted"}`}>{n}</span>
                       </button>
                     ))}
                   </div>
@@ -1257,12 +1260,14 @@ export default function WaitingView({ token }: { token: string }) {
                         {theirs.map((t) => (
                           <button key={t.id} onClick={() => openTask(t.id, t.review)} disabled={goingTo === t.id}
                             style={{ borderLeftColor: "var(--highlight)" }}
-                            className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 rounded-[5px] border border-l-[6px] bg-surface px-5 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60">
+                            className="flex w-full flex-col items-stretch gap-3 rounded-[5px] border border-l-[6px] bg-surface px-4 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
                             <div className="min-w-0 flex-1">
                               <b className="block text-[18px]">{t.title}</b>
                               <span className="text-[16px] text-muted">{[t.due ? `Due ${shortDate(t.due)}` : null, projects.length > 1 ? projectName(t.projectId) : null].filter(Boolean).join(" · ")}</span>
                             </div>
-                            <span className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[5px] bg-highlight px-5 text-[16px] font-bold text-white">
+                            {/* Under the task's name on a phone, full width: beside it, it
+                                squeezed the name to a narrow column. */}
+                            <span className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[5px] bg-highlight px-5 text-[16px] font-bold text-white">
                               {goingTo === t.id ? "Opening…" : t.review ? "Review it" : "Answer it"} <span aria-hidden>→</span>
                             </span>
                           </button>
