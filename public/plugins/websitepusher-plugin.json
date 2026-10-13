@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-12 23:41:13",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.6.1.zip",
+  "last_updated": "2026-10-13 01:48:32",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.6.2.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* Faster full-site pulls: activity and log tables (the Brain Box's queue history, visit logs, form action logs, email logs and the like) bring down only their last 30 days, not years of history. Dashboards and recent counts still work on the local copy."
+  "changelog": "* A site pulled onto a computer with a full-site pull is marked as a copy. On it, WordPress's scheduled jobs stay off and an admin notice says so, so the copy can't run the live site's queued posts and sends a second time."
 }
