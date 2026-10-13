@@ -2003,22 +2003,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const clientStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    const due = addBusinessDaysIso(TODAY, 2);
-    const step: Subtask = { id, title: `${firstName}: ${task.title}`.slice(0, 120), done: false, due, onClient: true, finishWhen: "reply", stage: "waiting" };
-    const list = [...taskRef.current.subtasks, step];
-    const current = currentStep(list)?.id === id;
     const draft = taskRef.current.draftEmail;
-    const emailIt = hasMessaging && !!messageDest?.email && !(draft && htmlToText(draft.body).trim());
+    if (draft && htmlToText(draft.body).trim() && !window.confirm(`Replace the draft email "${draft.subject || "(no subject)"}" with one asking ${firstName} for this?`)) return;
+    // The ask is the step; sending it is done, and the wait on their reply
+    // comes after it as the check in, like any email (Derek, 2026-10-13: "the
+    // natural next step is for me to wait for the response").
+    const step: Subtask = { id, title: `Ask ${firstName}: ${task.title}`.slice(0, 120), done: false, ...stepOwnerFields() };
+    const list = holdOnStep([...taskRef.current.subtasks, step], id, "email");
     const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const now = new Date().toISOString();
-    const started = current ? list.map((x) => (x.id === id ? { ...x, startedAt: now } : x)) : list;
     onPatch({
-      subtasks: emailIt ? holdOnStep(started, id, "email") : started,
-      ...(current ? { status: "waiting" as const, followUpAt: due } : {}),
-      ...(emailIt ? { draftEmail: { subject: task.title.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>To keep <strong>${esc(task.title)}</strong> moving, we need this from you:</p><p></p>${clientPortalUrl ? `<p>You can reply to this email or answer on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>"}`, replyTo: null, createdAt: now, updatedAt: now } } : {}),
+      subtasks: list,
+      ...(hasMessaging && messageDest?.email ? { draftEmail: { subject: task.title.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>To keep <strong>${esc(task.title)}</strong> moving, we need this from you:</p><p></p>${clientPortalUrl ? `<p>You can reply to this email or answer on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>"}`, replyTo: null, createdAt: now, updatedAt: now } } : {}),
     });
     setOpenStepPage({ taskId: task.id, id, full: false });
-    if (emailIt) setEmailOpenNonce((n) => n + 1);
+    if (hasMessaging && messageDest?.email) setEmailOpenNonce((n) => n + 1);
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
   // A checklist as a step of its own: its page opens with the to-do box ready.
@@ -2710,7 +2709,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const done = followUpsLine(ps.followUps);
     const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
     return (
-      <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies. Still nothing? Follow up:`} choices={[
+      <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies${stepAfter(task.subtasks, ps.id) ? `, and "${stepAfter(task.subtasks, ps.id)!.title}" starts` : ""}. Still nothing? Follow up:`} choices={[
         ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); } }] : []),
         ...(messageDest?.phone ? [{ label: "Text a follow up", says: "A text to write and send here. It keeps waiting.", onClick: () => draftOn("sms") }] : []),
         { label: "I called them", says: "Notes the call and checks again in 3 business days.", onClick: () => {
@@ -3522,7 +3521,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
                 setOpenStepPage(null);
                 toClaude(ps.id);
-              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient && sentReviews(ps).length ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
+              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient && sentReviews(ps).length ? outFor(ps) : undefined} doneActions={ps.onClient && sentReviews(ps).length ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

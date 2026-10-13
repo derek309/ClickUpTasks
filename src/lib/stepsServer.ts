@@ -117,7 +117,18 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
     const waiting = list.filter((x) => !x.done && x.finishWhen === "reply").map((x) => x.id);
     if (!waiting.length) return null;
     const now = new Date().toISOString();
-    return list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+    const done = list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+    // The next step starts, as it does when someone ticks one in the app.
+    const next = planSteps(done).find((x) => !x.done);
+    if (next) return next.startedAt ? done : done.map((x) => (x.id === next.id ? { ...x, startedAt: now } : x));
+    // Nothing after it: their answer is the owner's to act on, so a "what's
+    // next?" step starts and the task shows under Needs you (Derek, 2026-10-13).
+    const last = waiting[waiting.length - 1];
+    if (done.some((x) => x.addedFor === `next:${last}`)) return done;
+    const at = done.findIndex((x) => x.id === last);
+    const out = [...done];
+    out.splice(at + 1, 0, { id: newId("s_"), title: `${first} replied: what's next?`, done: false, addedFor: `next:${last}`, startedAt: now });
+    return out;
   });
 }
 

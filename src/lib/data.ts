@@ -3219,6 +3219,7 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
   if (!prev) return null;
   if (prev.addedFor?.startsWith("ok:")) return `${clientFirst} approved. Your turn`;
+  if (prev.finishWhen === "reply" && prev.outcome?.endsWith(" replied")) return `${clientFirst} replied. Your turn`;
   if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
   if (prev.assigneeId && prev.assigneeId !== meId) return `${userById(prev.assigneeId)?.name.split(" ")[0] ?? "A teammate"} finished. Your turn`;
   return null;
