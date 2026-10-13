@@ -885,6 +885,10 @@ export interface Subtask {
   /** A step that is on the client, not the team: their review (Derek,
    *  2026-10-11: "a new step assigned to the client, with waiting"). */
   onClient?: boolean;
+  /** A text or a portal chat written for the client, held on the step until
+   *  someone reads and sends it, like the draft email (Derek, 2026-10-13: the
+   *  client is written to through the step's Actions, not a box on the page). */
+  draftMessage?: { channel: "sms" | "chat"; body: string };
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;

@@ -14,6 +14,7 @@ import {
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { usePersisted } from "@/lib/usePersisted";
+import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
@@ -1823,6 +1824,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
+      ...(sub.draftMessage ? [sub.draftMessage.channel === "sms" ? "📱 1" : "💬 1"] : []),
     ];
     // The current step lists what's on it, one line each, read only: the work
     // is done inside the step, with its directions (Derek, 2026-10-12: "show
@@ -1898,7 +1900,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               {!sub.done && sentReviews(sub).map((k) => <span key={k} className="text-muted">{viewedLine(k)}</span>)}
               {tp.total > 0 && <span className="text-muted">{tp.done} of {tp.total} to do</span>}
               {(() => { const n = (sub.todos ?? []).filter((t) => todoWaiting(t, messages) === "waiting").length; return n > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{n} waiting on {firstName}</span>; })()}
-              {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Client work on this step">{markers.join("  ")}</span>}
+              {markers.length > 0 && !heldHere && <span className="min-w-0 truncate text-muted" title="Actions on this step">{markers.join("  ")}</span>}
               {fresh > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300">{fresh} new from {firstName}</span>}
               {missing.length > 0 && isActive && <span className="text-muted">Needs {missing.join(", ")}</span>}
               {reason && !sub.onClient && <span className="text-muted">{reason}</span>}
@@ -2005,8 +2007,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const talkStep = (kind: "text" | "client") => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, ...stepOwnerFields() }] });
-    setOpenStepPage({ taskId: task.id, id, full: false, talk: kind });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
+    setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // A meeting (Derek, 2026-10-12): a step for it, and the booking window opens.
   const meetingStep = () => {
@@ -2203,10 +2205,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     Conversation: [<I.comment key="i" className="h-4 w-4" />, "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"],
     "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
   };
+  // "Client work" reads as Actions now (Derek, 2026-10-13: "it's a lot more
+  // than that"); the name stays the key, so what was folded stays folded.
+  const SHOWN_AS: Record<string, string> = { "Client work": "Actions" };
   const headingText = (title: string, extra?: React.ReactNode) => (
     <h2 className="flex items-center gap-2 text-[16px] font-bold text-foreground">
       {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
-      {title}{extra}
+      {SHOWN_AS[title] ?? title}{extra}
     </h2>
   );
   // Client work, Links and files and Conversation fold away (Derek,
@@ -2473,14 +2478,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : currentStep(taskRef.current.subtasks);
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
     const name = cur.title.trim();
-    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name) : channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name);
+    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
+      : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
     if (!fits) return false;
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
     // the task's follow up, and a due date already earlier all move to it.
     // Three business days when none was picked.
     const due = followUpDate || addBusinessDaysIso(TODAY, 3);
-    const list = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"));
-    if (!list) return false;
+    const made = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"));
+    if (!made) return false;
+    // A sent text or chat leaves no draft behind on its step.
+    const list = channel === "email" ? made : made.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
     if (openStep) setNextStepDone(openStep.id, true);
     const status = statusForStep(task.status, "waiting");
     onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
@@ -2756,6 +2764,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         tone: made && r ? reviewTone(r.status) : undefined,
         note: here ? "on this step" : on ? `on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : undefined };
     }),
+    // A text or a portal chat drafted on the step, read and sent from it (2026-10-13).
+    ...(messageDest?.phone ? [{ key: "text", label: "Text", disabled: sub.draftMessage?.channel === "sms", note: sub.draftMessage?.channel === "sms" ? "on this step" : undefined,
+      onPick: () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.body ?? "" } } : x)) }) }] : []),
+    ...(hasMessaging ? [{ key: "chat", label: "Chat", disabled: sub.draftMessage?.channel === "chat", note: sub.draftMessage?.channel === "chat" ? "on this step" : undefined,
+      onPick: () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: "chat" as const, body: x.draftMessage?.body ?? "" } } : x)) }) }] : []),
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
     { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }];
   };
@@ -2813,10 +2826,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const keys = (sub.holds ?? []).filter((k) =>
       (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)) || !!sentMail(k));
     const emails = sub.fromEmails ?? [];
-    if (!keys.length && !emails.length) return null;
+    const dm = sub.draftMessage;
+    if (!keys.length && !emails.length && !dm) return null;
     const sortable = keys.length > 1;
     return (
       <div className="flex flex-col gap-2">
+        {/* A text or chat for the client, read and sent from here (2026-10-13). */}
+        {dm && (
+          <DraftMessageBox key={`${sub.id}-${dm.channel}`} channel={dm.channel} body={dm.body} firstName={firstName} tone={!sub.done ? stepTone(sub) : null}
+            onSave={(body) => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: dm.channel, body } } : x)) })}
+            onDiscard={() => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) })}
+            onSend={(body) => {
+              if (!onSendTaskMessage) return;
+              onSendTaskMessage(dm.channel, "", body);
+              if (!finishTalkStep(dm.channel, null, sub.id)) onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) });
+            }} />
+        )}
         {/* The client's email this step answers; Reply drafts the answer on it. */}
         {emails.map((e) => (
           <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done}
@@ -2881,7 +2906,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                         <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
                       <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend ? "bg-accent text-white" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
-                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Client work)"} aria-label={`Take ${deliverableName(d)} off this step`}
+                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Actions)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
                   );
@@ -3122,6 +3147,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Deliverables on no step (Derek: they may sit outside a step). With
           steps and nothing loose, there is no section, but the blocks stay
           mounted so they can say whether they exist. */}
+      {/* Folded, the work stays mounted out of sight: its windows (the email,
+          a document, a review) are what Open on a step opens (2026-10-13:
+          folding it left "Open" doing nothing). Fixed windows are not
+          clipped by the zero height. */}
+      {isFolded("Client work") && <div className="h-0 overflow-hidden">{workBlocks}</div>}
       {isFolded("Client work") ? foldedCard("Client work", workCount) : section("Client work", (
         <>
           {workBlocks}

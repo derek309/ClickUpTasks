@@ -21,7 +21,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -189,6 +189,19 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     ...actions.filter((a) => !!a.body.trim() && !a.parentId && inWindow(a.at, w)).map((a) => ({ key: `a_${a.id}`, at: a.at, kind: "action" as const, a })),
   ].sort((x, y) => y.at.localeCompare(x.at));
 
+  // One line for what was said: "2 emails, 1 text · last from Pamela, 2h ago".
+  const [showSaid, setShowSaid] = useState(false);
+  const saidMessages = said.flatMap((x) => (x.kind === "message" ? [x.m] : []));
+  const saidNotes = said.filter((x) => x.kind === "action");
+  const saidSummary = (() => {
+    const n = (c: string) => saidMessages.filter((m) => m.channel === c).length;
+    const parts = [[n("email"), "email"], [n("sms"), "text"], [n("chat"), "chat"]].filter(([k]) => (k as number) > 0).map(([k, w]) => `${k} ${w}${k === 1 ? "" : "s"}`);
+    if (saidNotes.length) parts.push(`${saidNotes.length} team ${saidNotes.length === 1 ? "note" : "notes"}`);
+    const last = saidMessages[0];
+    if (!parts.length) return "None yet";
+    return `${parts.join(", ")}${last ? ` · last ${last.direction === "inbound" ? `from ${first}` : "from us"}, ${timeAgo(last.at)}` : ""}`;
+  })();
+
   const send = () => {
     const body = draft.trim();
     if (!body) return;
@@ -207,14 +220,17 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const toneOf = (m: Message) => CHANNEL_TONE[m.channel === "sms" ? "sms" : m.channel === "email" ? "email" : "chat"];
   const conversation = (
     <section aria-labelledby="step-talk" className="flex min-w-0 flex-col gap-3">
+      {/* Read only, folded (Derek, 2026-10-13: "we shouldn't be writing in
+          those boxes"; the client is written to through Actions, as a
+          draft held on the step). The only box here is a note to the team. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id="step-talk" className="text-[17px] font-bold">Conversation on this step</h3>
-        <div role="group" aria-label="Who to talk to" className="flex gap-1 rounded-lg bg-background p-1">
-          {canChat && <button onClick={() => setTalk("client")} aria-pressed={talk === "client"} title={`Chat with ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "client" ? "bg-surface shadow-soft" : "text-muted"}`}>Chat</button>}
-          {canEmail && onSendEmail && <button onClick={() => setTalk("email")} aria-pressed={talk === "email"} title={`Email ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "email" ? "bg-surface shadow-soft" : "text-muted"}`}>Email</button>}
-          {canText && onSendText && <button onClick={() => setTalk("text")} aria-pressed={talk === "text"} title={`Text ${first}`} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "text" ? "bg-surface shadow-soft" : "text-muted"}`}>Text</button>}
-          <button onClick={() => setTalk("team")} aria-pressed={talk === "team"} className={`h-9 rounded-md px-3 text-[16px] font-semibold ${talk === "team" ? "bg-surface shadow-soft" : "text-muted"}`}>Team</button>
-        </div>
+        <button onClick={() => setShowSaid((o) => !o)} aria-expanded={showSaid} disabled={!saidMessages.length && !saidNotes.length}
+          className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default">
+          <h3 id="step-talk" className="text-[17px] font-bold">Messages on this step</h3>
+          <span className="min-w-0 truncate text-[16px] text-muted">{saidSummary}</span>
+          {(saidMessages.length > 0 || saidNotes.length > 0) && <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />}
+        </button>
+        <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : "Note to the team"}</button>
       </div>
       {/* The chat from when this step was a handoff, kept to read (Derek,
           2026-10-12: handoffs are steps now). */}
@@ -232,7 +248,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           </div>
         </details>
       )}
-      <div className={said.length ? "order-last flex flex-col gap-3" : "hidden"}>
+      <div className={showSaid && said.length ? "order-last flex flex-col gap-3" : "hidden"}>
         {said.map((x) => {
           if (x.kind === "message") {
             const m = x.m;
@@ -546,7 +562,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
-                    <h3 id="step-works" className="text-[17px] font-bold">Client work</h3>
+                    <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
                     {outFor === undefined && addMenu(true)}
                   </div>
                   {held}
