@@ -1920,7 +1920,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const offeredTemplates = templatesFor(templates, task.clientId);
   const [savePlan, setSavePlan] = useState<string | null>(null);
-  const [quickWorkOpen, setQuickWorkOpen] = useState(false);
+  const [quickWorkOpen, setQuickWorkOpenRaw] = useState(false);
+  // Quick step search (Derek, 2026-10-13: "a search ... the cursor in it so we
+  // can just start typing"): letters filter, arrows move, Enter picks.
+  const [quickQ, setQuickQ] = useState("");
+  const [quickAt, setQuickAt] = useState(0);
+  const setQuickWorkOpen = (v: boolean | ((o: boolean) => boolean)) => { setQuickWorkOpenRaw(v); setQuickQ(""); setQuickAt(0); };
   const savePlanAs = (clientId: string | null) => {
     if (!onSaveTemplate || !savePlan?.trim()) return;
     const nameOf = (k: string) => (k.startsWith("att:") ? task.attachments.find((a) => attachmentKey(a.id) === k)?.name ?? null : KIND_LABEL[k as DeliverableKey] ?? null);
@@ -2152,20 +2157,37 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
                 {/* Opens downward (Derek, 2026-10-12: upward it was cut off at the top). */}
                 <div role="menu" aria-label="Quick step" className="absolute right-0 top-full z-40 mt-1 max-h-[min(70vh,560px)] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg">
+                  {(() => {
+                    const q = quickQ.trim().toLowerCase();
+                    const hit = (o: QuickOption) => !q || `${o.label} ${QUICK_GROUPS.find((g) => g.key === o.group)?.label ?? ""}`.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || o.label.toLowerCase().includes(q);
+                    const found = QUICK_GROUPS.flatMap((g) => quickWork.filter((o) => o.group === g.key && hit(o) && !o.disabled));
+                    const pick = (o: QuickOption) => { setQuickWorkOpen(false); o.onPick(); };
+                    return (<>
+                      <input autoFocus value={quickQ} onChange={(e) => { setQuickQ(e.target.value); setQuickAt(0); }} placeholder="Search, or type a letter" aria-label="Search quick steps"
+                        onKeyDown={(e) => {
+                          if (e.key === "ArrowDown") { e.preventDefault(); setQuickAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setQuickAt((n) => Math.max(0, n - 1)); }
+                          else if (e.key === "Enter" && found[quickAt]) { e.preventDefault(); pick(found[quickAt]); }
+                          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setQuickWorkOpen(false); }
+                        }}
+                        className="mb-1 h-10 w-full rounded-[5px] border bg-background px-2.5 text-[16px] outline-none focus:border-accent" />
+                      {!found.length && <div className="px-2.5 py-2 text-[16px] text-muted">Nothing matches &ldquo;{quickQ}&rdquo;</div>}
                   {QUICK_GROUPS.map((g, gi) => {
-                    const items = quickWork.filter((o) => o.group === g.key);
+                    const items = quickWork.filter((o) => o.group === g.key && hit(o));
                     return items.length > 0 && (
-                      <div key={g.key} className={gi ? "mt-1 border-t pt-1" : ""}>
-                        <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">{g.label}</div>
+                      <div key={g.key} className={gi && !q ? "mt-1 border-t pt-1" : ""}>
+                        {!q && <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">{g.label}</div>}
                         {items.map((o) => (
-                          <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
-                            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
+                          <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => pick(o)} onMouseEnter={() => { const i = found.indexOf(o); if (i >= 0) setQuickAt(i); }}
+                            className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50 ${found[quickAt] === o ? "bg-background ring-1 ring-inset ring-accent/40" : ""}`}>
                             <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
                           </button>
                         ))}
                       </div>
                     );
                   })}
+                    </>);
+                  })()}
                   {/* Saved plans too: their steps go on the end (Derek, 2026-10-11:
                       "we can add some in templates"). */}
                   {TEMPLATES_ON && offeredTemplates.length > 0 && (<>
