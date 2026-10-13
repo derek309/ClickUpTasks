@@ -524,9 +524,12 @@ export function createServer(opts = {}) {
         created_by: ME,
       };
       await sb("tasks", "POST", t);
+      // The whole request typed as the name: a short name, the request onto step 1.
+      const tidied = opts.services?.tidyTitle ? await opts.services.tidyTitle(t.id).catch(() => null) : null;
+      const renamed = tidied?.ok ? ` Its name was the whole request, so it is now "${tidied.title}" and the request is step 1's directions.` : "";
       await members();
       const assigneeLabel = t.waiting_on_client ? "waiting on client" : (t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned");
-      return { content: [{ type: "text", text: `Created ${t.id}: "${t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.` }] };
+      return { content: [{ type: "text", text: `Created ${t.id}: "${tidied?.ok ? tidied.title : t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.${renamed}` }] };
     });
 
   server.tool("update_task",
@@ -628,7 +631,9 @@ export function createServer(opts = {}) {
         .filter((k) => k !== "waiting_on_client" || patch.assignee_id === undefined)
         .map((k) => k === "assignee_id" ? `assignee: ${patch.waiting_on_client ? "waiting on client" : (patch.assignee_id ? (memberNames[patch.assignee_id] || patch.assignee_id) : "unassigned")}` : `${k}: ${JSON.stringify(patch[k])}`)
         .join(", ");
-      return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}` }] };
+      const tidied = patch.title && opts.services?.tidyTitle ? await opts.services.tidyTitle(id).catch(() => null) : null;
+      const renamed = tidied?.ok ? ` Its name was long, so it is now "${tidied.title}" and the request is step 1's directions.` : "";
+      return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}${renamed}` }] };
     });
 
   server.tool("delete_task",

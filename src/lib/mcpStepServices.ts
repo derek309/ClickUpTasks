@@ -4,6 +4,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { holdDraftOnStep, tickStep, tickTodo } from "./stepsServer";
 import { sendTaskFileToSite } from "./clientWebsite";
+import { tidyLongTitle } from "./tidyTitle";
 
 export function createStepServices({ memberId }: { memberId: string }) {
   let name: Promise<string> | null = null;
@@ -15,6 +16,8 @@ export function createStepServices({ memberId }: { memberId: string }) {
     tickStep: (taskId: string, stepId: string, done: boolean) => tickStep(taskId, stepId, done),
     tickTodo: async (taskId: string, ref: string, done: boolean) => tickTodo(taskId, ref, done, await label()),
     holdDraftOnStep: (taskId: string, subject: string, step?: string) => holdDraftOnStep(taskId, subject, step),
+    // A long name made short, the request onto step 1 (lib/tidyTitle, 2026-10-13).
+    tidyTitle: (taskId: string) => tidyLongTitle(taskId),
     // A task's picture into the client's website Media Library (Derek, 2026-10-12).
     sendToWebsite: async (taskId: string, file: string) => {
       const r = await sendTaskFileToSite(taskId, file);

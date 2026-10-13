@@ -1510,10 +1510,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           (task detail redesign, 2026-10-11: no Description tab, no post at
           the top of the feed). */}
       {descEditing ? (
-        <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Add a description…" />
+        <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Directions: what this task needs…" />
       ) : (
         // The full width and up to three lines, then Read more (Derek, 2026-10-12).
-        <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add a description"} aria-label={hasDescription ? "Description, show all or edit" : "Add a description"}
+        <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add directions"} aria-label={hasDescription ? "Directions, show all or edit" : "Add directions"}
           className="-mx-1 block min-h-8 w-full rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted hover:bg-background hover:text-foreground">
           {hasDescription ? (<>
             {/* Closed up: paragraphs run on, cut at a word, with "… Read more"
@@ -1524,7 +1524,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               const cut = full.slice(0, 260).replace(/\s+\S*$/, "");
               return <span className="[overflow-wrap:anywhere]">{cut}… <span className="whitespace-nowrap font-semibold text-accent">Read more</span></span>;
             })()}
-          </>) : <span className="text-accent underline decoration-dotted underline-offset-4">Add a description</span>}
+          </>) : <span className="text-accent underline decoration-dotted underline-offset-4">Add directions</span>}
         </button>
       )}
       {descEditing && (
@@ -2473,7 +2473,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this task"
       // Plain like Link and + Attach beside it, no box (Derek, 2026-10-13).
       triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline" items={[
-      !hasDescription && { label: "Description", onClick: () => setDescEditing(true) },
+      // Called directions, like a step's (Derek, 2026-10-13).
+      !hasDescription && { label: "Directions", onClick: () => setDescEditing(true) },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
@@ -2951,7 +2952,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className="rounded-lg p-2 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
         </span>
       )}
-      <button onClick={onToggleFull} title="Open the task on its own page" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
+      <button onClick={onToggleFull} title="Open the task on its own page" className="hidden h-9 items-center sm:inline-flex gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
       <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
       <div className="relative">
       <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[

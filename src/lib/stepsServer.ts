@@ -121,6 +121,33 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
   });
 }
 
+/** A long task name made short: the request becomes step 1's directions, a
+ *  step of its own in front when the plan's first step is something else. The
+ *  name changes in the same write, and only while it is still the request. */
+export async function requestOntoStepOne(taskId: string, request: string, title: string, stepTitle: string): Promise<boolean> {
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const notes = request.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
+  let stillLong = true;
+  const ok = await rewriteSteps(taskId, async (row) => {
+    const { data } = await supabaseAdmin.from("tasks").select("title").eq("id", taskId).maybeSingle();
+    stillLong = String((data as { title?: string } | null)?.title ?? "").trim() === request;
+    if (!stillLong) return null;
+    const list = row.subtasks ?? [];
+    const first = planSteps(list).find((x) => !x.done);
+    const now = new Date().toISOString();
+    if (first && !first.notes?.trim()) return list.map((x) => (x.id === first.id ? { ...x, notes } : x));
+    const hasCurrent = list.some((x) => !x.done && x.startedAt);
+    return [{ id: newId("s_"), title: stepTitle, done: false, notes, ...(hasCurrent ? {} : { startedAt: now }) }, ...list];
+  }, false, () => ({ title }));
+  if (ok) {
+    await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: {
+      id: "cm_" + crypto.randomUUID(), authorId: "u_derek", at: new Date().toISOString(), kind: "event",
+      body: `shortened the name from the full request, which is now step 1's directions`,
+    } });
+  }
+  return ok;
+}
+
 /** Client work's Add, Meeting transcript: the meeting's two steps, dated to
  *  the task (or today when that has passed). Nothing when they are there. */
 /** A step page's Transcript: this step waits on the meeting's transcript. */

@@ -1,7 +1,8 @@
 // Data-access layer over Supabase. Maps snake_case DB rows <-> our camelCase
 // domain types, seeds demo data on first run, and exposes upsert/delete helpers.
 
-import { supabase } from "./supabase";
+import { supabase, authedFetch } from "./supabase";
+import { isLongTitle } from "./data";
 import { noteTaskWrite } from "./localTaskWrites";
 import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
@@ -557,7 +558,16 @@ export async function trashedSince(table: "tasks" | "clients", sinceIso: string)
 
 // --- mutations (fire-and-forget from the UI; errors surface via console) -----
 
-export const upsertTask = (t: Task, updatedBy?: string | null) => { noteTaskWrite(t.id); return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))); };
+// A task named with the whole request: once saved, the server gives it a short
+// name and makes the request step 1's directions (lib/tidyTitle, 2026-10-13).
+const tidyIfLong = (id: string, title: string) => {
+  if (!isLongTitle(title)) return;
+  void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST" }).catch(() => undefined);
+};
+export const upsertTask = (t: Task, updatedBy?: string | null) => {
+  noteTaskWrite(t.id);
+  return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title); return r; });
+};
 
 /** The task columns an edit actually changes, compared as stored. Saving an
  *  edit used to write the whole row from whatever that window had loaded, so a
@@ -591,6 +601,7 @@ export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string
   }
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
   if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
+  if ("title" in changed && res && !res.error) tidyIfLong(after.id, after.title);
   return res;
 }
 /** A task's draft email, written alone: the only browser write of draft_email

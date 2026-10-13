@@ -3138,6 +3138,13 @@ export function clientEmailText(body: string, signer?: string | null): string {
   return text.replace(/\*{1,2}([^*\n]+?)\*{1,2}/g, "$1").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** A task named with the whole request rather than a name: it gets a short
+ *  name and the request becomes step 1's directions (lib/tidyTitle). */
+export function isLongTitle(title: string): boolean {
+  const t = title.trim();
+  return t.length > 90 || t.split(/\s+/).length > 16;
+}
+
 /** "Thanks!", "Sounds good": nothing to do, so no step (Derek, 2026-10-12). */
 export function isJustThanks(text: string): boolean {
   const own = emailOwnWords(text).replace(/\s+/g, " ").trim();
