@@ -2407,8 +2407,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
       <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
-        className="w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
-        <div className="text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}` : `✓ Sent to ${firstName}.`}</div>
+        className="relative w-full max-w-[560px] rounded-[5px] bg-surface p-5 shadow-2xl">
+        {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
+        <button onClick={closeSentNext} aria-label="Close" title="Close, change nothing"
+          className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.close /></button>
+        <div className="pr-10 text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}` : `✓ Sent to ${firstName}.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
         <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
           onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
