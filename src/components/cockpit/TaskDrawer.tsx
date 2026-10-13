@@ -1994,6 +1994,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Follow up with ${firstName}`, done: false, due: addBusinessDaysIso(TODAY, 3), finishWhen: "reply" as const, ...stepOwnerFields() }] });
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
+  // Delegate to the client (Derek and Justin, 2026-10-13: "a task that is for
+  // the client but no way to assign it to the client"). Like handing a step
+  // to a teammate: the task stays yours, this one step is theirs. While it is
+  // the current step the task is waiting on them (their page lists it, the
+  // reminders run), and their answer, from their page, an email or a text,
+  // ticks it and the next step starts. The email asking for it opens on it.
+  const clientStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    const due = addBusinessDaysIso(TODAY, 2);
+    const step: Subtask = { id, title: `${firstName}: ${task.title}`.slice(0, 120), done: false, due, onClient: true, finishWhen: "reply", stage: "waiting" };
+    const list = [...taskRef.current.subtasks, step];
+    const current = currentStep(list)?.id === id;
+    const draft = taskRef.current.draftEmail;
+    const emailIt = hasMessaging && !!messageDest?.email && !(draft && htmlToText(draft.body).trim());
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const now = new Date().toISOString();
+    const started = current ? list.map((x) => (x.id === id ? { ...x, startedAt: now } : x)) : list;
+    onPatch({
+      subtasks: emailIt ? holdOnStep(started, id, "email") : started,
+      ...(current ? { status: "waiting" as const, followUpAt: due } : {}),
+      ...(emailIt ? { draftEmail: { subject: task.title.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>To keep <strong>${esc(task.title)}</strong> moving, we need this from you:</p><p></p>${clientPortalUrl ? `<p>You can reply to this email or answer on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>"}`, replyTo: null, createdAt: now, updatedAt: now } } : {}),
+    });
+    setOpenStepPage({ taskId: task.id, id, full: false });
+    if (emailIt) setEmailOpenNonce((n) => n + 1);
+  };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
   // A checklist as a step of its own: its page opens with the to-do box ready.
   const checklistStep = () => {
@@ -2160,6 +2186,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
     { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },
     { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
+    ...(mayContactClient ? [{ key: "toclient", group: "handoff" as const, label: `Delegate to ${firstName} (client)`, disabled: false, note: "emails them what you need", onPick: clientStep }] : []),
     { key: "followup", group: "handoff", label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep },
   ];
   const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "Web page", video: "Video" };
@@ -2634,7 +2661,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const due = followUpDate || addBusinessDaysIso(TODAY, 2);
       const list = recordFollowUp(taskRef.current.subtasks, cur.id, "email", due).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
       onPatch({ subtasks: list, followUpAt: due });
-      pushToast(`Reminder sent. Still waiting on ${firstName}; checking again ${formatDue(due)}.`);
+      pushToast(`${cur.followUps?.length || cur.waitsOn ? "Reminder sent" : "Sent"}. Waiting on ${firstName}; checking again ${formatDue(due)}.`);
       return true;
     }
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
@@ -3494,7 +3521,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
                 setOpenStepPage(null);
                 toClaude(ps.id);
-              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
+              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient && sentReviews(ps).length ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

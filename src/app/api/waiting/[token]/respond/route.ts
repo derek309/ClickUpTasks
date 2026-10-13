@@ -1,3 +1,4 @@
+import { stepsOnClientReply } from "@/lib/stepsServer";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { clientAnswerPatch, type Attachment } from "@/lib/data";
@@ -57,6 +58,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   const { error } = await supabaseAdmin.from("tasks").update({ ...patch, updated_by: null }).eq("id", taskId);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  // A step delegated to the client ends with their answer here, and the
+  // next step starts (Derek, 2026-10-13).
+  await stepsOnClientReply(taskId).catch(() => false);
 
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({
