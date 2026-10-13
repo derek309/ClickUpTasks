@@ -176,8 +176,9 @@ export default function ApiTokensPanel() {
     try { setClaudeShown({ kind, text: await text }); } catch (e) { setClaudeError(e instanceof Error ? e.message : "Couldn't get it."); }
   };
 
+  // One card, its sections split by lines, like the task page (2026-10-12).
   return (
-    <>
+    <div className="rounded-[5px] border bg-surface shadow-soft">
         <div className="border-b px-5 py-4">
           <h3 className="text-[16px] font-bold">Connect Claude Code</h3>
           {claudeToken ? (<>
@@ -186,20 +187,20 @@ export default function ApiTokensPanel() {
               <li>In the Claude app: Settings, Connectors, Add custom connector. Paste it and click Add.</li>
               <li>That&apos;s it. ClickUpTasks works in Claude and in Claude Code, as you. Keep the link to yourself.</li>
             </ol>
-            <button onClick={() => void copyClaude("link")} className="mt-3 h-10 rounded-lg bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied && claudeCopiedKind === "link" ? "Copied. Paste it in Claude's Connectors" : "Copy my Claude link"}</button>
+            <button onClick={() => void copyClaude("link")} className="mt-3 h-10 rounded-[5px] bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied && claudeCopiedKind === "link" ? "Copied. Paste it in Claude's Connectors" : "Copy my Claude link"}</button>
             {claudeError && <p className="mt-2 text-[16px] text-danger">{claudeError}</p>}
             {claudeShown && (
               <div className="mt-3">
                 <p className="text-[16px] text-muted">Your browser wouldn&apos;t copy it. It&apos;s selected below: press ⌘C (Ctrl+C on Windows).</p>
                 <textarea readOnly value={claudeShown.text} rows={3} autoFocus onFocus={(e) => e.currentTarget.select()} aria-label={claudeShown.kind === "link" ? "Your Claude link" : "Your Terminal command"}
-                  className="mt-2 w-full resize-none rounded-lg border bg-background px-3 py-2 font-mono text-[16px]" />
+                  className="mt-2 w-full resize-none rounded-[5px] border bg-background px-3 py-2 font-mono text-[16px]" />
               </div>
             )}
             <button onClick={() => setShowTerminal((v) => !v)} className="mt-3 block text-[16px] font-semibold text-accent hover:underline">{showTerminal ? "Hide the Terminal way" : "Use Terminal instead (Claude Code without the Claude app)"}</button>
             {showTerminal && (
               <div className="mt-2">
                 <p className="text-[16px] text-muted">Copy the command, paste it into Terminal and press Return, then restart Claude Code.</p>
-                <button onClick={() => void copyClaude("command")} className="mt-2 h-10 rounded-lg px-4 text-[16px] font-semibold ring-1 ring-[var(--border)] hover:bg-background">{claudeCopied && claudeCopiedKind === "command" ? "Copied. Paste it into Terminal" : "Copy the Terminal command"}</button>
+                <button onClick={() => void copyClaude("command")} className="mt-2 h-10 rounded-[5px] px-4 text-[16px] font-semibold ring-1 ring-[var(--border)] hover:bg-background">{claudeCopied && claudeCopiedKind === "command" ? "Copied. Paste it into Terminal" : "Copy the Terminal command"}</button>
               </div>
             )}
           </>) : (
@@ -208,60 +209,60 @@ export default function ApiTokensPanel() {
         </div>
         {revealedToken ? (
           <div className="px-5 py-4">
-            <p className="text-[15px] font-medium text-amber-700">
+            <p className="text-[16px] font-medium text-amber-700">
               Copy this now — you won&apos;t be able to see it again.
             </p>
             {/* Named, because after a rotate there are several tokens in the
                 list and "copy this" alone does not say which one you are
                 holding. */}
-            <p className="mb-2 mt-0.5 text-[13px] text-muted">
+            <p className="mb-2 mt-0.5 text-[16px] text-muted">
               {revealedFor ? `${revealedFor.rotated ? "New token for" : "New token"} “${revealedFor.name}”. ` : ""}
               You can copy it again from the list below.
             </p>
-            <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
-              <code className="min-w-0 flex-1 break-all text-[13px]">{revealedToken}</code>
+            <div className="flex items-center gap-2 rounded-[5px] border bg-background px-2.5 py-2">
+              <code className="min-w-0 flex-1 break-all text-[16px]">{revealedToken}</code>
               <button onClick={() => { navigator.clipboard.writeText(revealedToken).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
-                className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
+                className="shrink-0 rounded-[5px] border bg-surface px-2 py-1 text-[16px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
             </div>
-            <button onClick={() => { setRevealedToken(null); setRevealedFor(null); }} className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white">Done</button>
+            <button onClick={() => { setRevealedToken(null); setRevealedFor(null); }} className="mt-3 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Done</button>
           </div>
         ) : (
           <form onSubmit={createToken} className="flex items-center gap-2 border-b bg-background/40 px-5 py-3">
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Token name (e.g. Claude on my laptop)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-            <button type="submit" disabled={creating} className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40"><I.plus className="mr-1 inline h-3.5 w-3.5" />{creating ? "Creating…" : "New token"}</button>
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Token name (e.g. Claude on my laptop)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+            <button type="submit" disabled={creating} className="shrink-0 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40"><I.plus className="mr-1 inline h-3.5 w-3.5" />{creating ? "Creating…" : "New token"}</button>
           </form>
         )}
 
         <div className="px-5 py-3">
-          {loading && <div className="py-8 text-center text-[13px] text-muted">Loading tokens…</div>}
-          {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
+          {loading && <div className="py-8 text-center text-[16px] text-muted">Loading tokens…</div>}
+          {error && <div className="mb-3 rounded-[5px] bg-red-50 px-3 py-2 text-[16px] text-red-600">{error}</div>}
           {!loading && tokens.map((t) => (
             <div key={t.id} className="flex items-center gap-3 border-b py-2.5 last:border-0">
               <I.key className="shrink-0 text-muted" />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-medium">{t.name}</div>
-                <div className="truncate text-[13px] text-muted">
+                <div className="truncate text-[16px] font-medium">{t.name}</div>
+                <div className="truncate text-[16px] text-muted">
                   Created {new Date(t.created_at).toLocaleDateString()}{t.last_used_at ? ` · last used ${new Date(t.last_used_at).toLocaleDateString()}` : " · never used"}
                   {!t.copyable && " · rotate to make it copyable"}
                 </div>
               </div>
               {t.copyable && t.name !== "Claude Code" && (
                 <button onClick={() => copyExisting(t)} disabled={copyingId === t.id || rotating === t.id || revoking === t.id}
-                  title="Copy this token to the clipboard" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
+                  title="Copy this token to the clipboard" className="shrink-0 rounded-[5px] border bg-surface px-2 py-1 text-[16px] font-medium hover:bg-background disabled:opacity-40">
                   {copiedId === t.id ? "Copied" : copyingId === t.id ? "…" : "Copy"}
                 </button>
               )}
               <button onClick={() => rotate(t)} disabled={rotating === t.id || revoking === t.id}
-                title="Replace this token's value with a new one" className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background disabled:opacity-40">
+                title="Replace this token's value with a new one" className="shrink-0 rounded-[5px] border bg-surface px-2 py-1 text-[16px] font-medium hover:bg-background disabled:opacity-40">
                 {rotating === t.id ? "Rotating…" : "Rotate"}
               </button>
-              <button onClick={() => revoke(t)} disabled={revoking === t.id || rotating === t.id} title="Revoke" className="shrink-0 rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
+              <button onClick={() => revoke(t)} disabled={revoking === t.id || rotating === t.id} title="Revoke" className="shrink-0 rounded-[5px] border px-2 py-1 text-[16px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
             </div>
           ))}
-          {!loading && !error && tokens.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No tokens yet.</div>}
+          {!loading && !error && tokens.length === 0 && <div className="py-8 text-center text-[16px] text-muted">No tokens yet.</div>}
         </div>
 
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
-    </>
+    </div>
   );
 }

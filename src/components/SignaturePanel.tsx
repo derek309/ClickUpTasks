@@ -14,6 +14,8 @@ import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { htmlToText, looksLikeHtml, plainTextToHtml } from "@/lib/data";
 import { RichTextEditor } from "./cockpit/RichTextEditor";
+import { SettingsCard, BTN_PRIMARY } from "./settings/ui";
+import { I } from "./cockpit/ui";
 
 const MAX_LEN = 10000; // the same as /api/signature
 
@@ -80,14 +82,10 @@ export default function SignaturePanel() {
   }
 
   return (
-    <div className="px-5 py-4">
-      <div className="mb-1 text-[15px] font-semibold">Email signature</div>
-      <p className="mb-3 max-w-[560px] text-[13px] text-muted">
-        Added to the bottom of every email you send to a client, from the task messaging column, the Journal, and scheduled sends. It is not added to texts or to internal team notes.
-      </p>
-
+    <SettingsCard title="Your signature" icon={<I.pencil className="h-4 w-4" />} tone="emerald"
+      hint="Added to every client email you send, from a task, the Journal, and scheduled sends. Not added to texts or team notes.">
       {loading ? (
-        <div className="text-[13px] text-muted">Loading…</div>
+        <div className="text-[16px] text-muted">Loading…</div>
       ) : (
         <>
           <div className="max-w-[560px]">
@@ -97,20 +95,20 @@ export default function SignaturePanel() {
             <button
               onClick={save}
               disabled={!dirty || saving}
-              className="rounded-lg bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40"
+              className={BTN_PRIMARY}
             >
               {saving ? "Saving…" : "Save"}
             </button>
-            {dirty && !saving && <span className="text-[13px] text-muted">Unsaved changes</span>}
-            {justSaved && <span className="text-[13px] text-success">Saved</span>}
+            {dirty && !saving && <span className="text-[16px] text-muted">Unsaved changes</span>}
+            {justSaved && <span className="text-[16px] text-success">Saved</span>}
             {!isEmpty(signature) && !dirty && !justSaved && (
-              <button onClick={clear} className="text-[13px] font-medium text-muted hover:text-danger">Clear</button>
+              <button onClick={clear} className="text-[16px] font-medium text-muted hover:text-danger">Clear</button>
             )}
           </div>
 
-          {error && <div className="mt-3 text-[13px] text-danger">{error}</div>}
+          {error && <div className="mt-3 text-[16px] text-danger">{error}</div>}
         </>
       )}
-    </div>
+    </SettingsCard>
   );
 }

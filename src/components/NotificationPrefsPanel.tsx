@@ -8,6 +8,8 @@
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { Toggle } from "./cockpit/ui";
+import { SettingsCard } from "./settings/ui";
+import { I } from "./cockpit/ui";
 
 type Prefs = { emailNotifyActivity: boolean; emailNotifyMessage: boolean; emailNotifyDm: boolean };
 
@@ -61,22 +63,19 @@ export default function NotificationPrefsPanel() {
   }
 
   return (
-    <div className="px-5 py-4">
-      <div className="mb-1 text-[17px] font-semibold">Email notifications</div>
-      <p className="mb-4 text-[16px] text-muted">
-        Turning one of these off only stops the email copy — you&apos;ll still see it in your Inbox in ClickUpTasks.
-      </p>
+    <SettingsCard title="Email copies" icon={<I.mail className="h-4 w-4" />} tone="rose"
+      hint="Turning one off only stops the email copy. You still see it in your Inbox in ClickUpTasks.">
       {!loading && !canSend && (
-        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-[16px] text-amber-900">
+        <div className="mb-3 rounded-[5px] border border-amber-300 bg-amber-50 px-3 py-2.5 text-[16px] text-amber-900">
           Email copies are sent from your own ClickUpLocal Google Workspace address, and your account is not one, so
           nothing you do sends a teammate an email. They still see it in ClickUpTasks. The toggles below change
           nothing until your account is on that domain.
         </div>
       )}
       {loading && <div className="py-8 text-center text-[16px] text-muted">Loading…</div>}
-      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[16px] text-red-600">{error}</div>}
+      {error && <div className="mb-3 rounded-[5px] bg-red-50 px-3 py-2 text-[16px] text-red-600">{error}</div>}
       {!loading && prefs && (
-        <div className="divide-y rounded-lg border">
+        <div className="divide-y rounded-[5px] border">
           {ROWS.map((r) => (
             <div key={r.key} className="flex items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
@@ -88,6 +87,6 @@ export default function NotificationPrefsPanel() {
           ))}
         </div>
       )}
-    </div>
+    </SettingsCard>
   );
 }

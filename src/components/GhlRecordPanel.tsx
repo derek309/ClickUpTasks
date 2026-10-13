@@ -19,17 +19,17 @@ export type GhlRecordStatus = {
 export function GhlRecordView({ data, onCheck, checking, checkMsg }: { data: GhlRecordStatus | null; onCheck?: () => void; checking?: boolean; checkMsg?: string }) {
   const rejected = data?.tokens.filter((t) => !t.ok) ?? [];
   return (
-    <div className="mb-2 rounded-lg border bg-background px-3 py-2.5">
-      <p className="text-[13px] text-muted">
+    <div className="mb-2 rounded-[5px] border bg-background px-3 py-2.5">
+      <p className="text-[16px] text-muted">
         Every email, text and call should land in GoHighLevel. The app checks every 15 minutes and flags anything
         still missing after an hour. Counts start {data ? new Date(data.since).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "on launch day"}.
       </p>
       {!data ? (
-        <div className="mt-2 text-[15px] text-muted">Checking…</div>
+        <div className="mt-2 text-[16px] text-muted">Checking…</div>
       ) : (
-        <div className="mt-2 space-y-2 text-[15px]">
+        <div className="mt-2 space-y-2 text-[16px]">
           {rejected.map((t) => (
-            <div key={t.locationId} className="rounded-md bg-danger-soft px-2.5 py-1.5 text-danger">
+            <div key={t.locationId} className="rounded-[5px] bg-danger-soft px-2.5 py-1.5 text-danger">
               <b>{t.name}</b>: GoHighLevel {t.status === 401 ? "rejected the token" : "did not answer"}. Nothing from this sub account can be
               pulled or confirmed until a new Private Integration token is connected above.
             </div>
@@ -50,12 +50,12 @@ export function GhlRecordView({ data, onCheck, checking, checkMsg }: { data: Ghl
             </ul>
           )}
           {data.byTeammate.length > 0 && (
-            <p className="text-[13px] text-muted">A teammate listed here most likely has not connected Gmail sync in their GoHighLevel profile.</p>
+            <p className="text-[16px] text-muted">A teammate listed here most likely has not connected Gmail sync in their GoHighLevel profile.</p>
           )}
           {data.unconfirmable.length > 0 && (
             <div>
               <div className="font-medium">Cannot be confirmed</div>
-              <p className="text-[13px] text-muted">These contacts have no GoHighLevel contact, so there is nothing to check against. Save them in GoHighLevel first.</p>
+              <p className="text-[16px] text-muted">These contacts have no GoHighLevel contact, so there is nothing to check against. Save them in GoHighLevel first.</p>
               <ul className="mt-1 space-y-0.5 pl-1">
                 {data.unconfirmable.map((u) => (
                   <li key={u.contactId} className="flex items-baseline justify-between gap-3">
@@ -71,10 +71,10 @@ export function GhlRecordView({ data, onCheck, checking, checkMsg }: { data: Ghl
       {onCheck && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button onClick={onCheck} disabled={checking}
-            className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
+            className="shrink-0 rounded-[5px] border px-2.5 py-1 text-[16px] font-medium hover:bg-surface disabled:opacity-50">
             {checking ? "Checking GoHighLevel…" : "Check now"}
           </button>
-          {checkMsg && !checking && <span className="text-[13px] text-muted">{checkMsg}</span>}
+          {checkMsg && !checking && <span className="text-[16px] text-muted">{checkMsg}</span>}
         </div>
       )}
     </div>

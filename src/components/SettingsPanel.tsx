@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { type Client } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import { GhlRecordPanel } from "./GhlRecordPanel";
+import { I } from "./cockpit/ui";
+import { SettingsCard, StatusWord, BTN, BTN_PRIMARY, INPUT, ROW } from "./settings/ui";
 
 export default function SettingsPanel({
   clients,
@@ -140,139 +142,77 @@ export default function SettingsPanel({
     }
   }
 
+  const note = (kind: string, msg?: string) => msg ? <div className={`mt-2 break-words text-[16px] ${kind === "ok" ? "text-emerald-700 dark:text-emerald-300" : "text-danger"}`}>{msg}</div> : null;
   return (
-    <div className="px-5 py-3">
-      <div className="mb-3 flex items-center gap-2">
-            <span className="text-[15px] font-semibold">GoHighLevel</span>
-            {configured === null ? (
-              <span className="text-[13px] text-muted">checking…</span>
-            ) : configured ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[15px] font-medium text-green-600"><span className="h-1.5 w-1.5 rounded-full bg-green-500" /> Token connected</span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Token not set</span>
-            )}
-          </div>
-
-          {configured === false && (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] text-amber-800">
-              <div className="font-medium">Add your GoHighLevel token to finish connecting.</div>
-              <div className="mt-1 text-amber-700">In each sub-account: <b>Settings → Private Integrations → Create</b>, enable the <b>Contacts</b> (and Tasks) scopes, copy the <code>pit-…</code> token. Then paste the <b>Location ID</b> + <b>token</b> below, hit <b>Connect</b>, then <b>Sync</b>. Tokens are stored server-side only — never in the browser.</div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {clients.map((c) => {
-              const st = status[c.id];
-              const loc = (locs[c.id] || "").trim();
-              const connected = !!loc && tokenLocations.includes(loc);
-              // Not-yet-connected accounts always show the form (nothing to
-              // collapse to); connected ones start collapsed and only show
-              // it again if you explicitly ask to change the token.
-              const showForm = !connected || editing[c.id];
-              return (
-                <div key={c.id} className="rounded-lg border bg-background px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
-                    <span className="truncate text-[15px] font-medium">{c.name}</span>
-                    <span className={`ml-auto rounded-full px-2 py-0.5 text-[13px] font-medium ${connected ? "bg-green-50 text-green-600" : "bg-amber-50 text-amber-700"}`}>
-                      {connected ? "Connected" : "Not connected"}
-                    </span>
-                  </div>
-
-                  {showForm ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <input value={locs[c.id] ?? ""} onChange={(e) => setLoc(c.id, e.target.value)} placeholder="Location ID"
-                        className="w-40 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
-                      <input type="password" value={tokens[c.id] ?? ""} onChange={(e) => setTokens((t) => ({ ...t, [c.id]: e.target.value }))} placeholder="pit-… token"
-                        className="min-w-0 flex-1 rounded-md border bg-surface px-2 py-1 text-[15px] outline-none focus:border-accent" />
-                      <button onClick={() => connect(c)} disabled={st?.kind === "busy"}
-                        className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-50">
-                        {st?.kind === "busy" ? "Connecting…" : "Connect"}</button>
-                      {connected && (
-                        <button onClick={() => setEditing((e) => ({ ...e, [c.id]: false }))} className="shrink-0 text-[13px] text-muted hover:text-foreground">Cancel</button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="mt-2 flex items-center gap-2">
-                      <button onClick={() => sync(c)} disabled={st?.kind === "busy"}
-                        className="shrink-0 rounded-md bg-accent px-3 py-1 text-[15px] font-medium text-white disabled:opacity-50">
-                        {st?.kind === "busy" ? "Syncing…" : "Sync"}</button>
-                      <button onClick={() => setEditing((e) => ({ ...e, [c.id]: true }))} className="text-[13px] text-muted hover:text-foreground hover:underline">Change token</button>
-                    </div>
-                  )}
-
-                  {st && st.kind !== "busy" && (
-                    <div className={`mt-1.5 text-[15px] ${st.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{st.msg}</div>
-                  )}
+    <div className="space-y-4">
+      <SettingsCard title="GoHighLevel" icon={<I.bolt className="h-4 w-4" />} tone="amber"
+        status={configured === null ? <span className="text-[16px] text-muted">Checking…</span> : <StatusWord ok={configured}>{configured ? "Token connected" : "Token not set"}</StatusWord>}
+        hint={configured === false ? <>In each sub account: <b>Settings, Private Integrations, Create</b>, turn on the <b>Contacts</b> (and Tasks) scopes and copy the <code>pit-</code> token. Paste the <b>Location ID</b> and the token below, click <b>Connect</b>, then <b>Sync</b>. Tokens are kept on the server, never in the browser.</> : undefined}>
+        <div className="space-y-2">
+          {clients.map((c) => {
+            const st = status[c.id];
+            const loc = (locs[c.id] || "").trim();
+            const connected = !!loc && tokenLocations.includes(loc);
+            // Not yet connected accounts always show the form (nothing to
+            // collapse to); connected ones start collapsed and only show it
+            // again if you ask to change the token.
+            const showForm = !connected || editing[c.id];
+            return (
+              <div key={c.id} className={ROW}>
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: c.color }} />
+                  <span className="truncate text-[16px] font-semibold">{c.name}</span>
+                  <span className="ml-auto"><StatusWord ok={connected}>{connected ? "Connected" : "Not connected"}</StatusWord></span>
                 </div>
-              );
-            })}
-          </div>
+                {showForm ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input value={locs[c.id] ?? ""} onChange={(e) => setLoc(c.id, e.target.value)} placeholder="Location ID" className={`${INPUT} w-44`} />
+                    <input type="password" value={tokens[c.id] ?? ""} onChange={(e) => setTokens((t) => ({ ...t, [c.id]: e.target.value }))} placeholder="pit- token" className={`${INPUT} flex-1`} />
+                    <button onClick={() => connect(c)} disabled={st?.kind === "busy"} className={BTN_PRIMARY}>{st?.kind === "busy" ? "Connecting…" : "Connect"}</button>
+                    {connected && <button onClick={() => setEditing((e) => ({ ...e, [c.id]: false }))} className={BTN}>Cancel</button>}
+                  </div>
+                ) : (
+                  <div className="mt-2 flex items-center gap-2">
+                    <button onClick={() => sync(c)} disabled={st?.kind === "busy"} className={BTN_PRIMARY}>{st?.kind === "busy" ? "Syncing…" : "Sync"}</button>
+                    <button onClick={() => setEditing((e) => ({ ...e, [c.id]: true }))} className={BTN}>Change token</button>
+                  </div>
+                )}
+                {st && st.kind !== "busy" && note(st.kind, st.msg)}
+              </div>
+            );
+          })}
+        </div>
+      </SettingsCard>
 
-          <div className="mb-3 mt-6 flex items-center gap-2">
-            <span className="text-[15px] font-semibold">Granola</span>
-            {granolaApiKeyConfigured === null ? (
-              <span className="text-[13px] text-muted">checking…</span>
-            ) : !granolaApiKeyConfigured ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> API key not set</span>
-            ) : granolaWebhookConfigured ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[15px] font-medium text-green-600"><span className="h-1.5 w-1.5 rounded-full bg-green-500" /> Connected</span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[15px] font-medium text-amber-700"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Webhook not registered</span>
-            )}
-          </div>
-          <div className="rounded-lg border bg-background px-3 py-2.5">
-            <p className="text-[13px] text-muted">
-              Meeting notes sync into a client&apos;s Journal automatically once a meeting&apos;s attendees match a known contact. Each person connects their own Granola in Settings, Granola; Sync here reads everyone&apos;s.
-              {!granolaWebhookConfigured && granolaApiKeyConfigured && " Click Connect once to register the webhook, then add the returned signing secret as GRANOLA_WEBHOOK_SECRET."}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {granolaApiKeyConfigured && !granolaWebhookConfigured && (
-                <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"}
-                  className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[15px] font-medium text-white disabled:opacity-50">
-                  {granolaStatus.kind === "busy" ? "Connecting…" : "Connect"}</button>
-              )}
-              {granolaApiKeyConfigured && (
-                <button onClick={syncGranolaNow} disabled={granolaStatus.kind === "busy"}
-                  className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
-                  {granolaStatus.kind === "busy" ? "Syncing…" : "Sync recent meetings"}</button>
-              )}
-              {/* After swapping in a new key (the team's workspace key, 2026-10-12):
-                  register a webhook under it; its secret replaces GRANOLA_WEBHOOK_SECRET. */}
-              {granolaApiKeyConfigured && granolaWebhookConfigured && (
-                <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"} title="After changing the Granola key: register its webhook, then put the new signing secret in GRANOLA_WEBHOOK_SECRET and redeploy"
-                  className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">Reconnect webhook</button>
-              )}
-            </div>
-            {granolaStatus.kind !== "busy" && granolaStatus.msg && (
-              <div className={`mt-1.5 break-all text-[15px] ${granolaStatus.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{granolaStatus.msg}</div>
-            )}
-          </div>
+      <SettingsCard title="Granola" icon={<I.calendar className="h-4 w-4" />} tone="sky"
+        status={granolaApiKeyConfigured === null ? <span className="text-[16px] text-muted">Checking…</span>
+          : <StatusWord ok={!!granolaApiKeyConfigured && !!granolaWebhookConfigured}>{!granolaApiKeyConfigured ? "Team key not set" : granolaWebhookConfigured ? "Connected" : "Webhook not registered"}</StatusWord>}
+        hint={<>Meeting notes go on a client&apos;s Journal once a meeting&apos;s attendees match a contact. Each person connects their own Granola in Settings, Granola; Sync here reads everyone&apos;s.{!granolaWebhookConfigured && granolaApiKeyConfigured && " Click Connect once to register the webhook, then add its signing secret as GRANOLA_WEBHOOK_SECRET."}</>}>
+        <div className="flex flex-wrap items-center gap-2">
+          {granolaApiKeyConfigured && !granolaWebhookConfigured && (
+            <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"} className={BTN_PRIMARY}>{granolaStatus.kind === "busy" ? "Connecting…" : "Connect"}</button>
+          )}
+          <button onClick={syncGranolaNow} disabled={granolaStatus.kind === "busy"} className={BTN}>{granolaStatus.kind === "busy" ? "Syncing…" : "Sync recent meetings"}</button>
+          {/* After swapping in a new team key: register a webhook under it;
+              its secret replaces GRANOLA_WEBHOOK_SECRET. */}
+          {granolaApiKeyConfigured && granolaWebhookConfigured && (
+            <button onClick={connectGranola} disabled={granolaStatus.kind === "busy"} title="After changing the team Granola key: register its webhook, then put the new signing secret in GRANOLA_WEBHOOK_SECRET and redeploy" className={BTN}>Reconnect webhook</button>
+          )}
+        </div>
+        {granolaStatus.kind !== "busy" && note(granolaStatus.kind, granolaStatus.msg)}
+      </SettingsCard>
 
-          <div className="mb-3 mt-6 flex items-center gap-2">
-            <span className="text-[15px] font-semibold">GoHighLevel record</span>
-          </div>
-          <GhlRecordPanel />
+      <SettingsCard title="GoHighLevel record" icon={<I.check className="h-4 w-4" />} tone="emerald">
+        <GhlRecordPanel />
+      </SettingsCard>
 
-          <div className="mb-3 mt-6 flex items-center gap-2">
-            <span className="text-[15px] font-semibold">Data cleanup</span>
-          </div>
-          <div className="mb-2 rounded-lg border bg-background px-3 py-2.5">
-            <p className="text-[13px] text-muted">
-              Messages that arrived before conversations were linked to tasks have no thread to follow, so a reply to one
-              lands on a general &quot;Reply to&quot; task instead of the task it belongs to. This asks GoHighLevel which
-              conversation each old message came from. Safe to run more than once — anything already linked is skipped.
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button onClick={backfillConversations} disabled={backfill.kind === "busy"}
-                className="shrink-0 rounded-md border px-2.5 py-1 text-[15px] font-medium hover:bg-surface disabled:opacity-50">
-                {backfill.kind === "busy" ? "Linking…" : backfill.remaining ? "Link the next 10 clients" : "Link old conversations"}
-              </button>
-            </div>
-            {backfill.kind !== "busy" && backfill.msg && (
-              <div className={`mt-1.5 text-[15px] ${backfill.kind === "ok" ? "text-green-600" : "text-red-500"}`}>{backfill.msg}</div>
-            )}
-          </div>
+      <SettingsCard title="Data cleanup" icon={<I.repeat className="h-4 w-4" />} tone="slate"
+        hint={<>Messages that arrived before conversations were linked to tasks have no thread to follow, so a reply to one lands on a general &quot;Reply to&quot; task instead of the task it belongs to. This asks GoHighLevel which conversation each old message came from. Safe to run more than once: anything already linked is skipped.</>}>
+        <button onClick={backfillConversations} disabled={backfill.kind === "busy"} className={BTN}>
+          {backfill.kind === "busy" ? "Linking…" : backfill.remaining ? "Link the next 10 clients" : "Link old conversations"}
+        </button>
+        {backfill.kind !== "busy" && note(backfill.kind, backfill.msg)}
+      </SettingsCard>
     </div>
   );
 }

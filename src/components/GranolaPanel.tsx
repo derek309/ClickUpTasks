@@ -6,6 +6,8 @@
 // them in. Per person, so on the same footing as Email signature.
 import { useEffect, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
+import { I } from "./cockpit/ui";
+import { SettingsCard, StatusWord, BTN, BTN_PRIMARY, INPUT } from "./settings/ui";
 
 type Status = { connected: boolean; since: string | null; webhook: boolean; team?: { name: string; since: string }[] };
 
@@ -54,23 +56,21 @@ export default function GranolaPanel() {
   };
 
   return (
-    <div className="max-w-[620px] px-5 py-4 text-[16px]">
-      <div className="mb-1 text-[17px] font-semibold">Granola</div>
-      <p className="mb-4 text-muted">
-        Connect your own Granola and your client meetings come in by themselves: the notes go on the client&apos;s Journal, and the transcript lands on a task&apos;s Transcript step. Any folder works.
-      </p>
+    <div className="space-y-4 text-[16px]">
+      <SettingsCard title="Your Granola" icon={<I.calendar className="h-4 w-4" />} tone="sky"
+        status={status === null ? undefined : <StatusWord ok={status.connected}>{status.connected ? `Connected${status.since ? ` since ${new Date(status.since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}` : "Not connected"}</StatusWord>}
+        hint="Your client meetings come in by themselves: the notes go on the client's Journal, the transcript onto a task's Transcript step. Any folder works.">
       {status === null ? <div className="text-muted">Checking…</div>
         : status.connected ? (
-          <div className="rounded-[5px] border bg-background px-4 py-3">
-            <div className="font-semibold text-green-700">● Connected{status.since ? ` since ${new Date(status.since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : ""}</div>
-            {!status.webhook && <div className="mt-1 text-muted">New meetings come in when you click Sync, not by themselves yet.</div>}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={() => void sync()} disabled={busy !== null} className="rounded-[5px] bg-accent px-3 py-1.5 font-medium text-white disabled:opacity-50">{busy === "sync" ? "Syncing…" : "Sync my meetings"}</button>
-              <button onClick={() => void disconnect()} disabled={busy !== null} className="rounded-[5px] border px-3 py-1.5 font-medium hover:bg-surface disabled:opacity-50">{busy === "off" ? "Disconnecting…" : "Disconnect"}</button>
+          <div>
+            {!status.webhook && <div className="mb-3 text-muted">New meetings come in when you click Sync, not by themselves yet.</div>}
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => void sync()} disabled={busy !== null} className={BTN_PRIMARY}>{busy === "sync" ? "Syncing…" : "Sync my meetings"}</button>
+              <button onClick={() => void disconnect()} disabled={busy !== null} className={BTN}>{busy === "off" ? "Disconnecting…" : "Disconnect"}</button>
             </div>
           </div>
         ) : (
-          <div className="rounded-[5px] border bg-background px-4 py-3">
+          <div>
             <ol className="mb-3 list-decimal space-y-1 pl-5">
               <li>In Granola, open <b>Settings</b>, then <b>Connectors</b>, then <b>Personal API keys</b>.</li>
               <li>Click <b>Create new key</b>, name it ClickUpTasks, and copy it.</li>
@@ -83,19 +83,19 @@ export default function GranolaPanel() {
                 autoComplete="off" autoCorrect="off" spellCheck={false} data-1p-ignore data-lpignore="true"
                 style={{ WebkitTextSecurity: "disc" } as React.CSSProperties}
                 onKeyDown={(e) => { if (e.key === "Enter" && key.trim()) void save(); }}
-                className="h-10 min-w-0 flex-1 rounded-[5px] border bg-surface px-3 outline-none focus:border-accent" />
-              <button onClick={() => void save()} disabled={!key.trim() || busy !== null} className="rounded-[5px] bg-accent px-4 font-medium text-white disabled:opacity-40">{busy === "save" ? "Checking…" : "Connect"}</button>
+                className={`${INPUT} flex-1`} />
+              <button onClick={() => void save()} disabled={!key.trim() || busy !== null} className={BTN_PRIMARY}>{busy === "save" ? "Checking…" : "Connect"}</button>
             </div>
           </div>
         )}
-      {msg && <div className={`mt-2 ${msg.ok ? "text-green-700" : "text-red-600"}`}>{msg.text}</div>}
+      {msg && <div className={`mt-3 ${msg.ok ? "text-emerald-700 dark:text-emerald-300" : "text-danger"}`}>{msg.text}</div>}
+      </SettingsCard>
       {status?.team && (
-        <div className="mt-6">
-          <div className="mb-1 font-semibold">Who is connected</div>
+        <SettingsCard title="Who is connected" icon={<I.user className="h-4 w-4" />} tone="indigo">
           {status.team.length
             ? <ul className="space-y-0.5">{status.team.map((t) => <li key={t.name + t.since}>{t.name} <span className="text-muted">since {new Date(t.since).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span></li>)}</ul>
             : <div className="text-muted">Nobody yet.</div>}
-        </div>
+        </SettingsCard>
       )}
     </div>
   );

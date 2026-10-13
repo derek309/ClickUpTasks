@@ -159,26 +159,27 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
     });
   }
 
+  // One card, its sections split by lines, like the task page (2026-10-12).
   return (
-    <>
+    <div className="rounded-[5px] border bg-surface shadow-soft">
         <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
           <div>
-            <div className="text-[15px] font-medium">Direct messages</div>
-            <div className="text-[13px] text-muted">Off for now — everyone still has the team-wide Conversations feed; use @ to address someone specifically. Flip this on to bring back 1:1 DM threads for the whole team.</div>
+            <div className="text-[16px] font-medium">Direct messages</div>
+            <div className="text-[16px] text-muted">Off for now — everyone still has the team-wide Conversations feed; use @ to address someone specifically. Flip this on to bring back 1:1 DM threads for the whole team.</div>
           </div>
           <Toggle on={dmEnabled} onClick={() => onSetDmEnabled(!dmEnabled)} />
         </div>
 
         <form onSubmit={sendInvite} className="flex flex-wrap items-center gap-2 border-b bg-background/40 px-5 py-3">
-          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Name (optional)" className="w-40 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-          <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@email.com" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-          <button type="submit" disabled={inviting || !inviteEmail.trim()} className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{inviting ? "Sending…" : "Send invite"}</button>
-          {inviteMsg && <div className={`w-full text-[15px] ${inviteMsg.kind === "err" ? "text-red-500" : "text-green-600"}`}>{inviteMsg.text}</div>}
+          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Name (optional)" className="w-40 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <input value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} type="email" required placeholder="teammate@email.com" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+          <button type="submit" disabled={inviting || !inviteEmail.trim()} className="shrink-0 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">{inviting ? "Sending…" : "Send invite"}</button>
+          {inviteMsg && <div className={`w-full text-[16px] ${inviteMsg.kind === "err" ? "text-red-500" : "text-green-600"}`}>{inviteMsg.text}</div>}
         </form>
 
         <div className="px-5 py-3">
-          {loading && <div className="py-8 text-center text-[13px] text-muted">Loading team…</div>}
-          {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[15px] text-red-600">{error}</div>}
+          {loading && <div className="py-8 text-center text-[16px] text-muted">Loading team…</div>}
+          {error && <div className="mb-3 rounded-[5px] bg-red-50 px-3 py-2 text-[16px] text-red-600">{error}</div>}
           {!loading && profiles.map((p) => (
             <div key={p.id} className="flex items-center gap-3 border-b py-2.5 last:border-0">
               <label className="group/avatar relative block h-8 w-8 shrink-0 cursor-pointer overflow-hidden rounded-full" title="Upload a headshot">
@@ -187,34 +188,34 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
                 {p.avatar_url
                   // eslint-disable-next-line @next/next/no-img-element -- small fixed-size thumbnail, not worth next/image's setup here.
                   ? <img src={p.avatar_url} alt={p.name || p.email} className="h-8 w-8 rounded-full object-cover" />
-                  : <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[15px] font-semibold text-white" style={{ background: p.color }}>{initials(p.name || p.email)}</span>}
+                  : <span className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[16px] font-semibold text-white" style={{ background: p.color }}>{initials(p.name || p.email)}</span>}
                 <span className={`absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-white transition-opacity ${uploadingId === p.id ? "opacity-100" : "opacity-0 group-hover/avatar:opacity-100"}`}>
-                  {uploadingId === p.id ? <span className="text-[11px]">…</span> : <I.pencil className="h-3.5 w-3.5" />}
+                  {uploadingId === p.id ? <span className="text-[16px]">…</span> : <I.pencil className="h-3.5 w-3.5" />}
                 </span>
               </label>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[13px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[13px] font-medium text-amber-700">Invite pending</span>}</div>
-                <div className="truncate text-[13px] text-muted">{p.email}</div>
+                <div className="truncate text-[16px] font-medium">{p.name || p.email}{p.id === me.id && <span className="ml-1 text-[16px] text-muted">(you)</span>}{p.pending && <span className="ml-1.5 rounded-[5px] bg-amber-50 px-1.5 py-0.5 text-[16px] font-medium text-amber-700">Invite pending</span>}</div>
+                <div className="truncate text-[16px] text-muted">{p.email}</div>
                 {/* Send-from address for outbound emails. Only meaningful for
                     accounts that can send; the domain must be authenticated in
                     the GHL sub-account or GHL rejects it at send time. */}
                 {(p.role === "admin" || !!p.can_send_messages) && (
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted">Sends as</span>
+                      <span className="shrink-0 text-[16px] font-medium uppercase tracking-wide text-muted">Sends as</span>
                       <input type="email" defaultValue={p.send_from_email ?? ""} disabled={saving === p.id}
                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                         onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.send_from_email ?? "")) patch(p.id, { send_from_email: v }); }}
                         placeholder="default sender"
-                        className="min-w-0 max-w-[200px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                        className="min-w-0 max-w-[200px] flex-1 rounded-[5px] border bg-background px-1.5 py-0.5 text-[16px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted" title="Paste this teammate's GoHighLevel user id so email sends as them">GHL user</span>
+                      <span className="shrink-0 text-[16px] font-medium uppercase tracking-wide text-muted" title="Paste this teammate's GoHighLevel user id so email sends as them">GHL user</span>
                       <input defaultValue={p.ghl_user_id ?? ""} disabled={saving === p.id}
                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                         onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.ghl_user_id ?? "")) patch(p.id, { ghl_user_id: v }); }}
                         placeholder="GHL user id"
-                        className="min-w-0 max-w-[220px] flex-1 rounded border bg-background px-1.5 py-0.5 text-[12px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
+                        className="min-w-0 max-w-[220px] flex-1 rounded-[5px] border bg-background px-1.5 py-0.5 text-[16px] outline-none placeholder:text-muted/70 focus:border-accent disabled:opacity-50" />
                     </div>
                   </div>
                 )}
@@ -229,7 +230,7 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
                     disabled={saving === p.id || p.role === "admin"}
                     onClick={() => patch(p.id, { can_send_messages: !p.can_send_messages })}
                     title={p.role === "admin" ? "Admins can always send email & SMS" : canSend ? "Can send email & SMS — click to revoke" : "Can't send email & SMS — click to allow"}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium disabled:opacity-60 ${canSend ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
+                    className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1 text-[16px] font-medium disabled:opacity-60 ${canSend ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
                     <I.bolt /> {canSend ? "Can send" : "No send"}
                   </button>
                 );
@@ -241,44 +242,44 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
                 disabled={saving === p.id || !!p.pending}
                 onClick={() => patch(p.id, { claude_code: !p.claude_code })}
                 title={p.claude_code ? "Claude Code can work on ClickUpTasks as them. Click to turn off" : "Let their Claude Code work on ClickUpTasks as them"}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium disabled:opacity-60 ${p.claude_code ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
+                className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1 text-[16px] font-medium disabled:opacity-60 ${p.claude_code ? "border-accent bg-accent-soft text-accent" : "text-muted hover:bg-background"}`}>
                 <span aria-hidden>✳</span> {p.claude_code ? "Claude Code on" : "Claude Code off"}
               </button>
-              <div className="inline-flex overflow-hidden rounded-md border">
+              <div className="inline-flex overflow-hidden rounded-[5px] border">
                 {(["admin", "va"] as const).map((r) => (
                   <button key={r} disabled={saving === p.id || (p.id === me.id && r === "va")} onClick={() => patch(p.id, { role: r })}
-                    className={`px-2.5 py-1 text-[15px] font-medium capitalize ${p.role === r ? "bg-accent-soft text-accent" : "bg-surface text-muted hover:bg-background"} disabled:opacity-40`}>
+                    className={`px-2.5 py-1 text-[16px] font-medium capitalize ${p.role === r ? "bg-accent-soft text-accent" : "bg-surface text-muted hover:bg-background"} disabled:opacity-40`}>
                     {r}
                   </button>
                 ))}
               </div>
               <button onClick={() => { setPasswordFor(p); setPasswordValue(randomPassword()); setPasswordError(null); }} disabled={saving === p.id} title="Set a password directly — works even if their invite/reset email never arrives"
-                className="rounded-md border px-2 py-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-40"><I.key /></button>
+                className="rounded-[5px] border px-2 py-1 text-muted hover:bg-background hover:text-foreground disabled:opacity-40"><I.key /></button>
               {p.id !== me.id && (
                 <button onClick={() => removeUser(p)} disabled={saving === p.id} title={p.pending ? "Revoke invite" : "Remove user"}
-                  className="rounded-md border px-2 py-1 text-[13px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
+                  className="rounded-[5px] border px-2 py-1 text-[16px] text-muted hover:border-red-300 hover:text-red-500 disabled:opacity-40">✕</button>
               )}
             </div>
           ))}
-          {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[13px] text-muted">No team members yet.</div>}
+          {!loading && !error && profiles.length === 0 && <div className="py-8 text-center text-[16px] text-muted">No team members yet.</div>}
         </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {passwordFor && (
         <>
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setPasswordFor(null)} />
-          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[5px] border bg-surface p-5 shadow-xl">
             <h3 className="text-[16px] font-semibold">Set password for {passwordFor.name || passwordFor.email}</h3>
-            <p className="mt-1 text-[13px] text-muted">They can sign in with this immediately — no email required. You&apos;ll see it once after saving so you can relay it to them.</p>
+            <p className="mt-1 text-[16px] text-muted">They can sign in with this immediately — no email required. You&apos;ll see it once after saving so you can relay it to them.</p>
             <form onSubmit={submitPassword} className="mt-3 space-y-2.5">
               <div className="flex items-center gap-2">
                 <input autoFocus value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="Password (min 8 characters)"
-                  className="min-w-0 flex-1 rounded-md border bg-background px-2.5 py-1.5 text-[15px] outline-none focus:border-accent" />
-                <button type="button" onClick={() => setPasswordValue(randomPassword())} className="shrink-0 rounded-md border px-2.5 py-1.5 text-[13px] font-medium hover:bg-background">Generate</button>
+                  className="min-w-0 flex-1 rounded-[5px] border bg-background px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                <button type="button" onClick={() => setPasswordValue(randomPassword())} className="shrink-0 rounded-[5px] border px-2.5 py-1.5 text-[16px] font-medium hover:bg-background">Generate</button>
               </div>
-              {passwordError && <div className="rounded-lg bg-red-50 px-3 py-2 text-[13px] text-red-600">{passwordError}</div>}
+              {passwordError && <div className="rounded-[5px] bg-red-50 px-3 py-2 text-[16px] text-red-600">{passwordError}</div>}
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" onClick={() => setPasswordFor(null)} className="rounded-md border px-3 py-1.5 text-[15px] font-medium hover:bg-background">Cancel</button>
-                <button type="submit" disabled={settingPassword || passwordValue.length < 8} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white disabled:opacity-40">{settingPassword ? "Saving…" : "Set password"}</button>
+                <button type="button" onClick={() => setPasswordFor(null)} className="rounded-[5px] border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
+                <button type="submit" disabled={settingPassword || passwordValue.length < 8} className="rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">{settingPassword ? "Saving…" : "Set password"}</button>
               </div>
             </form>
           </div>
@@ -287,19 +288,19 @@ export default function TeamPanel({ me, dmEnabled, onSetDmEnabled }: { me: Me; d
       {revealed && (
         <>
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setRevealed(null)} />
-          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-surface p-5 shadow-xl">
+          <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[5px] border bg-surface p-5 shadow-xl">
             <h3 className="text-[16px] font-semibold">Password set for {revealed.name}</h3>
-            <p className="mb-2 mt-1 text-[13px] font-medium text-amber-700">Copy this now — you won&apos;t be able to see it again.</p>
-            <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-2">
-              <code className="min-w-0 flex-1 break-all text-[13px]">{revealed.password}</code>
+            <p className="mb-2 mt-1 text-[16px] font-medium text-amber-700">Copy this now — you won&apos;t be able to see it again.</p>
+            <div className="flex items-center gap-2 rounded-[5px] border bg-background px-2.5 py-2">
+              <code className="min-w-0 flex-1 break-all text-[16px]">{revealed.password}</code>
               <button onClick={() => { navigator.clipboard.writeText(revealed.password).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}
-                className="shrink-0 rounded-md border bg-surface px-2 py-1 text-[13px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
+                className="shrink-0 rounded-[5px] border bg-surface px-2 py-1 text-[16px] font-medium hover:bg-background">{copied ? "Copied" : "Copy"}</button>
             </div>
-            <button onClick={() => setRevealed(null)} className="mt-3 rounded-md bg-accent px-3 py-1.5 text-[15px] font-medium text-white">Done</button>
+            <button onClick={() => setRevealed(null)} className="mt-3 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white">Done</button>
           </div>
         </>
       )}
-    </>
+    </div>
   );
 }
 

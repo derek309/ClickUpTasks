@@ -67,9 +67,9 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
     setUseOpenId(null);
   };
 
-  const field = "w-full rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent";
+  const field = "w-full rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent";
   return (
-    <div>
+    <div className="rounded-[5px] border bg-surface shadow-soft">
         <div className="border-b bg-background/40 px-5 py-3">
           {addOpen ? (
             <div className="space-y-3">
@@ -83,7 +83,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
                   <span className="block text-[16px] font-medium text-muted">For</span>
                   <div className="mt-1">
                     <SearchableSelect value={forClient} onChange={setForClient} options={[{ value: "", label: "Everyone" }, ...clientOptions]}
-                      placeholder="Everyone" searchPlaceholder="Search clients…" className="rounded-md border bg-surface px-2.5 py-1.5 text-[16px] focus:border-accent" />
+                      placeholder="Everyone" searchPlaceholder="Search clients…" className="rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] focus:border-accent" />
                   </div>
                 </div>
               </div>
@@ -96,7 +96,7 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
                         <span className="w-6 shrink-0 text-center text-[16px] font-semibold text-muted">{i + 1}</span>
                         <input value={r.title} onChange={(e) => patchRow(i, { title: e.target.value })} placeholder="Step, like: Write the email" aria-label={`Step ${i + 1}`} className={`min-w-0 flex-1 ${field}`} />
                         <button onClick={() => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : [blankRow()]))} title="Remove this step" aria-label={`Remove step ${i + 1}`}
-                          className="shrink-0 rounded p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
+                          className="shrink-0 rounded-[5px] p-1.5 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
                       </div>
                       <div className="mt-2 grid gap-2 pl-8 sm:grid-cols-3">
                         <select value={r.stage} onChange={(e) => patchRow(i, { stage: e.target.value as TaskStatus | "" })} aria-label={`Stage for step ${i + 1}`} className={field}>
@@ -115,12 +115,12 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
                 <button onClick={() => setRows((rs) => [...rs, blankRow()])} className="mt-2 inline-flex items-center gap-1.5 text-[16px] font-medium text-accent"><I.plus /> Add step</button>
               </div>
               <div className="flex justify-end gap-2 pt-1">
-                <button onClick={() => setAddOpen(false)} className="rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
-                <button onClick={submit} disabled={!name.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">{editId ? "Save" : "Add template"}</button>
+                <button onClick={() => setAddOpen(false)} className="rounded-[5px] border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
+                <button onClick={submit} disabled={!name.trim()} className="rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">{editId ? "Save" : "Add template"}</button>
               </div>
             </div>
           ) : (
-            <button onClick={startAdd} className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <button onClick={startAdd} className="inline-flex items-center gap-1.5 rounded-[5px] border border-dashed px-3 py-1.5 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
               <I.plus /> Add template
             </button>
           )}
@@ -140,9 +140,9 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
                     <div className="truncate text-[16px] font-medium">{t.name}</div>
                     <div className="truncate text-[16px] text-muted">{steps.length} {steps.length === 1 ? "step" : "steps"} · {clientName(t.clientId) ?? "Everyone"}</div>
                   </div>
-                  <button onClick={() => openUse(t)} className="shrink-0 rounded-md border border-accent px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">Use…</button>
-                  <button onClick={() => startEdit(t)} title="Edit" aria-label={`Edit ${t.name}`} className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-foreground"><I.pencil /></button>
-                  <button onClick={() => onDelete(t.id)} title="Delete template" aria-label={`Delete ${t.name}`} className="shrink-0 rounded p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
+                  <button onClick={() => openUse(t)} className="shrink-0 rounded-[5px] border border-accent px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft">Use…</button>
+                  <button onClick={() => startEdit(t)} title="Edit" aria-label={`Edit ${t.name}`} className="shrink-0 rounded-[5px] p-1 text-muted hover:bg-background hover:text-foreground"><I.pencil /></button>
+                  <button onClick={() => onDelete(t.id)} title="Delete template" aria-label={`Delete ${t.name}`} className="shrink-0 rounded-[5px] p-1 text-muted hover:bg-background hover:text-danger"><I.trash /></button>
                 </div>
                 {steps.some((x) => x.stage || x.makes || x.needs?.length) && (
                   <ol className="border-t px-3 py-2 text-[16px]">
@@ -161,13 +161,13 @@ export default function TemplatesPanel({ templates, clients, projects, onSave, o
                   <div className="flex flex-wrap items-center gap-2 border-t bg-background/40 px-3 py-2.5">
                     <div className="min-w-0 flex-1"><SearchableSelect value={useClientId} onChange={(v) => { setUseClientId(v); setUseProjectId(""); }}
                       options={clientOptions} placeholder="Pick a client…" searchPlaceholder="Search clients…"
-                      className="rounded-md border bg-surface px-2.5 py-1.5 text-[16px] focus:border-accent" /></div>
-                    <select value={useProjectId} onChange={(e) => setUseProjectId(e.target.value)} disabled={!useClientId} aria-label="List" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent disabled:opacity-50">
+                      className="rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] focus:border-accent" /></div>
+                    <select value={useProjectId} onChange={(e) => setUseProjectId(e.target.value)} disabled={!useClientId} aria-label="List" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent disabled:opacity-50">
                       <option value="">Pick a list…</option>
                       {projects.filter((p) => p.clientId === useClientId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                    <button onClick={submitUse} disabled={!useClientId || !useProjectId} className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Create task</button>
-                    <button onClick={() => setUseOpenId(null)} className="shrink-0 rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
+                    <button onClick={submitUse} disabled={!useClientId || !useProjectId} className="shrink-0 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">Create task</button>
+                    <button onClick={() => setUseOpenId(null)} className="shrink-0 rounded-[5px] border px-3 py-1.5 text-[16px] font-medium hover:bg-background">Cancel</button>
                   </div>
                 )}
               </div>

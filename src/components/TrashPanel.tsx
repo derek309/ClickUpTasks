@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { timeAgo, userById } from "@/lib/data";
 import { I } from "./cockpit/ui";
 import { type TrashEntry, fetchTrash } from "@/lib/db";
+import { SettingsCard } from "./settings/ui";
 
 const RETENTION_DAYS = 30;
 /** The teammate's name, or null when nobody was recorded or they left the team. */
@@ -49,24 +50,20 @@ export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestor
   const isEmpty = groups.every((g) => g.entries.length === 0);
 
   return (
-    <div className="p-5">
-      <div className="mb-4">
-        <h2 className="text-[17px] font-semibold">Trash</h2>
-        <p className="text-[13px] text-muted">Deleted clients, projects, and tasks stay here for {RETENTION_DAYS} days before they&apos;re gone for good.</p>
-      </div>
+    <div className="space-y-4">
+      <p className="text-[16px] text-muted">Everything here is kept for {RETENTION_DAYS} days, then it is gone for good.</p>
       {loading ? (
-        <div className="text-[13px] text-muted">Loading…</div>
+        <div className="text-[16px] text-muted">Loading…</div>
       ) : isEmpty ? (
-        <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed py-10 text-center text-muted">
+        <div className="flex flex-col items-center gap-1.5 rounded-[5px] border border-dashed bg-surface py-10 text-center text-muted">
           <I.trash />
-          <span className="text-[14px]">Nothing in Trash</span>
+          <span className="text-[16px]">Nothing in Trash</span>
         </div>
       ) : (
         <div className="space-y-6">
           {groups.filter((g) => g.entries.length > 0).map((g) => (
-            <div key={g.key}>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{g.label} · {g.entries.length}</div>
-              <div className="overflow-hidden rounded-lg border">
+            <SettingsCard key={g.key} title={`${g.label} · ${g.entries.length}`} icon={<I.trash className="h-4 w-4" />} tone="slate">
+              <div className="overflow-hidden rounded-[5px] border bg-background">
                 {g.entries.map((e, i) => (
                   <div key={e.id} className={`flex items-center gap-3 px-3 py-2 ${i > 0 ? "border-t" : ""}`}>
                     {/* Whose it was and who binned it (Derek, 2026-09-29: "can we say who
@@ -79,19 +76,19 @@ export default function TrashPanel({ onRestoreClient, onRestoreProject, onRestor
                       </div>
                     </div>
                     <button onClick={() => act(g.key, e.id, g.onRestore)} disabled={busyId === e.id}
-                      className="shrink-0 rounded-md border border-accent/40 px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
+                      className="shrink-0 rounded-[5px] border border-accent/40 px-2.5 py-1 text-[16px] font-medium text-accent hover:bg-accent-soft disabled:opacity-50">
                       Restore
                     </button>
                     <button
                       onClick={() => { if (window.confirm(`Permanently delete "${e.name}"? This can't be undone.`)) act(g.key, e.id, g.onPurge); }}
                       disabled={busyId === e.id}
-                      className="shrink-0 rounded-md border px-2.5 py-1 text-[16px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
+                      className="shrink-0 rounded-[5px] border px-2.5 py-1 text-[16px] font-medium text-muted hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50">
                       Delete forever
                     </button>
                   </div>
                 ))}
               </div>
-            </div>
+            </SettingsCard>
           ))}
         </div>
       )}
