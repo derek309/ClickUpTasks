@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "ClickUpTasks Clipper",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "Create or update a ClickUpTasks task from a Gmail email, or review any website (local or live) and add changes to the client's list in one keystroke each.",
   "permissions": ["storage", "sidePanel", "activeTab", "tabs", "tabGroups"],
-  "host_permissions": ["https://mail.google.com/*", "https://clickuptasks.vercel.app/*"],
+  "host_permissions": ["https://mail.google.com/*", "https://tasks.clickuplocal.com/*", "https://clickuptasks.vercel.app/*"],
   "action": {},
   "side_panel": {
     "default_path": "sidepanel.html"

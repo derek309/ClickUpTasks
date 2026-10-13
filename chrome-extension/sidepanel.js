@@ -1,7 +1,8 @@
 
 import { todayIso, DEFAULT_DUE, DEFAULT_FOLLOW_UP } from "./lib/dates.js";
 
-const API_BASE = "https://clickuptasks.vercel.app";
+// The app's own address since 2026-10-12; clickuptasks.vercel.app still answers.
+const API_BASE = "https://tasks.clickuplocal.com";
 // Matches the /api/extension/upload route's own limit.
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
