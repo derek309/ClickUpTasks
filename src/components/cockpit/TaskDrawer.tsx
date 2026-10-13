@@ -1578,7 +1578,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // With steps, the steps say what's next; the old panel asks only without them.
     onMessageSent: (channel, body) => {
       if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: channel, body });
-      else if (channel === "email") finishEmailStep();
+      else finishTalkStep(channel);
     },
     onComposeEmail: hasMessaging ? startDraftEmail : undefined,
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
@@ -1967,6 +1967,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, ...stepOwnerFields() }], id, "email") });
     if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail();
   };
+  // A text or a portal chat as a step of its own, like Email (2026-10-13): its
+  // page opens on that box; sending it finishes the step and asks what's next.
+  const talkStep = (kind: "text" | "client") => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, ...stepOwnerFields() }] });
+    setOpenStepPage({ taskId: task.id, id, full: false, talk: kind });
+  };
   // A meeting (Derek, 2026-10-12): a step for it, and the booking window opens.
   const meetingStep = () => {
     const id = newId("s_");
@@ -1997,17 +2005,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setEmailOpenNonce((n) => n + 1);
     if (!link) pushToast("No booking page found for you. Add one with Copy booking link in the email.");
   };
-  const quickPeopleOptions = () => [
-    { key: "checklist", label: "Create Checklist", disabled: false, note: undefined as string | undefined, onPick: checklistStep },
-    ...(hasMessaging ? [{ key: "email", label: "Send Email to Client", disabled: false, note: deliverablePresent("email") ? "uses the draft" as string | undefined : undefined, onPick: emailStep }] : []),
-    { key: "followup", label: "Follow Up with Client", disabled: false, note: undefined as string | undefined, onPick: followUpStep },
-    ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", label: "Book a Meeting", disabled: false, note: undefined as string | undefined, onPick: meetingStep }] : []),
-    ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", label: "Email to Book a Time", disabled: false, note: undefined as string | undefined, onPick: () => void bookingEmailStep() }] : []),
-    { key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: delegateStep },
-    { key: "claude", label: "Delegate to Claude", disabled: false, note: undefined as string | undefined, onPick: claudeStep },
+  // Quick step in three groups (Derek, 2026-10-13: "organize quick links"):
+  // talking to the client, making something for them to review, and handing
+  // off or waiting. Each one is a step.
+  type QuickOption = { key: string; label: string; group: "talk" | "make" | "handoff"; disabled: boolean; note?: string; onPick: () => void };
+  const QUICK_GROUPS: { key: QuickOption["group"]; label: string }[] = [
+    { key: "talk", label: `Talk to ${firstName}` },
+    { key: "make", label: `Make something for ${firstName} to review` },
+    { key: "handoff", label: "Hand it off or wait" },
   ];
-  const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
-    key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
+  const quickPeopleOptions = (): QuickOption[] => [
+    ...(hasMessaging ? [{ key: "email", group: "talk" as const, label: `Email ${firstName}`, disabled: false, note: deliverablePresent("email") ? "uses the draft" : undefined, onPick: emailStep }] : []),
+    ...(messageDest?.phone ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
+    ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
+    ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", group: "talk" as const, label: "Book a meeting", disabled: false, onPick: meetingStep }] : []),
+    ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", group: "talk" as const, label: `Send ${firstName} my booking link`, disabled: false, onPick: () => void bookingEmailStep() }] : []),
+    { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
+    { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },
+    { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
+    { key: "followup", group: "handoff", label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep },
+  ];
+  const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "Web page", video: "Video" };
+  const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
+    key: k, group: "make" as const, label: MAKE_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
   const [showAllSteps, setShowAllSteps] = useState<string | null>(null);
   const renderPlan = () => (
@@ -2097,12 +2117,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
                 {/* Opens downward (Derek, 2026-10-12: upward it was cut off at the top). */}
                 <div role="menu" aria-label="Quick step" className="absolute right-0 top-full z-40 mt-1 max-h-[min(70vh,560px)] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg">
-                                    {quickWork.map((o) => (
-                    <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
-                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-                      <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
-                    </button>
-                  ))}
+                  {QUICK_GROUPS.map((g, gi) => {
+                    const items = quickWork.filter((o) => o.group === g.key);
+                    return items.length > 0 && (
+                      <div key={g.key} className={gi ? "mt-1 border-t pt-1" : ""}>
+                        <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">{g.label}</div>
+                        {items.map((o) => (
+                          <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setQuickWorkOpen(false); o.onPick(); }}
+                            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
+                            <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
                   {/* Saved plans too: their steps go on the end (Derek, 2026-10-11:
                       "we can add some in templates"). */}
                   {offeredTemplates.length > 0 && (<>
@@ -2403,10 +2431,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the Email box left "Let Pamela know the changes are done" open and asked
   // nothing). The check in follows and What's next opens.
   const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
-  const finishEmailStep = (followUpDate?: string | null): boolean => {
-    const cur = currentStep(taskRef.current.subtasks);
+  // A Text or Chat step the same way, by its name (2026-10-13).
+  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
+    // Sent from a step's own page: that step; otherwise the current one.
+    const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : currentStep(taskRef.current.subtasks);
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
-    if (!cur.holds?.includes("email") && !EMAILING.test(cur.title.trim())) return false;
+    const name = cur.title.trim();
+    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name) : channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name);
+    if (!fits) return false;
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
     // the task's follow up, and a due date already earlier all move to it.
     // Three business days when none was picked.
@@ -2470,7 +2502,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           if (list) onPatch({ subtasks: list });
           return;
         }
-        if (finishEmailStep(email.followUpDate)) return;
+        if (finishTalkStep("email", email.followUpDate)) return;
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
         // A due date inside that window already brings it back: no follow up then.
@@ -2648,7 +2680,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step whose own page is open, and whether full page (Derek: a slide
   // out to look quickly, full page to work in, like a handoff).
-  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
+  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean; talk?: "client" | "text" } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
   // An older handoff opened as a step: its brief, steps, files and reviews
   // move onto the step once (handoffIntoStep); its chat stays to read.
   const pageSub = openStepPage?.taskId === task.id ? task.subtasks.find((x) => x.id === openStepPage.id) ?? null : null;
@@ -3178,7 +3210,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
@@ -3195,7 +3227,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               controls={stepControls(ps, isCur)}
               addOptions={stepAddOptions(ps)}
               canText={!!messageDest?.phone && !!onSendTaskMessage}
-              onSendText={onSendTaskMessage ? (body) => onSendTaskMessage("sms", "", body) : undefined}
+              onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
               canEmail={!!messageDest?.email && !!onSendTaskMessage}
               onFullEmail={(subject, body) => {
                 // What was typed in the step goes into the email window; with
@@ -3206,7 +3238,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   setEmailOpenNonce((n) => n + 1);
                 } else startDraftEmail();
               }}
-              onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); if (isCur) finishEmailStep(); } : undefined}
+              onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
               followBox={isCur && canNudge ? (
                 <div className="flex flex-wrap items-center gap-2.5 rounded-[5px] bg-danger-soft px-3 py-2 text-[16px] font-medium text-danger">
                   <span className="min-w-0 flex-1">{watch?.kind === "approved" ? `${firstName} hasn't approved yet` : `${firstName} hasn't replied`} · {nudgeDays} {nudgeDays === 1 ? "day" : "days"}</span>
@@ -3225,7 +3257,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}
               canChat={hasMessaging && !!onSendTaskMessage}
-              onSendChat={onSendTaskMessage ? (body) => onSendTaskMessage("chat", "", body) : undefined}
+              onSendChat={onSendTaskMessage ? (body) => { onSendTaskMessage("chat", "", body); finishTalkStep("chat", null, ps.id); } : undefined}
               onAddNote={(body) => logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
                 body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })}
               clientItems={clientItemsOf(ps.id)} onToggleClientItem={onToggleSub}

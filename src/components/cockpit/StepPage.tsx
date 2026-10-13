@@ -21,7 +21,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -51,6 +51,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   meId?: string | null;
   /** Opened from "Create Checklist": the to-do box is out and ready. */
   startWithChecklist?: boolean;
+  /** A Text or Chat step opens on that box, ready to write (2026-10-13). */
+  startTalk?: "client" | "text" | "email";
   /** The client's waiting step: what is out with them, in place of adding work
    *  (nothing gets made while it is with them). */
   outFor?: React.ReactNode;
@@ -116,7 +118,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const own = todoProgress(todos);
   const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
   const [todoDraft, setTodoDraft] = useState("");
-  const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(canChat ? "client" : "team");
+  const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(startTalk ?? (canChat ? "client" : "team"));
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(startWithChecklist);
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
@@ -141,7 +143,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
   // Which box to put the cursor in next, set by a choice, done after drawing.
-  const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(startWithChecklist ? { box: "todo", n: 1 } : null);
+  const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(startWithChecklist ? { box: "todo", n: 1 } : startTalk ? { box: "talk", n: 1 } : null);
   useEffect(() => {
     if (!focusNext) return;
     (focusNext.box === "todo" ? todoRef.current : talkRef.current)?.focus();
