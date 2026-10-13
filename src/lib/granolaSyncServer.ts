@@ -11,6 +11,7 @@ import { contactsByEmail } from "./contactsByEmail";
 import { TASK_FILES_BUCKET } from "./db";
 import { ensureMeetingSteps, stepWaitsOnTranscript, stepsOnMeetingTranscript } from "./stepsServer";
 import type { Subtask } from "./data";
+import { allGranolaKeys, granolaKeyFor, type GranolaKey } from "./granolaKeys";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -29,11 +30,14 @@ function noteBody(note: Awaited<ReturnType<typeof granolaGetNote>>): string {
   return `${title}\n\n${summary}${link}`;
 }
 
-export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncResult> {
+/** `by` is whose key read it: that person's own key, or none for the
+ *  deployment's GRANOLA_API_KEY. */
+export async function syncOneGranolaNote(noteId: string, by?: GranolaKey): Promise<GranolaSyncResult> {
   const { data: already } = await supabaseAdmin.from("granola_synced_notes").select("granola_note_id").eq("granola_note_id", noteId).maybeSingle();
   if (already) return "skipped";
 
-  const note = await granolaGetNote(noteId);
+  const note = await granolaGetNote(noteId, by?.key);
+  const seenBy = by ? { granola_user_id: by.userId } : {};
 
   // Internal-only teammate addresses never count as "the client" — exclude
   // any attendee email that's actually one of our own profiles.
@@ -50,7 +54,7 @@ export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncRes
   // note) — nothing to match or triage. Record it as seen and stop, rather
   // than parking a meeting with no possible client in the triage queue.
   if (externalEmails.length === 0) {
-    await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: null, client_note_id: null });
+    await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: null, client_note_id: null, ...seenBy });
     return "internal";
   }
 
@@ -65,7 +69,7 @@ export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncRes
       web_url: note.web_url || null,
       occurred_at: note.calendar_event?.scheduled_start_time || note.created_at,
     });
-    await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: null, client_note_id: null });
+    await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: null, client_note_id: null, ...seenBy });
     return "unmatched";
   }
 
@@ -78,7 +82,7 @@ export async function syncOneGranolaNote(noteId: string): Promise<GranolaSyncRes
   });
   if (error) throw new Error(`client_notes insert failed: ${error.message}`);
 
-  await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: clientId, client_note_id: clientNoteId });
+  await supabaseAdmin.from("granola_synced_notes").insert({ granola_note_id: noteId, client_id: clientId, client_note_id: clientNoteId, ...seenBy });
   try { await transcriptOntoTask(clientId, note); } catch (e) { console.error("[granolaSync] transcript onto task failed", e); }
   return "created";
 }
@@ -148,12 +152,24 @@ export async function transcriptForTask(taskId: string, stepId?: string): Promis
   const step = ((task.subtasks as Subtask[] | null) ?? []).find((x) => (stepId ? x.id === stepId : !x.done && x.finishWhen === "transcript"));
   if (!step) return { ok: false, error: "Couldn't add the transcript step." };
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
-  const { data: notes } = await supabaseAdmin.from("granola_synced_notes").select("granola_note_id, client_note_id").eq("client_id", task.client_id).not("client_note_id", "is", null);
+  const { data: notes } = await supabaseAdmin.from("granola_synced_notes").select("granola_note_id, client_note_id, granola_user_id").eq("client_id", task.client_id).not("client_note_id", "is", null);
   if (!notes?.length) return { ok: true, filed: null };
   const { data: meetings } = await supabaseAdmin.from("client_notes").select("id, created_at").in("id", notes.map((n: any) => n.client_note_id)).gte("created_at", since);
   const target = Date.parse(step.due ?? new Date().toISOString().slice(0, 10));
   const nearest = (meetings ?? []).sort((a: any, b: any) => Math.abs(Date.parse(a.created_at) - target) - Math.abs(Date.parse(b.created_at) - target))[0];
   if (!nearest) return { ok: true, filed: null };
-  const noteId = notes.find((n: any) => n.client_note_id === nearest.id)!.granola_note_id;
-  return { ok: true, filed: await fileTranscript(taskId, await granolaGetNote(noteId), stepId) };
+  const row = notes.find((n: any) => n.client_note_id === nearest.id)!;
+  return { ok: true, filed: await fileTranscript(taskId, await readNoteWithAnyKey(row.granola_note_id, row.granola_user_id), stepId) };
+}
+
+/** The note with the key that filed it, else the deployment's, else anyone's
+ *  that can read it. */
+async function readNoteWithAnyKey(noteId: string, filedBy: string | null): Promise<Awaited<ReturnType<typeof granolaGetNote>>> {
+  const own = await granolaKeyFor(filedBy);
+  const tries: (string | undefined)[] = [...(own ? [own] : []), ...(process.env.GRANOLA_API_KEY ? [undefined] : []), ...(await allGranolaKeys()).map((k) => k.key)];
+  let last: unknown = new Error("No Granola key can read this meeting.");
+  for (const key of tries) {
+    try { return await granolaGetNote(noteId, key); } catch (e) { last = e; }
+  }
+  throw last;
 }

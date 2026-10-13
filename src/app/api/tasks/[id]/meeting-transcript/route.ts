@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
 import { teamDocAccess } from "@/lib/taskDocumentServer";
-import { granolaConfigured } from "@/lib/granolaClient";
+import { granolaAnywhere, granolaKeyFor } from "@/lib/granolaKeys";
+import { requireUser } from "@/lib/serverAuth";
 import { ensureMeetingSteps } from "@/lib/stepsServer";
 import { transcriptForTask } from "@/lib/granolaSyncServer";
 
@@ -14,10 +15,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
   const { stepId } = (await req.json().catch(() => ({}))) as { stepId?: string };
-  if (!granolaConfigured) { await ensureMeetingSteps(id); return NextResponse.json({ ok: true, filed: null }); }
+  // Nothing found and you have no key of your own: say where to add it.
+  const caller = await requireUser(req);
+  const connect = !(await granolaKeyFor(caller?.id));
+  if (!(await granolaAnywhere())) { await ensureMeetingSteps(id); return NextResponse.json({ ok: true, filed: null, connect }); }
   try {
     const r = await transcriptForTask(id, typeof stepId === "string" && stepId ? stepId : undefined);
-    return r.ok ? NextResponse.json(r) : NextResponse.json({ error: r.error }, { status: 400 });
+    return r.ok ? NextResponse.json({ ...r, connect: !r.filed && connect }) : NextResponse.json({ error: r.error }, { status: 400 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Granola didn't answer." }, { status: 502 });
   }

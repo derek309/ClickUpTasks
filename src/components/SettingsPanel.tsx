@@ -223,7 +223,7 @@ export default function SettingsPanel({
           </div>
           <div className="rounded-lg border bg-background px-3 py-2.5">
             <p className="text-[13px] text-muted">
-              Meeting notes sync into a client&apos;s Journal automatically once a meeting&apos;s attendees match a known contact.
+              Meeting notes sync into a client&apos;s Journal automatically once a meeting&apos;s attendees match a known contact. Each person connects their own Granola in Settings, Granola; Sync here reads everyone&apos;s.
               {!granolaWebhookConfigured && granolaApiKeyConfigured && " Click Connect once to register the webhook, then add the returned signing secret as GRANOLA_WEBHOOK_SECRET."}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">

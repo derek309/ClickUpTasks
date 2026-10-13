@@ -2450,8 +2450,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const pullTranscript = async (stepId?: string) => {
     pushToast("Looking for the meeting in Granola…");
     const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/meeting-transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }).catch(() => null);
-    const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string } | null;
+    const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string; connect?: boolean } | null;
     if (!res?.ok) { pushToast(`⚠️ ${j?.error ?? "Couldn't reach Granola."}`); return; }
+    // Your meetings only come in once your own Granola key is in.
+    if (!j?.filed && j?.connect) { pushToast("Connect your Granola first: Settings, Granola. Then click Transcript again."); return; }
     pushToast(j?.filed ? `Added ${j.filed}.`
       : stepId ? `No Granola meeting with ${firstName} yet. It lands on this step after the meeting.`
       : "Added the meeting steps. Granola's transcript lands there after the meeting.");

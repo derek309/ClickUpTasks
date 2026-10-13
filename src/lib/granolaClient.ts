@@ -29,9 +29,11 @@ export type GranolaNote = {
   transcript?: { speaker?: { source?: string | null; diarization_label?: string | null } | null; text?: string | null }[] | null;
 };
 
-async function granolaFetch(path: string): Promise<any> {
+// Every call takes the key to use: a teammate's own (lib/granolaKeys), or the
+// deployment's GRANOLA_API_KEY when none is given.
+async function granolaFetch(path: string, apiKey?: string): Promise<any> {
   const res = await fetch(`${GRANOLA_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${process.env.GRANOLA_API_KEY}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${apiKey ?? process.env.GRANOLA_API_KEY}`, Accept: "application/json" },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -40,22 +42,22 @@ async function granolaFetch(path: string): Promise<any> {
   return res.json();
 }
 
-export async function granolaGetNote(noteId: string): Promise<GranolaNote> {
+export async function granolaGetNote(noteId: string, apiKey?: string): Promise<GranolaNote> {
   // The transcript rides along when Granola sends it; a refusal never costs
   // the note itself.
-  try { return await granolaFetch(`/notes/${encodeURIComponent(noteId)}?include=transcript`); }
-  catch { return granolaFetch(`/notes/${encodeURIComponent(noteId)}`); }
+  try { return await granolaFetch(`/notes/${encodeURIComponent(noteId)}?include=transcript`, apiKey); }
+  catch { return granolaFetch(`/notes/${encodeURIComponent(noteId)}`, apiKey); }
 }
 
 // Lightweight list items only (id/title/owner/timestamps) — used by the
 // manual backfill sync to discover which notes exist; full detail (attendees,
 // summary) is fetched per-note via granolaGetNote.
-export async function granolaListNotesSince(createdAfter: string): Promise<{ id: string; title: string | null }[]> {
+export async function granolaListNotesSince(createdAfter: string, apiKey?: string): Promise<{ id: string; title: string | null }[]> {
   const notes: { id: string; title: string | null }[] = [];
   let cursor: string | undefined;
   for (;;) {
     const qs = new URLSearchParams({ created_after: createdAfter, page_size: "30", ...(cursor ? { cursor } : {}) });
-    const json = await granolaFetch(`/notes?${qs.toString()}`);
+    const json = await granolaFetch(`/notes?${qs.toString()}`, apiKey);
     for (const n of json.notes ?? []) notes.push({ id: n.id, title: n.title ?? null });
     if (!json.hasMore || !json.cursor) break;
     cursor = json.cursor;
@@ -67,17 +69,24 @@ export async function granolaListNotesSince(createdAfter: string): Promise<{ id:
 // exactly ["workspace"]: every teammate's notes in spaces with API access. A
 // personal key refuses that, so it falls back to ["personal"].
 const WEBHOOK_EVENTS = ["note.generated", "note.edited", "note.access_granted"];
-export async function granolaCreateWebhookEndpoint(url: string): Promise<{ id: string; signing_secret: string; scopes?: string[] }> {
+export async function granolaCreateWebhookEndpoint(url: string, apiKey?: string, only?: string[]): Promise<{ id: string; signing_secret: string; scopes?: string[] }> {
   const register = (scopes: string[]) => fetch(`${GRANOLA_BASE}/webhook-endpoints`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${process.env.GRANOLA_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
+    headers: { Authorization: `Bearer ${apiKey ?? process.env.GRANOLA_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ url, scopes, events: WEBHOOK_EVENTS }),
   });
-  let res = await register(["workspace"]);
-  if (!res.ok && res.status >= 400 && res.status < 500) res = await register(["personal"]);
+  let res = await register(only ?? ["workspace"]);
+  if (!only && !res.ok && res.status >= 400 && res.status < 500) res = await register(["personal"]);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Granola API ${res.status}: ${text.slice(0, 300)}`);
   }
   return res.json();
+}
+
+/** Best effort: a teammate disconnecting takes their webhook with them. */
+export async function granolaDeleteWebhookEndpoint(id: string, apiKey: string): Promise<void> {
+  await fetch(`${GRANOLA_BASE}/webhook-endpoints/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+  }).catch(() => undefined);
 }

@@ -22,9 +22,10 @@ import TemplatesPanel from "./TemplatesPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
 import SignaturePanel from "./SignaturePanel";
+import GranolaPanel from "./GranolaPanel";
 import TrashPanel from "./TrashPanel";
 
-export type TabKey = "account" | "integrations" | "team" | "templates" | "tokens" | "notifications" | "signature" | "trash";
+export type TabKey = "account" | "integrations" | "team" | "templates" | "tokens" | "notifications" | "signature" | "granola" | "trash";
 
 export default function SettingsHub({
   initialTab = "integrations",
@@ -91,6 +92,8 @@ export default function SettingsHub({
     { key: "notifications", label: "Notifications", icon: "bell", visible: true },
     // Per-person, not team management — same footing as Notifications.
     { key: "signature", label: "Email signature", icon: "mail", visible: true },
+    // Your own Granola key: your meetings, from any folder (2026-10-12).
+    { key: "granola", label: "Granola", icon: "calendar", visible: true },
     // Restoring/purging touches other people's clients/projects/tasks, same
     // trust level as the admin-only tabs above.
     { key: "trash", label: "Trash", icon: "trash", visible: canAdmin },
@@ -112,6 +115,7 @@ export default function SettingsHub({
         })}
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
+            {tab === "granola" && <GranolaPanel />}
             {tab === "integrations" && canAdmin && <SettingsPanel clients={subAccounts} onSaveClient={onSaveClient} onSynced={onSynced} />}
             {tab === "team" && canAdmin && <TeamPanel me={me} dmEnabled={dmEnabled} onSetDmEnabled={onSetDmEnabled} />}
             {tab === "templates" && canAdmin && (

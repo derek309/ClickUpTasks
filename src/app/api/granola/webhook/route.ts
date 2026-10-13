@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { syncOneGranolaNote } from "@/lib/granolaSyncServer";
+import { granolaHook, type GranolaKey } from "@/lib/granolaKeys";
 
 // Inbound Granola -> ClickUpTasks: fires the moment a meeting's AI summary is
 // ready (note.generated/note.regenerated). The payload carries only the note
@@ -13,8 +14,9 @@ import { syncOneGranolaNote } from "@/lib/granolaSyncServer";
 
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-function verifySignature(id: string, timestamp: string, rawBody: string, signatureHeader: string): boolean {
-  const secret = process.env.GRANOLA_WEBHOOK_SECRET;
+// A teammate's own webhook (?h=<hook id>, lib/granolaKeys) is checked against
+// its own secret; the deployment's against GRANOLA_WEBHOOK_SECRET.
+function verifySignature(id: string, timestamp: string, rawBody: string, signatureHeader: string, secret: string | undefined): boolean {
   if (!secret) return false;
   const secretB64 = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
   const key = Buffer.from(secretB64, "base64");
@@ -40,7 +42,11 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(skewMs) || skewMs > MAX_CLOCK_SKEW_MS) return NextResponse.json({ error: "Timestamp out of range" }, { status: 401 });
 
   const rawBody = await req.text();
-  if (!verifySignature(id, timestamp, rawBody, signature)) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  const hookId = req.nextUrl.searchParams.get("h");
+  const hook = hookId ? await granolaHook(hookId) : null;
+  if (hookId && !hook) return NextResponse.json({ error: "Unknown hook" }, { status: 401 });
+  if (!verifySignature(id, timestamp, rawBody, signature, hook ? hook.secret : process.env.GRANOLA_WEBHOOK_SECRET)) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  const by: GranolaKey | undefined = hook ? { userId: hook.userId, key: hook.key } : undefined;
 
   // Signed and still not valid JSON is possible (a truncated body, a format
   // change at their end); throwing here answered a correctly signed delivery
@@ -53,7 +59,7 @@ export async function POST(req: NextRequest) {
   }
   if ((payload.event_type === "note.generated" || payload.event_type === "note.edited" || payload.event_type === "note.access_granted" || payload.event_type === "note.regenerated") && payload.note_id) {
     try {
-      await syncOneGranolaNote(payload.note_id);
+      await syncOneGranolaNote(payload.note_id, by);
     } catch (e) {
       console.error("[granola/webhook] sync failed:", e instanceof Error ? e.message : e);
       // Still 200 — a Granola-side retry won't help if our own sync failed on
