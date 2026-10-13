@@ -2180,7 +2180,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     // Booking lives on the client page and the calendar button; a step asks
     // them to meet (Derek, 2026-10-13).
-    ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: () => remindStep() }] : []),
+    // Remind is gone from here (Derek, 2026-10-13): Delegate to the client
+    // starts the wait, and its step's Email a follow up is the reminder.
     ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
