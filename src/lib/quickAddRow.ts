@@ -26,6 +26,9 @@ export type TaskRow = {
   /** False only when a priority was chosen by hand: see applyDumpDefaults. */
   priorityAuto: boolean;
   keep: boolean;
+  /** Delegated as it is made: step 1 goes to this teammate or Claude (user
+   *  id), the task stays yours (Derek, 2026-10-13). */
+  delegateTo?: string | null;
 };
 
 const emptyRow = (): TaskRow => ({
@@ -74,6 +77,7 @@ export type DumpDefaults = {
    *  its automatic, date-derived priority (effectivePriority in lib/data). */
   priorityTouched: boolean;
   size: TaskSize | null;
+  delegateTo?: string | null;
 };
 
 /** Fills in everything a row did not answer for itself, so nothing arrives
@@ -92,6 +96,7 @@ export function applyDumpDefaults(rows: TaskRow[], d: DumpDefaults): TaskRow[] {
     // New tasks are Normal and stay Normal (Derek, 2026-10-12: "auto set all
     // tasks to normal on creation"): no priority that follows the due date.
     priorityAuto: d.priorityTouched || r.priority === "urgent" ? false : r.priorityAuto,
+    delegateTo: r.delegateTo ?? d.delegateTo ?? null,
     keep: true,
   }));
 }

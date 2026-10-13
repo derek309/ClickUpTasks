@@ -29,7 +29,7 @@
 //     api/ai/parse-tasks.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
+  users, assignableUsers, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
   SIZE_META, SIZE_ORDER, SIZING_ON, type Priority, type TaskSize,
 } from "@/lib/data";
 import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow } from "@/lib/quickAddRow";
@@ -119,6 +119,8 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // date derived priority every other task in the app has.
   const [priorityTouched, setPriorityTouched] = useState(false);
   const [size, setSize] = useState<TaskSize | null>(null);
+  // Delegated as it is made: step 1 goes to them (Derek, 2026-10-13).
+  const [delegateTo, setDelegateTo] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string>(defaultClientId ?? "");
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
   // Which button is waiting on its request — busy alone can't tell the two
@@ -151,7 +153,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   };
 
   // The defaults every row is finished with, wherever it came from.
-  const defaults = () => ({ due, followUpAt, assignee: owner, priority, priorityTouched, size });
+  const defaults = () => ({ due, followUpAt, assignee: owner, priority, priorityTouched, size, delegateTo });
   const attachAll = () => files.map((f) => ({ file: f.file, row: 0 }));
   const blocked = !text.trim() || busy || (needsClient && !clientId);
 
@@ -159,7 +161,11 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // exists (Derek, 2026-09-28: "just created without changing the name").
   const addAsTyped = () => {
     if (blocked) return;
-    onCreate(applyDumpDefaults([verbatimTaskRow(text)], defaults()), attachAll());
+    // Several lines are the whole request: it all goes to step 1's directions
+    // with a short name (lib/tidyTitle), not split into a name and a
+    // description (Derek, 2026-10-13).
+    const row = text.trim().includes("\n") ? { ...verbatimTaskRow(text), title: text.trim(), description: "" } : verbatimTaskRow(text);
+    onCreate(applyDumpDefaults([row], defaults()), attachAll());
   };
 
   // One per line: the same promise, for a list that is already a list. No AI,
@@ -339,7 +345,13 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                     <option value="">not sized</option>
                     {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
                   </select></>},{" "}
-                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
+                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />,{" "}
+                delegate to{" "}
+                <select value={delegateTo ?? ""} onChange={(e) => setDelegateTo(e.target.value || null)} aria-label="Delegate step 1 to"
+                  title="Step 1 goes to them; the task stays yours and comes back the day after it is due" className={WORD}>
+                  <option value="">nobody</option>
+                  {assignableUsers().map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
               </p>
             </div>
             {/* Two pairs rather than a row of four: one task or a list, and

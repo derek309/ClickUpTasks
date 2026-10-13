@@ -560,7 +560,7 @@ export async function trashedSince(table: "tasks" | "clients", sinceIso: string)
 
 // A task named with the whole request: once saved, the server gives it a short
 // name and makes the request step 1's directions (lib/tidyTitle, 2026-10-13).
-const tidyIfLong = (id: string, title: string) => {
+export const tidyIfLong = (id: string, title: string) => {
   if (!isLongTitle(title)) return;
   void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST" }).catch(() => undefined);
 };

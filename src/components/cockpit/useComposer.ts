@@ -7,8 +7,8 @@
 import * as React from "react";
 import { type ParsedRow } from "./MindDumpModal";
 import { newId } from "./ui";
-import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
-import { bulkUpsertTasks, upsertProject } from "@/lib/db";
+import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
+import { bulkUpsertTasks, tidyIfLong, upsertProject } from "@/lib/db";
 
 // A dumped task's description: what the AI summarised, then the client's own
 // wording underneath as a blockquote so it stays visibly theirs. The verbatim
@@ -92,6 +92,12 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     const made: Task[] = rows.map((r) => {
       const waiting = r.assignee === "client";
       const member = r.assignee && r.assignee !== "client" ? users.find((u) => u.name === r.assignee) : null;
+      const owner = member?.id ?? me.id;
+      // Delegated as it is made (Derek, 2026-10-13): step 1 is theirs, the task
+      // stays yours and comes back the business day after it is due.
+      const to = r.delegateTo && r.delegateTo !== owner ? r.delegateTo : null;
+      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: r.due, followUpAt: TODAY, startedAt: now } : null;
+      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: r.due ? addBusinessDaysIso(r.due, 1) : r.followUpAt } : null;
       return {
         id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: describeDumpRow(r),
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
@@ -107,7 +113,8 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
         contactId: targetClient.slice(3),
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto,
-        private: false, subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+        private: false, subtasks: step ? [step] : [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+        ...(handoff && !waiting ? handoff : {}),
       } as Task;
     });
     // waiting/status must move together — the one rule that owns that lives in
@@ -118,11 +125,14 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     // Pinned so a task created into a group the current sort or filter would
     // hide does not vanish the moment it is made.
     synced.forEach((t) => pinJustAdded(t.id));
-    const write = () => { bulkUpsertTasks(synced, me.id); attachDumpFiles(synced, files); };
+    // A task typed as the whole request gets its short name and the request
+    // as step 1's directions once saved (lib/tidyTitle).
+    const write = () => { void Promise.resolve(bulkUpsertTasks(synced, me.id)).then(() => synced.forEach((t) => tidyIfLong(t.id, t.title))); attachDumpFiles(synced, files); };
     if (projectWrite) projectWrite.then(write); else write();
     setDumpGroup(null);
     pushToast(`Created ${synced.length} task${synced.length === 1 ? "" : "s"}`);
     synced.forEach((t) => { if (t.assigneeId && t.assigneeId !== me.id) notify(t.assigneeId, `${me.name} assigned you \u201C${t.title}\u201D`, t.id); });
+    synced.forEach((t) => { const to = t.subtasks[0]?.assigneeId; if (to && to !== t.assigneeId && userById(to) && to !== "u_claude") notify(to, `${me.name} gave you a step on \u201C${t.title}\u201D`, t.id); });
   };
 
   // A pasted file is uploaded after its task exists, because an attachment

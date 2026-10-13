@@ -3142,7 +3142,7 @@ export function clientEmailText(body: string, signer?: string | null): string {
  *  name and the request becomes step 1's directions (lib/tidyTitle). */
 export function isLongTitle(title: string): boolean {
   const t = title.trim();
-  return t.length > 90 || t.split(/\s+/).length > 16;
+  return t.includes("\n") || t.length > 90 || t.split(/\s+/).length > 16;
 }
 
 /** "Thanks!", "Sounds good": nothing to do, so no step (Derek, 2026-10-12). */
