@@ -898,6 +898,10 @@ export interface Subtask {
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;
+  /** When the step's owner last acted on the task while it said Needs you
+   *  (moved its date): it leaves Needs you until something new happens
+   *  (Derek, 2026-10-13: "they've had an action from me"). */
+  seenAt?: string;
   /** On the client's waiting step: when the review email went to them, shown
    *  on the step instead of a step of its own (Derek, 2026-10-11). */
   emailedAt?: string;
@@ -3205,6 +3209,7 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   const cur = currentStep(task.subtasks);
   if (!cur || !plan.length) return null;
   if ((cur.assigneeId ?? task.assigneeId) !== meId) return null;
+  if (cur.seenAt && cur.seenAt >= needsYouSince(task.subtasks, cur)) return null;
   if (cur.onClient || cur.assigneeId === CLAUDE_ID || cur.finishWhen === "reply" || stepStage(cur, task.assigneeId) === "waiting") return null;
   if (cur.fromEmails?.length) return `${clientFirst} wrote. Reply`;
   const portal = task.subtasks.filter((x) => x.fromClient && !x.done && x.stepId === cur.id).length;
@@ -3217,6 +3222,15 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
   if (prev.assigneeId && prev.assigneeId !== meId) return `${userById(prev.assigneeId)?.name.split(" ")[0] ?? "A teammate"} finished. Your turn`;
   return null;
+}
+
+/** When the current step last turned to you: the newest email on it, the
+ *  step before it finishing, or the step starting. */
+export function needsYouSince(subtasks: Subtask[], cur: Subtask): string {
+  const plan = planSteps(subtasks);
+  const at = plan.findIndex((x) => x.id === cur.id);
+  const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
+  return [cur.startedAt, prev?.doneAt, ...(cur.fromEmails ?? []).map((e) => e.at)].filter((x): x is string => !!x).sort().pop() ?? "";
 }
 
 /** Step templates are off (Derek, 2026-10-13: "use it naturally as we work

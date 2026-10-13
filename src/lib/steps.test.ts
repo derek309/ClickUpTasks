@@ -374,6 +374,16 @@ describe("needs you", () => {
     expect(needsYou(waiting, "u_derek", "Pam")).toBeNull();
     expect(needsYou({ ...base, subtasks: [{ id: "p", title: "Plain", done: false }] }, "u_derek")).toBeNull();
   });
+
+  it("leaves Needs you once you act, and comes back when something new arrives", async () => {
+    const { needsYou } = await import("./data");
+    const base = { status: "in_progress" as const, assigneeId: "u_derek" };
+    const email = (at: string) => ({ messageId: at, from: "pam@x.com", subject: "Hi", body: "Videos?", at });
+    const seen = { ...base, subtasks: [{ id: "r", title: "Reply to Pam", done: false, startedAt: "2026-10-13T10:00:00Z", fromEmails: [email("2026-10-13T10:00:00Z")], seenAt: "2026-10-13T12:00:00Z" }] };
+    expect(needsYou(seen, "u_derek", "Pam")).toBeNull();
+    const again = { ...base, subtasks: [{ ...seen.subtasks[0], fromEmails: [...seen.subtasks[0].fromEmails, email("2026-10-13T15:00:00Z")] }] };
+    expect(needsYou(again, "u_derek", "Pam")).toBe("Pam wrote. Reply");
+  });
 });
 
 describe("following up while waiting", () => {

@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, datesForCurrentStep, stepChangeEvents, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -210,6 +210,12 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // The dates follow the current step, unless this edit sets them itself.
     if (synced.subtasks && synced.due === undefined && synced.followUpAt === undefined && synced.status !== "done") {
       Object.assign(synced, datesForCurrentStep(before.subtasks, synced.subtasks, before));
+    }
+    // Moving the date of a task that says Needs you is acting on it: it
+    // leaves Needs you until something new comes in (Derek, 2026-10-13).
+    if ((synced.due !== undefined && synced.due !== before.due) || (synced.followUpAt !== undefined && synced.followUpAt !== before.followUpAt)) {
+      const cur = needsYou(before, me.id) ? currentStep(synced.subtasks ?? before.subtasks) : null;
+      if (cur) synced.subtasks = (synced.subtasks ?? before.subtasks).map((x) => (x.id === cur.id ? { ...x, seenAt: new Date().toISOString() } : x));
     }
     const checkBack = waitingFollowUp(before, synced);
     if (checkBack) synced.followUpAt = checkBack;
