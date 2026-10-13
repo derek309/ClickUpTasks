@@ -505,7 +505,6 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   </div>
                 )}
                 {controls}
-                {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>
               {followBox}
               {planBits}
@@ -588,6 +587,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
+              ) : !sub.done && isCurrent && doneActions ? (
+                // A waiting step's answer (approved, sent changes) and a
+                // "what's next?" step's choices sit here too, where a step is
+                // finished, not up top (Derek, 2026-10-13).
+                <div className="border-t pt-4">{doneActions}</div>
               ) : !sub.done && !doneActions && !sub.onClient ? (
                 <div className="flex flex-wrap items-center gap-2 border-t pt-4">
                   {/* Said as the next move, not "done" (Derek, 2026-10-13: "I still feel
