@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, 
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
@@ -1922,6 +1922,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: list });
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
+  // Delegate to Claude (Derek, 2026-10-13): the same, already given to Claude,
+  // so it is on Claude's list (MCP list_my_tasks for_claude). The page opens
+  // for the directions Claude works from.
+  const claudeStep = () => {
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    const list = [...taskRef.current.subtasks];
+    const cur = currentStep(list);
+    const due = addBusinessDaysIso(TODAY, 3);
+    const step: Subtask = { id, title: "For Claude", done: false, due, assigneeId: CLAUDE_ID, followUpAt: TODAY, startedAt: new Date().toISOString() };
+    list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, step);
+    const status = statusForStep(task.status, stepStage(step, task.assigneeId));
+    onPatch({ subtasks: list, ...(status ? { status } : {}), ...(task.assigneeId !== CLAUDE_ID ? handoffDates(due) : {}) });
+    setOpenStepPage({ taskId: task.id, id, full: false });
+    pushToast("Given to Claude. Write what Claude should do in Directions.");
+  };
   // A teammate has the current step: the task is theirs until that date, and
   // comes back to its owner the business day after (Derek, 2026-10-12: "check
   // it the day after it is due").
@@ -1972,6 +1988,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(mayContactClient && messageDest?.ghlContactId ? [{ key: "meeting", label: "Book a Meeting", disabled: false, note: undefined as string | undefined, onPick: meetingStep }] : []),
     ...(hasMessaging && messageDest?.email ? [{ key: "bookemail", label: "Email to Book a Time", disabled: false, note: undefined as string | undefined, onPick: () => void bookingEmailStep() }] : []),
     { key: "delegate", label: "Delegate this Task", disabled: false, note: undefined as string | undefined, onPick: delegateStep },
+    { key: "claude", label: "Delegate to Claude", disabled: false, note: undefined as string | undefined, onPick: claudeStep },
   ];
   const quickStepOptions = () => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, label: quickStepName(k) ?? KIND_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
