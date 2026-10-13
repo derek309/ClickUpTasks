@@ -2470,7 +2470,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Everything a task can gain, in one menu beside Deliverables. It was a row
   // of up to seven dashed buttons, wrapping two by two in the rail.
   const addMenu = (
-    <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus /> Add</span>} title="Add to this task" items={[
+    <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this task"
+      // Plain like Link and + Attach beside it, no box (Derek, 2026-10-13).
+      triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline" items={[
       !hasDescription && { label: "Description", onClick: () => setDescEditing(true) },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
