@@ -2291,57 +2291,63 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <button onClick={() => setQuickWorkOpen((o) => !o)} aria-haspopup="menu" aria-expanded={quickWorkOpen}
                 title="Add a step that makes a document, image, HTML or video"
                 className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Quick step</button>
-              {quickWorkOpen && (<>
-                <div className="fixed inset-0 z-30" onClick={() => setQuickWorkOpen(false)} />
-                {/* Opens downward (Derek, 2026-10-12: upward it was cut off at the top). */}
-                <div role="menu" aria-label="Quick step" className="absolute right-0 top-full z-40 mt-1 max-h-[min(70vh,560px)] w-[min(300px,calc(100vw-32px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg">
-                  {(() => {
-                    const q = quickQ.trim().toLowerCase();
-                    const hit = (o: QuickOption) => !q || `${o.label} ${QUICK_GROUPS.find((g) => g.key === o.group)?.label ?? ""}`.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || o.label.toLowerCase().includes(q);
-                    const found = QUICK_GROUPS.flatMap((g) => quickWork.filter((o) => o.group === g.key && hit(o) && !o.disabled));
-                    const pick = (o: QuickOption) => { setQuickWorkOpen(false); o.onPick(); };
-                    return (<>
-                      <input autoFocus value={quickQ} onChange={(e) => { setQuickQ(e.target.value); setQuickAt(0); }} placeholder="Search, or type a letter" aria-label="Search quick steps"
-                        onKeyDown={(e) => {
-                          if (e.key === "ArrowDown") { e.preventDefault(); setQuickAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
-                          else if (e.key === "ArrowUp") { e.preventDefault(); setQuickAt((n) => Math.max(0, n - 1)); }
-                          else if (e.key === "Enter" && found[quickAt]) { e.preventDefault(); pick(found[quickAt]); }
-                          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setQuickWorkOpen(false); }
-                        }}
-                        className="mb-1 h-10 w-full rounded-[5px] border bg-background px-2.5 text-[16px] outline-none focus:border-accent" />
-                      {!found.length && <div className="px-2.5 py-2 text-[16px] text-muted">Nothing matches &ldquo;{quickQ}&rdquo;</div>}
-                  {QUICK_GROUPS.map((g, gi) => {
-                    const items = quickWork.filter((o) => o.group === g.key && hit(o));
-                    return items.length > 0 && (
-                      <div key={g.key} className={gi && !q ? "mt-1 border-t pt-1" : ""}>
-                        {!q && <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">{g.label}</div>}
-                        {items.map((o) => (
-                          <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => pick(o)} onMouseEnter={() => { const i = found.indexOf(o); if (i >= 0) setQuickAt(i); }}
-                            className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50 ${found[quickAt] === o ? "bg-background ring-1 ring-inset ring-accent/40" : ""}`}>
-                            <span className="shrink-0">{o.label}</span>{o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })}
-                    </>);
-                  })()}
-                  {/* Saved plans too: their steps go on the end (Derek, 2026-10-11:
-                      "we can add some in templates"). */}
-                  {TEMPLATES_ON && offeredTemplates.length > 0 && (<>
-                    <div className="mt-1 border-t px-2.5 pb-1 pt-2 text-[16px] text-muted">From a template:</div>
-                    {offeredTemplates.map((t) => (
-                      <button key={t.id} role="menuitem" onClick={() => { setQuickWorkOpen(false); onApplyTemplate(t.id); }}
-                        className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background">
-                        <span className="min-w-0 flex-1 truncate">{t.name}</span><span className="shrink-0 text-muted">{templateSteps(t).length} steps</span>
-                      </button>
-                    ))}
-                  </>)}
-                </div>
-              </>)}
             </span>
           ); })()}
         </li>
+        {/* Quick step folds open under the steps, full width (Derek,
+            2026-10-13: the popup wrapped its words and ran long): search on
+            top, the three groups side by side, each choice with its note. */}
+        {quickWorkOpen && (() => {
+          const quickWork = [...quickStepOptions(), ...quickPeopleOptions()];
+          const q = quickQ.trim().toLowerCase();
+          const hit = (o: QuickOption) => !q || `${o.label} ${QUICK_GROUPS.find((g) => g.key === o.group)?.label ?? ""}`.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || o.label.toLowerCase().includes(q);
+          const found = QUICK_GROUPS.flatMap((g) => quickWork.filter((o) => o.group === g.key && hit(o) && !o.disabled));
+          const pick = (o: QuickOption) => { setQuickWorkOpen(false); o.onPick(); };
+          return (
+            <li role="menu" aria-label="Quick step" className="border-t bg-background/40 px-3 py-3">
+              <div className="flex items-center gap-2">
+                <input autoFocus value={quickQ} onChange={(e) => { setQuickQ(e.target.value); setQuickAt(0); }} placeholder="Search, or type a letter" aria-label="Search quick steps"
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setQuickAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
+                    else if (e.key === "ArrowUp") { e.preventDefault(); setQuickAt((n) => Math.max(0, n - 1)); }
+                    else if (e.key === "Enter" && found[quickAt]) { e.preventDefault(); pick(found[quickAt]); }
+                    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setQuickWorkOpen(false); }
+                  }}
+                  className="h-10 min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 text-[16px] outline-none focus:border-accent" />
+                <button onClick={() => setQuickWorkOpen(false)} aria-label="Close quick steps" className="h-10 shrink-0 rounded-[5px] px-3 text-[16px] text-muted hover:bg-background hover:text-foreground">×</button>
+              </div>
+              {!found.length && <div className="px-1 pt-3 text-[16px] text-muted">Nothing matches &ldquo;{quickQ}&rdquo;</div>}
+              <div className="mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-3">
+                {QUICK_GROUPS.map((g) => {
+                  const items = quickWork.filter((o) => o.group === g.key && hit(o));
+                  return items.length > 0 && (
+                    <div key={g.key} className="min-w-0">
+                      <div className="px-2 pb-1 text-[16px] font-semibold text-muted">{g.label}</div>
+                      {items.map((o) => (
+                        <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => pick(o)} onMouseEnter={() => { const i = found.indexOf(o); if (i >= 0) setQuickAt(i); }}
+                          className={`block w-full rounded-[5px] px-2 py-2 text-left text-[16px] hover:bg-surface disabled:opacity-50 ${found[quickAt] === o ? "bg-surface ring-1 ring-inset ring-accent/40" : ""}`}>
+                          <span className="block font-medium">{o.label}</span>
+                          {o.note && <span className="block text-muted">{o.note}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+              {TEMPLATES_ON && offeredTemplates.length > 0 && (
+                <div className="mt-3 border-t pt-2">
+                  <div className="px-2 pb-1 text-[16px] text-muted">From a template:</div>
+                  {offeredTemplates.map((t) => (
+                    <button key={t.id} role="menuitem" onClick={() => { setQuickWorkOpen(false); onApplyTemplate(t.id); }}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-[5px] px-2 text-left text-[16px] hover:bg-surface">
+                      <span className="min-w-0 flex-1 truncate">{t.name}</span><span className="shrink-0 text-muted">{templateSteps(t).length} steps</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })()}
       </ol>
     </section>
   );
