@@ -3160,6 +3160,12 @@ export function stepChangeEvents(before: Subtask[], after: Subtask[]): { body: s
   return out;
 }
 
+/** Step templates are off (Derek, 2026-10-13: "use it naturally as we work
+ *  through it ... trying to pre-design it before we use it causes more
+ *  confusion"). Saved templates are kept; true brings back Save as template,
+ *  From template, and the templates in Quick step. */
+export const TEMPLATES_ON = false;
+
 /** A task named with the whole request rather than a name: it gets a short
  *  name and the request becomes step 1's directions (lib/tidyTitle). */
 export function isLongTitle(title: string): boolean {

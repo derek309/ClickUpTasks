@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
-  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, 
+  STATUS_META, pickableStatuses, stepDateLabel, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
@@ -2063,7 +2063,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </h2>
         <span className="flex flex-wrap items-center gap-2">
         {/* Save these steps as a plan for this client or everyone (phase 5). */}
-        {onSaveTemplate && progress.total > 0 && (
+        {TEMPLATES_ON && onSaveTemplate && progress.total > 0 && (
           <div className="relative">
             <button onClick={() => { setSavePlan((o) => (o === null ? task.title : null)); }} className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:bg-background">Save as template</button>
             {savePlan !== null && (<>
@@ -2081,7 +2081,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </>)}
           </div>
         )}
-        {offeredTemplates.length > 0 && (
+        {TEMPLATES_ON && offeredTemplates.length > 0 && (
           <div className="relative">
             <button onClick={() => setTemplateOpen((o) => !o)} className="inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-medium hover:bg-background"><I.clipboard /> From template</button>
             {templateOpen && (<>
@@ -2157,7 +2157,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   })}
                   {/* Saved plans too: their steps go on the end (Derek, 2026-10-11:
                       "we can add some in templates"). */}
-                  {offeredTemplates.length > 0 && (<>
+                  {TEMPLATES_ON && offeredTemplates.length > 0 && (<>
                     <div className="mt-1 border-t px-2.5 pb-1 pt-2 text-[16px] text-muted">From a template:</div>
                     {offeredTemplates.map((t) => (
                       <button key={t.id} role="menuitem" onClick={() => { setQuickWorkOpen(false); onApplyTemplate(t.id); }}

@@ -25,6 +25,7 @@ import SignaturePanel from "./SignaturePanel";
 import GranolaPanel from "./GranolaPanel";
 import { SettingsCard, Tile, BTN, BTN_DANGER, type Tone } from "./settings/ui";
 import TrashPanel from "./TrashPanel";
+import { TEMPLATES_ON } from "@/lib/data";
 
 export type TabKey = "account" | "integrations" | "team" | "templates" | "tokens" | "notifications" | "signature" | "granola" | "trash";
 
@@ -89,7 +90,7 @@ export default function SettingsHub({
     { key: "account", label: "Account", icon: "user", tone: "slate", about: "How ClickUpTasks looks for you, and signing out.", visible: true },
     { key: "integrations", label: "Integrations", icon: "gear", tone: "amber", about: "GoHighLevel, Granola and the checks that keep them honest.", visible: canAdmin },
     { key: "team", label: "Team", icon: "user", tone: "indigo", about: "Who is on the team and what each person can do.", visible: canAdmin },
-    { key: "templates", label: "Task templates", icon: "clipboard", tone: "sky", about: "Ready made steps to start a task from.", visible: canAdmin },
+    { key: "templates", label: "Task templates", icon: "clipboard", tone: "sky", about: "Ready made steps to start a task from.", visible: canAdmin && TEMPLATES_ON },
     { key: "tokens", label: "Claude and API tokens", icon: "key", tone: "violet", about: "Connect Claude, and keys for scripts and tools.", visible: true },
     { key: "notifications", label: "Notifications", icon: "bell", tone: "rose", about: "Which emails you get a copy of.", visible: true },
     // Per-person, not team management: same footing as Notifications.
