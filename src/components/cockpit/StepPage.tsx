@@ -164,6 +164,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   const [draft, setDraft] = useState("");
+  const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
   // To-dos picked to ask the client about, in one email.
@@ -350,20 +351,12 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       </>)}
     </div>
   );
+  // One Add button, not a wall of them (Derek, 2026-10-13: "this is getting
+  // messy"): the same list opens from it.
   const quickStart = (
-    <section aria-label="Add to this step" className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
-        {options.map((o) => (
-          <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={o.tone ? `Add ${o.label} to this step${o.note ? ` (${o.note})` : ""}` : o.note}
-            // Work already made wears its stage's color, so it reads as "add this one".
-            style={o.tone ? { background: o.tone.chip, borderColor: o.tone.dot } : undefined}
-            className={`inline-flex h-10 max-w-full items-center gap-1.5 rounded-lg border px-3 text-[16px] font-medium disabled:opacity-50 ${o.tone ? "hover:brightness-95" : "bg-surface hover:border-accent hover:bg-background"}`}>
-            <span className={o.tone ? "" : "text-accent"} style={o.tone ? { color: o.tone.text } : undefined}><I.plus className="h-4 w-4 shrink-0" /></span><span className="min-w-0 truncate">{o.label}</span>
-            {o.tone && <span className="shrink-0 rounded-[5px] bg-surface/70 px-1.5 text-[16px] font-semibold" style={{ color: o.tone.text }}>{o.tone.label}</span>}
-          </button>
-        ))}
-      </div>
-      <p className="text-[16px] text-muted">Or paste a link or drop a file anywhere on this page.</p>
+    <section aria-label="Add to this step" className="flex flex-wrap items-center gap-3">
+      {addMenu(false)}
+      <span className="text-[16px] text-muted">An email, a text, a document, a checklist or directions<span className="hidden sm:inline">, or paste a link or drop a file anywhere on this page</span>.</span>
     </section>
   );
   const todoList = !hasTodos ? null : (
@@ -477,10 +470,15 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                       <I.check className={`h-4 w-4 ${sub.done ? "" : "opacity-30 group-hover/tick:opacity-100"}`} />
                     </button>
                   )}
-                  <textarea value={sub.title} onChange={(e) => onRename(e.target.value)} rows={1} aria-label="Step"
+                  {/* A "what's next?" step reads as that, its old name under it, and
+                      the box names the next step (Derek, 2026-10-13: the last
+                      step's whole instruction as its title was a mess). */}
+                  <textarea value={whatsNext ? "" : sub.title} onChange={(e) => { if (!whatsNext || e.target.value.trim()) onRename(e.target.value); }} rows={1} aria-label="Step"
+                    placeholder={whatsNext ? "What's next? Name the next step" : undefined}
                     onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                     className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[20px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background sm:text-[24px]" />
                 </div>
+                {whatsNext && <div className="truncate text-[16px] text-muted" title={sub.title.replace(/: what's next\?$/, "")}>After: {sub.title.replace(/: what's next\?$/, "")}</div>}
                 {(sub.done || !isCurrent || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                     {round && <span className="font-semibold text-foreground">{round}</span>}

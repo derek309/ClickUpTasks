@@ -1143,7 +1143,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const whatsNextActions = (sid: string) => (
     <div className="flex flex-wrap items-center gap-2 text-[16px]">
-      <span className="min-w-0 flex-1 text-muted">Name the next step above, or add client work below. Or:</span>
+      <span className="min-w-0 flex-1 text-muted">Name the next step above, add an action below, or:</span>
       <button onClick={() => finishTask(sid)} className="shrink-0 rounded-[5px] bg-success px-3 py-1.5 font-semibold text-white hover:opacity-90">The task is finished</button>
       {hasMessaging && !!messageDest?.email && (
         <button onClick={() => finishTask(sid, true)} title={`Finish it and draft an email telling ${firstName} it's done`}
@@ -1883,7 +1883,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>
               {/* Numbered, so "step 2" means the same to everyone (Derek, 2026-10-12). */}
               {!sub.fromClient && steps.some((x) => x.id === sub.id) && <span className="mr-1.5 tabular-nums text-muted">{steps.findIndex((x) => x.id === sub.id) + 1}.</span>}
-              {sub.title}
+              {asksWhatsNext(sub) ? "What's next?" : sub.title}
             </span>
             {say && <span className={`text-[16px] font-semibold ${sayTone}`}>{say}</span>}
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
