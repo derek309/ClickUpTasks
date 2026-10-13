@@ -880,15 +880,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   );
   const detailsSentence = (
     <div className="mt-1 text-[16px] leading-snug sm:text-[18px]">
-      {wordPick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[effectiveStatus(task)].dot }} />{STATUS_META[effectiveStatus(task)].label}</>,
-        "Status", effectiveStatus(task), pickableStatuses(effectiveStatus(task)).map((st) => ({ value: st, label: STATUS_META[st].label })), (v) => onPatch({ status: v as TaskStatus }))}
-      {/* Waiting says who on, and the owner after it, so "Waiting, on Justin"
-          no longer reads as waiting on Justin when it waits on James
-          (Justin, 2026-10-13 meeting). */}
-      {/* "assigned to", not "on" (Derek and Justin, 2026-10-13): "on Derek"
-          read as who it waits on. */}
-      {effectiveStatus(task) === "waiting" && task.clientId !== PERSONAL_CLIENT_ID ? <> on {firstName}</> : null}, assigned to{" "}
-      {wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }))}
+      {(() => {
+        const st = effectiveStatus(task);
+        const statusWord = (label: string) => wordPick(<><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[st].dot }} />{label}</>,
+          "Status", st, pickableStatuses(st).map((x) => ({ value: x, label: STATUS_META[x].label })), (v) => onPatch({ status: v as TaskStatus }));
+        const ownerWord = wordPick(ownerName, "Owner", task.assigneeId ?? "", [{ value: "", label: "Nobody" }, ...assignableUsers().map((u) => ({ value: u.id, label: u.name }))], (v) => onPatch({ assigneeId: v || null }));
+        // Waiting reads with the person first: "Justin is waiting on James"
+        // (Derek and Justin, 2026-10-13: "Derek's waiting", one sentence, no
+        // pills). Anything else: "To do, assigned to Derek".
+        const waits = st === "waiting" && task.clientId !== PERSONAL_CLIENT_ID;
+        if (waits && task.assigneeId) return <>{ownerWord} is {statusWord("waiting")} on {firstName}</>;
+        if (waits) return <>{statusWord("Waiting")} on {firstName}, assigned to {ownerWord}</>;
+        return <>{statusWord(STATUS_META[st].label)}, assigned to {ownerWord}</>;
+      })()}
       , {wordPick(PRIORITY_META[task.priority].label, "Priority", task.priority, manualPriorityOptions(task.priority).map((pr) => ({ value: pr, label: PRIORITY_META[pr].label })), (v) => onPatch({ priority: v as Priority }), task.priority === "urgent" ? "text-danger" : "")}
       , {task.due ? "due " : ""}
       <span className="inline-block">
