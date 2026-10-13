@@ -1182,7 +1182,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onPatch({ subtasks: list, ...(status ? { status } : {}), ...(drafting ? { draftEmail: changesDoneEmail(sub) } : {}) });
         if (drafting) void linkReviewInDraft(sub);
         setAutoDone(null);
-        pushToast(`Next: let ${firstName} know. The email is drafted for you to read.`);
+        // The same What's next as every other finish (Derek, 2026-10-13:
+        // "it should always have the same flow").
+        const tell = list.find((x) => x.addedFor === `tell:${sid}`);
+        if (tell) setSentNext({ taskId: task.id, stepId: tell.id, done: sub.title });
         return;
       }
     }
@@ -1275,6 +1278,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const name = reviews[k]?.title?.trim() || (k === "doc" ? "the document" : "the review");
     const from = task.subtasks.find((x) => x.id === stepId);
     if (what === "sent") {
+      // Already waiting on them for this review (the send itself made it): no second one.
+      if (taskRef.current.subtasks.some((x) => !x.done && x.onClient && x.waitsOn === k)) return;
       const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
       const list = addClientReviewStep(taskRef.current.subtasks, stepId, firstName, name, k, due, () => newId("s_"));
       if (list) onPatch({ subtasks: list, ...(statusForStep(task.status, "waiting") ? { status: "waiting" as TaskStatus } : {}) });
@@ -1306,7 +1311,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const status = statusForStep(task.status, "changes_requested");
       const due = list.find((x) => x.addedFor === key)?.due ?? null;
       onPatch({ subtasks: list, ...(status ? { status } : {}), ...(due ? { followUpAt: due } : {}) });
-      pushToast(`Changes on ${name}: added "Make ${firstName}'s changes"${todos.length ? ` with ${todos.length} to ${todos.length === 1 ? "do" : "dos"}` : ""}`);
+      const made = list.find((x) => x.addedFor === key);
+      if (made) setSentNext({ taskId: task.id, stepId: made.id, said: `${firstName} sent changes on ${name}${todos.length ? `: ${todos.length} to ${todos.length === 1 ? "do" : "dos"}` : ""}.` });
     });
   }, [stageKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // What the client sends from their portal lands on the open changes step,
@@ -1354,10 +1360,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const watch = `approved:${kind}`;
     // With steps, our step is done and the client's own step starts: on
     // them, waiting, holding the review (Derek, 2026-10-11).
-    if (activeStep && !isHandoffStep(activeStep, task.assigneeId)) {
+    // Once: a step already waiting on them for this review (made by the send
+    // itself) is not doubled (Derek, 2026-10-13: Justin got two "Waiting on").
+    const alreadyWaiting = taskRef.current.subtasks.some((x) => !x.done && x.onClient && x.waitsOn === kind);
+    if (activeStep && !activeStep.onClient && !alreadyWaiting && !isHandoffStep(activeStep, task.assigneeId)) {
       const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
       const list = addClientReviewStep(taskRef.current.subtasks, activeStep.id, firstName, name, kind as DeliverableKey, due, () => newId("s_"));
-      if (list) onPatch({ subtasks: list });
+      if (list) {
+        onPatch({ subtasks: list });
+        const waiting = list.find((x) => !x.done && x.onClient && x.waitsOn === kind);
+        if (waiting) setSentNext({ taskId: task.id, stepId: waiting.id, said: `${name} sent to ${firstName}. Waiting for ${firstName} to review it.` });
+      }
     }
     if (openStep) {
       if (task.status !== "waiting") onPatch({ status: "waiting" });
@@ -2461,7 +2474,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // here's my suggestion and dates, approve or change"; "a pop up marked
   // Approved"): the step it made or started, as a sentence to say yes to or
   // change. Closing keeps it as it is.
-  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; via?: "email" | "sms" | "chat" } | null>(null);
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; via?: "email" | "sms" | "chat"; said?: string } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
   // Escape closes this box first, not the task behind it.
@@ -2510,7 +2523,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
         <button onClick={closeSentNext} aria-label="Close" title="Close, change nothing"
           className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.close /></button>
-        <div className="pr-10 text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}`
+        <div className="pr-10 text-[16px] font-semibold text-success">{sentNext?.said ? `✓ ${sentNext.said}` : sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}`
           // Says what went (Derek, 2026-10-13: "Text message sent, waiting for Ryan to reply").
           : `✓ ${sentNext?.via === "sms" ? "Text" : sentNext?.via === "chat" ? "Chat" : "Email"} sent to ${firstName}. Waiting for ${firstName} to reply.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
