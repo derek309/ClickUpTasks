@@ -75,7 +75,9 @@ function DayWord({ value, onChange, label }: { value: string | null; onChange: (
     </span>
   );
 }
-export const DEFAULT_FOLLOW_UP = () => TODAY;
+// Due in three business days, checked on tomorrow (Derek, 2026-10-13: "if it's
+// due in 3 days, make the follow up tomorrow"), the next business day.
+export const DEFAULT_FOLLOW_UP = () => addBusinessDaysIso(TODAY, 1);
 
 type PastedFile = { file: File; url: string; row: number };
 
