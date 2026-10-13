@@ -13,6 +13,7 @@ import {
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
+import { usePersisted } from "@/lib/usePersisted";
 import { authedFetch } from "@/lib/supabase";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu } from "./ActionMenu";
@@ -2138,13 +2139,33 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     List: [<I.list key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
     "In GoHighLevel": [<I.bolt key="i" className="h-4 w-4" />, "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"],
     "Links and files": [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
+    Conversation: [<I.comment key="i" className="h-4 w-4" />, "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"],
     "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
   };
-  const heading = (title: string, extra?: React.ReactNode) => (
+  const headingText = (title: string, extra?: React.ReactNode) => (
     <h2 className="flex items-center gap-2 text-[16px] font-bold text-foreground">
       {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
       {title}{extra}
     </h2>
+  );
+  // Client work, Links and files and Conversation fold away (Derek,
+  // 2026-10-13: "the steps are good at containing everything"). Folded by
+  // default; each one's choice is remembered in this browser.
+  const FOLDABLE = ["Client work", "Links and files", "Conversation"];
+  const [folded, setFolded] = usePersisted<string[]>("taskSectionsFolded", FOLDABLE, (v) => Array.isArray(v));
+  const isFolded = (title: string) => folded.includes(title);
+  const toggleFold = (title: string) => setFolded(isFolded(title) ? folded.filter((x) => x !== title) : [...folded, title]);
+  const heading = (title: string, extra?: React.ReactNode) => FOLDABLE.includes(title) ? (
+    <button onClick={() => toggleFold(title)} aria-expanded={!isFolded(title)} title={isFolded(title) ? "Show" : "Hide"} className="flex min-w-0 items-center gap-1 text-left hover:opacity-80">
+      {headingText(title, extra)}
+      <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isFolded(title) ? "rotate-180" : "-rotate-90"}`} />
+    </button>
+  ) : headingText(title, extra);
+  // A folded section: its heading and how many things are in it, one line.
+  const foldedCard = (title: string, count?: number) => (
+    <section className={CARD}>
+      {heading(title, count ? <span className="font-normal text-muted">· {count}</span> : undefined)}
+    </section>
   );
   // Client work and Links and files look alike: a card, and while empty one
   // line, the hint beside the heading (Derek, 2026-10-12: "make these
@@ -2546,6 +2567,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // 2026-10-11: "bring it down below so we can get to it easily"). Each block
   // is drawn once, here; a step's page lists what is on it with Open.
   const anyWork = DELIVERABLE_KEYS.some(deliverablePresent) || steps.some((st) => (st.holds ?? []).some((k) => !!sentMail(k)));
+  const workCount = DELIVERABLE_KEYS.filter(deliverablePresent).length + steps.reduce((n, st) => n + (st.holds ?? []).filter((k) => !!sentMail(k)).length, 0);
   // Work on a step is a one line row here, the record of what was made
   // (Derek, 2026-10-12): its box is on its step. Work on no step keeps its
   // full box, and so does everything while deleted work is being restored.
@@ -3028,7 +3050,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Deliverables on no step (Derek: they may sit outside a step). With
           steps and nothing loose, there is no section, but the blocks stay
           mounted so they can say whether they exist. */}
-      {section("Client work", (
+      {isFolded("Client work") ? foldedCard("Client work", workCount) : section("Client work", (
         <>
           {workBlocks}
           {sentWorkLines}
@@ -3041,12 +3063,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ), addMenu, !anyWork && !(deletedTotal > 0 && deletedOpen === 0) ? (steps.length ? "Documents, reviews and emails. Add them from a step's page." : "Documents, reviews and emails show here.") : undefined)}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
-      {attachmentsBlock}
-      <section className="mt-7">
-        {/* The composer the floating dock opens for a text, chat or note. */}
-        {composerFooter}
-        <div className="mt-6">{feedArea}</div>
-      </section>
+      {isFolded("Links and files") ? foldedCard("Links and files", task.attachments.length + conversationFiles.length) : attachmentsBlock}
+      {/* The composer the floating dock opens for a text, chat or note. */}
+      {composerFooter}
+      {isFolded("Conversation") ? foldedCard("Conversation", (messages ?? []).filter((m) => m.taskId === task.id).length || undefined) : (
+        <section className="mt-7">
+          <div className="mb-2">{heading("Conversation")}</div>
+          <div className="mt-4">{feedArea}</div>
+        </section>
+      )}
     </>
   );
 
