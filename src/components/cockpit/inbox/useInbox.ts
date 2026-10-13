@@ -314,7 +314,10 @@ async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSin
   // Alongside the messages, not before them. A missing inbox_blocks table
   // (before inbox-blocks.sql) just means none.
   const [stateRes, blockRes, results] = await Promise.all([
-    supabase.from("inbox_state").select("*").eq("member_id", meMemberId),
+    // Every page of your marks: at 1,000 the database stopped and a different
+    // few were left out on each read, so archived conversations came back
+    // (Derek, 2026-10-13, 1,011 marks).
+    allPages((from, to) => supabase.from("inbox_state").select("*").eq("member_id", meMemberId).order("thread_key").range(from, to)),
     supabase.from("inbox_blocks").select("address").eq("member_id", meMemberId),
     Promise.all(reads),
   ]);
