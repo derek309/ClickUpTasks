@@ -2602,8 +2602,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
   // A Text or Chat step the same way, by its name (2026-10-13).
   const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
-    // Sent from a step's own page: that step; otherwise the current one.
-    const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : currentStep(taskRef.current.subtasks);
+    // Sent from a step's own page: that step. An email sent from the task's
+    // email window: the open step holding that email, else the current one.
+    // It used to be the current one always, so "Reply to media" was ticked,
+    // the check in went after it, and "Email Brian" below stayed open (Derek,
+    // 2026-10-13, the PPAI task).
+    const holder = !stepId && channel === "email" ? taskRef.current.subtasks.find((x) => !x.done && x.holds?.includes("email")) : undefined;
+    const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : holder ?? currentStep(taskRef.current.subtasks);
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
     const name = cur.title.trim();
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
@@ -2621,8 +2626,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
       : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
     if (!fits) return false;
-    const made = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"), undefined, channel);
-    if (!made) return false;
+    const made0 = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"), undefined, channel);
+    if (!made0) return false;
+    // The current step above it was an emailing step too ("Reply to media"):
+    // this email was its answer, so it is done as well.
+    const before = holder ? currentStep(taskRef.current.subtasks) : undefined;
+    const alsoDone = before && before.id !== cur.id && !before.onClient && !isHandoffStep(before, task.assigneeId) && EMAILING.test(before.title.trim())
+      && taskRef.current.subtasks.findIndex((x) => x.id === before.id) < taskRef.current.subtasks.findIndex((x) => x.id === cur.id) ? before : undefined;
+    const made = alsoDone ? made0.map((x) => (x.id === alsoDone.id ? { ...x, done: true, doneAt: new Date().toISOString(), outcome: `Email sent to ${firstName}` } : x)) : made0;
     // A sent text or chat leaves no draft behind on its step.
     const list = channel === "email" ? made : made.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
     if (openStep) setNextStepDone(openStep.id, true);
