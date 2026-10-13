@@ -2416,7 +2416,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // here's my suggestion and dates, approve or change"; "a pop up marked
   // Approved"): the step it made or started, as a sentence to say yes to or
   // change. Closing keeps it as it is.
-  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string } | null>(null);
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; via?: "email" | "sms" | "chat" } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
   // Escape closes this box first, not the task behind it.
@@ -2451,7 +2451,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
         <button onClick={closeSentNext} aria-label="Close" title="Close, change nothing"
           className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.close /></button>
-        <div className="pr-10 text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}` : `✓ Sent to ${firstName}.`}</div>
+        <div className="pr-10 text-[16px] font-semibold text-success">{sentNext?.approved ? `✓ Approved: ${sentNext.approved}` : sentNext?.done ? `✓ Done: ${sentNext.done}`
+          // Says what went (Derek, 2026-10-13: "Text message sent, waiting for Ryan to reply").
+          : `✓ ${sentNext?.via === "sms" ? "Text" : sentNext?.via === "chat" ? "Chat" : "Email"} sent to ${firstName}. Waiting for ${firstName} to reply.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
         <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
           onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
@@ -2519,7 +2521,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const status = statusForStep(task.status, "waiting");
     onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
     const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`);
-    if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id });
+    if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id, via: channel });
     setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
     return true;
   };
