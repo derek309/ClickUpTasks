@@ -566,7 +566,19 @@ export const tidyIfLong = (id: string, title: string, subtasks?: Subtask[] | nul
   if (!isLongTitle(title) && !(subtasks ?? []).some((x) => !x.done && !x.fromClient && isLongTitle(x.title))) return;
   void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST" }).catch(() => undefined);
 };
-export const upsertTask = (t: Task, updatedBy?: string | null) => {
+// One task's saves run one after another (Derek, 2026-10-13: a step added
+// and an email sent seconds apart, and the step was gone). A save read the
+// task while the one before it was still landing, took the new step as
+// deleted elsewhere (mergeSubtasks) and wrote the list without it.
+const taskSaves = new Map<string, Promise<unknown>>();
+function inOrder<T>(id: string, run: () => Promise<T>): Promise<T> {
+  const p = (taskSaves.get(id) ?? Promise.resolve()).catch(() => undefined).then(run);
+  taskSaves.set(id, p);
+  void p.catch(() => undefined).finally(() => { if (taskSaves.get(id) === p) taskSaves.delete(id); });
+  return p;
+}
+export const upsertTask = (t: Task, updatedBy?: string | null) => inOrder(t.id, () => upsertTaskNow(t, updatedBy));
+const upsertTaskNow = (t: Task, updatedBy?: string | null) => {
   noteTaskWrite(t.id);
   return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title, t.subtasks); return r; });
 };
@@ -589,7 +601,10 @@ export function changedTaskColumns(before: Task, after: Task): Record<string, un
 /** Saves an edit to an existing task, sending only the changed columns. A task
  *  whose insert has not landed yet matches no row, so the whole row is written
  *  instead and a quick edit right after creating it is not lost. */
-export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string | null) {
+export function saveTaskEdit(before: Task, after: Task, updatedBy?: string | null) {
+  return inOrder(after.id, () => saveTaskEditNow(before, after, updatedBy));
+}
+async function saveTaskEditNow(before: Task, after: Task, updatedBy?: string | null) {
   const changed = changedTaskColumns(before, after);
   if (!Object.keys(changed).length) return null;
   noteTaskWrite(after.id);
@@ -602,7 +617,7 @@ export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string
     if (Array.isArray(remote)) changed.subtasks = mergeSubtasks(before.subtasks ?? [], after.subtasks ?? [], remote);
   }
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
-  if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
+  if (res && !res.error && !res.data?.length) return upsertTaskNow(after, updatedBy);
   if (("title" in changed || "subtasks" in changed) && res && !res.error) tidyIfLong(after.id, "title" in changed ? after.title : "", "subtasks" in changed ? after.subtasks : null);
   return res;
 }
