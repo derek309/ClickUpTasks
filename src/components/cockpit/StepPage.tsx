@@ -21,7 +21,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, outFor, doneActions, addOptions = [], canText = false, onSendText, canEmail = false, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, canChat, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -51,6 +51,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   meId?: string | null;
   /** Opened from "Create Checklist": the to-do box is out and ready. */
   startWithChecklist?: boolean;
+  /** Whose move it is, the same colour and sentence as the step's row. */
+  tone?: { say: string | null; sayTone: string; rowTone: string };
   /** A Text or Chat step opens on that box, ready to write (2026-10-13). */
   startTalk?: "client" | "text" | "email";
   /** The client's waiting step: what is out with them, in place of adding work
@@ -118,7 +120,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   const own = todoProgress(todos);
   const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
   const [todoDraft, setTodoDraft] = useState("");
-  const [talk, setTalk] = useState<"client" | "email" | "text" | "team">(startTalk ?? (canChat ? "client" : "team"));
+  // No box until a tab is picked (Derek, 2026-10-13: the conversation box was
+  // what pulled the eye, away from the work). A tab again folds it.
+  type Talk = "client" | "email" | "text" | "team";
+  const [talk, setTalkState] = useState<Talk | null>(startTalk ?? null);
+  const setTalk = (t: Talk) => { setTalkState((cur) => (cur === t ? null : t)); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); };
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(startWithChecklist);
   const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
@@ -278,7 +284,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           );
         })}
       </div>
-      <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : talk === "text" ? CHANNEL_TONE.sms.surface : talk === "email" ? CHANNEL_TONE.email.surface : CHANNEL_TONE.chat.surface}`}>
+      {talk && <div className={`rounded-lg p-2 ${talk === "team" ? CHANNEL_TONE.note.surface : talk === "text" ? CHANNEL_TONE.sms.surface : talk === "email" ? CHANNEL_TONE.email.surface : CHANNEL_TONE.chat.surface}`}>
         {talk === "email" && (
           <input value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" placeholder="Subject"
             className="mb-1 w-full border-b bg-transparent px-2 py-1 text-[16px] font-semibold outline-none" />
@@ -298,7 +304,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           </span>
           <button onClick={send} disabled={!draft.trim()} className="h-9 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-40">Send</button>
         </div>
-      </div>
+      </div>}
     </section>
   );
 
@@ -465,6 +471,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                     {(sub.done || !isCurrent) && <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>}
                   </div>
                 )}
+                {/* Whose move it is, as on the step's row (2026-10-13). */}
+                {tone?.say && !sub.done && <div className={`rounded-[5px] px-3 py-2 text-[16px] font-semibold ${tone.rowTone} ${tone.sayTone}`}>{tone.say}</div>}
                 {controls}
                 {!sub.done && isCurrent && doneActions && <div>{doneActions}</div>}
               </div>

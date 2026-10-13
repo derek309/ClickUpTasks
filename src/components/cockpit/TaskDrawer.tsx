@@ -1770,6 +1770,38 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     );
   };
+  // Whose move a step is, as a colour and one sentence (Derek, 2026-10-13:
+  // "red needs your attention, yellow waiting, orange Claude's working on it,
+  // gray done"). The step's row and its page both use it.
+  const stepTone = (sub: Subtask) => {
+    const isActive = activeStep?.id === sub.id;
+    const st = stepStage(sub, task.assigneeId);
+    const own = todoProgress(sub.todos);
+    const fromPortal = clientItemsOf(sub.id);
+    const tp = { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length };
+    const person = sub.assigneeId ?? task.assigneeId;
+    const state: "done" | "claude" | "waiting" | "mine" | "later" = sub.done ? "done"
+      : sub.assigneeId === CLAUDE_ID ? "claude"
+      : sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? "waiting"
+      : isActive ? (person && meId && person !== meId ? "waiting" : "mine")
+      : "later";
+    const ROW_TONE: Record<typeof state, string> = {
+      mine: "bg-red-50 shadow-[inset_4px_0_0_#ef4444] dark:bg-red-500/10",
+      waiting: "bg-amber-50 shadow-[inset_4px_0_0_#f59e0b] dark:bg-amber-500/10",
+      claude: "bg-orange-50 shadow-[inset_4px_0_0_#ea580c] dark:bg-orange-500/10",
+      done: "bg-background/60",
+      later: "",
+    };
+    const sayTone = state === "mine" ? "text-red-700 dark:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
+    const say = state === "claude" ? "Claude is working on it"
+      : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `Waiting on ${firstName}` : `With ${userById(person ?? null)?.name.split(" ")[0] ?? "a teammate"}`)
+      : state === "mine" ? (
+        tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
+        : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
+        : (() => { const prev = steps[steps.findIndex((x) => x.id === sub.id) - 1]; return prev?.done && prev.assigneeId === CLAUDE_ID ? "Claude finished its part. Your turn" : "Your turn"; })()
+      ) : null;
+    return { state, say, sayTone, rowTone: ROW_TONE[state] };
+  };
   const stepRow = (sub: Subtask, i: number) => {
     const isActive = activeStep?.id === sub.id;
     const upcoming = !sub.done && !isActive;
@@ -1812,30 +1844,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     })() : null;
     const missing = !sub.done ? missingNeeds(sub) : [];
     const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
-    // Whose move it is, as the row's colour and one sentence (Derek,
-    // 2026-10-13: "red needs your attention, yellow waiting, orange Claude's
-    // working on it, gray done"; a little circle "is not enough for the eye").
-    const person = sub.assigneeId ?? task.assigneeId;
-    const state: "done" | "claude" | "waiting" | "mine" | "later" = sub.done ? "done"
-      : sub.assigneeId === CLAUDE_ID ? "claude"
-      : sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? "waiting"
-      : isActive ? (person && meId && person !== meId ? "waiting" : "mine")
-      : "later";
-    const ROW_TONE: Record<typeof state, string> = {
-      mine: "bg-red-50 shadow-[inset_4px_0_0_#ef4444] dark:bg-red-500/10",
-      waiting: "bg-amber-50 shadow-[inset_4px_0_0_#f59e0b] dark:bg-amber-500/10",
-      claude: "bg-orange-50 shadow-[inset_4px_0_0_#ea580c] dark:bg-orange-500/10",
-      done: "bg-background/60",
-      later: "",
-    };
-    const sayTone = state === "mine" ? "text-red-700 dark:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
-    const say = state === "claude" ? "Claude is working on it"
-      : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `Waiting on ${firstName}` : `With ${userById(person ?? null)?.name.split(" ")[0] ?? "a teammate"}`)
-      : state === "mine" ? (
-        tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
-        : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
-        : (() => { const prev = steps[steps.findIndex((x) => x.id === sub.id) - 1]; return prev?.done && prev.assigneeId === CLAUDE_ID ? "Claude finished its part. Your turn" : "Your turn"; })()
-      ) : null;
+    const { say, sayTone, rowTone } = stepTone(sub);
     return (
       <Fragment key={sub.id}>
       <li draggable={dragSub === sub.id}
@@ -1844,7 +1853,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
         onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== sub.id) moveSub(dragSub, sub.id); setDragSub(null); setDropSub(null); }}
         aria-current={isActive ? "step" : undefined}
-        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${ROW_TONE[state]} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
+        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${rowTone} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
         {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
           className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
@@ -2858,16 +2867,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   const d = k as DeliverableKey;
                   if (!deliverablePresent(d)) return null;
                   const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
+                  // An email not yet sent on an open step is the work to do:
+                  // the step's own colour, said plainly (Derek, 2026-10-13: "we
+                  // need to see it and pull it out").
+                  const toSend = d === "email" && !sub.done ? stepTone(sub) : null;
                   return (
                     // The whole box opens it (Derek, 2026-10-11), not only its button.
                     <span role="button" tabIndex={0} onClick={() => openWork(d)} onKeyDown={(e) => { if (e.key === "Enter") openWork(d); }}
                       style={r ? { background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot } : undefined}
-                      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border bg-surface px-3 py-2 hover:border-accent hover:bg-background">
+                      className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border px-3 py-2 hover:border-accent ${toSend ? `${toSend.rowTone} pl-4` : "bg-surface hover:bg-background"}`}>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
-                        <span className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{KIND_LABEL[d]}{r && stageChip(r.status)}</span>
+                        <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : KIND_LABEL[d]}{r && stageChip(r.status)}</span>
                       </span>
-                      <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-4 text-[16px] font-semibold leading-9">Open</span>
+                      <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend ? "bg-accent text-white" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Client work)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
@@ -3237,7 +3250,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
+            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} tone={stepTone(ps)} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
