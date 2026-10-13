@@ -1923,11 +1923,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // Delegate to Claude (Derek, 2026-10-13): the same, already given to Claude,
-  // so it is on Claude's list (MCP list_my_tasks for_claude). The page opens
-  // for the directions Claude works from.
+  // so it is on Claude's list (MCP list_my_tasks for_claude). Nothing opens:
+  // "nine times out of ten we just want to delegate it and move on", the task
+  // has what Claude needs. One open Claude step at a time.
   const claudeStep = () => {
-    const id = newId("s_");
     if (asking) setAskNext(null);
+    if (taskRef.current.subtasks.some((x) => !x.done && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
+    const id = newId("s_");
     const list = [...taskRef.current.subtasks];
     const cur = currentStep(list);
     const due = addBusinessDaysIso(TODAY, 3);
@@ -1935,8 +1937,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, step);
     const status = statusForStep(task.status, stepStage(step, task.assigneeId));
     onPatch({ subtasks: list, ...(status ? { status } : {}), ...(task.assigneeId !== CLAUDE_ID ? handoffDates(due) : {}) });
-    setOpenStepPage({ taskId: task.id, id, full: false });
-    pushToast("Given to Claude. Write what Claude should do in Directions.");
+    pushToast("Delegated to Claude");
   };
   // A teammate has the current step: the task is theirs until that date, and
   // comes back to its owner the business day after (Derek, 2026-10-12: "check
