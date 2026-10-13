@@ -14,6 +14,7 @@ import {
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
+import { ActionMenu } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
@@ -290,7 +291,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
-          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : "Sent when you press Send. Shows below, newest first."}
+          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : <span className="hidden sm:inline">Sent when you press Send. Shows below, newest first.</span>}
             {talk === "email" && onFullEmail && <> <button onClick={() => { onFullEmail(subject, draft); setDraft(""); }} className="font-semibold text-accent underline decoration-dotted underline-offset-4">Full email</button></>}
           </span>
           <button onClick={send} disabled={!draft.trim()} className="h-9 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-40">Send</button>
@@ -405,23 +406,35 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
       <div ref={pageRef} role="dialog" aria-label={`Step: ${sub.title}`}
         className={`fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
         {/* One line: a long task name shortens instead of pushing × down. */}
-        <div className="flex items-center gap-x-3 border-b px-4 py-2 text-[16px]">
-          <button onClick={onClose} title={task.title} className="min-w-0 flex-1 truncate rounded-[5px] px-2 py-1.5 text-left text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
+        {/* On a phone: back, the step arrows, one ⋯ menu and ×. Eight things
+            in a row pushed the back link to nothing and the rest off screen
+            (Derek, 2026-10-13). */}
+        <div className="flex items-center gap-x-2 border-b px-2 py-2 text-[16px] sm:gap-x-3 sm:px-4">
+          <button onClick={onClose} title={task.title} className="min-w-[3.5rem] flex-1 truncate rounded-[5px] px-2 py-1.5 text-left text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
           {stepNo && stepNo.total > 1 && (
             <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted">
               <button onClick={onPrev} disabled={!onPrev} title="Step before (←)" aria-label="Step before" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4" /></button>
-              <span className="tabular-nums">Step {stepNo.at} of {stepNo.total}</span>
+              <span className="tabular-nums"><span className="hidden sm:inline">Step </span>{stepNo.at} of {stepNo.total}</span>
               <button onClick={onNext} disabled={!onNext} title="Step after (→)" aria-label="Step after" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4 rotate-180" /></button>
             </span>
           )}
           {/* Done, or nothing: the step is the stage (Derek, 2026-10-11). */}
           {sub.done
-            ? <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold"><I.check className="h-3.5 w-3.5" />Done</span>
+            ? <span className="hidden items-center gap-1.5 rounded-[5px] bg-background px-2 font-semibold sm:inline-flex"><I.check className="h-3.5 w-3.5" />Done</span>
  : null}
+          <span className="sm:hidden">
+            <ActionMenu label={<I.dots />} title="More" items={[
+              onCopyPortalLink && { label: "Copy the client portal link", onClick: onCopyPortalLink },
+              onCopyLink && { label: "Copy a link to this step", onClick: onCopyLink },
+              onCopyForClaude && { label: "Copy this step for Claude", onClick: onCopyForClaude },
+            ]} />
+          </span>
+          <span className="hidden items-center gap-x-3 sm:inline-flex">
           {onCopyPortalLink && <button onClick={onCopyPortalLink} title="Copy the client portal link (opens on this task; clients don't see steps)" aria-label="Copy the client portal link" className="inline-flex h-9 items-center gap-1 rounded-lg px-2 font-semibold text-muted hover:bg-background hover:text-foreground"><I.link /><span className="hidden sm:inline">Portal</span></button>}
           {onCopyLink && <button onClick={onCopyLink} title="Copy a link to this step" aria-label="Copy a link to this step" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-background hover:text-foreground"><I.link /></button>}
           {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
           <button onClick={onToggleFull} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
+          </span>
           <button onClick={onClose} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -442,7 +455,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   )}
                   <textarea value={sub.title} onChange={(e) => onRename(e.target.value)} rows={1} aria-label="Step"
                     onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-                    className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[24px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background" />
+                    className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[20px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background sm:text-[24px]" />
                 </div>
                 {(sub.done || !isCurrent || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
@@ -528,7 +541,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   </div>
                   {held}
                   {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}
-                  <p className="text-[16px] text-muted">Paste a link or drop a file anywhere on this page to add it here.</p>
+                  <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
               )}
             </div>
