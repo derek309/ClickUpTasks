@@ -3368,7 +3368,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           return (
             <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} tone={stepTone(ps)}
               nextPanel={sentStep ? nextBody(true) : undefined}
-              onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
+              onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
+              onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
+                const st = statusForStep(task.status, stepStage({ ...ps, assigneeId: CLAUDE_ID }, task.assigneeId));
+                onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, assigneeId: CLAUDE_ID, followUpAt: TODAY } : x)), ...(st ? { status: st } : {}), ...(isCur ? handoffDates(ps.due) : {}) });
+                setOpenStepPage(null);
+                pushToast("Given to Claude. It comes back to you when Claude is done.");
+              }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient ? outFor(ps) : undefined} doneActions={ps.onClient ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}

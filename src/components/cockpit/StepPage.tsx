@@ -21,7 +21,7 @@ import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, onGiveToClaude, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -54,6 +54,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   /** What's next, once this step is done: shown at the bottom of the page
    *  (Derek, 2026-10-13: "mark this done, then it pops open down below"). */
   nextPanel?: React.ReactNode;
+  /** Hand this step, not done, to Claude to do (Derek, 2026-10-13: "I want
+   *  Claude to do it"). */
+  onGiveToClaude?: () => void;
   /** Finish the whole task from the bottom of the step. */
   onFinishTask?: () => void;
   /** Whose move it is, the same colour and sentence as the step's row. */
@@ -582,6 +585,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               ) : !sub.done && !doneActions && !sub.onClient ? (
                 <div className="flex flex-wrap items-center gap-2 border-t pt-4">
                   <button onClick={onMarkDone} className="inline-flex h-11 items-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"><I.check className="h-4 w-4" /> Mark this step done</button>
+                  {onGiveToClaude && <button onClick={onGiveToClaude} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">Give this step to Claude</button>}
                   {onFinishTask && <button onClick={onFinishTask} className="h-11 rounded-[5px] border px-4 text-[16px] font-semibold hover:bg-background">The task is finished</button>}
                 </div>
               ) : null}
