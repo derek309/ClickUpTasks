@@ -1783,13 +1783,30 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </section>
     );
   };
+  // The end of a step waiting on the client's review: what can happen next,
+  // each with what it does (Derek, 2026-10-13: "more guidance at the end of
+  // the step for next steps").
   const reviewAnswer = (sub: Subtask) => {
     const k = sentReviews(sub)[0];
     if (!k || sub.done) return null;
+    const sent = followUpsLine(sub.followUps);
+    const choices: { label: string; says: string; primary?: boolean; onClick: () => void }[] = [
+      { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
+      { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
+      ...(hasMessaging && messageDest?.email ? [{ label: "Send a reminder", says: `An email nudging ${firstName} to look. This step keeps waiting.`, onClick: () => remindStep(sub) }] : []),
+    ];
     return (
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => void markReview(k, "approved")} className="h-10 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{firstName} approved</button>
-        <button onClick={() => void markReview(k, "client_submitted")} className="h-10 rounded-lg border px-4 text-[16px] font-semibold hover:bg-background">{firstName} sent changes</button>
+      <div className="flex flex-col gap-2">
+        <b className="text-[16px]">What&apos;s next?</b>
+        <span className="text-[16px] text-muted">Still waiting? Send a reminder. Heard back by phone or email? Mark what {firstName} said.{sent ? ` ${sent}.` : ""}</span>
+        <div className="flex flex-col divide-y rounded-[5px] border">
+          {choices.map((c) => (
+            <div key={c.label} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+              <button onClick={c.onClick} className={`h-10 min-w-[11rem] rounded-[5px] px-4 text-[16px] font-semibold ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
+              <span className="min-w-0 flex-1 text-[16px] text-muted">{c.says}</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -2054,8 +2071,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Remind the client (Derek, 2026-10-13: "a reminder email, individual for
   // the task and the step"): a step holding an email that names this task and
   // what its current step waits on, with their portal opened on it.
-  const remindStep = () => {
-    const cur = currentStep(taskRef.current.subtasks);
+  // From a waiting review step (Derek, 2026-10-13: "I want to send a
+  // reminder"), the email is held on that step: sending it is a follow up on
+  // the wait, not a new step.
+  const remindStep = (onStep?: Subtask) => {
+    const cur = onStep ?? currentStep(taskRef.current.subtasks);
     const draft = taskRef.current.draftEmail;
     if (draft && htmlToText(draft.body).trim() && !window.confirm(`Replace the draft email "${draft.subject || "(no subject)"}" with a reminder to ${firstName}?`)) return;
     if (asking) setAskNext(null);
@@ -2071,7 +2091,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const id = newId("s_");
     const now = new Date().toISOString();
     onPatch({
-      subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
+      subtasks: onStep ? holdOnStep(taskRef.current.subtasks, onStep.id, "email") : holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
       draftEmail: { subject: `Reminder: ${task.title}`.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>A quick reminder about <strong>${esc(task.title)}</strong>.</p>${what}${where}`, replyTo: null, createdAt: now, updatedAt: now },
     });
     setEmailOpenNonce((n) => n + 1);
@@ -2135,7 +2155,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     // Booking lives on the client page and the calendar button; a step asks
     // them to meet (Derek, 2026-10-13).
-    ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: remindStep }] : []),
+    ...(hasMessaging && messageDest?.email ? [{ key: "remind", group: "talk" as const, label: `Remind ${firstName}`, disabled: false, onPick: () => remindStep() }] : []),
     ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
@@ -2609,6 +2629,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // 2026-10-13, the PPAI task).
     const holder = !stepId && channel === "email" ? taskRef.current.subtasks.find((x) => !x.done && x.holds?.includes("email")) : undefined;
     const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : holder ?? currentStep(taskRef.current.subtasks);
+    // A reminder held on a review out with the client: a follow up on that
+    // wait, and the email comes off the step.
+    if (cur?.onClient && channel === "email" && cur.holds?.includes("email")) {
+      const due = followUpDate || addBusinessDaysIso(TODAY, 2);
+      const list = recordFollowUp(taskRef.current.subtasks, cur.id, "email", due).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
+      onPatch({ subtasks: list, followUpAt: due });
+      pushToast(`Reminder sent. Still waiting on ${firstName}; checking again ${formatDue(due)}.`);
+      return true;
+    }
     if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
     const name = cur.title.trim();
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
