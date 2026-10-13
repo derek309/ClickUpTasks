@@ -65,6 +65,11 @@ body {
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.2s ease, color 0.2s ease;
+  /* Nothing may make the page wider than the screen: on a phone a wide email
+     or row widened it, and the Feedback tab (fixed to the right edge) sat off
+     screen with its label cut (Derek, 2026-10-13). clip, not hidden, so it
+     makes no scroll box and sticky bars still stick. */
+  overflow-x: clip;
 }
 
 * {
