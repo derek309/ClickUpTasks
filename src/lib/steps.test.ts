@@ -344,3 +344,19 @@ describe("new automatic steps go on the task's owner", () => {
     expect(ownNewSteps(before, after, "u_derek").map((x) => x.assigneeId ?? null)).toEqual([null, "u_derek", null, null, null]);
   });
 });
+
+describe("step history", () => {
+  it("keeps a deleted step whole, and notes finished and reopened ones", async () => {
+    const { stepChangeEvents } = await import("./data");
+    const before = [
+      { id: "a", title: "Write it", done: false, notes: "<p>Do this</p>" },
+      { id: "b", title: "For Claude", done: false, assigneeId: "u_claude" },
+      { id: "c", title: "Send it", done: true },
+      { id: "r", title: "Client asked", done: false, fromClient: true },
+    ];
+    const after = [{ ...before[0], done: true }, { ...before[2], done: false }];
+    const ev = stepChangeEvents(before, after);
+    expect(ev.map((e) => e.body)).toEqual(['finished the step "Write it"', 'deleted the step "For Claude"', 'reopened the step "Send it"']);
+    expect(ev[1]).toMatchObject({ step: before[1], stepAt: 1 });
+  });
+});

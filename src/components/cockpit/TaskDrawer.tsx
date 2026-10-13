@@ -1578,6 +1578,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onReplyInDock: (id, channel, preview) => setReplyTarget((r) => ({ id, channel, preview, n: (r?.n ?? 0) + 1 })),
     onNoteInDock: (text) => askDock("note", text),
     onAddToChanges: (text) => addToChanges(text),
+    // A deleted step back where it was, from its line in Changes (2026-10-13).
+    onRestoreStep: (c) => {
+      const st = c.step;
+      if (!st || taskRef.current.subtasks.some((x) => x.id === st.id)) return;
+      const list = [...taskRef.current.subtasks];
+      list.splice(Math.min(c.stepAt ?? list.length, list.length), 0, st);
+      onPatch({ subtasks: list });
+      pushToast(`Restored "${st.title || "step"}"`);
+    },
     onWrite: () => askDock("note"),
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,

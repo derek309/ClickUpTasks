@@ -200,11 +200,11 @@ function ActionBody({ text }: { text: string }) {
   );
 }
 
-export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; onAddToChanges?: (text: string) => void; onWrite?: () => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
+export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[]; onDeleteAction?: (id: string) => void; onEditAction?: (id: string, body: string) => void; onLogAction?: (a: TaskAction) => void; meId?: string | null; onSendDm?: (memberId: string, body: string) => void; onDeleteComment?: (id: string) => void; onMessageSent?: (channel: "chat" | "email" | "sms", body: string) => void; onComposeEmail?: (reply?: { subject?: string; replyTo?: string }) => void; onReplyInDock?: (id: string, channel: "chat" | "sms", preview: string) => void; onNoteInDock?: (text: string) => void; onAddToChanges?: (text: string) => void; onRestoreStep?: (c: Comment) => void; onWrite?: () => void; meetings?: ClientNote[]; description?: { node: React.ReactNode; has: boolean; onEdit?: () => void }; createdLine?: string; initialView?: "conversation" | "all" }): { feedArea: React.ReactNode; composerFooter: React.ReactNode; openCompose: (channel: Channel, body?: string) => void; showDescription: () => void } {
   const { task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, onAddToChanges, onWrite, meetings, description, createdLine } = p;
+    onDeleteMessage, onEditMessage, hasMessaging, actions, onDeleteAction, onEditAction, onLogAction, meId, onSendDm, onDeleteComment, onMessageSent, onComposeEmail, onReplyInDock, onNoteInDock, onAddToChanges, onRestoreStep, onWrite, meetings, description, createdLine } = p;
 
   // Conversation first: what was said and done. The app's own record of field
   // changes is one tab over, and folded to single lines under Everything.
@@ -1058,6 +1058,10 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
         <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center"><span className="h-2.5 w-2.5 rounded-full border-2 border-surface bg-muted/50" /></div>
         <div className="min-w-0 flex-1 pt-1 text-[16px] text-muted">
           <span className="font-medium text-foreground">{u?.name}</span>{" "}<EventText body={c.body} />{" · "}{timeAgo(c.at)}
+          {/* A deleted step comes back from here, as it was (2026-10-13). */}
+          {c.step && onRestoreStep && !task.subtasks.some((x) => x.id === c.step!.id) && (
+            <button onClick={() => onRestoreStep(c)} className="ml-2 font-semibold text-accent hover:underline">Restore</button>
+          )}
           {onDeleteComment && (
             <button onClick={() => onDeleteComment(c.id)} title="Delete this entry"
               className="ml-1.5 rounded p-0.5 align-middle opacity-0 transition hover:text-danger group-hover:opacity-100">

@@ -806,6 +806,11 @@ export interface Comment {
    * comment counts. Absent/"comment" = a real user comment. */
   kind?: "comment" | "event";
   attachments?: Attachment[]; // images pasted/attached into the comment
+  /** On a "deleted the step" event: the step as it was and where it sat, so
+   *  the Changes tab can put it back (Derek, 2026-10-13: "a history ... so
+   *  that we can recover things"). */
+  step?: Subtask;
+  stepAt?: number;
 }
 
 export interface Subtask {
@@ -3136,6 +3141,23 @@ export function clientEmailText(body: string, signer?: string | null): string {
   const sig = signatureCut(text, signer);
   if (sig > 0) text = text.slice(0, sig);
   return text.replace(/\*{1,2}([^*\n]+?)\*{1,2}/g, "$1").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** The step lines for a task's Changes tab: a step deleted (kept whole, to
+ *  restore), finished or reopened. The client's own requests and the "Task
+ *  done" record are left out; they say themselves elsewhere. */
+export function stepChangeEvents(before: Subtask[], after: Subtask[]): { body: string; step?: Subtask; stepAt?: number }[] {
+  const named = (s: Subtask) => `"${(s.title || "a step").replace(/\s+/g, " ").slice(0, 120)}"`;
+  const out: { body: string; step?: Subtask; stepAt?: number }[] = [];
+  const now = new Map(after.map((s) => [s.id, s]));
+  before.forEach((s, at) => {
+    if (s.fromClient || s.addedFor === "finished") return;
+    const a = now.get(s.id);
+    if (!a) out.push({ body: `deleted the step ${named(s)}`, step: s, stepAt: at });
+    else if (!s.done && a.done) out.push({ body: `finished the step ${named(a)}` });
+    else if (s.done && !a.done) out.push({ body: `reopened the step ${named(a)}` });
+  });
+  return out;
 }
 
 /** A task named with the whole request rather than a name: it gets a short

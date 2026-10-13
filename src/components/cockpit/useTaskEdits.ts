@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, datesForCurrentStep, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, datesForCurrentStep, stepChangeEvents, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -75,6 +75,10 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       }
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
+    // Steps deleted, finished or reopened go on the task's Changes, the same as
+    // patchTask, so a deleted step can be put back (Derek, 2026-10-13).
+    const stepEvents = cur && synced.subtasks ? stepChangeEvents(cur.subtasks, synced.subtasks).map((e) => ({ id: newId("cm_"), authorId: me.id, at: new Date().toISOString(), kind: "event" as const, ...e })) : [];
+    if (stepEvents.length) Object.assign(synced, { comments: [...(cur?.comments ?? []), ...stepEvents] });
     setTasks((ts) => { let next = ts.map((t) => (t.id === id ? { ...t, ...synced } : t)); if (clone) next = [...next, clone]; return next; });
     // The ref catches up now, not after the next render, so a second change
     // in the same click builds on this one instead of a copy from before it
@@ -84,7 +88,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // Only the columns this edit changed (saveTaskEdit), so a checklist tick
     // from this window can't carry stale comments or fields over newer ones.
     if (cur) {
-      void saveTaskEdit(cur, { ...cur, ...synced, ...(item ? { subtasks: cur.subtasks } : {}) }, me.id);
+      void saveTaskEdit(cur, { ...cur, ...synced, comments: cur.comments, ...(item ? { subtasks: cur.subtasks } : {}) }, me.id);
+      for (const e of stepEvents) void appendCommentDb(id, e);
       if (item) saveChecklistChange(id, item, me.id);
       if (clone) upsertTask(clone, me.id);
     }
@@ -210,7 +215,11 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (checkBack) synced.followUpAt = checkBack;
     const withDue = followUpWithDue(before, synced);
     if (withDue !== undefined) synced.followUpAt = withDue;
-    const events = describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const }));
+    const events = [
+      ...describeFieldChange(before, synced).map((body) => ({ id: newId("cm_"), authorId: me.id, body, at: new Date().toISOString(), kind: "event" as const })),
+      // Steps deleted, finished or reopened: a history to recover from (2026-10-13).
+      ...(synced.subtasks ? stepChangeEvents(before.subtasks, synced.subtasks).map((e) => ({ id: newId("cm_"), authorId: me.id, at: new Date().toISOString(), kind: "event" as const, ...e })) : []),
+    ];
     const updated: Task = { ...before, ...synced, comments: events.length ? [...before.comments, ...events] : before.comments };
     let clone: Task | null = null;
     if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
