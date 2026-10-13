@@ -8,7 +8,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
-  isHandoffStep, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
+  isHandoffStep, isLongTitle, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -146,6 +146,35 @@ export async function requestOntoStepOne(taskId: string, request: string, title:
     } });
   }
   return ok;
+}
+
+/** Each open step named with a whole request gets a short name, and the
+ *  request goes on top of its directions. How many it renamed. */
+export async function longStepsToDirections(taskId: string, nameFor: (request: string) => Promise<string>): Promise<number> {
+  const { data } = await supabaseAdmin.from("tasks").select("subtasks").eq("id", taskId).maybeSingle();
+  const long = (((data as { subtasks?: Subtask[] | null } | null)?.subtasks) ?? []).filter((x) => !x.done && !x.fromClient && isLongTitle(x.title));
+  if (!long.length) return 0;
+  const names = new Map(await Promise.all(long.map(async (x) => [x.title, await nameFor(x.title)] as const)));
+  const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let count = 0;
+  const ok = await rewriteSteps(taskId, (row) => {
+    count = 0;
+    const next = (row.subtasks ?? []).map((x) => {
+      const name = !x.done && !x.fromClient ? names.get(x.title) : undefined;
+      if (!name) return x;
+      count++;
+      const request = x.title.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
+      return { ...x, title: name, notes: x.notes?.trim() ? `${request}${x.notes}` : request };
+    });
+    return count ? next : null;
+  });
+  if (ok) {
+    await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: {
+      id: "cm_" + crypto.randomUUID(), authorId: "u_derek", at: new Date().toISOString(), kind: "event",
+      body: count === 1 ? "shortened a step's name; the full request is now its directions" : `shortened ${count} steps' names; each full request is now its directions`,
+    } });
+  }
+  return ok ? count : 0;
 }
 
 /** Client work's Add, Meeting transcript: the meeting's two steps, dated to

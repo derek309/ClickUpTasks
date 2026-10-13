@@ -560,13 +560,15 @@ export async function trashedSince(table: "tasks" | "clients", sinceIso: string)
 
 // A task named with the whole request: once saved, the server gives it a short
 // name and makes the request step 1's directions (lib/tidyTitle, 2026-10-13).
-export const tidyIfLong = (id: string, title: string) => {
-  if (!isLongTitle(title)) return;
+// A step named the same way gets the same: a short name, the request as its
+// directions.
+export const tidyIfLong = (id: string, title: string, subtasks?: Subtask[] | null) => {
+  if (!isLongTitle(title) && !(subtasks ?? []).some((x) => !x.done && !x.fromClient && isLongTitle(x.title))) return;
   void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST" }).catch(() => undefined);
 };
 export const upsertTask = (t: Task, updatedBy?: string | null) => {
   noteTaskWrite(t.id);
-  return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title); return r; });
+  return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title, t.subtasks); return r; });
 };
 
 /** The task columns an edit actually changes, compared as stored. Saving an
@@ -601,7 +603,7 @@ export async function saveTaskEdit(before: Task, after: Task, updatedBy?: string
   }
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
   if (res && !res.error && !res.data?.length) return upsertTask(after, updatedBy);
-  if ("title" in changed && res && !res.error) tidyIfLong(after.id, after.title);
+  if (("title" in changed || "subtasks" in changed) && res && !res.error) tidyIfLong(after.id, "title" in changed ? after.title : "", "subtasks" in changed ? after.subtasks : null);
   return res;
 }
 /** A task's draft email, written alone: the only browser write of draft_email

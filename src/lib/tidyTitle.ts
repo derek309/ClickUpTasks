@@ -5,7 +5,7 @@
 // long name, from the app (db.ts) or Claude (MCP).
 import { GEMINI_URL, geminiHeaders } from "./ai";
 import { isLongTitle } from "./data";
-import { requestOntoStepOne } from "./stepsServer";
+import { longStepsToDirections, requestOntoStepOne } from "./stepsServer";
 import { supabaseAdmin } from "./supabaseAdmin";
 
 const words = (s: string, n: number) => s.trim().split(/\s+/).slice(0, n).join(" ");
@@ -40,12 +40,43 @@ async function namesFor(request: string): Promise<{ title: string; step: string 
   }
 }
 
+/** A short name for a step typed as a whole request; a plain cut when Gemini
+ *  is not there or says nothing usable. */
+async function stepNameFor(request: string): Promise<string> {
+  const fallback = words(request.replace(/[.!?][\s\S]*$/, ""), 8);
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return fallback;
+  const prompt = [
+    "A teammate typed a whole request as the name of one step of a task. Name the step.",
+    'Reply as JSON: {"step": string}.',
+    "step: what this step does, starting with a verb, 3 to 8 words, plain words, no dashes, no ending period. Keep names of people, clients and products.",
+    `Request: ${request.slice(0, 2000)}`,
+  ].join("\n");
+  try {
+    const res = await fetch(GEMINI_URL, {
+      method: "POST", headers: geminiHeaders(apiKey),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } } }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return fallback;
+    const raw: string = (await res.json())?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const j = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim()) as { step?: unknown };
+    const step = typeof j.step === "string" ? j.step.replace(/\s*[—–-]\s*/g, ", ").replace(/[.\s]+$/, "").trim().slice(0, 90) : "";
+    return step && !isLongTitle(step) ? step : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** Shortens a long task name and moves the request onto step 1. False when
  *  the name is not long (or was changed in the meantime). */
-export async function tidyLongTitle(taskId: string): Promise<{ ok: boolean; title?: string }> {
+export async function tidyLongTitle(taskId: string): Promise<{ ok: boolean; title?: string; steps?: number }> {
   const { data } = await supabaseAdmin.from("tasks").select("title").eq("id", taskId).maybeSingle();
   const request = String((data as { title?: string } | null)?.title ?? "").trim();
-  if (!request || !isLongTitle(request)) return { ok: false };
+  // A step typed as the whole request: a short name, the request its
+  // directions (Derek, 2026-10-13, the Lincoln Automotive step).
+  const steps = await longStepsToDirections(taskId, stepNameFor);
+  if (!request || !isLongTitle(request)) return { ok: steps > 0, steps };
   const { title, step } = await namesFor(request);
   const done = await requestOntoStepOne(taskId, request, title, step);
   return done ? { ok: true, title } : { ok: false };
