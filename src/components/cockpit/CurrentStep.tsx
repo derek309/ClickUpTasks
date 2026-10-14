@@ -21,7 +21,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -41,6 +41,9 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   /** What the step's + Add offers (TaskDrawer stepAddOptions). */
   addOptions?: AddOption[];
   held?: React.ReactNode;
+  /** Whose turn, as a face before the words: the person's avatar, Claude's
+   *  icon, the client's initials. */
+  face?: React.ReactNode;
   /** Its links and files, their own row under the work. */
   files?: React.ReactNode;
   /** The client's waiting step: the review out with them, in place of held. */
@@ -97,8 +100,17 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   // 2026-10-14: it was pale grey under a red line).
   const context = whatsNext ? htmlToText(sub.notes ?? "").trim() : "";
 
+  // A click on the card's empty space opens the step's page; what is on it
+  // keeps its own click, and selecting text opens nothing (Derek,
+  // 2026-10-14). Keyboard users have Open the step.
+  const openFromCard = (e: React.MouseEvent<HTMLDivElement>) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("a, button, input, textarea, select, label, [role=button], [contenteditable=true], [data-no-open]")) return;
+    if ((window.getSelection?.()?.toString() ?? "").trim()) return;
+    onOpenStep();
+  };
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div onClick={openFromCard} className="flex min-w-0 cursor-pointer flex-col gap-3">
       <div className="flex flex-col gap-1">
         {whatsNext || naming ? (
           <input value={whatsNext ? (typed ? "" : suggestion ?? "") : sub.title} aria-label="Name the next step" placeholder="What's next? Name the next step"
@@ -116,7 +128,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
         )}
         {/* Whose move it is, strong red for yours, the step's own colour otherwise. */}
         <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold leading-snug ${tone.sayTone}`}>
-          <span>{tone.say ?? tone.word}</span>
+          <span className="inline-flex items-center gap-2">{face}<span>{tone.say ?? tone.word}</span></span>
           {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
         </div>
         {sub.cloudError === "not_set_up" && !sub.done && (
@@ -159,22 +171,17 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
       {!sub.onClient && !whatsNext && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0) && todo.node}
       {/* How it ends: Done, then What's next; a waiting, check in or "what's
           next?" step has its own choices. The only dark button on the page. */}
-      {!sub.done && doneActions ? (
-        <div className="border-t pt-3">{doneActions}</div>
-      ) : !sub.done && !sub.onClient ? (
-        <div className="border-t pt-3">
-          {sendReady ? (
-            <div className="flex flex-col items-start gap-2">
-              <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {firstName}</button>
-              <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
-            </div>
-          ) : (
-            <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
-          )}
-        </div>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px]">
-        {quick && <><button onClick={quick.onPick} className={link}>{quick.label}</button><span aria-hidden className="text-muted">·</span></>}
+      {!sub.done && doneActions && <div className="border-t pt-3">{doneActions}</div>}
+      {/* One line: Done (the page's one dark button), then Open the step
+          beside it, wrapping under only when the width forces it. No quick
+          action link here (Derek, 2026-10-14). */}
+      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px] ${!sub.done && !doneActions && !sub.onClient ? "border-t pt-3" : ""}`}>
+        {!sub.done && !doneActions && !sub.onClient && (sendReady ? (<>
+          <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {firstName}</button>
+          <button onClick={onMarkDone} className="font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
+        </>) : (
+          <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
+        ))}
         <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
       </div>
     </div>

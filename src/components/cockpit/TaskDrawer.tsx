@@ -1833,7 +1833,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <div className="text-[16px] leading-snug sm:text-[18px]">
         {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
-        <span className="font-semibold"><span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />{t.word}</span>
+        <span className="font-semibold">{turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{t.word}</span>
         {/* The comma rides inside the picker's box: on a phone it wrapped onto
             the start of the next line. */}
         {parts.map((p, i) => (
@@ -1995,6 +1995,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const word = state === "done" ? "Done" : state === "claude" ? "Claude's turn" : state === "mine" ? "Your turn" : state === "later" ? laterWord(sub, steps) : say ?? "Waiting";
     return { state, say, word, sayTone, rowTone: ROW_TONE[state] };
   };
+  // Whose turn as a face (Derek, 2026-10-14): the person's avatar, Claude's
+  // ✳, the client's initials; yours is your own avatar.
+  const turnFace = (sub: Subtask): React.ReactNode => {
+    const { state } = stepTone(sub);
+    const st = stepStage(sub, task.assigneeId);
+    if (state === "done") return null;
+    if (state === "claude") return <span aria-hidden title="Claude" className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] bg-orange-600 text-[13px] font-bold text-white">✳</span>;
+    if (sub.onClient || st === "waiting" || sub.finishWhen === "reply") return <span title={client.name} aria-hidden className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>;
+    const person = state === "mine" ? meId ?? null : sub.assigneeId ?? task.assigneeId ?? null;
+    return person ? <span aria-hidden className="inline-flex shrink-0"><Avatar id={person} size={22} /></span> : null;
+  };
   // phoneHidden: folded away on a phone only (the second of the last two done).
   const stepRow = (sub: Subtask, i: number, phoneHidden = false, noDeskTop = false) => {
     const isActive = activeStep?.id === sub.id;
@@ -2133,7 +2144,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
-            onCopyForClaude={() => void copyForClaude()}
+            onCopyForClaude={() => void copyForClaude()} face={turnFace(sub)}
             suggestion={suggestionFor(sub)?.name ?? undefined} onAcceptSuggestion={() => acceptSuggestion(sub.id)}
             picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
