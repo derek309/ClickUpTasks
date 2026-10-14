@@ -88,6 +88,18 @@ const draftPlainTextToHtml = (text) => {
   return text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("");
 };
 const NOTE_TYPES = ["meeting", "decision", "note"];
+// A task's directions go on step 1, never its description (Derek, 2026-10-14):
+// the app's directionsOntoStepOne (src/lib/data.ts), replicated here because
+// this is a separate Node process with no app import. What Claude writes is
+// plain text with a little markdown (docTextToHtml below), or HTML as it is.
+const directionsHtml = (text) => (/^\s*<[a-z][\s\S]*>/i.test(text) ? text : docTextToHtml(text));
+// Step 1's name when it is made: the task's name, cut to its first words when
+// the name is the whole request (the app's isLongTitle).
+function stepOneName(title) {
+  const t = String(title || "").replace(/\s+/g, " ").trim();
+  const long = /\n/.test(String(title || "")) || t.length > 90 || t.split(" ").length > 16;
+  return (long ? t.replace(/[.!?]\s[\s\S]*$/, "").split(" ").slice(0, 8).join(" ") : t) || "Work out what is needed";
+}
 
 // The client review document is stored as HTML the app's editor reads. Claude
 // works in plain text with a little markdown, both ways:
@@ -478,12 +490,12 @@ export function createServer(opts = {}) {
     });
 
   server.tool("create_task",
-    "Create a new task under a client (and optionally a specific list/project). Defaults match the app's quick-add: due tomorrow, priority normal — except assignee, which defaults to unassigned since you're creating on the user's behalf, not as yourself. Get ids from list_clients/list_projects.",
+    "Create a new task under a client (and optionally a specific list/project). Defaults match the app's quick-add: due tomorrow, priority normal — except assignee, which defaults to unassigned since you're creating on the user's behalf, not as yourself. Get ids from list_clients/list_projects. A task has no description: what it needs (description) is written as step 1's directions, and step 1 is made for it, named for the task.",
     {
       client_id: z.string(),
       project_id: z.string().optional().describe("omit to use (or create) the client's default \"Tasks\" list"),
       title: z.string().min(1),
-      description: z.string().optional(),
+      description: z.string().optional().describe("what the task needs: written to step 1's directions (step 1 is made, named for the task), not a task description. Plain text with a little markdown"),
       due: z.string().optional().describe("yyyy-mm-dd; defaults to tomorrow"),
       priority: z.enum(["none", "normal", "urgent"]).optional().describe("defaults to \"normal\"; \"conversation\" is reserved/auto-created only"),
       assignee_id: z.string().optional().describe("roster member id (get one from list_members), or \"me\" for yourself; defaults to unassigned"),
@@ -514,7 +526,9 @@ export function createServer(opts = {}) {
         assigneeIdResolved = resolved.id;
       }
       const t = {
-        id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: description || "",
+        id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: "",
+        // What it needs is step 1's directions (Derek, 2026-10-14).
+        ...(stripHtml(description || "") ? { subtasks: [{ id: rid("s_"), title: stepOneName(title), done: false, notes: directionsHtml(description), startedAt: nowIso() }] } : {}),
         // "waiting" status and waiting_on_client always move together (see
         // data.ts's applyWaitingStatusSync) — this tool bypasses that helper
         // (separate Node process, no app import), so it replicates the same
@@ -531,15 +545,16 @@ export function createServer(opts = {}) {
       const renamed = tidied?.ok ? ` Its name was the whole request, so it is now "${tidied.title}" and the request is step 1's directions.` : "";
       await members();
       const assigneeLabel = t.waiting_on_client ? "waiting on client" : (t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned");
-      return { content: [{ type: "text", text: `Created ${t.id}: "${tidied?.ok ? tidied.title : t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.${renamed}` }] };
+      const onStep = t.subtasks ? ` The description is step 1's directions ("${t.subtasks[0].title}").` : "";
+      return { content: [{ type: "text", text: `Created ${t.id}: "${tidied?.ok ? tidied.title : t.title}" in ${clientNames[client_id]} · due ${t.due} · priority ${t.priority} · assignee: ${assigneeLabel}.${onStep}${renamed}` }] };
     });
 
   server.tool("update_task",
-    "Edit an existing task's title, description, priority, due date, assignee, list, client, or contact. Only the fields you pass are changed. Get the id from get_task/list_my_tasks. client_id moves it to another client: it lands on that client's Tasks list (or project_id, a list of the new client), its contact becomes the new client's own, any GoHighLevel task link is dropped, and the move is logged in its Changes.",
+    "Edit an existing task's title, step 1's directions (description), priority, due date, assignee, list, client, or contact. Only the fields you pass are changed. A task has no description: description is added to the end of step 1's directions, and with no steps, step 1 is made, named for the task. Get the id from get_task/list_my_tasks. client_id moves it to another client: it lands on that client's Tasks list (or project_id, a list of the new client), its contact becomes the new client's own, any GoHighLevel task link is dropped, and the move is logged in its Changes.",
     {
       id: z.string(),
       title: z.string().min(1).optional(),
-      description: z.string().optional(),
+      description: z.string().optional().describe("added to the end of step 1's directions (step 1 is made, named for the task, when there are no steps), never the task's description. Plain text with a little markdown"),
       priority: z.enum(["none", "normal", "urgent"]).optional().describe("\"conversation\" is reserved/auto-created only, can't be set manually"),
       due: z.string().nullable().optional().describe("yyyy-mm-dd, or null to clear the due date"),
       assignee_id: z.string().nullable().optional().describe("roster member id (get one from list_members), \"me\" for yourself, or null to unassign"),
@@ -551,14 +566,13 @@ export function createServer(opts = {}) {
     async ({ id, title, description, priority, due, assignee_id, waiting_on_client, project_id, client_id, contact_id }) => {
       const patch = {};
       if (title !== undefined) patch.title = title.trim();
-      if (description !== undefined) patch.description = description;
       if (priority !== undefined) patch.priority = priority;
       if (due !== undefined) patch.due = due;
       // Read first on every edit, not only the ones that could cross the
       // waiting boundary: the read is what enforces trash and privacy, and
       // "waiting" status and waiting_on_client always move together after it
       // (see data.ts's applyWaitingStatusSync).
-      const before = await loadTask(id, "status,follow_up_at,client_id,project_id,ghl_task_id");
+      const before = await loadTask(id, "title,status,follow_up_at,client_id,project_id,ghl_task_id,subtasks");
       if (!before) return noTask(id);
       // Move to another client (Derek, 2026-10-07): the Client box's rules,
       // shared through taskMove.mjs, and the same Changes line it writes.
@@ -617,7 +631,23 @@ export function createServer(opts = {}) {
       }
       const checkBack = patch.status === "waiting" ? waitingFollowUp(before) : null;
       if (checkBack) patch.follow_up_at = checkBack;
-      if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to update — provide at least one field." }] };
+      // The description is step 1's directions (Derek, 2026-10-14): on the end
+      // of step 1's own, or a step 1 made for it, named for the task. One step
+      // in a locked row (supabase/checklist-functions.sql), like check_item.
+      let stepLine = "";
+      if (description !== undefined && stripHtml(description)) {
+        const html = directionsHtml(description);
+        const first = (before.subtasks || []).find((x) => !x.fromClient);
+        if (first) {
+          await sb("rpc/patch_subtask", "POST", { task_id: id, subtask_id: first.id, patch: { notes: stripHtml(first.notes || "") ? `${first.notes}${html}` : html }, author: null });
+          stepLine = ` Added to step 1's directions ("${first.title}").`;
+        } else {
+          const step = { id: rid("s_"), title: stepOneName(patch.title ?? before.title), done: false, notes: html, startedAt: nowIso() };
+          await sb("rpc/append_subtasks", "POST", { task_id: id, items: [step], author: null });
+          stepLine = ` Made step 1 ("${step.title}") with it as the directions.`;
+        }
+      }
+      if (!Object.keys(patch).length) return { content: [{ type: "text", text: stepLine ? `Updated ${id}.${stepLine}` : "Nothing to update — provide at least one field." }] };
       const [t] = await patchTask(id, patch);
       if (!t) return noTask(id);
       // The Changes line, appended atomically like add_comment; updated_by
@@ -635,7 +665,7 @@ export function createServer(opts = {}) {
         .join(", ");
       const tidied = patch.title && opts.services?.tidyTitle ? await opts.services.tidyTitle(id).catch(() => null) : null;
       const renamed = tidied?.ok ? ` Its name was long, so it is now "${tidied.title}" and the request is step 1's directions.` : "";
-      return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}${renamed}` }] };
+      return { content: [{ type: "text", text: `Updated ${id} — ${changed}.${ghl}${stepLine}${renamed}` }] };
     });
 
   server.tool("delete_task",
