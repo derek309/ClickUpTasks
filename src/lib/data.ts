@@ -2413,6 +2413,7 @@ const USELESS_TITLES = new Set([
   "open", "sign in", "sign in - google accounts", "google drive", "google docs",
   "redirecting", "redirecting…", "loading", "loading…", "untitled", "untitled document",
   "error", "not found", "access denied", "just a moment...", "attention required!",
+  "chatgpt", "claude",
 ]);
 export function isUselessTitle(title: string): boolean {
   const t = title.trim().toLowerCase();
@@ -2497,9 +2498,37 @@ export function tidyEmailText(text: string): string {
     .trim();
 }
 
+/** A chat with an AI, by where it lives: its address is only an id. */
+export function chatLinkName(url: string): string | null {
+  let u: URL;
+  try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, "");
+  if ((host === "chatgpt.com" || host === "chat.openai.com") && /^\/(?:c|share|g)\//.test(u.pathname)) return "ChatGPT chat";
+  if (host === "claude.ai" && /^\/(?:chat|share)\//.test(u.pathname)) return "Claude chat";
+  return null;
+}
+
+/** A name that is an id, not a name: a uuid, or groups of hex with digits in
+ *  them ("6acfa6f6 ceb4 83e8 b663 27b6fbf564d9", Derek 2026-10-14). */
+export function looksLikeIdName(name: string): boolean {
+  const t = name.trim();
+  if (!t || !/\d/.test(t)) return false;
+  const parts = t.split(/[\s_-]+/).filter(Boolean);
+  if (parts.length >= 2 && parts.every((p) => /^[0-9a-f]{3,}$/i.test(p)) && parts.some((p) => p.length >= 8) && parts.join("").length >= 16) return true;
+  return parts.length === 1 && /^[0-9a-f]{16,}$/i.test(t);
+}
+
+/** What a link shows as: its name, unless that name is an id, then a name
+ *  read off its address. */
+export function linkDisplayName(a: { name: string; url?: string | null }): string {
+  return a.url && looksLikeIdName(a.name) ? prettyLinkName(a.url) : a.name;
+}
+
 export function prettyLinkName(url: string): string {
   const google = googleLinkName(url);
   if (google) return google;
+  const chat = chatLinkName(url);
+  if (chat) return chat;
   let u: URL;
   try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return url.slice(0, 120); }
   const host = u.hostname.replace(/^www\./, "");
@@ -2507,6 +2536,7 @@ export function prettyLinkName(url: string): string {
   for (let i = segments.length - 1; i >= 0; i--) {
     const raw = decodeURIComponent(segments[i]).replace(/\.(html?|php|aspx)$/i, "");
     const words = raw.replace(/[_+-]+/g, " ").replace(/\s+/g, " ").trim();
+    if (looksLikeIdName(words)) continue;
     // Skip pure ids and hashes: they are not names, however long they are.
     if (words.length < 3) continue;
     if (!/[a-z]/i.test(words)) continue;
@@ -3657,6 +3687,18 @@ export function holdOnStep(subtasks: Subtask[], stepId: string, key: string): Su
     return unname({ ...s, holds: holds.length ? holds : undefined }, key);
   });
 }
+/** Where a link or file added now goes (Derek, 2026-10-14: a link added while
+ *  working a step landed on the task, not the step). A step's own page puts it
+ *  on that step; on the task page it goes on the step picked beside Link and
+ *  Attach, else the current step. `pick` null is "Not on a step"; a picked step
+ *  since finished or deleted falls back to the current one. */
+export function addTargetStep<T extends Pick<Subtask, "id" | "done" | "fromClient">>(subtasks: T[], pick: string | null | undefined, pageStepId?: string | null): string | null {
+  if (pageStepId) return pageStepId;
+  if (pick === null) return null;
+  if (pick && subtasks.some((s) => s.id === pick && !s.done)) return pick;
+  return currentStep(subtasks)?.id ?? null;
+}
+
 /** The work a step was named after came off it: its old name comes back,
  *  unless someone has renamed it since. */
 function unname(s: Subtask, key: string): Subtask {

@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -261,16 +261,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const addLink = () => {
     const url = linkUrl.trim();
     if (!url) return;
+    addLinkOn(url, linkLabel.trim(), linkTarget ?? addStepId);
+    setLinkTarget(null);
+    setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
+  };
+  // A link onto the task and, when given, onto that step (a step's own page
+  // adds straight to itself).
+  const addLinkOn = (url: string, typed: string, onStep: string | null) => {
     const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
     const id = newId("at_");
-    const typed = linkLabel.trim();
     // Named immediately from the URL so the row never shows a raw link, then
     // upgraded in place if the page has a real title. Doing it the other way
     // round would leave a blank row while a slow site thinks about it.
     onPatch({ attachments: [...taskRef.current.attachments, { id, name: typed || prettyLinkName(href), kind: "link", size: "", url: href }] });
-    // Asked for from a step's + menu: it goes on that step too (phase 4).
-    if (linkTarget) { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, linkTarget, attachmentKey(id)) }); setLinkTarget(null); }
-    setLinkUrl(""); setLinkLabel(""); setLinkOpen(false);
+    // Asked for from a step's + menu, or added with a step picked beside
+    // Link (the current step unless changed): it goes on that step too.
+    if (onStep) onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, onStep, attachmentKey(id)) });
     if (!typed) void fetchLinkTitle(id, href);
   };
   // The client's saved short links put on a step (Derek, 2026-10-12): each
@@ -480,8 +486,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       setFileOverDrawer(false);
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
-      // Dropped on a step's page: the files go onto that step too.
-      if (pageStepId) setFileTarget({ stepId: pageStepId, before: task.attachments.map((a) => a.id) });
+      // Dropped on a step's page, or on the task page with a step to add
+      // to: the files go onto that step too.
+      if (addStepId) setFileTarget({ stepId: addStepId, before: task.attachments.map((a) => a.id) });
       onAddFiles(e.dataTransfer.files);
     },
   };
@@ -679,8 +686,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       e.preventDefault();
       const dt = new DataTransfer();
       files.forEach((f) => dt.items.add(f));
-      // Pasted on a step's page: the files go onto that step too.
-      if (pageStepId) setFileTarget({ stepId: pageStepId, before: task.attachments.map((a) => a.id) });
+      // Pasted on a step's page (or the task page's step to add to): the
+      // files go onto that step too.
+      if (addStepId) setFileTarget({ stepId: addStepId, before: task.attachments.map((a) => a.id) });
       onAddFiles(dt.files);
       return;
     }
@@ -711,10 +719,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // the two ways of adding a link produced different-looking rows.
     const pastedId = newId("at_");
     onPatch({ attachments: [...taskRef.current.attachments, { id: pastedId, name: prettyLinkName(text), kind: "link", size: "", url: text }] });
-    // Pasted on a step's page: the link goes onto that step too.
-    if (pageStepId) onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, pageStepId, attachmentKey(pastedId)) });
+    // Pasted on a step's page, or on the task page with a step to add to:
+    // the link goes onto that step too.
+    if (addStepId) onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, addStepId, attachmentKey(pastedId)) });
     void fetchLinkTitle(pastedId, text);
-    pushToast?.(pageStepId ? "Link added to this step" : "Link attached");
+    pushToast?.(pageStepId ? "Link added to this step" : addStepId ? `Link added to step ${stepNumberOf(addStepId)}` : "Link attached");
   };
   // Loaded here rather than with the initial payload: unlike tasks or clients
   // this grows without bound and only one task's worth is ever on screen.
@@ -1684,7 +1693,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // (never both, since they're mutually exclusive) so fileRef always resolves.
   const hiddenFileInput = (
     <input ref={fileRef} type="file" multiple className="hidden"
-      onChange={(e) => { if (e.target.files) onAddFiles(e.target.files); e.target.value = ""; }} />
+      onChange={(e) => {
+        if (e.target.files) {
+          // Onto the step being added to (the picker beside Attach, or the open step's page).
+          if (addStepId) setFileTarget({ stepId: addStepId, before: taskRef.current.attachments.map((a) => a.id) });
+          onAddFiles(e.target.files);
+        }
+        e.target.value = "";
+      }} />
   );
 
   const documentBlock = (onCurrentStep = false) => !canHaveDocument ? null : (
@@ -2825,7 +2841,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             return (
               <span key={a.id} className="group flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                 {editing ? (
-                  <input autoFocus defaultValue={a.name}
+                  <input autoFocus defaultValue={isLink ? linkDisplayName(a) : a.name}
                     onBlur={(e) => { renameAttachment(a.id, e.target.value); setRenamingAttId(null); }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") { renameAttachment(a.id, e.currentTarget.value); setRenamingAttId(null); }
@@ -2841,7 +2857,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       by side, a phone squeezed the name to a letter a line
                       (Derek, 2026-10-13). */}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{a.name}</span>
+                    <span className="block truncate">{isLink ? linkDisplayName(a) : a.name}</span>
                     {(a.size || stepNoHolding(attachmentKey(a.id)) > 0) && (
                       <span className="block truncate font-normal text-muted" title={stepTitleHolding(attachmentKey(a.id)) ?? undefined}>{[a.size, stepNoHolding(attachmentKey(a.id)) > 0 && `Step ${stepNoHolding(attachmentKey(a.id))}`].filter(Boolean).join(" · ")}</span>
                     )}
@@ -3497,6 +3513,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (moved && (pageSub.note || pageSub.handoff?.goal || pageSub.handoff?.steps?.length || pageSub.handoff?.links?.length || pageSub.handoff?.fileIds?.length || pageSub.handoff?.deliverables?.length || pageSub.handoff?.doneWhen?.length)) onPatchSub(pageSub.id, moved);
   }, [pageSub?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageStepId = openStepPage?.taskId === task.id ? openStepPage.id : null;
+  // Where a link or file added now goes (Derek, 2026-10-14: a link added
+  // while working a step landed on the task): the open step's page, else the
+  // step picked beside Link and Attach, the current step until one is picked.
+  const [addOnStep, setAddOnStep] = useState<string | null | undefined>(undefined);
+  const addStepId = addTargetStep(task.subtasks, addOnStep, pageStepId);
   // What's next opening in the steps comes into view.
   const nextInlineId = nextInline() ? sentStep!.id : null;
   useEffect(() => {
@@ -3677,7 +3698,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 ) : a ? (
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                     {a.url
-                      ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
+                      ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{linkDisplayName(a)}</span></a>
                       : <button onClick={() => (isPicture(a) ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
                     <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
                       className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
@@ -3854,11 +3875,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const filesEmpty = fileCount === 0 && !uploadProgress && !linkOpen && deletedOpen === 0;
   const filesOpen = !filesEmpty && (!isFolded("Files") || linkOpen || !!uploadProgress || deletedOpen > 0);
   const sentShown = sentOpen ? (messages ?? []).find((m) => m.id === sentOpen) : null;
+  // Where a link or file added from this card goes, beside Link and Attach:
+  // the current step until another is picked (Derek, 2026-10-14).
+  const openForAdd = steps.filter((x) => !x.done);
+  const stepPicker = openForAdd.length > 0 && (
+    <label className="inline-flex items-center">
+      <span className="sr-only">Links and files added here go on</span>
+      <select value={addStepId ?? ""} onChange={(e) => setAddOnStep(e.target.value || null)} title="Where a link or file added here goes"
+        className="max-w-[10rem] cursor-pointer rounded-[5px] bg-transparent py-1 text-[16px] text-muted outline-none hover:text-foreground">
+        {openForAdd.map((x) => <option key={x.id} value={x.id}>On step {stepNumberOf(x.id)}</option>)}
+        <option value="">Not on a step</option>
+      </select>
+    </label>
+  );
   const filesCard = (
     <section id="task-files"
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
+      // The drawer around it adds the files (onto the step being added to);
+      // adding here as well uploaded each file twice.
+      onDrop={() => setAttFileDragOver(false)}
       className={`${CARD} transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
       <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 ${filesOpen ? "mb-3" : ""}`}>
         {filesEmpty ? headingText("Files") : heading("Files", fileCount > 0 && <span className="font-normal text-muted">· {fileCount}</span>)}
@@ -3874,6 +3910,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               </select>
             )}
             {addMenu}
+            {stepPicker}
             <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
             <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
           </span>
@@ -4205,7 +4242,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             rather than navigating the browser away to the file. */}
         {fileOverDrawer && (
           <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-accent-soft/70 backdrop-blur-[1px]">
-            <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">Drop to attach</span>
+            <span className="rounded-lg bg-surface px-4 py-2 text-[16px] font-semibold shadow-lg">{pageStepId ? "Drop to add to this step" : addStepId ? `Drop to add to step ${stepNumberOf(addStepId)}` : "Drop to attach"}</span>
           </div>
         )}
         {/* Floating at the bottom of the drawer so you can log from anywhere
@@ -4260,6 +4297,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
+              onAddLink={(url) => { addLinkOn(url, "", ps.id); pushToast("Link added to this step"); }}
+              onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}
               savedLinks={(clientLinks ?? []).map((l) => {
                 const att = task.attachments.find((a) => a.url === l.url);

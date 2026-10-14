@@ -326,7 +326,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -386,6 +386,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   doneActions?: React.ReactNode;
   /** The links and files the step holds: their own row, apart from Actions. */
   files?: React.ReactNode;
+  /** A link typed in the row onto this step (Derek, 2026-10-14). */
+  onAddLink?: (url: string) => void;
+  /** Picks files to add to this step. */
+  onAttachFiles?: () => void;
   /** Sends the unsent email to the client held on this step, the way its
    *  window's Send does. Missing when there is none to send. */
   onSendHeldEmail?: () => void;
@@ -506,6 +510,9 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     );
   });
   const [draft, setDraft] = useState("");
+  // A link being typed into the Links and files row, or null when closed.
+  const [linkDraft, setLinkDraft] = useState<string | null>(null);
+  const saveLink = () => { const u = (linkDraft ?? "").trim(); if (u && onAddLink) { onAddLink(u); setLinkDraft(null); } };
   const nextRef = useRef<HTMLElement | null>(null);
   const hasNext = !!nextPanel;
   useEffect(() => { if (hasNext) nextRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [hasNext]);
@@ -894,9 +901,23 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               )}
               {/* Links and files, apart from what does something (Derek,
                   2026-10-14); they come in by paste or drag (2026-10-11). */}
-              {(files || held) && (
+              {(files || held || ((onAddLink || onAttachFiles) && !sub.onClient && !setup && !(empty && !dir.open))) && (
                 <section aria-labelledby="step-files" className="flex flex-col gap-2">
-                  {files && <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>
+                    {/* Added here, they go on this step (Derek, 2026-10-14). */}
+                    {onAddLink && <button onClick={() => setLinkDraft((d) => (d === null ? "" : null))} aria-expanded={linkDraft !== null} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.link /> Link</button>}
+                    {onAttachFiles && <button onClick={onAttachFiles} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.plus /> Attach</button>}
+                  </div>
+                  {linkDraft !== null && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
+                        onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
+                        placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                      <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
+                      <button onClick={() => setLinkDraft(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
+                    </div>
+                  )}
                   {files}
                   <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
