@@ -49,6 +49,45 @@ describe("suggestStepActions", () => {
     expect(kinds("Check the context of the listing")).toEqual([]);
     expect(kinds("Copy the files over")).toEqual([]);
   });
+  it("reads a newsletter as the email and the web page it links to", () => {
+    expect(labels("Newsletter for October")).toEqual(["Email Ryan", "Make the web page"]);
+    expect(kinds("Send the October newsletter")).toEqual(["email", "page"]);
+  });
+  it("reads a blast or a campaign as an email, unless it is a text", () => {
+    expect(kinds("Spring blast")).toEqual(["email"]);
+    expect(kinds("Holiday campaign")).toEqual(["email"]);
+    expect(kinds("Text blast")).toEqual(["text"]);
+  });
+  it("reads a post, a blog and an article as a document", () => {
+    expect(labels("Blog for March")).toEqual(["Write the document"]);
+    expect(kinds("Facebook post")).toEqual(["doc"]);
+    expect(kinds("Article on spring cleanups")).toEqual(["doc"]);
+  });
+  it("reads a flyer, a postcard, a banner and an ad as an image", () => {
+    expect(labels("Open house flyer")).toEqual(["Make the image"]);
+    expect(kinds("Postcard for the mailer")).toEqual(["image"]);
+    expect(kinds("Banner for the event")).toEqual(["image"]);
+    expect(kinds("Facebook ad")).toEqual(["image"]);
+    expect(kinds("Add the address")).toEqual([]);
+  });
+  it("reads a landing, a site and a website as a web page", () => {
+    expect(labels("Landing for the offer")).toEqual(["Make the web page"]);
+    expect(kinds("Fix the site")).toEqual(["page"]);
+    expect(kinds("New website")).toEqual(["page"]);
+  });
+  it("reads a reel and a clip as a video", () => {
+    expect(labels("Instagram reel")).toEqual(["Make the video"]);
+    expect(kinds("Cut a clip from the interview")).toEqual(["video"]);
+  });
+  it("reads follow up and remind as an email", () => {
+    expect(labels("Follow up with Ryan")).toEqual(["Email Ryan"]);
+    expect(kinds("Remind Ryan about the photos")).toEqual(["email"]);
+  });
+  it("orders the new words by where they sit, still two at most", () => {
+    expect(kinds("Flyer and a reel for the open house")).toEqual(["image", "video"]);
+    expect(kinds("Reel, then the flyer, then a blog post")).toEqual(["video", "image"]);
+    expect(kinds("Blog post, then follow up")).toEqual(["doc", "email"]);
+  });
   it("uses the name it is given for the client", () => {
     expect(suggestStepActions("Send to them", "The Artist Workshop")).toEqual([{ kind: "email", label: "Email The Artist Workshop" }]);
   });

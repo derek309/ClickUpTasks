@@ -13,15 +13,18 @@ export type StepSuggestion = { kind: StepSuggestKind; label: string };
 const MESSAGE_WRITING = /\b(?:write|draft)\s+(?:(?:an?|the|a quick)\s+)?(?:email|e-mail|text|reply|message|note)s?\b/gi;
 const WRITE_TO = /\bwrite\s+(?:to|back)\b/gi;
 
-const EMAIL_WORD = /\b(?:email|e-mail|emails)\b/i;
-const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back))\b|\blet\b.{0,40}?\bknow\b/i;
+// A newsletter is an email and the web page it links to (Derek, 2026-10-14).
+const EMAIL_WORD = /\b(?:email|e-mail|emails|newsletter|newsletters)\b/i;
+// Soft: these give way to a text ("Text blast" is the text, not an email).
+const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back)|blast|blasts|campaign|campaigns|follow[\s-]?up|follow[\s-]?ups|remind|reminder|reminders)\b|\blet\b.{0,40}?\bknow\b/i;
 const TEXT_WORD = /\b(?:text|texts|sms)\b/i;
 const DOC_NOUN = /\b(plan|proposal|brief|copy)\b/i;
-const DOC_WORD = /\b(?:write|draft|document|doc)\b/i;
-const IMAGE_WORD = /\b(?:image|images|graphic|graphics|thumbnail|thumbnails)\b/i;
+const DOC_WORD = /\b(?:write|draft|document|doc|post|posts|blog|blogs|article|articles)\b/i;
+// "ad" only as a word: "add" and "address" stay out.
+const IMAGE_WORD = /\b(?:image|images|graphic|graphics|thumbnail|thumbnails|flyer|flyers|flier|fliers|postcard|postcards|banner|banners|ad|ads)\b/i;
 const DESIGN_WORD = /\bdesign\b/i;
-const PAGE_WORD = /\b(?:page|pages|landing|website|webpage)\b/i;
-const VIDEO_WORD = /\b(?:video|videos)\b/i;
+const PAGE_WORD = /\b(?:page|pages|landing|site|sites|website|websites|webpage|newsletter|newsletters)\b/i;
+const VIDEO_WORD = /\b(?:video|videos|reel|reels|clip|clips)\b/i;
 const CHECKLIST_WORD = /\b(?:checklist|list)\b/i;
 
 const at = (re: RegExp, s: string) => { const m = re.exec(s); return m ? m.index : -1; };
