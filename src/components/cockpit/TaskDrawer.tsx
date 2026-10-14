@@ -1856,7 +1856,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const word = state === "done" ? "Done" : state === "claude" ? "Claude's turn" : state === "mine" ? "Your turn" : state === "later" ? "Comes later" : say ?? "Waiting";
     return { state, say, word, sayTone, rowTone: ROW_TONE[state] };
   };
-  const stepRow = (sub: Subtask, i: number) => {
+  // phoneHidden: folded away on a phone only (the second of the last two done).
+  const stepRow = (sub: Subtask, i: number, phoneHidden = false, noDeskTop = false) => {
     const isActive = activeStep?.id === sub.id;
     const upcoming = !sub.done && !isActive;
     const st = stepStage(sub, task.assigneeId);
@@ -1916,7 +1917,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
         onDrop={(e) => { e.preventDefault(); if (dragSub && dragSub !== sub.id) moveSub(dragSub, sub.id); setDragSub(null); setDropSub(null); }}
         aria-current={isActive ? "step" : undefined}
-        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${rowTone} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
+        className={`group/sub relative flex items-stretch ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${phoneHidden ? "max-sm:hidden" : ""} ${rowTone} ${dropSub === sub.id ? "ring-2 ring-inset ring-accent/50" : ""} ${dragSub === sub.id ? "opacity-50" : ""}`}>
         {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
           className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
@@ -1986,7 +1987,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         )}
         </div>
       </li>
-      {heldHere && <li key={`${sub.id}-work`} className={`px-3 pb-3 sm:pl-12 sm:pr-4 ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""}`}>{heldHere}</li>}
+      {heldHere && <li key={`${sub.id}-work`} className={`px-3 pb-3 sm:pl-12 sm:pr-4 ${phoneHidden ? "max-sm:hidden" : ""} ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""}`}>{heldHere}</li>}
       </Fragment>
     );
   };
@@ -2392,21 +2393,36 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             it sits (Derek, 2026-10-13: steps added in front left done ones
             below the current one, "starting to go out of order"). */}
         {(() => {
-          // The last two finished stay in view for context (Derek, 2026-10-13).
+          // The last two finished stay in view for context (Derek, 2026-10-13);
+          // on a phone only the last one, and two or more done fold into one
+          // line (Derek, 2026-10-14: "3 done · Show").
           const done = steps.filter((x) => x.done);
-          const recent = new Set([...done].sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "") || steps.indexOf(b) - steps.indexOf(a)).slice(0, 2).map((x) => x.id));
+          const byRecent = [...done].sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "") || steps.indexOf(b) - steps.indexOf(a));
+          const recent = new Set(byRecent.slice(0, 2).map((x) => x.id));
+          const lastDone = byRecent[0]?.id;
           const hidden = done.length - recent.size;
+          const hiddenPhone = done.length - (lastDone ? 1 : 0);
           const anyOpen = steps.some((x) => !x.done);
-          const fold = anyOpen && hidden > 0 && showAllSteps !== task.id;
+          const open = showAllSteps === task.id;
+          const fold = anyOpen && hidden > 0 && !open;
+          const foldPhone = anyOpen && hiddenPhone > 0 && !open;
           const shown = fold ? steps.filter((x) => !x.done || recent.has(x.id)) : steps;
           const lead = anyOpen && hidden > 0 ? 1 : 0;
+          const leadPhone = anyOpen && hiddenPhone > 0;
+          const toggle = () => setShowAllSteps(open ? null : task.id);
           return (<>
-            {lead > 0 && (
-              <li><button onClick={() => setShowAllSteps(fold ? task.id : null)} aria-expanded={!fold} className="flex w-full items-center gap-2 bg-background/60 px-4 py-2.5 text-left text-[16px] text-muted hover:text-foreground">
+            {anyOpen && hidden > 0 && (
+              <li className="max-sm:hidden"><button onClick={toggle} aria-expanded={!fold} className="flex w-full items-center gap-2 bg-background/60 px-4 py-2.5 text-left text-[16px] text-muted hover:text-foreground">
                 <I.check className="h-4 w-4" /> {fold ? `${hidden} earlier ${hidden === 1 ? "step" : "steps"} done` : `${done.length} steps done`} <span className="font-semibold text-accent">{fold ? "Show" : "Hide"}</span>
               </button></li>
             )}
-            {shown.map((x, i) => stepRow(x, i + lead))}
+            {leadPhone && (
+              <li className="sm:hidden"><button onClick={toggle} aria-expanded={!foldPhone} className="flex w-full items-center gap-2 bg-background/60 px-4 py-2.5 text-left text-[16px] text-muted hover:text-foreground">
+                <I.check className="h-4 w-4" /> {foldPhone ? `${hiddenPhone} done` : `${done.length} done`} <span aria-hidden>·</span> <span className="font-semibold text-accent">{foldPhone ? "Show" : "Hide"}</span>
+              </button></li>
+            )}
+            {/* On a desktop with no line above, the first row has no top border. */}
+            {shown.map((x, i) => stepRow(x, i + (lead || leadPhone ? 1 : 0), foldPhone && x.done && x.id !== lastDone, !lead && leadPhone && i === 0))}
           </>);
         })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
