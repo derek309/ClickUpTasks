@@ -706,20 +706,27 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const waiting = waitingTasksFor(clientId);
     const url = getClientShareUrl(clientId);
     if (!url) pushToast("No portal link could be made for this client, so the reminder has no link. An admin needs to create the share link first.");
-    const link = url ? { url, label: "Reply or upload everything here" } : null;
-    // Grouped by list, in the client's list order (Derek, 2026-10-05); one
-    // list needs no heading.
+    const link = url ? { url, label: "Open your client portal" } : null;
+    // Counts only, never the tasks themselves, and the portal is where they
+    // answer, not a reply (Derek, 2026-10-14: "just tell them counts of what
+    // we need, we can't move forward until we get this, link to the client
+    // portal, we don't want them replying"). Counted by list, in the
+    // client's list order; one list needs no breakdown.
     const order = orderLists(projectsForClient(clientId));
     const groups = [...order.map((pr) => ({ name: pr.name, items: waiting.filter((t) => t.projectId === pr.id) })),
       { name: "Other", items: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)) }].filter((g) => g.items.length);
-    const headed = groups.length > 1;
-    const listHtml = groups.map((g) => `${headed ? `<p><strong>${escapeHtml(g.name)}</strong></p>` : ""}<ul>${g.items.map((t) => `<li><p>${escapeHtml(t.title)}</p></li>`).join("")}</ul>`).join("");
+    const total = waiting.length;
+    const things = (n: number) => `${n} ${n === 1 ? "thing" : "things"}`;
+    const countHtml = groups.length > 1
+      ? `<ul>${groups.map((g) => `<li><p>${escapeHtml(g.name)}: ${g.items.length}</p></li>`).join("")}</ul>`
+      : "";
     return {
-      subject: `Quick check on a few things for ${name || "you"}`,
-      body: `<p>Hi ${escapeHtml(firstName)},</p><p>We are still waiting on a few things from you before we can move forward:</p>`
-        + `${listHtml}${draftLinkHtml(link)}<p>Thanks!</p>`,
+      subject: `We need ${things(total)} from you to move forward`,
+      body: `<p>Hi ${escapeHtml(firstName)},</p><p>We can't move forward until we get ${things(total)} from you${groups.length > 1 ? ":" : "."}</p>`
+        + `${countHtml}<p>Each one is in your client portal, where you can answer it or upload what we need.</p>`
+        + `${draftLinkHtml(link)}<p>Please use the portal rather than replying to this email, so nothing gets missed.</p><p>Thanks!</p>`,
       link,
-      aiContext: `A friendly reminder that we are still waiting on these items from the client before we can move forward, grouped by list:\n${groups.map((g) => `${g.name}:\n${g.items.map((t) => `• ${t.title}`).join("\n")}`).join("\n")}`,
+      aiContext: `A short reminder that we can't move forward until the client gets us ${things(total)}. Give only the counts${groups.length > 1 ? ` by list (${groups.map((g) => `${g.name}: ${g.items.length}`).join(", ")})` : ""}, never the items themselves. Send them to the client portal link to answer or upload each one, and ask them to use the portal rather than replying to the email.`,
     };
   };
   // Remind, from the client page (Derek, 2026-10-14): the reminder is written
