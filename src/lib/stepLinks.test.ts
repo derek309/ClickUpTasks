@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTargetStep, chatLinkName, linkDisplayName, looksLikeIdName, prettyLinkName, taskDatesForStepDue } from "./data";
+import { addTargetStep, chatLinkName, linkDisplayName, looksLikeIdName, prettyLinkName, taskDatesForStepDue, isApprovalOutcome, doneWhen } from "./data";
 
 const steps = [
   { id: "s1", done: true },
@@ -69,5 +69,20 @@ describe("a step's new due date and its task", () => {
     expect(taskDatesForStepDue({ ...base, due: "2026-10-20", onClient: true })).toBeNull();
     expect(taskDatesForStepDue({ ...base, due: "2026-10-20", isCurrent: false })).toBeNull();
     expect(taskDatesForStepDue({ ...base, due: null })).toBeNull();
+  });
+});
+
+describe("a done step's line", () => {
+  it("knows an approval", () => {
+    expect(isApprovalOutcome("Brian approved")).toBe(true);
+    expect(isApprovalOutcome("Brian approved (version 4)")).toBe(true);
+    expect(isApprovalOutcome("You marked it approved")).toBe(true);
+    expect(isApprovalOutcome("Brian sent changes")).toBe(false);
+    expect(isApprovalOutcome(undefined)).toBe(false);
+  });
+  it("says the day and the time it was done", () => {
+    const at = new Date(2026, 9, 14, 9, 15).toISOString();
+    expect(doneWhen(at)).toBe("Wed, Oct 14, 9:15 AM");
+    expect(doneWhen("junk")).toBe("");
   });
 });

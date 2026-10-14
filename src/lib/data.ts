@@ -3740,6 +3740,17 @@ export function taskDatesForStepDue(o: { due: string | null; isCurrent: boolean;
   return { due: o.due, followUpAt: addBusinessDaysIso(o.due, 1) };
 }
 
+/** A done step that ended in an approval ("Brian approved", "Brian approved
+ *  (version 4)", "You marked it approved"): shown green (Derek, 2026-10-14). */
+export const isApprovalOutcome = (outcome?: string | null) => /\bapproved\b/i.test(outcome ?? "");
+
+/** When a step was done, in the viewer's own time: "Tue, Oct 14, 9:15 AM". */
+export function doneWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 /** Where a link or file added now goes (Derek, 2026-10-14: a link added while
  *  working a step landed on the task, not the step). A step's own page puts it
  *  on that step; on the task page it goes on the step picked beside Link and

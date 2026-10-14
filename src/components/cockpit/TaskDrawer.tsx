@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -2121,8 +2121,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             step is answered on its page instead. */}
         {(() => {
           const tickable = !sub.onClient && !asksWhatsNext(sub);
+          // An approval is green, any other done step navy (Derek, 2026-10-14).
           const mark = sub.done ? (
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white"><I.check className="h-3.5 w-3.5" /></span>
+            <span className={`flex h-6 w-6 items-center justify-center rounded-full text-white ${isApprovalOutcome(sub.outcome) ? "bg-success" : "bg-accent"}`}><I.check className="h-3.5 w-3.5" /></span>
           ) : isActive ? (
             <span className="group/tick flex h-6 w-6 items-center justify-center rounded-full border-[7px] bg-surface" style={{ borderColor: STATUS_META[st].dot }} />
           ) : (
@@ -2145,7 +2146,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             </span>
             {say && <span className={`text-[16px] font-semibold ${sayTone}`}>{say}</span>}
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
-              {sub.done && <span className="text-muted">{sub.outcome ?? "Done"}{sub.doneAt ? ` · ${formatDue(sub.doneAt.slice(0, 10))}` : ""}</span>}
+              {sub.done && <span className={isApprovalOutcome(sub.outcome) ? "font-semibold text-success" : "text-muted"}>{sub.outcome ?? "Done"}{sub.doneAt ? ` · ${doneWhen(sub.doneAt)}` : ""}</span>}
               {/* Each step's own due date (Derek, 2026-10-11). */}
               {(() => {
                 const d = !sub.done ? sub.due ?? null : null;

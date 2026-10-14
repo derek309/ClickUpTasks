@@ -10,7 +10,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting, PERSONAL_CLIENT_ID,
+  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting, PERSONAL_CLIENT_ID, isApprovalOutcome, doneWhen,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
@@ -849,7 +849,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 {(sub.done || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                     {round && <span className="font-semibold text-foreground">{round}</span>}
-                    {sub.done && <span>{`${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}`}</span>}
+                    {sub.done && <span className={isApprovalOutcome(sub.outcome) ? "font-semibold text-success" : ""}>{`${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${doneWhen(sub.doneAt)}` : ""}`}</span>}
                     {sub.done && <button onClick={onReopen} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Reopen this step</button>}
                   </div>
                 )}
