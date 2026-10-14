@@ -1444,3 +1444,26 @@ describe("taskFromStep", () => {
     expect(t.subtasks[1]).toMatchObject({ title: "Bigger logo", stepId: step.id });
   });
 });
+
+describe("restoreStep", () => {
+  const st = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: id, done: false, ...extra });
+  it("goes back after the step it followed, wherever that is now", async () => {
+    const { restoreStep } = await import("./data");
+    const now = [st("new", { done: true }), st("a", { done: true }), st("c")];
+    expect(restoreStep(now, st("b"), 1, "a").map((x) => x.id)).toEqual(["new", "a", "b", "c"]);
+  });
+  it("first when it was first; old place when its neighbour is gone or unknown", async () => {
+    const { restoreStep } = await import("./data");
+    const now = [st("a"), st("c")];
+    expect(restoreStep(now, st("b"), 1, null).map((x) => x.id)).toEqual(["b", "a", "c"]);
+    expect(restoreStep(now, st("b"), 1, "gone").map((x) => x.id)).toEqual(["a", "b", "c"]);
+    expect(restoreStep(now, st("b"), 9).map((x) => x.id)).toEqual(["a", "c", "b"]);
+  });
+  it("keeps started only when it lands as the current step", async () => {
+    const { restoreStep } = await import("./data");
+    const later = restoreStep([st("a", { startedAt: "x" })], st("b", { startedAt: "y" }), 1, "a");
+    expect(later.find((x) => x.id === "b")!.startedAt).toBeUndefined();
+    const current = restoreStep([st("a", { done: true })], st("b", { startedAt: "y" }), 1, "a");
+    expect(current.find((x) => x.id === "b")!.startedAt).toBe("y");
+  });
+});

@@ -811,6 +811,9 @@ export interface Comment {
    *  that we can recover things"). */
   step?: Subtask;
   stepAt?: number;
+  /** The step it followed when deleted (null when it was first), so Restore
+   *  puts it back after that step even when others moved since. */
+  afterId?: string | null;
 }
 
 export interface Subtask {
@@ -3244,18 +3247,30 @@ export function clientEmailText(body: string, signer?: string | null): string {
 /** The step lines for a task's Changes tab: a step deleted (kept whole, to
  *  restore), finished or reopened. The client's own requests and the "Task
  *  done" record are left out; they say themselves elsewhere. */
-export function stepChangeEvents(before: Subtask[], after: Subtask[]): { body: string; step?: Subtask; stepAt?: number }[] {
+export function stepChangeEvents(before: Subtask[], after: Subtask[]): { body: string; step?: Subtask; stepAt?: number; afterId?: string | null }[] {
   const named = (s: Subtask) => `"${(s.title || "a step").replace(/\s+/g, " ").slice(0, 120)}"`;
-  const out: { body: string; step?: Subtask; stepAt?: number }[] = [];
+  const out: { body: string; step?: Subtask; stepAt?: number; afterId?: string | null }[] = [];
   const now = new Map(after.map((s) => [s.id, s]));
   before.forEach((s, at) => {
     if (s.fromClient || s.addedFor === "finished") return;
     const a = now.get(s.id);
-    if (!a) out.push({ body: `deleted the step ${named(s)}`, step: s, stepAt: at });
+    if (!a) out.push({ body: `deleted the step ${named(s)}`, step: s, stepAt: at, afterId: at > 0 ? before[at - 1].id : null });
     else if (!s.done && a.done) out.push({ body: `finished the step ${named(a)}` });
     else if (s.done && !a.done) out.push({ body: `reopened the step ${named(a)}` });
   });
   return out;
+}
+
+/** A deleted step put back (the Changes tab's Restore): right after the step
+ *  it followed when that is still there, first when it was first, else at its
+ *  old place (lines from before afterId was kept). It reads as started only
+ *  when it lands as the current step, so two steps never both read current. */
+export function restoreStep(subtasks: Subtask[], step: Subtask, stepAt?: number, afterId?: string | null): Subtask[] {
+  const list = [...subtasks];
+  const after = afterId ? list.findIndex((x) => x.id === afterId) : -1;
+  const at = afterId === null ? 0 : after >= 0 ? after + 1 : Math.min(stepAt ?? list.length, list.length);
+  list.splice(at, 0, step);
+  return currentStep(list)?.id === step.id || !step.startedAt ? list : list.map((x) => (x.id === step.id ? { ...x, startedAt: undefined } : x));
 }
 
 /** Why a task needs the person looking, or null (Derek, 2026-10-13: "after
