@@ -593,11 +593,12 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                   </div>
                 )}
                 {/* Whose move it is, as on the step's row (2026-10-13). A bare
-                    "Your turn" says nothing the page doesn't, so no band then
-                    (Derek, 2026-10-13); your move with a reason ("Claude
+                    "Your turn", or a bare "With Claude" beside Assign Claude,
+                    says nothing the page doesn't, so no band then (Derek,
+                    2026-10-13); your move with a reason ("Claude
                     finished its part", "Ryan wrote") reads in strong red on
                     the page, not pale red on pale pink. */}
-                {tone?.say && !sub.done && tone.say !== "Your turn" && (
+                {tone?.say && !sub.done && !["Your turn", "With Claude"].includes(tone.say) && (
                   <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold ${tone.state === "mine" ? "leading-snug text-red-700 dark:text-red-300" : `rounded-[5px] px-3 py-2 ${tone.rowTone} ${tone.sayTone}`}`}>
                     <span>{tone.say}</span>
                     {/* The cloud session working it (lib/claudeCloud). */}
