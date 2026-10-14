@@ -497,7 +497,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                   {/* The tick the step lines use, in place of a Mark done button
                       (Derek, 2026-10-11). The client's own step is answered below instead. */}
                   {/* Any open step can be ticked, not only the current one. */}
-                  {(sub.done || !doneActions) && (
+                  {/* A check in waiting on a reply keeps its tick beside its follow ups. */}
+                  {(sub.done || !doneActions || sub.finishWhen === "reply") && (
                     <button onClick={sub.done ? onReopen : onMarkDone} aria-pressed={sub.done}
                       title={sub.done ? "Done. Click to reopen this step" : "Mark this step done"} aria-label={sub.done ? "Reopen this step" : "Mark this step done"}
                       className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "text-accent ring-2 ring-inset ring-accent hover:bg-accent hover:text-white"}`}>
@@ -611,7 +612,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
-              ) : !sub.done && isCurrent && doneActions ? (
+              ) : !sub.done && doneActions ? (
                 // A waiting step's answer (approved, sent changes) and a
                 // "what's next?" step's choices sit here too, where a step is
                 // finished, not up top (Derek, 2026-10-13).
