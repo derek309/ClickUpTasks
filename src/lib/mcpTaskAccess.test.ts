@@ -91,6 +91,7 @@ describe("what the MCP tools may see", () => {
       ["delete_draft_email", { id: "t_theirs" }],
       ["check_item", { id: "t_theirs", item: "x" }],
       ["add_checklist_items", { id: "t_theirs", items: ["x"] }],
+      ["update_step", { task_id: "t_theirs", step_id: "x", due: "2026-10-20" }],
       ["delete_task", { id: "t_theirs" }],
     ] as [string, Record<string, unknown>][]) {
       fakeSupabase([...names, { table: "tasks", rows: [theirs] }]);

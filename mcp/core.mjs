@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
-import { QUEUE_TASK_COLS, entryIndex, groupQueue, isQueueWaiting, pacificToday, placesFor, promoteQueueStore, queueMove, queueOrder, queuePatchRow, queuePromotions, queueSettings, queueTaskFromRow } from "./queue.mjs";
+import { QUEUE_TASK_COLS, addBusinessDaysIso, entryIndex, groupQueue, isQueueWaiting, pacificToday, placesFor, promoteQueueStore, queueMove, queueOrder, queuePatchRow, queuePromotions, queueSettings, queueTaskFromRow } from "./queue.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -23,6 +23,7 @@ How a task is built:
 - If someone else does it, or you wait for it, it is a step. If the same person does it straight after, it is a to-do inside that step. One thing per step.
 - A task has no description: what it needs is step 1's directions (create_task and update_task description write there). Directions are context: the why, the links, what done looks like. They are not a list of actions; actions are to-dos.
 - Set up every step you add (add_checklist_items): who (assignee: "me", a member id, "claude", or "client" for an ask the client answers), when (due), what it holds (email, text, chat, doc, image, page = HTML review, video, or checklist with its to-dos), and its directions.
+- Change who or when on a step that already exists with update_step (assignee, due, follow_up; also its name, directions and more to-dos), never by removing and re-adding it. As in the app: given to Claude it is due today; to a teammate it lands on their list today and the task is Delegated while it is the current step; to the client it becomes an ask holding the email; a new due date on the owner's current step moves the task's due date.
 
 Queues: a list can be a queue (list_client_tasks and get_task say so).
 - Now is the top N not waiting: work Now first. Waiting is the client's or a teammate's turn. Up next waits in order, with no dates.
@@ -115,6 +116,44 @@ function stepOneName(title) {
   return (long ? t.replace(/[.!?]\s[\s\S]*$/, "").split(" ").slice(0, 8).join(" ") : t) || "Work out what is needed";
 }
 
+// A step's rules, copies of src/lib/data.ts's (this is a separate Node process
+// with no app import; src/lib/mcpUpdateStep.test.ts checks they agree).
+/** The stage a step's title suggests (data.ts guessStepStage). */
+function guessStepStage(title) {
+  const t = String(title || "").toLowerCase();
+  if (/\b(change|changes|revis|fix|edit)/.test(t)) return "changes_requested";
+  if (/\b(review|approv|feedback|sign off)/.test(t)) return "review";
+  if (/\bwait/.test(t)) return "waiting";
+  return "in_progress";
+}
+/** The stage a step shows and sets (data.ts stepStage): someone other than
+ *  the task's owner makes it Delegated, the client's own step Waiting. */
+export function stepStage(s, taskOwnerId) {
+  if (s.assigneeId && s.assigneeId !== taskOwnerId) return "delegated";
+  if (s.onClient) return "waiting";
+  return s.stage ?? guessStepStage(s.title);
+}
+/** The status a task moves to when a step with stage `next` starts, or null
+ *  to leave it (data.ts statusForStep). On hold and Done never change. */
+export function statusForStep(current, next) {
+  if (!next || current === "on_hold" || current === "done" || current === next) return null;
+  return next;
+}
+/** What a new due date on a step does to its task's dates (data.ts
+ *  taskDatesForStepDue, f36bde9c). The current step on the task's owner (or
+ *  nobody) carries the task: due that day too. A teammate's or Claude's
+ *  current step: due that day with a follow up the business day after (the
+ *  handoff dates). The client's step, a later step, a cleared date, or a task
+ *  in a queue's Up next leave the task alone. Null: nothing to change. */
+export function taskDatesForStepDue(o) {
+  if (!o.due || !o.isCurrent || o.onClient) return null;
+  const who = o.stepAssignee ?? null;
+  if (!who || who === o.taskOwner) return o.upNext ? null : { due: o.due };
+  return { due: o.due, followUpAt: addBusinessDaysIso(o.due, 1) };
+}
+/** An open "<step>: what's next?" step: the task asking (data.ts asksWhatsNext). */
+const asksWhatsNext = (s) => !s.done && !!s.addedFor && /: what's next\?$/.test(s.title || "");
+
 // The client review document is stored as HTML the app's editor reads. Claude
 // works in plain text with a little markdown, both ways:
 //   docTextToHtml  what Claude writes -> document HTML. Every character of input
@@ -166,12 +205,14 @@ export function docHtmlToText(html) {
 }
 
 /**
- * @param {{ url?: string, key?: string, memberId?: string, services?: object, role?: string, visibleClients?: "all" | Set<string> }} [opts]
+ * @param {{ url?: string, key?: string, memberId?: string, services?: object, role?: string, visibleClients?: "all" | Set<string>, claudeRoutine?: { id?: string, token?: string } }} [opts]
  *   role and visibleClients: a teammate's own token sees what they see in the app.
  *   Falls back to CLICKUPTASKS_URL/CLICKUPTASKS_KEY/CLICKUPTASKS_MEMBER_ID
  *   env vars when omitted (the stdio server's original behavior). services: the
  *   app's review code (src/lib/mcpReviewServices.ts); the review tools exist only
- *   when it is given, which the hosted server does.
+ *   when it is given, which the hosted server does. claudeRoutine: the Claude
+ *   Code routine a step given to Claude starts (else CLAUDE_ROUTINE_ID and
+ *   CLAUDE_ROUTINE_TOKEN, as the app's lib/claudeCloud reads them).
  */
 export function createServer(opts = {}) {
   const URL = opts.url || process.env.CLICKUPTASKS_URL;
@@ -441,9 +482,10 @@ export function createServer(opts = {}) {
   // order with the current step marked, and on each step its date, owner,
   // directions, to-dos and the client work it holds. Portal requests listed apart.
   const HOLD_NAME = { doc: "client document", image: "image review", page: "HTML review", video: "video review", brief: "project instructions", email: "draft email" };
-  async function stepsText(t) {
+  // How each step reads (get_task, and update_step's reply): the plan, the
+  // current step and a line maker for one step.
+  async function stepReader(t) {
     const subs = t.subtasks || [];
-    if (!subs.length) return "";
     await members();
     const plan = subs.filter((s) => !s.fromClient);
     const current = plan.find((s) => !s.done) ?? null;
@@ -479,6 +521,12 @@ export function createServer(opts = {}) {
       if (work.length) out.push(`   Holds: ${work.join("; ")}`);
       return out.join("\n");
     };
+    return { plan, current, line };
+  }
+  async function stepsText(t) {
+    const subs = t.subtasks || [];
+    if (!subs.length) return "";
+    const { plan, line } = await stepReader(t);
     const requests = subs.filter((s) => s.fromClient);
     return [
       `\nSteps (${plan.filter((s) => s.done).length} of ${plan.length} done; tick one with check_item, a to-do with check_todo):`,
@@ -1745,6 +1793,213 @@ export function createServer(opts = {}) {
       const next = [...out, ...subs.filter((s) => !picked.has(s.id))];
       await patchTask(id, { subtasks: next });
       return { content: [{ type: "text", text: `New order on ${id}:\n${next.map((s, i) => `${i + 1}. ${s.title} [${s.id}]${s.done ? " (done)" : ""}`).join("\n")}` }] };
+    });
+
+  // Claude in the cloud (the app's lib/claudeCloud): a step given to Claude
+  // fires the team's Claude Code routine when CLAUDE_ROUTINE_ID and
+  // CLAUDE_ROUTINE_TOKEN are set (the hosted server has them on Vercel); not
+  // set, the step is on Claude's list, as in the app.
+  const routine = () => {
+    const id = opts.claudeRoutine?.id ?? process.env.CLAUDE_ROUTINE_ID, token = opts.claudeRoutine?.token ?? process.env.CLAUDE_ROUTINE_TOKEN;
+    return id && token ? { id, token } : null;
+  };
+  async function startClaudeCloud(text) {
+    const r = routine();
+    if (!r) return { ok: false, error: "not_set_up" };
+    try {
+      const res = await fetch(`https://api.anthropic.com/v1/claude_code/routines/${enc(r.id)}/fire`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${r.token}`, "anthropic-beta": "experimental-cc-routine-2026-04-01", "content-type": "application/json" },
+        body: JSON.stringify({ text: text.slice(0, 4000) }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const body = await res.text().catch(() => "");
+      let j = {};
+      try { j = body ? JSON.parse(body) : {}; } catch { /* not JSON */ }
+      if (!res.ok) return { ok: false, error: typeof j.error === "string" ? j.error : j.error?.message || `Claude said ${res.status}` };
+      return { ok: true, url: j.claude_code_session_url ?? null };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Couldn't reach Claude" };
+    }
+  }
+
+  // Who and when on a step that already exists (Derek, 2026-10-14), the way
+  // the step's own pickers change them in the app (TaskDrawer assignStep,
+  // setStepDue, toClaude, askClientOn): one step written in a locked row
+  // (patch_subtask), never the whole list, so a tick landing at the same
+  // moment is kept (00b7f0cb).
+  const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  server.tool("update_step",
+    "Change one step that already exists: whose turn it is, when it is due, its follow up, its name, its directions or more to-dos. The way to change who or when on a step; never remove and re-add it. Giving it to Claude makes it due today (and starts Claude in the cloud when that is set up, else it waits on Claude's list); to a teammate puts it on their list today and, when it is the current step, makes the task Delegated with the handoff dates; to the client makes it an ask (\"Ask <name>: ...\") holding the email that asks them (write it with draft_email and this step). A new due date on the current step that is the task owner's moves the task's due date too. A done step can only be renamed or have its directions changed. Returns the step as get_task shows it.",
+    {
+      task_id: z.string(),
+      step_id: z.string().describe("the step's id (s_..., from get_task), or a piece of its title matching one step"),
+      assignee: z.string().optional().describe("whose turn: \"me\", a member id (list_members), \"claude\", or \"client\""),
+      due: DATE.nullable().optional().describe("yyyy-mm-dd, by when; null clears it. Claude's turn is always due today"),
+      follow_up: DATE.nullable().optional().describe("yyyy-mm-dd, the day a teammate's step lands on their list; null clears it"),
+      title: z.string().optional().describe("the step's new name"),
+      directions: z.string().optional().describe("replaces the step's directions: context, not a list of actions. Plain text with a little markdown; empty clears them"),
+      add_todos: z.array(z.string()).optional().describe("to-dos to add to the end of the step's own"),
+    },
+    async ({ task_id, step_id, assignee, due, follow_up, title, directions, add_todos }) => {
+      const t = await loadTask(task_id);
+      if (!t) return noTask(task_id);
+      const subs = t.subtasks || [];
+      const plan = subs.filter((x) => !x.fromClient);
+      const { out, missing, unclear } = matchItems(plan, [step_id]);
+      if (!out.length) return reply(subs.some((x) => x.id === step_id.trim()) ? "That is a request from the client's portal, not a step." : matchProblem(missing, unclear, "Nothing was changed."));
+      const step = out[0];
+      const todos = (add_todos || []).map((x) => String(x).trim()).filter(Boolean);
+      const rawWho = String(assignee ?? "").trim();
+      const newTitle = title === undefined ? undefined : String(title).replace(/\s+/g, " ").trim();
+      if (newTitle === "") return reply("A step needs a name.");
+      if (!rawWho && due === undefined && follow_up === undefined && newTitle === undefined && directions === undefined && !todos.length) return reply("Nothing to change: give assignee, due, follow_up, title, directions or add_todos.");
+      if (step.done && (rawWho || due !== undefined || follow_up !== undefined || todos.length)) return reply(`"${step.title}" is done: only its name and directions can change. Reopen it first (check_item with done false) to change who, when or its to-dos.`);
+      const owner = t.assignee_id || null;
+      const today = pacificToday();
+      const CLAUDE = "u_claude";
+      let who; // undefined: not changing whose turn it is
+      if (rawWho.toLowerCase() === "client") {
+        if (t.is_private || t.client_id === PERSONAL_CLIENT_ID) return reply("A private or Personal task has no client to ask.");
+        who = "client";
+      } else if (rawWho) {
+        const r = await resolveAssignee(rawWho);
+        if (r.error) return reply(r.error);
+        who = r.id;
+      }
+      const isCurrent = plan.find((x) => !x.done)?.id === step.id;
+      const wasClaude = step.assigneeId === CLAUDE;
+      const toClaude = who === CLAUDE && !wasClaude;
+      const patch = {};
+      const said = [];
+      let name = newTitle ?? step.title;
+      // A "what's next?" given to someone is answered: it becomes that step
+      // (data.ts answerWhatsNext), named for what comes next.
+      if (who !== undefined && asksWhatsNext(step) && newTitle === undefined) {
+        name = step.suggested?.name || (who === CLAUDE ? "Work out the next step and do it" : "Work out the next step");
+        patch.asked = { title: step.title, assigneeId: step.assigneeId ?? null, due: step.due ?? null };
+      }
+      let first = "the client";
+      if (who === "client") {
+        const [c] = await sb(`clients?select=name&id=eq.${enc(t.client_id)}${LIVE}&limit=1`).catch(() => []);
+        first = String(c?.name || "the client").split(" ")[0];
+        // The ask, as Delegate to the client: on the task's owner, holding the
+        // email that asks them; sending it finishes the step.
+        if (!/^ask\b/i.test(name)) name = `Ask ${first}: ${name}`.slice(0, 120);
+        patch.assigneeId = owner;
+        patch.followUpAt = null;
+        if (!(step.holds || []).includes("email")) {
+          patch.holds = [...(step.holds || []), "email"];
+          if (!t.draft_email) patch.madeHere = [...new Set([...(step.madeHere || []), "email"])];
+        }
+        if (due !== undefined) patch.due = due;
+        if (follow_up) said.push("The client's step has no follow up: a check in waits on their reply once the email is sent.");
+      } else if (who === CLAUDE) {
+        // Claude: due today, no follow up (toClaude).
+        if (wasClaude) said.push("It was already Claude's.");
+        else {
+          patch.assigneeId = CLAUDE;
+          patch.toClaudeAt = nowIso();
+          patch.cloudError = routine() ? null : "not_set_up";
+        }
+        patch.due = today;
+        patch.followUpAt = null;
+        if ((due && due !== today) || follow_up) said.push("Claude's turn is due today with no follow up, so the dates given were not used.");
+      } else {
+        if (who !== undefined && who !== (step.assigneeId ?? null)) {
+          patch.assigneeId = who;
+          // On a teammate's list today unless a follow up is already set.
+          if (who && who !== owner && !step.followUpAt && follow_up === undefined) patch.followUpAt = today;
+          if (wasClaude) { patch.toClaudeAt = null; patch.cloudError = null; }
+        }
+        if (due !== undefined) patch.due = due;
+        if (follow_up !== undefined) patch.followUpAt = follow_up;
+      }
+      if (name !== step.title) patch.title = name;
+      if (directions !== undefined) {
+        patch.notes = stripHtml(directions) ? directionsHtml(directions) : null;
+        if (step.note) patch.note = null;
+      }
+      if (todos.length) patch.todos = [...(step.todos || []), ...todos.map((x) => ({ id: rid("td_"), title: x, done: false }))];
+      if (!Object.keys(patch).length) return reply(`Nothing changed on "${step.title}".${said.length ? ` ${said.join(" ")}` : ""}`);
+
+      // The task follows its current step, as in the app.
+      const after = { ...step, ...patch };
+      const assigneeChanged = "assigneeId" in patch && (patch.assigneeId ?? null) !== (step.assigneeId ?? null);
+      const task = {};
+      if (isCurrent) {
+        if (toClaude) {
+          task.follow_up_at = null;
+          // Delegated only while Claude in the cloud can start on it (data.ts statusForClaudeStep).
+          const st = routine() ? statusForStep(t.status, stepStage(after, owner)) : null;
+          if (st) task.status = st;
+        } else if (assigneeChanged) {
+          const st = statusForStep(t.status, stepStage(after, owner));
+          if (st) task.status = st;
+        }
+        // Dates: a new due date, or the step handed to a teammate (the
+        // handoff dates); not for the client's ask or Claude's today.
+        const handedOff = assigneeChanged && who !== "client" && who !== CLAUDE && !!after.assigneeId && after.assigneeId !== owner;
+        if (who !== "client" && who !== CLAUDE && (due !== undefined || handedOff)) {
+          let upNext = false;
+          if (t.queue_pos != null && !t.due && t.project_id) { try { upNext = !!queueSettings(await queueStore.queue(t.project_id)); } catch { /* not a queue */ } }
+          const dates = taskDatesForStepDue({ due: after.due ?? null, isCurrent: true, stepAssignee: after.assigneeId ?? null, taskOwner: owner, onClient: after.onClient, upNext });
+          if (dates) { task.due = dates.due; if (dates.followUpAt) task.follow_up_at = dates.followUpAt; }
+        }
+        if (task.status && t.status === "waiting") task.waiting_on_client = false;
+      }
+
+      await sb("rpc/patch_subtask", "POST", { task_id, subtask_id: step.id, patch, author: null });
+      // The email moved onto this step comes off the step that held it, the
+      // name it gave that step going back (data.ts holdOnStep).
+      if (patch.holds?.includes("email")) {
+        for (const x of subs.filter((y) => y.id !== step.id && (y.holds || []).includes("email"))) {
+          const left = x.holds.filter((k) => k !== "email");
+          const p = { holds: left.length ? left : null };
+          if (x.namedFrom?.key === "email") { p.namedFrom = null; if (x.title === x.namedFrom.as) p.title = x.namedFrom.title; }
+          await sb("rpc/patch_subtask", "POST", { task_id, subtask_id: x.id, patch: p, author: null });
+        }
+      }
+      if (Object.keys(task).length) await patchTask(task_id, { ...task, updated_by: null });
+      // The current step handed to a teammate: the open follow up finishes
+      // when they mark it done (check_item finishes it).
+      if (isCurrent && assigneeChanged && who && who !== "client" && who !== CLAUDE && who !== owner) {
+        try {
+          const [open] = await sb(`task_actions?task_id=eq.${enc(task_id)}&next_step=not.is.null&next_step_done_at=is.null&select=id,next_step_watch&order=at.desc&limit=1`);
+          if (open && !open.next_step_watch) await sb(`task_actions?id=eq.${enc(open.id)}`, "PATCH", { next_step_watch: `handoff:${step.id}` });
+        } catch { /* the step itself landed */ }
+      }
+      // Given to Claude: Claude starts on it in the cloud when set up.
+      if (toClaude && routine()) {
+        const r = await startClaudeCloud(`ClickUpTasks task ${task_id}, step ${step.id}: "${name}" on "${t.title}".`);
+        if (r.ok) {
+          const at = nowIso();
+          await sb("rpc/patch_subtask", "POST", { task_id, subtask_id: step.id, patch: { cloudSession: { url: r.url, at }, cloudError: null }, author: null });
+          await sb("rpc/append_comment", "POST", { task_id, comment: { id: rid("cm_"), authorId: ME, at, kind: "event", body: `started Claude on "${name}" in the cloud` } });
+          said.push(`Claude started on it in the cloud${r.url ? `: ${r.url}` : ""}.`);
+        } else {
+          await sb("rpc/patch_subtask", "POST", { task_id, subtask_id: step.id, patch: { cloudError: r.error }, author: null });
+          said.push(`It is on Claude's list; Claude in the cloud did not start (${r.error}).`);
+        }
+      } else if (toClaude) said.push("It is on Claude's list (Claude in the cloud is not set up, so it starts when someone works Claude's list).");
+      // A queue list: the Now task handed off brings the next one up.
+      const promoted = isCurrent && (assigneeChanged || task.status) ? await promoteQueueStore(queueStore, t.project_id) : [];
+
+      await members();
+      const fresh = (await loadTask(task_id)) ?? t;
+      const freshStep = (fresh.subtasks || []).find((x) => x.id === step.id) ?? after;
+      const { plan: freshPlan, line } = await stepReader(fresh);
+      const text = line(freshStep, Math.max(0, freshPlan.findIndex((x) => x.id === step.id)));
+      const taskBits = [
+        task.status ? `status ${task.status}` : null,
+        task.due ? `due ${task.due}` : null,
+        task.follow_up_at ? `follow up ${task.follow_up_at}` : "follow_up_at" in task ? "no follow up" : null,
+      ].filter(Boolean);
+      if (taskBits.length) said.push(`The task: ${taskBits.join(" · ")}.`);
+      if (who === "client" && !t.draft_email) said.push(`Write the ask with draft_email and step "${step.id}"; sending it finishes "${name}" and a check in waits on their reply.`);
+      const next = promoted.filter((p) => p.due).map((p) => `${p.id} (due ${p.due})`);
+      if (next.length) said.push(`Next in the queue: ${next.join(", ")}.`);
+      return reply(`Updated on ${task_id}:\n${text}${said.length ? `\n\n${said.join("\n")}` : ""}`);
     });
 
   server.tool("list_members",
