@@ -58,9 +58,9 @@ describe("suggestStepActions", () => {
     expect(labels("Create newsletter")).toEqual(["Build the HTML review"]);
     expect(labels("Send the October newsletter")).toEqual(["Build the HTML review"]);
   });
-  it("reads a blast or a campaign as an email, unless it is a text", () => {
-    expect(kinds("Spring blast")).toEqual(["email"]);
-    expect(kinds("Holiday campaign")).toEqual(["email"]);
+  it("reads a blast or a campaign as the HTML review, never an email to the client, unless it is a text", () => {
+    expect(kinds("Spring blast")).toEqual(["page"]);
+    expect(kinds("Holiday campaign")).toEqual(["page"]);
     expect(kinds("Text blast")).toEqual(["text"]);
   });
   it("reads a post, a blog and an article as a document", () => {
@@ -96,5 +96,21 @@ describe("suggestStepActions", () => {
   });
   it("uses the name it is given for the client", () => {
     expect(suggestStepActions("Send to them", "The Artist Workshop")).toEqual([{ kind: "email", label: "Email The Artist Workshop" }]);
+  });
+});
+
+describe("a mass send is not an email to the client (Derek, 2026-10-14)", () => {
+  const brian = (t: string) => suggestStepActions(t, "Brian").map((s) => s.label);
+  it("campaign, blast, newsletter and bulk never suggest Email Brian", () => {
+    expect(brian("Schedule Campaign to bulk customers")).toEqual(["Build the HTML review"]);
+    expect(brian("Schedule email to bulk customers")).not.toContain("Email Brian");
+    expect(brian("Send the newsletter")).not.toContain("Email Brian");
+    expect(brian("Bulk customers blast")).not.toContain("Email Brian");
+  });
+  it("only words naming the client make one", () => {
+    expect(brian("Send Brian the bulk campaign proof")).toEqual(["Email Brian"]);
+    expect(brian("Email Brian about the newsletter")).toEqual(["Email Brian"]);
+    expect(brian("Reply to Brian")).toEqual(["Email Brian"]);
+    expect(brian("Let Brian know")).toEqual(["Email Brian"]);
   });
 });

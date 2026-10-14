@@ -21,15 +21,19 @@ const EMAIL_WORD = /\b(?:email|e-mail|emails)\b/i;
 // is the HTML review only: "Send the newsletter" is not an email to them
 // (Derek, 2026-10-14).
 const NEWSLETTER = /\bnewsletters?\b/i;
-// Soft: these give way to a text ("Text blast" is the text, not an email).
-const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back)|blast|blasts|campaign|campaigns|follow[\s-]?up|follow[\s-]?ups|remind|reminder|reminders)\b|\blet\b.{0,40}?\bknow\b/i;
+// Soft: these give way to a text ("Reply by text" is the text, not an email).
+const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back)|follow[\s-]?up|follow[\s-]?ups|remind|reminder|reminders)\b|\blet\b.{0,40}?\bknow\b/i;
+// Mass sends go to the client's own customers from GoHighLevel, built as an
+// HTML review, never an email to the client (Derek, 2026-10-14: "Schedule
+// Campaign to bulk customers" offered "Email Brian").
+const MASS = /\b(?:campaigns?|blasts?|newsletters?|bulk)\b/i;
 const TEXT_WORD = /\b(?:text|texts|sms)\b/i;
 const DOC_NOUN = /\b(plan|proposal|brief|copy)\b/i;
 const DOC_WORD = /\b(?:write|draft|document|doc|post|posts|blog|blogs|article|articles)\b/i;
 // "ad" only as a word: "add" and "address" stay out.
 const IMAGE_WORD = /\b(image|images|graphic|graphics|thumbnail|thumbnails|flyer|flyers|flier|fliers|postcard|postcards|banner|banners|ad|ads)\b/i;
 const DESIGN_WORD = /\b(design)\b/i;
-const PAGE_WORD = /\b(?:page|pages|landing|site|sites|website|websites|webpage|newsletter|newsletters)\b/i;
+const PAGE_WORD = /\b(?:page|pages|landing|site|sites|website|websites|webpage|newsletter|newsletters|campaign|campaigns|blast|blasts)\b/i;
 const VIDEO_WORD = /\b(video|videos|reel|reels|clip|clips)\b/i;
 const CHECKLIST_WORD = /\b(?:checklist|list)\b/i;
 
@@ -51,11 +55,17 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
   const add = (kind: StepSuggestKind, i: number, label: string) => { if (i >= 0) found.push({ kind, at: i, label }); };
 
   const textAt = at(TEXT_WORD, raw);
-  const emailWordAt = at(EMAIL_WORD, raw);
+  // A mass send ("Schedule email to bulk customers", "Holiday campaign") is
+  // never an email to the client; only words naming them make one ("email
+  // Brian", "reply to Brian", "send Brian", "let Brian know").
+  const mass = MASS.test(raw);
+  const who = firstName.trim() ? firstName.trim().split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+  const toClient = who ? new RegExp(`\\b(?:email|e-mail|reply\\s+to|send|write\\s+to|let)\\s+${who}\\b`, "i").exec(raw) : null;
+  const emailWordAt = mass ? -1 : at(EMAIL_WORD, raw);
   // "Send the newsletter" sends nothing to the client: no soft email then.
-  const emailSoftAt = NEWSLETTER.test(raw) ? -1 : at(EMAIL_SOFT, raw);
+  const emailSoftAt = NEWSLETTER.test(raw) || mass ? -1 : at(EMAIL_SOFT, raw);
   // "Send Ryan a text" is the text; only "email" itself adds the email then.
-  const emailAt = emailWordAt >= 0 ? emailWordAt : textAt >= 0 ? -1 : emailSoftAt;
+  const emailAt = mass ? (toClient && textAt < 0 ? toClient.index : -1) : emailWordAt >= 0 ? emailWordAt : textAt >= 0 ? -1 : emailSoftAt;
   add("email", emailAt, `Email ${firstName}`);
   add("text", textAt, `Text ${firstName}`);
 
