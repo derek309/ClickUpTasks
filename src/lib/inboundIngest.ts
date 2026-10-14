@@ -17,15 +17,16 @@ import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
 import type { GmailFile } from "@/lib/googleMail";
+import { pictureMime } from "@/lib/pictures";
 
 /** An email's files as the row's attachments: each stays in Gmail and is
  *  fetched when opened (api/inbox/attachment), so a photo can be previewed. */
 export function gmailFilesToAttachments(files: GmailFile[] | undefined) {
   return (files ?? []).map((f) => ({
     id: "at_gm_" + f.gmailAttachmentId.slice(-24), name: f.name,
-    kind: f.mimeType.startsWith("image/") ? "image" : f.mimeType === "application/pdf" ? "pdf" : /sheet|excel|csv/.test(f.mimeType) ? "sheet" : "doc",
+    kind: f.mimeType.startsWith("image/") || pictureMime(f.name, f.mimeType) ? "image" : f.mimeType === "application/pdf" ? "pdf" : /sheet|excel|csv/.test(f.mimeType) ? "sheet" : "doc",
     size: f.bytes >= 1_000_000 ? `${(f.bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(f.bytes / 1000))} KB`,
-    gmailAttachmentId: f.gmailAttachmentId, mimeType: f.mimeType,
+    gmailAttachmentId: f.gmailAttachmentId, mimeType: pictureMime(f.name, f.mimeType) ?? f.mimeType,
   }));
 }
 

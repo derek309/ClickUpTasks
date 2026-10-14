@@ -9,6 +9,7 @@
 import { type ReactNode } from "react";
 import { type Attachment } from "@/lib/data";
 import { FileBadge } from "./ui";
+import { isPicture } from "@/lib/pictures";
 
 export function AttachmentTile({ item, url, href, onOpen, small, actions, drag }: {
   item: Attachment;
@@ -24,7 +25,7 @@ export function AttachmentTile({ item, url, href, onOpen, small, actions, drag }
   /** Drag-to-reorder wiring — same splice-before-target idiom as FolderRail/ClientLinks. Omit to disable dragging on this tile. */
   drag?: { dragging: boolean; onDragStart: () => void; onDrop: () => void };
 }) {
-  const isImage = item.kind === "image" && !!url;
+  const isImage = isPicture(item) && !!url;
   const body = (
     <>
       {isImage ? (

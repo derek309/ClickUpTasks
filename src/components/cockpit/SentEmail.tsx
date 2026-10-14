@@ -5,7 +5,9 @@
 // review"). It says whether the client has written back since; the whole box
 // opens the email as it went out.
 import { useId, useState, type ReactNode } from "react";
-import { clientEmailText, looksLikeHtml, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
+import { clientEmailText, looksLikeHtml, timeAgo, type Attachment, type Message, type ReceivedEmail } from "@/lib/data";
+import { isPicture } from "@/lib/pictures";
+import { I } from "./ui";
 import { reviewTone } from "@/lib/reviewTone";
 import { safeMessageHtml } from "@/lib/safeHtml";
 import { recipientName } from "@/lib/emailHeader";
@@ -25,8 +27,10 @@ export function replyTo(sent: Message, messages: Message[] | null | undefined): 
  *  on a step's draft and sent emails): who it is to, its subject, its body
  *  (sanitised, as the Conversation shows emails) and its files by name. Read
  *  only; the email window is where it changes. */
-export function EmailPreview({ id, toName, toEmail, subject, body, attachments }: {
+export function EmailPreview({ id, toName, toEmail, subject, body, attachments, filesView }: {
   id?: string;
+  /** Its files drawn by the caller (pictures as themselves); else by name. */
+  filesView?: ReactNode;
   toName?: string | null;
   toEmail?: string | null;
   subject: string;
@@ -58,7 +62,12 @@ export function EmailPreview({ id, toName, toEmail, subject, body, attachments }
             ? <div className="rte-content" dangerouslySetInnerHTML={{ __html: safeMessageHtml(body) }} />
             : <div className="whitespace-pre-wrap leading-relaxed">{body.trim()}</div>}
       </div>
-      {attachments && attachments.length > 0 && (
+      {filesView ? (
+        <div className={`${row} items-start border-b-0 border-t`}>
+          <span className={label}>Files</span>
+          <div className="min-w-0 flex-1">{filesView}</div>
+        </div>
+      ) : attachments && attachments.length > 0 && (
         <div className={`${row} items-start border-b-0 border-t`}>
           <span className={label}>Files</span>
           <span className="flex min-w-0 flex-1 flex-col">
@@ -79,8 +88,10 @@ export function ShowLink({ open, controls, onToggle }: { open: boolean; controls
   );
 }
 
-export function SentEmailBox({ message, messages, firstName, toName, toEmail, onRemove }: {
+export function SentEmailBox({ message, messages, firstName, toName, toEmail, onRemove, files }: {
   message: Message;
+  /** Its files drawn by the caller (EmailFiles), in place of their names. */
+  files?: ReactNode;
   messages?: Message[] | null;
   firstName: string;
   /** Who it went to when the message does not say (the client's contact). */
@@ -120,7 +131,7 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
       {open && (
         <div className="border-t bg-surface p-2">
           <EmailPreview id={previewId} toName={peer ? message.peerName : toName} toEmail={peer ?? toEmail}
-            subject={message.subject ?? ""} body={message.body} attachments={message.attachments} />
+            subject={message.subject ?? ""} body={message.body} attachments={message.attachments} filesView={files} />
         </div>
       )}
     </div>
@@ -169,6 +180,50 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
         </div>
       )}
       {files && <div className="border-t bg-surface px-3 py-2">{files}</div>}
+    </div>
+  );
+}
+
+/** An email's files (Derek, 2026-10-14): a picture as a thumbnail with its
+ *  name under it, a click opening the full size viewer (Download, Close and
+ *  arrows there); anything else a chip with its name and size. */
+export function EmailFiles({ files, urls, onOpenPicture, onOpenFile }: {
+  files: Attachment[];
+  /** Each stored file's viewable address, by its path. */
+  urls: Record<string, string>;
+  onOpenPicture: (a: Attachment) => void;
+  onOpenFile: (a: Attachment) => void;
+}) {
+  const pics = files.filter((a) => isPicture(a) && !!a.path && !!urls[a.path]);
+  const rest = files.filter((a) => !pics.includes(a));
+  return (
+    <div className="flex flex-col gap-2">
+      {pics.length > 0 && (
+        <div className="flex flex-wrap items-start gap-3">
+          {pics.map((a) => (
+            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenPicture(a); }} title={`View ${a.name}`} aria-label={`View ${a.name}`}
+              className="group flex max-w-[240px] flex-col items-start gap-1 text-left">
+              <span className="block overflow-hidden rounded-[5px] border bg-background group-hover:border-accent">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={urls[a.path!]} alt={a.name} className="block h-auto max-h-[160px] w-auto max-w-full object-contain" />
+              </span>
+              <span className="block w-full truncate text-[16px] font-medium text-accent">{a.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {rest.length > 0 && (
+        <div className="flex flex-wrap items-start gap-2">
+          {rest.map((a) => (
+            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenFile(a); }} title={`Open ${a.name}`}
+              className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background px-2.5 py-1 text-left text-[16px] hover:border-accent">
+              <I.clip className="h-4 w-4 shrink-0 text-muted" />
+              <span className="min-w-0 truncate font-medium text-accent">{a.name}</span>
+              {a.size && <span className="shrink-0 text-muted">{a.size}</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

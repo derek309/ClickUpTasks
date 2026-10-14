@@ -1,3 +1,4 @@
+import { isPictureName, pictureMime } from "@/lib/pictures";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -83,13 +84,13 @@ export async function copyEmailFilesToTask(db: Db, messageId: string, taskId: st
           const buf = await readGmailAttachment(mailbox, row.gmail_message_id as string, file.gmailAttachmentId as string);
           if (buf.byteLength > EMAIL_FILE_MAX_BYTES) { skipped.push(name); continue; }
           path = taskPath(taskId, name);
-          const { error } = await db.storage.from(TASK_FILES_BUCKET).upload(path, buf, { contentType: file.mimeType || "application/octet-stream", upsert: false });
+          const { error } = await db.storage.from(TASK_FILES_BUCKET).upload(path, buf, { contentType: pictureMime(name, file.mimeType) || file.mimeType || "application/octet-stream", upsert: false });
           if (error) { skipped.push(name); continue; }
           made.add(path);
           bytes = buf.byteLength;
         }
         added.push({
-          id: "a_" + randomUUID().slice(0, 12), name, size: bytes !== null ? sizeLabel(bytes) : file.size, kind: file.kind && file.kind !== "link" ? file.kind : kindOfName(name),
+          id: "a_" + randomUUID().slice(0, 12), name, size: bytes !== null ? sizeLabel(bytes) : file.size, kind: isPictureName(name) ? "image" : file.kind && file.kind !== "link" ? file.kind : kindOfName(name),
           path, ...(file.mimeType ? { mimeType: file.mimeType } : {}), emailSource: source,
         });
       } catch {

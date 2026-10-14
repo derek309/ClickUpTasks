@@ -19,6 +19,8 @@ import {
 import { I, Avatar, CollapsibleText, LinkedText, newId, NotInGhlChip } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { AttachmentTile } from "./AttachmentTile";
+import { ImageLightbox } from "./TaskWorkItem";
+import { isPicture } from "@/lib/pictures";
 import { SchedulePopover } from "./SchedulePopover";
 import { CHANNEL_TONE } from "./channelTone";
 import { shortcut } from "@/lib/platform";
@@ -1017,9 +1019,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                     <I.download className="h-3 w-3" /> {zippingIds.has(m.id) ? "Zipping…" : `Download all ${m.attachments.filter((a) => a.path).length}`}
                   </button>
                 )}
-                {m.attachments.filter((a) => a.kind === "image").length > 0 && (
+                {m.attachments.filter((a) => isPicture(a)).length > 0 && (
                   <div className="grid grid-cols-4 gap-1.5">
-                    {m.attachments.filter((a) => a.kind === "image").map((a) => (a as { gmailAttachmentId?: string }).gmailAttachmentId && !a.path ? (
+                    {m.attachments.filter((a) => isPicture(a)).map((a) => (a as { gmailAttachmentId?: string }).gmailAttachmentId && !a.path ? (
                       <GmailImageTile key={a.id} item={a} messageId={m.id} />
                     ) : (
                       <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
@@ -1031,7 +1033,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                     ))}
                   </div>
                 )}
-                {m.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={m.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
+                {m.attachments.filter((a) => !isPicture(a)).length > 0 && <AttachmentThumbs items={m.attachments.filter((a) => !isPicture(a))} onOpen={onDownloadFile} />}
               </div>
             )}
           </div>
@@ -1162,9 +1164,9 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                       <I.download className="h-3 w-3" /> {zippingIds.has(c.id) ? "Zipping…" : `Download all ${c.attachments.filter((a) => a.path).length}`}
                     </button>
                   )}
-                  {c.attachments.filter((a) => a.kind === "image").length > 0 && (
+                  {c.attachments.filter((a) => isPicture(a)).length > 0 && (
                     <div className="grid grid-cols-4 gap-1.5">
-                      {c.attachments.filter((a) => a.kind === "image").map((a) => (
+                      {c.attachments.filter((a) => isPicture(a)).map((a) => (
                         <AttachmentTile key={a.id} item={a} small url={a.path ? attImageUrls[a.path] : undefined} onOpen={() => openPreview(a)}
                           actions={<>
                             {a.path && <button onClick={(e) => { e.stopPropagation(); onDownloadFileAs(a.path!, a.name); }} title="Download" className="flex h-5 w-5 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-2.5 w-2.5" /></button>}
@@ -1174,7 +1176,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
                       ))}
                     </div>
                   )}
-                  {c.attachments.filter((a) => a.kind !== "image").length > 0 && <AttachmentThumbs items={c.attachments.filter((a) => a.kind !== "image")} onOpen={onDownloadFile} />}
+                  {c.attachments.filter((a) => !isPicture(a)).length > 0 && <AttachmentThumbs items={c.attachments.filter((a) => !isPicture(a))} onOpen={onDownloadFile} />}
                 </div>
               )}
             </div>
@@ -1309,7 +1311,21 @@ function GmailImageTile({ item, messageId }: { item: Attachment; messageId: stri
       .catch(() => {});
     return () => { live = false; if (made) URL.revokeObjectURL(made); };
   }, [item.id, messageId]);
-  return <AttachmentTile item={item} small url={src ?? undefined} onOpen={() => { if (src) window.open(src, "_blank", "noopener"); }} />;
+  // Opens in the full size viewer like the task's own pictures, Download
+  // saving the very file under its own name (Derek, 2026-10-14).
+  const [open, setOpen] = useState(false);
+  const save = () => {
+    if (!src) return;
+    const a = document.createElement("a");
+    a.href = src; a.download = item.name || "picture";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  return (
+    <>
+      <AttachmentTile item={item} small url={src ?? undefined} onOpen={() => { if (src) setOpen(true); }} />
+      {open && src && <ImageLightbox images={[{ id: item.id, name: item.name, url: src }]} index={0} onIndex={() => {}} onClose={() => setOpen(false)} onDownload={save} />}
+    </>
+  );
 }
 
 /** Its first ~7 lines, faded at the cut, with Read more; whole when short. */

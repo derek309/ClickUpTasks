@@ -44,7 +44,7 @@ import { DraftEmail } from "./DraftEmail";
 import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
 import { draftLinkAsButton } from "@/lib/draftLink";
 import { talkStepPlan as planTalkStep, talkSendPatch, type TalkPlan } from "@/lib/talkSend";
-import { EmailPreview, ReceivedEmailBox, SentEmailBox, ShowLink } from "./SentEmail";
+import { EmailFiles, EmailPreview, ReceivedEmailBox, SentEmailBox, ShowLink } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { conversationSummary } from "@/lib/conversationSummary";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices, setupHistory, recommendActions, historyKinds } from "@/lib/stepSetup";
@@ -52,6 +52,7 @@ import { StepSetup, WhatsNextPicks, addRowsOf, type NextPick, type SetupAction, 
 import { suggestStepActions } from "@/lib/stepSuggest";
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
+import { isPicture } from "@/lib/pictures";
 import { ClientWebsite } from "./ClientWebsite";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { TaskBrief } from "./TaskBrief";
@@ -500,7 +501,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // attachments (a screenshot dropped into the Activity tab) so those render
   // as real thumbnails in the feed too, not just a filename chip.
   const attImagePaths = useMemo(
-    () => [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => a.kind === "image" && a.path).map((a) => a.path as string).join(","),
+    () => [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => isPicture(a) && a.path).map((a) => a.path as string).join(","),
     [task.attachments, task.clientResponse, messages, task.comments]
   );
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
@@ -529,7 +530,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // to live inside the files card, so a picture from chat on a task with no
   // files of its own opened nothing (Derek, 2026-10-09).
   const galleryImages = useMemo(() => [...task.attachments, ...conversationFiles]
-    .filter((a) => a.kind === "image" && a.path && attImageUrls[a.path])
+    .filter((a) => isPicture(a) && a.path && attImageUrls[a.path])
     .map((a) => ({ id: a.path!, name: a.name, url: attImageUrls[a.path!] })), [task.attachments, conversationFiles, attImageUrls]);
   const [lightbox, setLightbox] = useState<number | null>(null);
   // A picture opens in the lightbox; anything else opens in its own tab,
@@ -537,11 +538,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // blocker stops it, then goes to the file.
   const openPreview = async (att: Attachment) => {
     if (!att.path) { if (att.url) window.open(att.url, "_blank", "noopener,noreferrer"); return; }
-    const i = att.kind === "image" ? galleryImages.findIndex((g) => g.id === att.path) : -1;
+    const i = isPicture(att) ? galleryImages.findIndex((g) => g.id === att.path) : -1;
     if (i >= 0) { setLightbox(i); return; }
     const tab = window.open("about:blank", "_blank");
     const url = await onGetSignedUrl(att.path);
     if (tab && url) { tab.opener = null; tab.location.href = url; } else tab?.close();
+  };
+  // A file on an email, not shown as a picture: a picture whose address has
+  // not come yet opens as one anyway; anything else downloads or opens.
+  const openEmailFile = (a: Attachment) => {
+    if (isPicture(a)) void openPreview(a);
+    else if (a.path) onDownloadFile(a.path);
+    else if (a.url) window.open(a.url, "_blank", "noopener,noreferrer");
   };
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -1599,14 +1607,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {task.clientResponse.attachments.length > 0 && (
         <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
           {task.clientResponse.attachments.map((a) => {
-            const isLink = a.kind !== "image" && !!a.url;
+            const isLink = !isPicture(a) && !!a.url;
             return (
               <div key={a.id} className="flex flex-col gap-1">
                 <AttachmentTile
                   item={a}
-                  url={a.kind === "image" && a.path ? attImageUrls[a.path] : undefined}
+                  url={isPicture(a) && a.path ? attImageUrls[a.path] : undefined}
                   href={isLink ? a.url : undefined}
-                  onOpen={a.kind === "image" && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
+                  onOpen={isPicture(a) && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
                   actions={a.path ? (
                     <>
                       <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
@@ -2694,8 +2702,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return 0; // "added" — keep stored order (oldest first, matches how they were attached)
   }), [task.attachments, attSort]);
   const galleryTiles = [
-    ...sortedAttachments.filter((a) => a.kind === "image").map((a) => ({ a, own: true })),
-    ...conversationFiles.filter((a) => a.kind === "image").map((a) => ({ a, own: false })),
+    ...sortedAttachments.filter((a) => isPicture(a)).map((a) => ({ a, own: true })),
+    ...conversationFiles.filter((a) => isPicture(a)).map((a) => ({ a, own: false })),
   ];
   // Each heading gets a small coloured icon tile, so the sections tell apart
   // at a glance without boxing the page in (Derek, 2026-10-11: "it's very
@@ -2753,32 +2761,43 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </div>
       )}
 
-      {/* Pictures as a gallery with no names, the task's own then the ones
-          from the conversation (Derek, 2026-10-09: "same as in mail"). A
-          click opens the lightbox; the name is on hover. */}
+      {/* Pictures as a gallery, the task's own then the ones from the
+          conversation (Derek, 2026-10-09: "same as in mail"). A click on the
+          picture opens the full size viewer. Its buttons sit in a bar under
+          it, always there: on the picture they hid each other and needed a
+          hover a phone does not have (Derek, 2026-10-14). */}
       {galleryTiles.length > 0 && (
-        // Small tiles now the files sit in the wide column, not a 340px rail.
         <div className="mt-2 flex flex-wrap gap-2">
-          {galleryTiles.map(({ a, own }) => (
-            <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
-              onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
-              onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
-              className={`group relative h-28 overflow-hidden rounded-lg bg-background ring-1 ring-[var(--border)] hover:ring-2 hover:ring-accent ${dragAttId === a.id ? "opacity-40" : ""}`}>
-              <button onClick={() => openPreview(a)} title={stepTitleHolding(attachmentKey(a.id)) ? `${a.name}, on ${stepTitleHolding(attachmentKey(a.id))}` : a.name} aria-label={`Preview ${a.name}`} className="block w-full">
-                {a.path && attImageUrls[a.path]
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-28 w-auto max-w-[240px] object-cover" />
-                  : <span className="grid h-28 w-40 place-items-center text-muted">🖼️</span>}
-              </button>
-              <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
-                {own && a.path && websiteButton(a)}
-                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>}
-                {own
-                  ? <button onClick={() => onRemoveFile(a)} title="Remove" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-red-500"><I.trash className="h-3.5 w-3.5" /></button>
-                  : <button onClick={() => attachToTask(a)} title="Keep it with the task's files" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.plus className="h-3.5 w-3.5" /></button>}
+          {galleryTiles.map(({ a, own }) => {
+            const step = stepTitleHolding(attachmentKey(a.id));
+            const tool = "flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground";
+            return (
+              <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
+                onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
+                onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
+                className={`w-[140px] overflow-hidden rounded-[5px] bg-background ring-1 ring-[var(--border)] ${dragAttId === a.id ? "opacity-40" : ""}`}>
+                <button onClick={() => openPreview(a)} title={step ? `${a.name}, on ${step}` : a.name} aria-label={`View ${a.name}`} className="block h-[120px] w-full hover:opacity-90">
+                  {a.path && attImageUrls[a.path]
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-[120px] w-full object-cover" />
+                    : <span className="grid h-[120px] w-full place-items-center text-muted">🖼️</span>}
+                </button>
+                <div className="flex items-center justify-between gap-0.5 border-t px-0.5 py-0.5">
+                  <button onClick={() => openPreview(a)} title="Open" aria-label={`Open ${a.name}`} className={tool}><I.expand className="h-4 w-4" /></button>
+                  {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" aria-label={`Download ${a.name}`} className={tool}><I.download className="h-4 w-4" /></button>}
+                  {own && a.path && (
+                    <button onClick={() => void sendToWebsite(a)} disabled={sendingSite === a.id}
+                      title={a.website ? "On the website. Click to copy its link" : "Send to the client's website Media Library"}
+                      aria-label={a.website ? `${a.name} is on the website, copy its link` : `Send ${a.name} to the website`}
+                      className={`${tool} text-[16px] font-semibold ${a.website ? "text-success" : ""} ${sendingSite === a.id ? "animate-pulse" : ""}`}>{a.website ? "✓" : "⤴"}</button>
+                  )}
+                  {own
+                    ? <button onClick={() => onRemoveFile(a)} title="Delete" aria-label={`Delete ${a.name}`} className={`${tool} hover:text-danger`}><I.trash className="h-4 w-4" /></button>
+                    : <button onClick={() => attachToTask(a)} title="Keep it with the task's files" aria-label={`Keep ${a.name} with the task's files`} className={tool}><I.plus className="h-4 w-4" /></button>}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {/* Non-image attachments (docs, sheets, links) used to render as
@@ -2788,9 +2807,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* One per row, not wrapped chips: a 90 character URL in an inline-flex
           chip either burst the card or wrapped into an unreadable block, and
           a full-width row can truncate cleanly with room for the buttons. */}
-      {conversationFiles.some((a) => a.kind !== "image") && (
+      {conversationFiles.some((a) => !isPicture(a)) && (
         <div className="mt-2 flex flex-col gap-1.5">
-          {conversationFiles.filter((a) => a.kind !== "image").map((a) => (
+          {conversationFiles.filter((a) => !isPicture(a)).map((a) => (
             <button key={a.id} onClick={() => openPreview(a)} title={`Open ${a.name}`}
               className="flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-2 text-left text-[16px] font-medium text-accent hover:underline">
               <I.link className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 truncate">{a.name}</span><span className="shrink-0 font-normal text-muted">· from the conversation</span>
@@ -2798,9 +2817,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           ))}
         </div>
       )}
-      {sortedAttachments.some((a) => a.kind !== "image") && (
+      {sortedAttachments.some((a) => !isPicture(a)) && (
         <div className="mt-2 flex flex-col gap-1.5">
-          {sortedAttachments.filter((a) => a.kind !== "image").map((a) => {
+          {sortedAttachments.filter((a) => !isPicture(a)).map((a) => {
             const isLink = !!a.url;
             const editing = renamingAttId === a.id;
             return (
@@ -3617,23 +3636,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   [...(sub.holds ?? []), ...(sub.waitsOn ? [sub.waitsOn] : [])].filter((x): x is "page" | "doc" | "image" | "video" => ["page", "doc", "image", "video"].includes(x)));
                 return k ? { label: `Mark version ${reviews[k]!.version} approved`, onClick: () => void markReview(k, "approved") } : undefined;
               })()}
-              files={files.length ? (
-                <div className="flex flex-wrap items-start gap-2">
-                  {files.map((a) => a.kind === "image" && a.path && attImageUrls[a.path] ? (
-                    <button key={a.id} onClick={() => void openPreview(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="block overflow-hidden rounded-[5px] border bg-background hover:border-accent">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={attImageUrls[a.path]} alt={a.name} className="max-h-48 max-w-[280px] object-contain" />
-                    </button>
-                  ) : (
-                    <button key={a.id} onClick={() => (a.kind === "image" ? void openPreview(a) : a.path ? onDownloadFile(a.path) : a.url ? window.open(a.url, "_blank", "noopener,noreferrer") : undefined)} title={`Open ${a.name}`}
-                      className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background px-2.5 py-1 text-left text-[16px] hover:border-accent">
-                      <I.clip className="h-4 w-4 shrink-0 text-muted" />
-                      <span className="min-w-0 truncate font-medium text-accent">{a.name}</span>
-                      {a.size && <span className="shrink-0 text-muted">{a.size}</span>}
-                    </button>
-                  ))}
-                </div>
-              ) : undefined}
+              files={files.length ? <EmailFiles files={files} urls={attImageUrls} onOpenPicture={(a) => void openPreview(a)} onOpenFile={openEmailFile} /> : undefined}
               onReply={hasMessaging ? () => {
                 startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
                 onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
@@ -3658,8 +3661,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               <div className="min-w-0 flex-1">
                 {mail ? (
                   <SentEmailBox message={mail} messages={messages} firstName={firstName} toName={messageDest?.name} toEmail={messageDest?.email || null}
+                    files={mail.attachments?.length ? <EmailFiles files={mail.attachments} urls={attImageUrls} onOpenPicture={(f) => void openPreview(f)} onOpenFile={openEmailFile} /> : undefined}
                     onRemove={() => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, k) })} />
-                ) : a && a.kind === "image" && a.path && attImageUrls[a.path] ? (
+                ) : a && isPicture(a) && a.path && attImageUrls[a.path] ? (
                   // A picture shows as itself, a click opens it full size (Derek, 2026-10-12).
                   <span className="relative inline-block">
                     <button onClick={() => void openPreview(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="block overflow-hidden rounded-[5px] border bg-background hover:border-accent">
@@ -3674,7 +3678,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                     {a.url
                       ? <a href={a.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><LinkFavicon url={a.url} /><span className="truncate">{a.name}</span></a>
-                      : <button onClick={() => (a.kind === "image" ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
+                      : <button onClick={() => (isPicture(a) ? openPreview(a) : a.path && onDownloadFile(a.path))} className="flex min-w-0 items-center gap-1.5 font-medium text-accent hover:underline"><I.clip className="h-4 w-4 shrink-0" /><span className="truncate">{a.name}</span></button>}
                     <button onClick={() => releaseKey(k)} title="Take off this step (it stays on the task)" aria-label={`Take ${a.name} off this step`}
                       className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                   </span>
@@ -3881,6 +3885,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {sentShown && row.key === `mail:${sentShown.id}` && (
             <div className="mb-2 ml-2 max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-[5px] border bg-background px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
               {htmlToText(sentShown.body).trim()}
+              {!!sentShown.attachments?.length && (
+                <div className="mt-2 whitespace-normal border-t pt-2"><EmailFiles files={sentShown.attachments} urls={attImageUrls} onOpenPicture={(f) => void openPreview(f)} onOpenFile={openEmailFile} /></div>
+              )}
             </div>
           )}
         </Fragment>
