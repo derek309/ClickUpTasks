@@ -613,8 +613,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   );
 
   // Why it is whose move, when the sentence's first word doesn't say it all.
-  // A bare "Your turn" or "With Claude" is the sentence itself (2026-10-13).
-  const reason = tone?.say && !sub.done && tone.say !== tone.word && !["Your turn", "With Claude"].includes(tone.say) ? tone.say : null;
+  // A bare "Your turn" or "Claude's turn" is the sentence itself (2026-10-13).
+  const reason = tone?.say && !sub.done && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
   // The directions, under the sentence the way the task shows its description
   // (Derek, 2026-10-13): muted text, four lines, Read more; a click edits.
   // Added from + Add like the rest (Derek, 2026-10-11); the ✳ above copies

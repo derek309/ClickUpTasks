@@ -1663,7 +1663,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const setADate = <span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>;
     // Each part after the first word: its words, then its picker.
     const parts: { lead: string; pick: React.ReactNode }[] = [];
-    // The client's own step: "Waiting on Ryan" already says who has it.
+    // The client's own step: "Ryan's turn" already says who has it.
     if (!sub.onClient) parts.push({ lead: "assigned to", pick: (
       <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word}>{whoName}</span>}
         onChange={(a) => {
@@ -1826,9 +1826,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const say = state === "claude" ? (
         sub.cloudSession ? "Claude is working"
         : sub.cloudError ? `Claude has not started: ${sub.cloudError === "not_set_up" ? "not set up" : sub.cloudError}`
-        : sub.toClaudeAt ? `With Claude since ${sub.toClaudeAt.slice(0, 10) === TODAY ? "" : `${formatDue(sub.toClaudeAt.slice(0, 10))}, `}${new Date(sub.toClaudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`
-        : "With Claude")
-      : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `Waiting on ${firstName}` : `With ${userById(person ?? null)?.name.split(" ")[0] ?? "a teammate"}`)
+        : sub.toClaudeAt ? `Claude's turn since ${sub.toClaudeAt.slice(0, 10) === TODAY ? "" : `${formatDue(sub.toClaudeAt.slice(0, 10))}, `}${new Date(sub.toClaudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`
+        : "Claude's turn")
+      // Whose move it is, said one way everywhere (Derek, 2026-10-14): Your
+      // turn, Pam's turn, Claude's turn, Justin's turn.
+      : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `${firstName}'s turn` : `${userById(person ?? null)?.name.split(" ")[0] ?? "A teammate"}'s turn`)
       : state === "mine" ? (
         tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
         : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
@@ -1836,7 +1838,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ) : null;
     // The short word the step page's sentence opens with ("● Your turn,
     // assigned to Derek, …"); say is the longer reason, when it has one.
-    const word = state === "done" ? "Done" : state === "claude" ? "With Claude" : state === "mine" ? "Your turn" : state === "later" ? "Comes later" : say ?? "Waiting";
+    const word = state === "done" ? "Done" : state === "claude" ? "Claude's turn" : state === "mine" ? "Your turn" : state === "later" ? "Comes later" : say ?? "Waiting";
     return { state, say, word, sayTone, rowTone: ROW_TONE[state] };
   };
   const stepRow = (sub: Subtask, i: number) => {
