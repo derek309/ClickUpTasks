@@ -40,6 +40,7 @@ export function useLiveSync({
   // notify() — so an incoming teammate's change never re-derives a diff
   // against local state and never double-fires GHL sync or notifications.
   useEffect(() => {
+    let downTimer: ReturnType<typeof setTimeout> | null = null;
     if (loading || !supabaseReady) return;
     const unsub = subscribeRealtime({
       onTask: (p) => {
@@ -149,9 +150,21 @@ export function useLiveSync({
         const m = rowToDmMessage(p.new);
         setDmMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
       },
-      onStatusChange: (s) => { if (s === "CHANNEL_ERROR") pushToast("⚠️ Live updates interrupted — reconnecting…"); },
+      // A phone drops the channel whenever the tab sleeps; it reconnects and
+      // the page refetches on return (below). Only say so when it is still
+      // down 20 seconds later with the page in front (Derek, 2026-10-14: the
+      // warning showed on every return).
+      onStatusChange: (s) => {
+        if (s === "SUBSCRIBED") { if (downTimer) { clearTimeout(downTimer); downTimer = null; } return; }
+        if (s !== "CHANNEL_ERROR" && s !== "TIMED_OUT") return;
+        if (downTimer) return;
+        downTimer = setTimeout(() => {
+          downTimer = null;
+          if (document.visibilityState === "visible") pushToast("Live updates are reconnecting. Pull to refresh if something looks out of date.");
+        }, 20_000);
+      },
     }, { meId, dm: dmEnabled });
-    return unsub;
+    return () => { if (downTimer) clearTimeout(downTimer); unsub(); };
     // One subscription per sign in. The handlers only call state setters,
     // which never change, and two helpers Cockpit rebuilds each render;
     // listing those would tear the channel down and stand it up on every render.
