@@ -18,7 +18,7 @@ import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
 import { ActionDock } from "./ActionDock";
-import { ActionMenu } from "./ActionMenu";
+import { ActionMenu, KeyboardSheet } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
@@ -43,7 +43,7 @@ import { draftLinkAsButton } from "@/lib/draftLink";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices } from "@/lib/stepSetup";
-import { StepSetup, addRowsOf, type SetupAnswer } from "./StepSetup";
+import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
 import { suggestStepActions } from "@/lib/stepSuggest";
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
@@ -1229,19 +1229,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (openStep) moveFollowUp(d);
     else onPatch({ followUpAt: d });
   };
-  // A new step, just as typed: no date of its own until one is set (Derek,
-  // 2026-10-11: "when creating a step we don't need an auto follow up date").
-  const addStep = (title: string) => {
-    const t = title.trim();
-    if (!t) return;
-    // A new step answers "what happens next?".
-    if (asking) setAskNext(null);
-    // On whoever added it (Derek, 2026-10-11: "auto assign it to the creator").
-    const id = newId("s_");
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: t, done: false, ...stepOwnerFields() }] });
-    // Its page opens on the set up: whose turn, by when, what (2026-10-14).
-    openSetup(id);
-  };
   // A client sent changes on a review while its review step is current: that
   // step is done, and "Make the changes" and a new client review follow it
   // (Derek, 2026-10-11: add steps on changes). Only for a step given the
@@ -1923,7 +1910,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const { say, sayTone, rowTone } = stepTone(sub);
     return (
       <Fragment key={sub.id}>
-      <li draggable={dragSub === sub.id}
+      <li draggable={dragSub === sub.id} data-step={sub.id}
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", sub.id); }}
         onDragEnd={() => { setDragSub(null); setDropSub(null); }}
         onDragOver={(e) => { if (dragSub && dragSub !== sub.id) { e.preventDefault(); setDropSub(sub.id); } }}
@@ -2005,12 +1992,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const offeredTemplates = templatesFor(templates, task.clientId);
   const [savePlan, setSavePlan] = useState<string | null>(null);
-  const [quickWorkOpen, setQuickWorkOpenRaw] = useState(false);
-  // Quick step search (Derek, 2026-10-13: "a search ... the cursor in it so we
-  // can just start typing"): letters filter, arrows move, Enter picks.
-  const [quickQ, setQuickQ] = useState("");
-  const [quickAt, setQuickAt] = useState(0);
-  const setQuickWorkOpen = (v: boolean | ((o: boolean) => boolean)) => { setQuickWorkOpenRaw(v); setQuickQ(""); setQuickAt(0); };
   const savePlanAs = (clientId: string | null) => {
     if (!onSaveTemplate || !savePlan?.trim()) return;
     const nameOf = (k: string) => (k.startsWith("att:") ? task.attachments.find((a) => attachmentKey(a.id) === k)?.name ?? null : KIND_LABEL[k as DeliverableKey] ?? null);
@@ -2150,10 +2131,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // An email to the client as a step of its own: the draft sits on it and its
   // window opens to write in. Nothing goes until someone presses Send
   // (Derek, 2026-10-12).
-  const emailStep = () => {
+  const emailStep = (title?: string) => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, due: TODAY, ...stepOwnerFields() }], id, "email") });
+    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: title || `Email ${firstName}`, done: false, due: TODAY, ...stepOwnerFields() }], id, "email") });
     // No set up: the email is the work, written now (Derek, 2026-10-14). Its
     // page sits under the window: closing without sending lands there,
     // sending goes back to the task (finishTalkStep).
@@ -2163,10 +2144,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // A text or a portal chat as a step of its own, like Email (2026-10-13): its
   // page opens on that box; sending it finishes the step and asks what's next.
-  const talkStep = (kind: "text" | "client") => {
+  const talkStep = (kind: "text" | "client", title?: string) => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: title || (kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`), done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
     talkReturn.current = id;
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
@@ -2251,13 +2232,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // talking to the client, making something for them to review, and handing
   // off or waiting. Each one is a step.
   type QuickOption = { key: string; label: string; group: "talk" | "make" | "handoff"; disabled: boolean; note?: string; onPick: () => void };
-  const QUICK_GROUPS: { key: QuickOption["group"]; label: string }[] = [
-    { key: "talk", label: `Talk to ${firstName}` },
-    { key: "make", label: `Make something for ${firstName} to review` },
-    { key: "handoff", label: "Hand it off or wait" },
-  ];
   const quickPeopleOptions = (): QuickOption[] => [
-    ...(hasMessaging ? [{ key: "email", group: "talk" as const, label: `Email ${firstName}`, disabled: false, note: deliverablePresent("email") ? "uses the draft" : undefined, onPick: emailStep }] : []),
+    ...(hasMessaging ? [{ key: "email", group: "talk" as const, label: `Email ${firstName}`, disabled: false, note: deliverablePresent("email") ? "uses the draft" : undefined, onPick: () => emailStep() }] : []),
     ...(messageDest?.phone ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     // Booking lives on the client page and the calendar button; a step asks
@@ -2276,6 +2252,88 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, group: "make" as const, label: MAKE_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
+  // ── + Add step (Derek, 2026-10-14): one flow for a new step, the same set
+  // up as everywhere. The name is optional: an action picked with it empty
+  // names the step as Quick step did ("Email Pam", "Create Document Review",
+  // "For Claude", "For Justin"); a typed name stays. Everything Quick step
+  // offered is an action, + More or a choice of Whose turn.
+  const [newOpen, setNewOpen] = useState<false | "inline" | "sheet">(false);
+  const newKey = useRef<string | null>(null);
+  const newAnswer = useRef<SetupAnswer | null>(null);
+  const closeNew = () => { setNewOpen(false); setSubDraft(""); newAnswer.current = null; };
+  const newDraftStep = (): Subtask => ({ id: "s_new", title: subDraft, done: false, ...stepOwnerFields() });
+  const newDefaults = (): SetupAnswer => ({ who: meId ?? null, when: preselectWhen(newDraftStep(), TODAY) });
+  const newNameFor = (key: string | null, who: string | null): string => {
+    if (key === "email") return `Email ${firstName}`;
+    if (key === "text") return `Text ${firstName}`;
+    if (key === "chat") return `Chat with ${firstName}`;
+    if (key === "doc" || key === "image" || key === "page" || key === "video") return quickStepName(key) ?? KIND_LABEL[key];
+    if (key === "checklist") return "Checklist";
+    if (key === "followup") return `Follow up with ${firstName}`;
+    if (key === "delegate") return "Hand off";
+    if (who === CLAUDE_ID) return "For Claude";
+    if (who === "client") return `Ask ${firstName}: ${task.title}`.slice(0, 120);
+    if (who && who !== meId) return `For ${firstOf(who)}`;
+    return key === "directions" ? "Directions" : "";
+  };
+  const submitNew = (a: SetupAnswer, run?: () => void) => {
+    newKey.current = null;
+    run?.();
+    const key = newKey.current as string | null;
+    const typed = subDraft.trim();
+    closeNew();
+    if (key?.startsWith("tpl:")) { onApplyTemplate(key.slice(4)); return; }
+    // A message is written now, in its window (no set up for these).
+    if (key === "email") { emailStep(typed); return; }
+    if (key === "text" || key === "chat") { talkStep(key === "text" ? "text" : "client", typed); return; }
+    if (key === "askemail" || key === "asktext") { void requestMeetingStep(key === "askemail" ? "email" : "sms"); return; }
+    const who = key === "claude" ? CLAUDE_ID : key === "toclient" ? "client" : a.who;
+    // Delegate with nobody picked: its page opens on the teammate to pick.
+    if (key === "delegate" && (!who || who === meId || who === CLAUDE_ID || who === "client")) { delegateStep(); return; }
+    if (key === "claude" && taskRef.current.subtasks.some((x) => !x.done && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
+    const title = typed || newNameFor(key, who);
+    if (!title) return;
+    const id = newId("s_");
+    if (asking) setAskNext(null);
+    const step: Subtask = { id, title, done: false, ...stepOwnerFields(), ...(key === "followup" ? { finishWhen: "reply" as const } : {}) };
+    onPatch({ subtasks: [...taskRef.current.subtasks, step] });
+    // The work goes on it, shown, not opened (a tap on it opens its editor).
+    if (key === "doc" || key === "image" || key === "page" || key === "video") stepAddOptions(step).find((o) => o.key === key)?.onPick();
+    applySetup(id, { who, when: a.when });
+    if (key === "checklist" || key === "directions") setOpenStepPage({ taskId: task.id, id, full: false, [key]: true });
+    // The new row comes into view, nothing else moves.
+    else setTimeout(() => document.querySelector(`[data-step="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
+  };
+  const newStepSetup = (sheet: boolean) => {
+    const props = setupOf(newDraftStep(), {});
+    if (!props) return null;
+    const pick = (key: string) => () => { newKey.current = key; };
+    const act = (key: string, label: string, show = true): SetupAction[] => (show ? [{ key, label, onPick: pick(key) }] : []);
+    const options: SetupAction[] = [
+      ...act("directions", "Directions"), ...act("checklist", "To dos"),
+      ...act("email", `Email ${firstName}`, hasMessaging), ...act("text", `Text ${firstName}`, !!messageDest?.phone), ...act("chat", "Chat in the portal", hasMessaging),
+      ...(canHaveDocument ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
+    ];
+    const more: SetupAction[] = [
+      ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
+      ...act("asktext", "Request a meeting by text", hasMessaging && !!messageDest?.phone),
+      ...act("followup", `Wait for ${firstName}'s reply`),
+      ...act("delegate", "Delegate to a teammate"),
+      ...act("claude", "Delegate to Claude"),
+      ...act("toclient", `Delegate to ${firstName} (client)`, mayContactClient),
+      ...(TEMPLATES_ON ? offeredTemplates.map((t) => ({ key: `tpl:${t.id}`, label: `From a template: ${t.name} (${templateSteps(t).length} steps)`, onPick: pick(`tpl:${t.id}`) })) : []),
+    ];
+    const lead = suggestStepActions(subDraft, firstName).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
+    const grouped = addRowsOf(options, firstName, new Set(lead.map((x) => x.key)));
+    return (
+      <StepSetup {...props} meId={meId ?? null} lead={lead} rows={grouped.rows} more={more} search={!sheet} enterSubmits={sheet}
+        onAnswer={(a) => { newAnswer.current = a; }} onDone={submitNew}
+        name={sheet ? (
+          <input data-name autoFocus value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="Name the step (optional)" aria-label="Step name"
+            className="h-11 w-full rounded-[5px] bg-background px-3 text-[16px] font-semibold outline-none ring-1 ring-inset ring-border focus:ring-accent" />
+        ) : undefined} />
+    );
+  };
   const [showAllSteps, setShowAllSteps] = useState<string | null>(null);
   const renderPlan = () => (
     <section className="mt-6" aria-labelledby="task-steps">
@@ -2353,74 +2411,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
-        <li className={`flex items-center gap-2 px-3 py-2 ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
-          <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { addStep(subDraft); setSubDraft(""); } }}
-            placeholder="+ Add step" aria-label="Add a step"
+        {/* One + Add step (Derek, 2026-10-14: "one flow everywhere"): the
+            name, optional, then the set up under it. A desktop types in place;
+            a phone opens a sheet above its keyboard, so the page under it
+            does not jump. */}
+        <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+          <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onFocus={() => setNewOpen("inline")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); submitNew(newAnswer.current ?? newDefaults()); }
+              else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeNew(); }
+            }}
+            placeholder={newOpen === "inline" ? "Name the step, or pick an action below" : "+ Add step"} aria-label="Add a step"
             className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
-          {/* Client work in one click, onto the current step (Derek, 2026-10-11:
-              "a + at the other end to add client work, to make it faster"). */}
-          {(() => { const quickWork = [...quickStepOptions(), ...quickPeopleOptions()]; return quickWork.length > 0 && (
-            <span className="relative shrink-0">
-              <button onClick={() => setQuickWorkOpen((o) => !o)} aria-haspopup="menu" aria-expanded={quickWorkOpen}
-                title="Add a step that makes a document, image, HTML or video"
-                className="inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[16px] font-medium text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Quick step</button>
-            </span>
-          ); })()}
+          {newOpen === "inline" && <button onClick={closeNew} aria-label="Close" title="Close (Escape)" className="h-9 shrink-0 rounded-[5px] px-3 text-[16px] text-muted hover:bg-background hover:text-foreground">×</button>}
         </li>
-        {/* Quick step folds open under the steps, full width (Derek,
-            2026-10-13: the popup wrapped its words and ran long): search on
-            top, the three groups side by side, each choice with its note. */}
-        {quickWorkOpen && (() => {
-          const quickWork = [...quickStepOptions(), ...quickPeopleOptions()];
-          const q = quickQ.trim().toLowerCase();
-          const hit = (o: QuickOption) => !q || `${o.label} ${QUICK_GROUPS.find((g) => g.key === o.group)?.label ?? ""}`.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || o.label.toLowerCase().includes(q);
-          const found = QUICK_GROUPS.flatMap((g) => quickWork.filter((o) => o.group === g.key && hit(o) && !o.disabled));
-          const pick = (o: QuickOption) => { setQuickWorkOpen(false); o.onPick(); };
-          return (
-            <li role="menu" aria-label="Quick step" className="border-t bg-background/40 px-3 py-3">
-              <div className="flex items-center gap-2">
-                <input autoFocus value={quickQ} onChange={(e) => { setQuickQ(e.target.value); setQuickAt(0); }} placeholder="Search, or type a letter" aria-label="Search quick steps"
-                  onKeyDown={(e) => {
-                    if (e.key === "ArrowDown") { e.preventDefault(); setQuickAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
-                    else if (e.key === "ArrowUp") { e.preventDefault(); setQuickAt((n) => Math.max(0, n - 1)); }
-                    else if (e.key === "Enter" && found[quickAt]) { e.preventDefault(); pick(found[quickAt]); }
-                    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setQuickWorkOpen(false); }
-                  }}
-                  className="h-10 min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 text-[16px] outline-none focus:border-accent" />
-                <button onClick={() => setQuickWorkOpen(false)} aria-label="Close quick steps" className="h-10 shrink-0 rounded-[5px] px-3 text-[16px] text-muted hover:bg-background hover:text-foreground">×</button>
-              </div>
-              {!found.length && <div className="px-1 pt-3 text-[16px] text-muted">Nothing matches &ldquo;{quickQ}&rdquo;</div>}
-              <div className="mt-2 grid gap-x-4 gap-y-3 sm:grid-cols-3">
-                {QUICK_GROUPS.map((g) => {
-                  const items = quickWork.filter((o) => o.group === g.key && hit(o));
-                  return items.length > 0 && (
-                    <div key={g.key} className="min-w-0">
-                      <div className="px-2 pb-1 text-[16px] font-semibold text-muted">{g.label}</div>
-                      {items.map((o) => (
-                        <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => pick(o)} onMouseEnter={() => { const i = found.indexOf(o); if (i >= 0) setQuickAt(i); }}
-                          className={`block w-full rounded-[5px] px-2 py-2 text-left text-[16px] hover:bg-surface disabled:opacity-50 ${found[quickAt] === o ? "bg-surface ring-1 ring-inset ring-accent/40" : ""}`}>
-                          <span className="block font-medium">{o.label}</span>
-                          {o.note && <span className="block text-muted">{o.note}</span>}
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-              {TEMPLATES_ON && offeredTemplates.length > 0 && (
-                <div className="mt-3 border-t pt-2">
-                  <div className="px-2 pb-1 text-[16px] text-muted">From a template:</div>
-                  {offeredTemplates.map((t) => (
-                    <button key={t.id} role="menuitem" onClick={() => { setQuickWorkOpen(false); onApplyTemplate(t.id); }}
-                      className="flex min-h-11 w-full items-center gap-2 rounded-[5px] px-2 text-left text-[16px] hover:bg-surface">
-                      <span className="min-w-0 flex-1 truncate">{t.name}</span><span className="shrink-0 text-muted">{templateSteps(t).length} steps</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </li>
-          );
-        })()}
+        {newOpen === "inline" && (
+          <li className="hidden border-t bg-background/40 px-3 py-3 sm:block">{newStepSetup(false)}</li>
+        )}
+        <li className={`px-3 py-2 sm:hidden ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+          <button onClick={() => setNewOpen("sheet")} className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add step</button>
+        </li>
+        {newOpen === "sheet" && (
+          <KeyboardSheet label="Add a step" onClose={closeNew}>{newStepSetup(true)}</KeyboardSheet>
+        )}
       </ol>
     </section>
   );

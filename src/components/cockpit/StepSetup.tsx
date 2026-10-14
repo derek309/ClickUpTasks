@@ -59,7 +59,7 @@ const CHOICE = "inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap
 const OFF = `${CHOICE} bg-surface text-foreground ring-border hover:ring-accent`;
 const ON = `${CHOICE} bg-accent-soft text-accent ring-2 ring-accent`;
 
-export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false }: {
+export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false, search = false, enterSubmits = false, onAnswer }: {
   /** What's next: the next step's name, above the three rows. */
   name?: React.ReactNode;
   who: SetupWho[];
@@ -82,9 +82,18 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   /** Set the step up with these answers, then do the action (if one). */
   onDone: (answer: SetupAnswer, run?: () => void) => void;
   autoFocus?: boolean;
+  /** On a desktop, a box to find an action by typing: letters filter the
+   *  action row, arrows move, Enter picks (Quick step's search, 2026-10-13). */
+  search?: boolean;
+  /** Enter in the name box sets it up with what is picked (+ Add step). */
+  enterSubmits?: boolean;
+  /** Told each pick, for a name box outside the rows (+ Add step's input). */
+  onAnswer?: (a: SetupAnswer) => void;
 }) {
   const [whoPick, setWhoPick] = useState<string | null>(whoInitial);
   const [when, setWhen] = useState(whenInitial);
+  const [q, setQ] = useState("");
+  const [qAt, setQAt] = useState(0);
   // Rows found by id: no refs read while drawing.
   const uid = useId();
   const rowEl = (i: number) => (typeof document === "undefined" ? null : document.getElementById(`${uid}-row${i}`));
@@ -101,10 +110,12 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     setWhoPick(k);
     // Claude starts on it now: today, always.
     if (k === CLAUDE_ID) setWhen(today);
+    onAnswer?.({ who: k, when: k === CLAUDE_ID ? today : when });
     setTimeout(() => focusRow(1), 0);
   };
   const pickWhen = (d: string) => {
     setWhen(d);
+    onAnswer?.({ who: whoPick, when: d });
     // The action is chosen already: this was the last thing to answer.
     if (preset) { onDone({ who: whoPick, when: d }); return; }
     setTimeout(() => focusRow(2), 0);
@@ -114,10 +125,16 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     onDone({ who: imp.who ?? whoPick, when: imp.when ?? when }, a.onPick);
   };
   const whenKey = whenKeyFor(when, today);
+  // What the search finds: every action, the + More ones too, by any word.
+  const needle = q.trim().toLowerCase();
+  const found = !needle ? [] : [...lead, ...rows.flatMap((r) => r.items), ...more]
+    .filter((a, i, all) => !a.disabled && all.findIndex((b) => b.key === a.key) === i)
+    .filter((a) => a.label.toLowerCase().split(/\s+/).some((w) => w.startsWith(needle)) || a.label.toLowerCase().includes(needle));
   const known = who.some((c) => c.key === whoPick);
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onDone(answer()); return; }
+    if (enterSubmits && e.key === "Enter" && !e.nativeEvent.isComposing && t.matches("input[data-name]")) { e.preventDefault(); onDone(answer()); return; }
     if (t.closest("input, textarea, [contenteditable=true]") || e.metaKey || e.ctrlKey || e.altKey) return;
     const row = [0, 1, 2].findIndex((i) => !!rowEl(i)?.contains(t));
     if (row < 0) return;
@@ -161,6 +178,23 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
       </>) })}
       {Row({ i: 2, label: "What's the action?", children: (
         <div className="flex min-w-0 flex-col gap-1">
+          {search && (
+            <input value={q} onChange={(e) => { setQ(e.target.value); setQAt(0); }} placeholder="Find an action, or type a letter" aria-label="Find an action"
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); setQAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
+                else if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); setQAt((n) => Math.max(0, n - 1)); }
+                else if (e.key === "Enter" && found[qAt]) { e.preventDefault(); act(found[qAt]); }
+              }}
+              className="hidden h-10 w-full max-w-[320px] rounded-[5px] bg-surface px-2.5 text-[16px] outline-none ring-1 ring-inset ring-border focus:ring-accent sm:block" />
+          )}
+          {needle ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {found.length ? found.map((a, i) => {
+                const Icon = ADD_ICON[a.key];
+                return <button key={`f-${a.key}`} data-choice aria-pressed={i === qAt} onClick={() => act(a)} className={i === qAt ? ON : OFF}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{a.label}</button>;
+              }) : <span className="text-[16px] text-muted">Nothing matches &ldquo;{q}&rdquo;</span>}
+            </div>
+          ) : (<>
           {lead.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               {lead.map((a) => {
@@ -191,6 +225,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
                 items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
             </span>
           )}
+          </>)}
         </div>
       ) })}
       <div className="flex justify-end">

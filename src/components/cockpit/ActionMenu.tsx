@@ -4,7 +4,8 @@
 // away or Escape. Keeps a review's toolbar to a few buttons, with the rarer and
 // riskier actions (Remove this version) one click further in (Derek, 2026-09-13:
 // "how can we clean this up it's a little messy").
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { quietButton } from "./TaskWorkItem";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { menuPos } from "./ui";
@@ -23,6 +24,40 @@ export function MenuSheet({ label, onClose, children }: { label: string; onClose
         {children}
       </div>
     </div>
+  );
+}
+
+/** A sheet that sits right above a phone's keyboard (visualViewport), for
+ *  typing in without the page under it jumping (2026-10-14: + Add step).
+ *  Below sm only; the backdrop and Escape close it. */
+export function KeyboardSheet({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const measure = () => {
+    if (typeof window === "undefined") return { bottom: 12, max: 600 };
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    const top = vv ? vv.offsetTop : 0;
+    return { bottom: Math.max(12, window.innerHeight - (h + top) + 12), max: Math.max(200, h - 24) };
+  };
+  const [box, setBox] = useState(measure);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const fit = () => setBox(measure());
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+    return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); };
+  }, []);
+  useEscapeToClose(onClose);
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="sm:hidden">
+      <div className="fixed inset-0 z-[120] bg-black/30" onClick={onClose} />
+      <div role="dialog" aria-label={label} style={{ bottom: box.bottom, maxHeight: box.max }}
+        className="fixed inset-x-3 z-[121] overflow-y-auto overscroll-contain rounded-[5px] bg-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
