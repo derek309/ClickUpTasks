@@ -18,7 +18,7 @@ import { safeMessageHtml } from "@/lib/safeHtml";
 import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "@/lib/uploadTypes";
 import { signedUrlForFile } from "@/lib/db";
 import { placeDraftLink, draftLinkAsButton, escapeHtml } from "@/lib/draftLink";
-import { emailWindowTitle } from "@/lib/emailHeader";
+import { emailWindowTitle, recipientName } from "@/lib/emailHeader";
 import { RichTextEditor } from "./RichTextEditor";
 import { BookingLinkMenu } from "./BookingLinkMenu";
 import { useDebouncedCommit } from "./useDebouncedCommit";
@@ -373,6 +373,7 @@ export function EmailWindow({
     .filter((a) => a.path && isPreviewableImage(a.name) && thumbs[a.path])
     .map((a) => ({ id: a.id, name: a.name, url: thumbs[a.path!] }));
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(draft.updatedAt ?? draft.createdAt)}`;
+  const shownName = recipientName(toName);
   const cannotSend = !toEmail ? "No linked contact to send to" : !onSend ? "You don't have permission to message this client" : undefined;
 
   return (
@@ -401,15 +402,22 @@ export function EmailWindow({
             )}
             <div className="overflow-hidden rounded-[5px] border bg-surface shadow-sm">
               {/* One line each, labels in one column (Derek, 2026-10-12: "awkward
-                  layout"). Cc / Bcc sits at the end of the To line; a long
-                  address shortens instead of wrapping. */}
-              <div className="flex min-h-12 items-center gap-3 border-b px-4 py-2 text-[16px] sm:px-6">
+                  layout"). The To line is the person's name with the address
+                  under it on a phone, after it on a desktop, never cut off
+                  (Derek, 2026-10-14); with no name, the address alone, wrapping.
+                  Cc / Bcc sits at the end of the To line. */}
+              <div className="flex min-h-12 items-start gap-3 border-b px-4 py-2.5 text-[16px] sm:items-center sm:px-6">
                 <span className="w-16 shrink-0 font-semibold text-muted">To</span>
                 {toEmail
-                  ? <span className="min-w-0 flex-1 truncate" title={toEmail}>{toEmail}</span>
+                  ? (
+                    <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-2">
+                      {shownName && <span className="font-semibold [overflow-wrap:anywhere]">{shownName}</span>}
+                      <span className={`[overflow-wrap:anywhere] ${shownName ? "text-muted" : ""}`}>{toEmail}</span>
+                    </span>
+                  )
                   : <span className="min-w-0 flex-1 text-danger">No linked contact yet, so this can&apos;t be sent from here.</span>}
                 {!showCopies && (
-                  <button onClick={() => setShowCopies(true)} className="shrink-0 rounded-[5px] px-2 py-1 font-medium text-muted hover:bg-background hover:text-foreground">Cc / Bcc</button>
+                  <button onClick={() => setShowCopies(true)} className="-my-1 shrink-0 rounded-[5px] px-2 py-1 font-medium text-muted hover:bg-background hover:text-foreground">Cc / Bcc</button>
                 )}
               </div>
               {showCopies && (
