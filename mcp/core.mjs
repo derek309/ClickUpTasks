@@ -383,7 +383,7 @@ export function createServer(opts = {}) {
           const byId = new Map(rows.map((t) => [t.id, t]));
           const part = (label, items) => (items.length ? `${label}:\n\n${items.map(([t, tag]) => `${tag} ${brief(byId.get(t.id))}`).join("\n\n")}` : "");
           const text = [
-            `A queue list: ${settings.now} at a time; the next one comes up ${settings.spacing} business days out when a Now task is done or handed off. Work Now first; the order is the team's, don't reorder it.`,
+            `A queue list: ${settings.now} at a time; the next one comes up ${settings.spacing} business days out when a Now task is done or handed off. Work Now first. The order is the team's working order and changes as priorities change; anyone may move tasks.`,
             part("Now", g.now.map((t) => [t, "[Now]"])),
             part("Waiting (the client's or a teammate's turn)", g.waiting.map((t) => [t, "[Waiting]"])),
             part("Up next, in order (no dates until their turn)", g.upNext.map((u) => [u.task, `[Up next · ${u.label}]`])),
