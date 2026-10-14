@@ -67,6 +67,12 @@ export type InboxPrefs = {
    *  Meet now uses it when Google can't make a Meet link. Read by the server
    *  too (api/calendar/meet-now). */
   meetingLink?: string;
+  /** The client page's Conversation shows automatic messages (reminders,
+   *  receipts) whole instead of one muted line each (Derek, 2026-10-14). */
+  feedShowAutomatic?: boolean;
+  /** When you last opened each client's Conversation (client id to ISO): the
+   *  "New since you last looked" line goes above what came in after. */
+  feedSeen?: Record<string, string>;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

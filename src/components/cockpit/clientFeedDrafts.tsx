@@ -8,7 +8,7 @@
 // which knows the review.
 import { useEffect, useState } from "react";
 import {
-  CLAUDE_ID, TODAY, addEmailSentRecord, currentStep, htmlToText, isHandoffStep, looksLikeHtml, plainTextToHtml, sentEmailKey, stepHolding,
+  CLAUDE_ID, TODAY, addEmailSentRecord, currentStep, formatDue, htmlToText, isHandoffStep, looksLikeHtml, plainTextToHtml, sentEmailKey, stepHolding,
   type Attachment, type Contact, type EmailDraft, type Message, type MessageChannel, type Task,
 } from "@/lib/data";
 import { deleteClientEmailDraft, fetchClientEmailDraft } from "@/lib/db";
@@ -184,4 +184,21 @@ export function buildFeedDrafts(deps: FeedDraftDeps): FeedDraft[] {
       openEdit: () => deps.openClientEmail({}),
     };
   });
+}
+
+/** A new message from the Conversation's box, sent on the task picked under
+ *  it (or on no task): the steps of that task move exactly as a send from the
+ *  task itself moves them (lib/talkSend). True once it went. */
+export async function sendFromFeed(deps: Pick<FeedDraftDeps, "clientId" | "first" | "tasksNow" | "sendMessage" | "patchTask" | "pushToast">, channel: "email" | "sms" | "chat", subject: string, body: string, replyTo: string | null, taskId: string | null): Promise<boolean> {
+  const ok = await deps.sendMessage(deps.clientId, channel, subject, body, [], [], [], taskId, undefined, replyTo);
+  if (!ok || !taskId) return ok;
+  const t = deps.tasksNow.current.find((x) => x.id === taskId);
+  if (!t || t.status === "done") return true;
+  const plan = talkStepPlan(t.subtasks, t.assigneeId, channel, TODAY);
+  const out = plan ? talkSendPatch(t, plan, channel, deps.first, () => newId("s_")) : null;
+  if (!plan || !out) return true;
+  deps.patchTask(taskId, out.patch);
+  const what = channel === "sms" ? "Text" : channel === "chat" ? "Chat" : "Email";
+  deps.pushToast(plan.kind === "finish" ? `${what} sent. Finished "${plan.cur.title.trim()}"` : `${what} sent. Still waiting on ${deps.first}; checking again ${formatDue(plan.due)}.`);
+  return true;
 }

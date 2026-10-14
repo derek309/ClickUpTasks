@@ -108,8 +108,8 @@ import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { orderLists } from "@/lib/listOrder";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { ClientConversation } from "./cockpit/ClientConversation";
-import { useClientSavedDraft } from "./cockpit/clientFeedDrafts";
-import { collectClientDrafts, emailBeingAnswered, newestLine, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
+import { sendFromFeed, useClientSavedDraft } from "./cockpit/clientFeedDrafts";
+import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
 import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
 import { pickThreeTimes } from "@/lib/improveText";
@@ -2664,9 +2664,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       }}
       channels={talk.channels}
       whereFor={(channel) => whereNewMessageGoes({ channel, tasks: talk.clientTasks, messages: talk.said, contactId: talk.ct?.id ?? null, first: talk.first })}
+      taskOptions={taskChoices(talk.clientTasks, talk.said)}
       answering={emailBeingAnswered(talk.said)}
-      onSend={(channel, subject, text, replyTo, taskId) => sendMessage(talk.cid, channel, subject, channel === "email" ? plainTextToHtml(text) : text, [], [], [], taskId, undefined, replyTo)}
+      onSend={(channel, subject, text, replyTo, taskId) => sendFromFeed({ clientId: talk.cid, first: talk.first, tasksNow: tasksRef, sendMessage, patchTask, pushToast: (m) => pushToast(m) },
+        channel, subject, channel === "email" ? plainTextToHtml(text) : text, replyTo, taskId)}
       onFullEmail={(subject, text) => openClientEmail(talk.cid, { subject, body: text.trim() ? plainTextToHtml(text) : "", replyTo: emailBeingAnswered(talk.said)?.id ?? null })}
+      showAutomatic={!!inboxPrefs.feedShowAutomatic} onShowAutomatic={(v) => setInboxPrefs({ feedShowAutomatic: v })}
+      seenAt={inboxPrefs.feedSeen?.[talk.cid] ?? null}
+      onSeen={() => { const cid = talk.cid; setInboxPrefs((p) => ({ feedSeen: { ...(p.feedSeen ?? {}), [cid]: new Date().toISOString() } })); }}
       onClose={() => setFeedClient(null)} />
   ) : null;
   // A phone's ⋮ holds the client's links and who follows them (2026-10-14).
