@@ -959,6 +959,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     label: task.hiddenFromClient ? "🔒 Show to client again" : "🔒 Hide from client",
     onClick: () => onPatch({ hiddenFromClient: !task.hiddenFromClient }),
   };
+  // In a queue list (mcp/queue.mjs): its due date is a real deadline, which
+  // the queue never clears and warns about when the line would miss it.
+  // Its date is the one it has, or the one the queue saved when it went in
+  // line. Off again, the date is saved the same way (the Now check dates it
+  // if it is Now).
+  const deadlineDate = task.due ?? task.queueSavedDue ?? null;
+  const deadlineItem = !!project?.queue && task.queuePos !== undefined && (!!deadlineDate || !!task.deadline) && {
+    label: task.deadline ? "📌 Due date is not a deadline" : `📌 ${formatDue(deadlineDate)} is a deadline`,
+    onClick: () => onPatch(task.deadline ? { deadline: false, due: null, queueSavedDue: task.due } : { deadline: true, due: deadlineDate, queueSavedDue: null }),
+  };
   const chipRow = (
     <div className="mt-2 flex flex-wrap items-center gap-2">
       {/* Kept off the client's portal and reminder emails (Derek, 2026-10-12).
@@ -3788,6 +3798,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         { label: "Copy link to task", onClick: onCopyLink },
         onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
         hideItem,
+        deadlineItem,
         { label: "Duplicate here", onClick: () => onDuplicate() },
         task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
         { label: "Delete task", onClick: onDelete, danger: true },
@@ -3898,6 +3909,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 { label: "Copy link to task", onClick: onCopyLink },
         onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
                 hideItem,
+                deadlineItem,
                 { label: "Duplicate here", onClick: () => onDuplicate() },
                 { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
                 task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },

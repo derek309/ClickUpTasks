@@ -123,15 +123,6 @@ export function useQueue({ projectById, setProjects, tasksRef, setTasks, me, not
     tellOwner(t, true, reason);
   };
 
-  /** A deadline, or not: its due date stays put in the queue. */
-  const setDeadline = (id: string, on: boolean) => {
-    const before = tasksRef.current.find((t) => t.id === id);
-    if (!before || before.queuePos === undefined) return;
-    const after = { ...before, deadline: on };
-    tasksRef.current = tasksRef.current.map((t) => (t.id === id ? after : t));
-    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, deadline: on } : t)));
-    void saveTaskEdit(before, after, me.id);
-  };
-
-  return { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue, setDeadline };
+  // A deadline is set on the task page's ⋯ menu (TaskDrawer deadlineItem).
+  return { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue };
 }
