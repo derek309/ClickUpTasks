@@ -78,6 +78,29 @@ export function NextChoices({ intro, choices, moreLabel }: { intro?: React.React
   );
 }
 
+// An empty step lays the Add menu out in three rows (Derek, 2026-10-14):
+// what you write, how you talk to the client, what you make for them to
+// review. Anything else on the menu stays behind + More at the end.
+const ADD_ROWS = [
+  { row: "write", keys: ["directions", "checklist"] },
+  { row: "talk", keys: ["email", "text", "chat"] },
+  { row: "make", keys: ["doc", "image", "page", "video"] },
+] as const;
+const ADD_SHORT: Record<string, string> = {
+  directions: "Directions", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
+  doc: "Document", image: "Image", page: "Web page", video: "Video",
+};
+// ui's icons have no image, web page or video; these match their stroke.
+const rowIcon = (d: React.ReactNode) => function RowIcon(p: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16" aria-hidden>{d}</svg>;
+};
+const ADD_ICON: Record<string, (p: { className?: string }) => React.ReactNode> = {
+  directions: I.pencil, checklist: I.list, email: I.mail, text: I.mobile, chat: I.chatBubbles, doc: I.note,
+  image: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>),
+  page: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01" /></>),
+  video: rowIcon(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9.5v5l4.5-2.5z" /></>),
+};
+
 /** The step's directions read as the task's description does: muted, four
  *  lines, then Read more, which opens the rest in place. A click on the text
  *  edits it. */
@@ -250,6 +273,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // Closing the page right after typing still saves what was typed.
   useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
   const [addOpen, setAddOpen] = useState(false);
+  // The menu opens leftward when it would run off the right edge.
+  const [addRight, setAddRight] = useState(false);
   const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
   // Which box to put the cursor in next, set by a choice, done after drawing.
@@ -283,8 +308,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // it: finishing is sending (Derek, 2026-10-13: "Send the email to Ryan").
   const sendReady = !!onSendHeldEmail && holdsKind("email")
     && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
-  const suggestButtons = (compact: boolean) => suggestions.map((x) => (
-    <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center rounded-[5px] border bg-surface text-[16px] font-semibold text-accent hover:bg-background`}>{x.label}</button>
+  const suggestButtons = (compact: boolean, dark = false) => suggestions.map((x) => (
+    <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center rounded-[5px] text-[16px] font-semibold ${dark ? "bg-accent text-white hover:opacity-90" : "border bg-surface text-accent hover:bg-background"}`}>{x.label}</button>
   ));
   const [draft, setDraft] = useState("");
   const nextRef = useRef<HTMLElement | null>(null);
@@ -464,15 +489,19 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // with while it is empty, then a button.
   // Once the step holds client work, the + sits beside its heading instead
   // (Derek, 2026-10-11: "reclaim that space").
-  const addMenu = (compact: boolean) => (
+  // "more": the + More at the end of an empty step's rows, with what the
+  // rows leave out.
+  const addMenu = (compact: boolean, items = options, more = false) => (
     <div className="relative">
-      <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen} title="Add to this step" aria-label="Add to this step"
-        className={compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
-          : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{!compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
+      <button onClick={(e) => { setAddRight(e.currentTarget.getBoundingClientRect().left + 316 > window.innerWidth); setAddOpen((o) => !o); }}
+        aria-haspopup="menu" aria-expanded={addOpen} title={more ? "More to add to this step" : "Add to this step"} aria-label={more ? "More to add to this step" : "Add to this step"}
+        className={more ? "inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
+          : compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
+          : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{more ? <span>More</span> : !compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
       {addOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
-        <div role="menu" aria-label="Add to this step" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
-          {options.map((o) => (
+        <div role="menu" aria-label={more ? "More to add to this step" : "Add to this step"} className={`absolute ${addRight ? "right-0" : "left-0"} top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg`}>
+          {items.map((o) => (
             <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(false); o.onPick(); }}
               className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
               <span className="min-w-0 truncate">{o.label}</span>
@@ -491,6 +520,41 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     <section aria-label="Add to this step" className="flex flex-wrap items-center gap-3">
       {suggestButtons(false)}
       {addMenu(false)}
+    </section>
+  );
+  // An empty open step (Derek, 2026-10-14): what its name suggests first, dark,
+  // then the Add menu's own choices in three labelled rows, each doing what
+  // picking it from + Add does. A suggested one isn't shown twice.
+  const suggested = new Set<string>(suggestions.map((x) => x.kind));
+  const rowKeys = new Set<string>(ADD_ROWS.flatMap((r) => r.keys));
+  const addRowList = ADD_ROWS.map((r) => ({
+    label: r.row === "write" ? "Write" : r.row === "talk" ? `Talk to ${first}` : "Make to review",
+    items: (r.keys as readonly string[]).flatMap((k) => options.filter((o) => o.key === k && !suggested.has(k))),
+  })).filter((r) => r.items.length > 0);
+  const addRest = options.filter((o) => !rowKeys.has(o.key));
+  const addRows = (
+    <section aria-label="Add to this step" className="flex flex-col gap-3">
+      {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false, true)}</div>}
+      <div className="flex flex-col gap-1">
+        {addRowList.map((r, i) => (
+          <div key={r.label} role="group" aria-label={r.label} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+            <span className="mr-2 shrink-0 text-[16px] text-muted sm:min-w-[10rem]">{r.label}</span>
+            {r.items.map((o) => {
+              const Icon = ADD_ICON[o.key];
+              const short = ADD_SHORT[o.key] ?? o.label;
+              // A document already made elsewhere keeps its name and where it sits, as in the menu.
+              const says = [o.label !== short && o.label, o.note].filter(Boolean).join(", ");
+              return (
+                <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={says || undefined}
+                  className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50 disabled:hover:bg-transparent">
+                  {Icon && <Icon className="h-4 w-4 shrink-0" />}{short}
+                </button>
+              );
+            })}
+            {i === addRowList.length - 1 && addRest.length > 0 && addMenu(false, addRest, true)}
+          </div>
+        ))}
+      </div>
     </section>
   );
   const todoList = !hasTodos ? null : (
@@ -671,7 +735,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
+              {outFor !== undefined ? outFor : empty && !dirOpen ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
               {/* Saved links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
