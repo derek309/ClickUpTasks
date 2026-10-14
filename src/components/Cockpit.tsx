@@ -3504,7 +3504,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onCreate={createTasksFromDump}
           onCancel={() => setDumpGroup(null)}
           meId={me.id}
-          clientFirst={dumpGroup.personal ? null : clientFirstName(ct, clientById(cid)?.name ?? null)}
+          // No client on Personal or on a list in Projects: no client choices.
+          clientFirst={dumpGroup.personal || cid === WORKSPACE_CLIENT_ID ? null : clientFirstName(ct, clientById(cid)?.name ?? null)}
+          personal={dumpGroup.personal}
           canMessage={!dumpGroup.personal && cid.startsWith("cl_") && canMessageClient(cid) && !!ct}
           hasPhone={!!ct?.phone}
           queue={q && pid ? { settings: q, tasks: tasks.filter((t) => t.projectId === pid) } : null}

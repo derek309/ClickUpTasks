@@ -199,3 +199,21 @@ describe("when there is no client on screen", () => {
     expect((button("Add") as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("the box with no client (Derek, 2026-10-14)", () => {
+  it("on your Personal list asks no owner and no Whose turn, and offers no review", () => {
+    open({ meId: "u_derek", clientFirst: null, personal: true, clientName: "you" });
+    expect(host.querySelector('select[aria-label="Owner"]')).toBeNull();
+    expect(host.textContent).not.toContain("Whose turn");
+    expect(host.textContent).not.toContain("HTML review");
+    expect(host.textContent).toContain("Directions");
+  });
+  it("on a list in Projects keeps the owner but never offers waiting on a client", () => {
+    open({ meId: "u_derek", clientFirst: null, clientName: "ClickUpLocal" });
+    const owner = host.querySelector<HTMLSelectElement>('select[aria-label="Owner"]')!;
+    expect(owner).not.toBeNull();
+    expect([...owner.options].some((o) => o.value === "client")).toBe(false);
+    expect(host.textContent).toContain("Whose turn");
+    expect(host.textContent).toContain("HTML review");
+  });
+});

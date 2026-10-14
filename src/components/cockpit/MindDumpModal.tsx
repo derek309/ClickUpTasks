@@ -89,12 +89,15 @@ export const DEFAULT_FOLLOW_UP = () => addBusinessDaysIso(TODAY, 1);
 
 type PastedFile = { file: File; url: string; row: number };
 
-export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, needsClient, clients, companyFor, defaultClientId, onPickClient, onParse, onAiAdd, onCreate, onCancel, meId = null, clientFirst = null, canMessage = false, hasPhone = false, queue = null }: {
+export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, needsClient, clients, companyFor, defaultClientId, onPickClient, onParse, onAiAdd, onCreate, onCancel, meId = null, clientFirst = null, canMessage = false, hasPhone = false, queue = null, personal = false }: {
   clientName: string;
   /** Whoever is creating it: step 1's turn starts as theirs. */
   meId?: string | null;
-  /** The client's first name, as the steps say it; null on your own list. */
+  /** The client's first name, as the steps say it; null with no client
+   *  (your own list, a list in Projects). */
   clientFirst?: string | null;
+  /** Your own Personal list: it is yours, so no owner and no Whose turn. */
+  personal?: boolean;
   /** The client can be emailed and chatted with from the app. */
   canMessage?: boolean;
   hasPhone?: boolean;
@@ -324,7 +327,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const options: SetupAction[] = [
     ...act("directions", "Directions"), ...act("checklist", "To dos"),
     ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
-    ...(clientFirst ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
+    ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
   ];
   const lead = suggestStepActions(text, first).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
   const grouped = addRowsOf(options, first, new Set(lead.map((x) => x.key)));
@@ -406,12 +409,13 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                   On a queue list it says where the task joins the line
                   instead of a due date and a follow up (Derek, 2026-10-14). */}
               <p className="mt-3 shrink-0 text-[16px] leading-loose text-muted">
-                On{" "}
+                {/* Your own list is yours: no owner to pick (Derek, 2026-10-14). */}
+                {!personal && <>On{" "}
                 <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)} aria-label="Owner" className={WORD}>
                   <option value="">me</option>
-                  <option value="client">waiting on {clientName}</option>
+                  {clientFirst && <option value="client">waiting on {clientName}</option>}
                   {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
-                </select>,{" "}
+                </select>,{" "}</>}
                 <select value={priority} onChange={(e) => { setPriority(e.target.value as Priority); setPriorityTouched(true); }} aria-label="Priority"
                   title={priorityTouched ? "Set by hand, so it stays put" : "Left alone it follows the due date"} className={WORD}>
                   {manualPriorityOptions(priority).map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}
@@ -454,7 +458,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 <StepSetup who={whoList} whoInitial={meId} nameOf={firstOf}
                   someoneElse={(label, pick) => <InlineAssignee value={null} noFace label={label} onChange={(id) => { if (id) pick(id); }} />}
                   whenInitial={stepWhen} today={TODAY} meId={meId} lead={lead} rows={grouped.rows} preset={null}
-                  hide={[...(clientFirst ? [] : ["who" as const]), ...(askWhen ? [] : ["when" as const])]} skip={false}
+                  hide={[...(personal ? ["who" as const] : []), ...(askWhen ? [] : ["when" as const])]} skip={false}
                   onAnswer={(a: SetupAnswer) => { if (a.who !== stepWho) setStepWho(a.who); if (a.when !== stepWhen) { setStepWhen(a.when); setWhenSet(true); } }}
                   onDone={(a: SetupAnswer, run?: () => void) => {
                     if (!run) return;
