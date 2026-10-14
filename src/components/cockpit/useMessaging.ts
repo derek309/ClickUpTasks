@@ -48,7 +48,9 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
   // the two capture a full two-way conversation with no gap and no polling.
   // True once it went: a caller that throws something away after a send
   // (a queued Claude draft) waits for this, not just for the call to end.
-  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null): Promise<boolean> => {
+  // onSent hands over the message as stored, for a caller that keeps its id
+  // (the client page's Conversation, sending a task's draft email).
+  const sendMessage = async (clientId: string, channel: MessageChannel, subject: string, body: string, attachments: Attachment[] = [], cc: string[] = [], bcc: string[] = [], taskId: string | null = null, fromEmail?: string, replyToMessageId?: string | null, onSent?: (m: Message) => void): Promise<boolean> => {
     if (!body.trim()) return false;
     const contact = contactForClient(clientId);
     if (!contact) { pushToast("This client isn't linked to a GHL contact yet."); return false; }
@@ -69,6 +71,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
         };
         setMessages((ms) => [...ms, m]);
         insertMessage(m);
+        onSent?.(m);
         if (taskId) {
           authedFetch("/api/messages/notify-client", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -122,6 +125,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
           };
           setMessages((ms) => [...ms, gm]);
           insertMessage(gm);
+          onSent?.(gm);
           if (taskId) onAnswered?.(taskId);
           return true;
         }
@@ -151,6 +155,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       };
       setMessages((ms) => [...ms, m]);
       insertMessage(m);
+      onSent?.(m);
       if (taskId) onAnswered?.(taskId);
       return true;
     } catch {

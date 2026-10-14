@@ -57,7 +57,7 @@ import {
   THIS_MONTH_END,
   isReplyTask,
   unansweredPreviewByTask,
-  looksLikeHtml, htmlToText, plainTextToHtml,
+  htmlToText, plainTextToHtml,
   decodeEntities,
 } from "@/lib/data";
 import { supabase, supabaseReady, authedFetch } from "@/lib/supabase";
@@ -107,6 +107,9 @@ import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { orderLists } from "@/lib/listOrder";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
+import { ClientConversation } from "./cockpit/ClientConversation";
+import { useClientSavedDraft } from "./cockpit/clientFeedDrafts";
+import { collectClientDrafts, emailBeingAnswered, newestLine, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
 import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
 import { pickThreeTimes } from "@/lib/improveText";
@@ -346,7 +349,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // (item 6) plus Following moving to its own header avatar stack below.
   const [groupSortOpen, setGroupSortOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
@@ -685,13 +687,21 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Reply, and Remind client (ClientEmail.tsx). Sending goes through the ordinary
   // send path: same can-message gating, same journal entry, same thread.
   const [clientEmail, setClientEmail] = useState<ClientEmailStart | null>(null);
+  // The client page's Conversation, open beside the list (Derek, 2026-10-14):
+  // the client it is open for, so it closes on its own when you go elsewhere.
+  const [feedClient, setFeedClient] = useState<string | null>(null);
+  // Moves when the client's saved email changes outside its window (Remind, a send from the feed).
+  const [savedDraftNonce, setSavedDraftNonce] = useState(0);
+  // Another client's page starts with it closed.
+  const [feedSeenClient, setFeedSeenClient] = useState(activeClient);
+  if (feedSeenClient !== activeClient) { setFeedSeenClient(activeClient); if (feedClient !== null && feedClient !== activeClient) setFeedClient(null); }
   const openClientEmail = (clientId: string, start: Omit<ClientEmailStart, "clientId" | "nonce"> = {}) =>
     setClientEmail((c) => ({ ...start, clientId, nonce: (c?.nonce ?? 0) + 1 }));
   // "We're still waiting on these" nudge, raised from the Review controls: the
   // reminder is written for them and opens for review before it goes. The portal
   // link is resolved on the click, not during render: getClientShareUrl mints and
   // persists a share token the first time it's called for a client.
-  const openRemindClient = (clientId: string) => {
+  const remindDraftFor = (clientId: string) => {
     const name = clientById(clientId)?.name ?? "";
     const firstName = clientFirstName(contactForClient(clientId), name, "there");
     const waiting = waitingTasksFor(clientId);
@@ -705,13 +715,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       { name: "Other", items: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)) }].filter((g) => g.items.length);
     const headed = groups.length > 1;
     const listHtml = groups.map((g) => `${headed ? `<p><strong>${escapeHtml(g.name)}</strong></p>` : ""}<ul>${g.items.map((t) => `<li><p>${escapeHtml(t.title)}</p></li>`).join("")}</ul>`).join("");
-    openClientEmail(clientId, {
+    return {
       subject: `Quick check on a few things for ${name || "you"}`,
       body: `<p>Hi ${escapeHtml(firstName)},</p><p>We are still waiting on a few things from you before we can move forward:</p>`
         + `${listHtml}${draftLinkHtml(link)}<p>Thanks!</p>`,
       link,
       aiContext: `A friendly reminder that we are still waiting on these items from the client before we can move forward, grouped by list:\n${groups.map((g) => `${g.name}:\n${g.items.map((t) => `• ${t.title}`).join("\n")}`).join("\n")}`,
-    });
+    };
+  };
+  // Remind, from the client page (Derek, 2026-10-14): the reminder is written
+  // as their saved email and shows as a draft in the Conversation, opened
+  // beside the list, to read and send there. One saved email at a time, as
+  // the email window keeps it: one already started is only replaced on a yes.
+  const remindAsDraft = async (clientId: string) => {
+    const start = remindDraftFor(clientId);
+    const saved = await fetchClientEmailDraft(clientId);
+    const name = clientById(clientId)?.name ?? "this client";
+    setFeedClient(clientId);
+    if (saved && htmlToText(saved.body).trim() && !window.confirm(`You already started an email to ${name}. Replace it with the reminder?`)) return;
+    const now = new Date().toISOString();
+    await saveClientEmailDraft(clientId, { subject: start.subject, body: start.body, link: start.link, aiContext: start.aiContext, replyTo: null, createdAt: now, updatedAt: now }, me.id);
+    setSavedDraftNonce((n) => n + 1);
+    pushToast("The reminder is a draft in the conversation, ready to read and send.");
   };
   // Send client link (Derek, 2026-10-05): the portal link in an email to them,
   // opened for review before it goes. From a list, the link opens on that list.
@@ -1907,7 +1932,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const openTaskMeetings = useMemo(() => (openTaskClientId ? clientNotes.filter((n) => n.clientId === openTaskClientId && n.type === "meeting") : []), [clientNotes, openTaskClientId]);
   // Sending, editing and scheduling client messages, the GoHighLevel refresh,
   // and a conversation's older messages loading when it opens (cockpit/useMessaging).
-  const conversationContact = (activeClient !== "all" && clientTab === "chat" && !activeProject ? activeClient : null) ?? clientEmail?.clientId ?? null;
+  // The client page's Conversation is open when it was opened for the client
+  // on screen; its messages load as the Journal's do.
+  const onClientPage = activeClient !== "all" && !myWork && !personalView && !inboxView && !settingsView && !dirView && clientTab !== "chat";
+  const feedFor = feedClient !== null && feedClient === activeClient && onClientPage && activeClient !== WORKSPACE_CLIENT_ID ? feedClient : null;
+  const conversationContact = (activeClient !== "all" && clientTab === "chat" && !activeProject ? activeClient : null) ?? feedFor ?? clientEmail?.clientId ?? null;
+  // The client's own saved email, counted with their drafts and shown in the
+  // Conversation; read again when their email window closes.
+  const savedClientDraft = useClientSavedDraft(onClientPage && activeClient !== WORKSPACE_CLIENT_ID ? activeClient : null, clientEmail?.clientId === activeClient, savedDraftNonce);
   const conversationContactId = conversationContact ? contactForClient(conversationContact)?.id ?? null : null;
   const {
     sendingMessage, sendMessage, deleteMessage, markTaskChannelRead, editMessage,
@@ -2585,50 +2617,77 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The Overdue, Waiting and Meeting boxes (Derek, 2026-10-05, mockup C).
   // Not on ClickUpLocal's own projects: messages, waiting and meetings are
   // about a client (Derek, 2026-10-08).
-  const needsStrip = clientView && clientTab !== "chat" && activeClient !== WORKSPACE_CLIENT_ID && clientById(activeClient) ? (() => {
-          const waiting = waitingTasksFor(activeClient).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
-          const ct = contactForClient(activeClient);
-          // Portal chats count too (Derek, 2026-10-12: Pam's chat never showed here).
-          const talk = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms" || m.channel === "chat")) : [];
-          const latest = (dir: "inbound" | "outbound") => talk.filter((m) => m.direction === dir).reduce<Message | null>((a, m) => (!a || m.at > a.at ? m : a), null);
-          const inn = latest("inbound"); const out = latest("outbound");
-          const plain = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
-          const canMsg = canMessageClient(activeClient);
+  // The client page's three answers and the Conversation they open (Derek,
+  // 2026-10-14, client header mockup). Not on ClickUpLocal's own projects:
+  // messages, waiting and meetings are about a client (Derek, 2026-10-08).
+  const talkClient = clientView && clientTab !== "chat" && activeClient !== WORKSPACE_CLIENT_ID && clientById(activeClient) ? activeClient : null;
+  const talk = talkClient ? (() => {
+    const cid = talkClient;
+    const ct = contactForClient(cid);
+    const first = clientFirstName(ct, clientById(cid)!.name);
+    const canMsg = canMessageClient(cid);
+    // Portal chats count too (Derek, 2026-10-12: Pam's chat never showed here).
+    const said = ct ? messages.filter((m) => m.contactId === ct.id && (m.channel === "email" || m.channel === "sms" || m.channel === "chat")) : [];
+    const clientTasks = scopedTasksByClientId.get(cid) ?? [];
+    const queued = (inboxPrefs.queuedDrafts ?? []).filter((d) => !!ct && (d.contactId === ct.id || d.to.toLowerCase() === ((d.kind === "email" ? ct.email : ct.phone) ?? "").toLowerCase()));
+    const draftCount = canMsg ? collectClientDrafts({ tasks: clientTasks, messages: said, queued, clientDraft: savedClientDraft, sentAlready: (d, ms) => !!sentEmailFor(d, ms) }).length : 0;
+    // Email, text and chat, only the ways they have; a chat needs a task to show on.
+    const channels: TalkChannel[] = !canMsg || !ct ? [] : [...(ct.email ? ["email" as const] : []), ...(ct.phone ? ["sms" as const] : []),
+      ...(whereNewMessageGoes({ channel: "chat", tasks: clientTasks, messages: said, contactId: ct.id, first }).taskId ? ["chat" as const] : [])];
+    return { cid, ct, first, canMsg, said, clientTasks, queued, draftCount, channels };
+  })() : null;
+  const needsStrip = talk ? (() => {
+          const { cid, ct, first, canMsg, said, draftCount } = talk;
+          const waiting = waitingTasksFor(cid).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
           return (
-              <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={clientFirstName(ct, clientById(activeClient)!.name)}
-                lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms" | "chat", preview: `${inn.channel === "sms" ? "Text" : inn.channel === "chat" ? "Chat" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
-                lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" | "chat" } : null}
-                onReply={canMsg && inn ? () => { if (inn.channel === "chat") { if (inn.taskId) setOpenTaskId(inn.taskId); } else if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
-                onEmail={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
-                onText={canMsg && ct?.phone ? () => openClientText(activeClient) : null}
-                drafts={canMsg ? [
-                  ...(scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.draftEmail && t.status !== "done" && !sentEmailFor(t.draftEmail, messages.filter((m) => m.taskId === t.id))).map((t) => ({
-                    id: `task:${t.id}`, title: t.draftEmail!.subject.trim() || t.title, where: `On ${t.title}`, at: t.draftEmail!.updatedAt || t.draftEmail!.createdAt,
-                    open: () => { setOpenTaskEmail(t.id); setOpenTaskId(t.id); },
-                  })),
-                  ...(inboxPrefs.queuedDrafts ?? []).filter((d) => !!ct && (d.contactId === ct.id || d.to.toLowerCase() === ((d.kind === "email" ? ct.email : ct.phone) ?? "").toLowerCase())).map((d) => ({
-                    id: `queued:${d.id}`, title: d.kind === "email" ? (d.subject?.trim() || "No subject") : htmlToText(d.body).slice(0, 60), where: `${d.kind === "email" ? "Email" : "Text"} from ${d.by ?? "Claude"}`, at: d.createdAt,
-                    open: () => (d.kind === "email" ? openClientEmail(activeClient, { subject: d.subject ?? "", body: looksLikeHtml(d.body) ? d.body : plainTextToHtml(d.body), queuedId: d.id }) : openClientText(activeClient, htmlToText(d.body), d.id)),
-                  })),
-                ] : []}
-                onOpenClientDraft={canMsg && ct?.email ? () => openClientEmail(activeClient, {}) : null}
-                composerOpen={clientEmail?.clientId === activeClient}
-                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
-                canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
-                onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null}
-                onMeetNow={canMsg && ct ? () => setMeetNowClient(activeClient) : null}
-                meetingNow={liveMeetingOf(scopedTasksByClientId.get(activeClient) ?? [], nowMs())}
+              <ClientNeeds clientId={cid} ghlContactId={ct?.ghlContactId ?? null} first={first}
+                newest={newestLine(said, { first, meId: me.id, nameOf: (id) => userById(id)?.name ?? null })}
+                draftCount={draftCount} feedOpen={feedFor === cid} onToggleFeed={() => setFeedClient(feedFor === cid ? null : cid)}
+                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
+                canBook={!!ct?.ghlContactId} onBook={() => setBookClient(cid)}
+                requestChannels={[...(ct?.email ? ["email" as const] : []), ...(ct?.phone ? ["sms" as const] : [])]}
+                onRequest={canMsg ? (ch) => void requestMeeting(cid, ch, inboxPrefs.defaultCalendarId ?? null) : null}
+                onMeetNow={canMsg && ct ? () => setMeetNowClient(cid) : null}
+                meetingNow={liveMeetingOf(scopedTasksByClientId.get(cid) ?? [], nowMs())}
                 meId={me.id} pushToast={(m) => pushToast(m)}
                 defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
           );
         })() : null;
+  // The Conversation: beside the list on a desktop, over it on a tablet, the
+  // whole screen on a phone (ClientConversation). Always the same parent, the
+  // page's own row, whether open or not.
+  const conversationFeed = talk && feedFor === talk.cid ? (
+    <ClientConversation key={talk.cid} first={talk.first} meId={me.id} nameOf={(id) => userById(id)?.name ?? null} messages={talk.said}
+      taskTitle={(id) => tasks.find((x) => x.id === id)?.title ?? null} onOpenTask={(id) => setOpenTaskId(id)} onOpenFile={downloadFile}
+      draftDeps={{
+        clientId: talk.cid, first: talk.first, contact: talk.ct ?? null, canMessage: talk.canMsg, tasks: talk.clientTasks, messages: talk.said,
+        queued: talk.queued, saved: savedClientDraft, tasksNow: tasksRef,
+        sendMessage, patchTask, afterQueuedSend, retireQueued: (id) => void retireQueuedDraft(setInboxPrefs, id),
+        openClientEmail: (start) => openClientEmail(talk.cid, start),
+        openTaskWithEmail: (id) => { setOpenTaskEmail(id); setOpenTaskId(id); },
+        onSavedDraftGone: () => setSavedDraftNonce((n) => n + 1),
+        ccContacts: contacts, onUpload: (file) => uploadOneImage(`messages/${talk.cid}`, file), pushToast: (m) => pushToast(m),
+      }}
+      channels={talk.channels}
+      whereFor={(channel) => whereNewMessageGoes({ channel, tasks: talk.clientTasks, messages: talk.said, contactId: talk.ct?.id ?? null, first: talk.first })}
+      answering={emailBeingAnswered(talk.said)}
+      onSend={(channel, subject, text, replyTo, taskId) => sendMessage(talk.cid, channel, subject, channel === "email" ? plainTextToHtml(text) : text, [], [], [], taskId, undefined, replyTo)}
+      onFullEmail={(subject, text) => openClientEmail(talk.cid, { subject, body: text.trim() ? plainTextToHtml(text) : "", replyTo: emailBeingAnswered(talk.said)?.id ?? null })}
+      onClose={() => setFeedClient(null)} />
+  ) : null;
+  // A phone's ⋮ holds the client's links and who follows them (2026-10-14).
+  const phoneSaas = isClientDetail ? contactForClient(activeClient)?.saasUrl ?? null : null;
+  const phoneLinks = isClientDetail ? clientLinks.filter((l) => l.clientId === activeClient) : [];
+  const phoneFollows = isClientDetail ? clientById(activeClient)?.assignedTo ?? [] : [];
+  const phoneRow = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[16px] hover:bg-background";
   const overflowControl = (
     <div className="relative">
       <button onClick={() => setHeaderMoreOpen((o) => !o)} title="More actions"
         className="rounded-md border bg-background p-1.5 text-muted hover:text-foreground"><I.dots /></button>
       {headerMoreOpen && (<>
         <div className="fixed inset-0 z-40" onClick={() => setHeaderMoreOpen(false)} />
-        <div className="absolute right-0 top-full z-50 mt-1 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border bg-surface p-1 shadow-soft-md">
+        {/* A sheet along the bottom on a phone, a menu under ⋮ elsewhere (2026-10-14). */}
+        <div className="fixed inset-x-3 bottom-3 z-50 max-h-[75vh] overflow-y-auto rounded-[5px] border bg-surface p-1 pb-[calc(0.25rem+env(safe-area-inset-bottom,0px))] shadow-soft-md sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-full sm:mt-1 sm:max-h-none sm:w-56 sm:overflow-visible sm:pb-1">
           {/* Journal lives here now (Derek, 2026-09-01: "we don't use journal
               much so much that under 3 dots"). It was half of a permanent
               segmented control at the top of every client, which is a lot of
@@ -2638,6 +2697,25 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] hover:bg-background">
               <I.comment /> {clientTab === "chat" ? "Back to tasks" : `Journal · ${journalCount()}`}
             </button>
+          )}
+          {/* On a phone the header is one line: their links and who follows
+              them are here instead (Derek, 2026-10-14, client header). */}
+          {isClientDetail && (
+            <div className="sm:hidden">
+              {(phoneSaas || phoneLinks.length > 0) && <>
+                <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-bold">Links</div>
+                {phoneSaas && <a href={phoneSaas} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)} className={`${phoneRow} font-bold text-accent`}>SaaS account ↗</a>}
+                {phoneLinks.map((l) => <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" onClick={() => setHeaderMoreOpen(false)} className={phoneRow}><I.link className="shrink-0 text-muted" /><span className="truncate">{l.label}</span></a>)}
+              </>}
+              <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] font-bold">Following</div>
+              {canAdmin ? users.map((u) => (
+                <button key={u.id} onClick={() => toggleClientAssignment(activeClient, u.id)} aria-pressed={phoneFollows.includes(u.id)} className={phoneRow}>
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${phoneFollows.includes(u.id) ? "border-accent bg-accent text-white" : "border-border"}`}>{phoneFollows.includes(u.id) && <I.check />}</span>
+                  <Avatar id={u.id} size={20} /> <span className="truncate">{u.name}</span>
+                </button>
+              )) : <div className="px-2.5 py-1.5 text-[16px] text-muted">{phoneFollows.length ? phoneFollows.map((uid) => userById(uid)?.name).filter(Boolean).join(", ") : "Nobody yet"}</div>}
+              <div className="my-1 border-t" />
+            </div>
           )}
           {/* The two icon buttons from the old bar, named (mockup C). */}
           {clientView && (<>
@@ -2918,11 +2996,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         <header className="relative z-10 flex shrink-0 flex-col gap-2 overflow-x-clip border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
-            <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <h1 className="min-w-0 truncate text-[17px] font-semibold">{headerTitleText}</h1>
+              {/* The star beside the name, as on a desktop (2026-10-14). */}
+              {isClientDetail && !activeProject && (
+                <button onClick={() => toggleStar(activeClient)} aria-label={starred.has(activeClient) ? "Unpin from sidebar" : "Pin to sidebar"}
+                  className={`shrink-0 rounded-[5px] p-1.5 ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></button>
+              )}
+            </div>
             {/* A client's page keeps everything on this one row (Derek,
                 2026-10-13: "move all to one line on mobile"); the name
                 shortens to make room. */}
-            {isClientDetail && clientTab === "tasks" && <>{followingControl}{viewControlPhone}</>}
+            {/* Who follows them and their links are in ⋮ on a phone (2026-10-14). */}
+            {isClientDetail && clientTab === "tasks" && viewControlPhone}
             {/* Icon only here — the phone header has a title and two controls
                 already, and a labelled button would push one of them off. */}
             {!inboxView && !settingsView && !dirView && (
@@ -2958,15 +3044,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : null}
         </header>
 
-        <header className="relative z-10 hidden shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3">
+        <header className={`relative z-10 hidden shrink-0 items-center gap-x-3 gap-y-1.5 border-b bg-surface px-4 py-2 shadow-soft sm:flex sm:gap-y-2 sm:px-5 sm:py-3 ${isClientDetail ? "flex-nowrap" : "flex-wrap"}`}>
           <button onClick={toggleSidebar} title="Show/hide sidebar" className="rounded-lg border p-2 text-muted hover:text-foreground"><I.menu /></button>
-          <div className="min-w-0">
+          <div className={`min-w-0 ${isClientDetail ? "flex-1" : ""}`}>
             {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeProject && projectById(activeProject) ? (<>
               <h1 className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[20px] font-semibold"><I.folder className="shrink-0 text-muted" /> {projectById(activeProject)!.name}
                 {/* The client's quick links on their lists too (Derek, 2026-10-06: header G
                     left them only on the client's own page). */}
+                {/* One line: the links that fit, the rest under + More (2026-10-14). */}
                 {clientView && (
-                  <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
+                  <QuickLinksBar fit links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
                     onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)}
                     onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}</h1>
@@ -2982,7 +3069,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>) : (<>
               {/* Not truncate: it clipped the Following menu beside the name. */}
               <h1 className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[20px] font-semibold">
-                {settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}
+                {/* The name gives way (ends in …) before the links run under the bell. */}
+                <span className="min-w-0 truncate">{settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}</span>
                 {/* The health pill is gone: the Overdue box under the header says it
                     with the count (Derek, 2026-10-05, header mockup C). */}
                 {/* Same star as the Clients directory row — pinning to the
@@ -2992,14 +3080,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   <span role="button" tabIndex={-1} onClick={() => toggleStar(activeClient)} title={starred.has(activeClient) ? "Unpin from sidebar" : "Pin to sidebar"}
                     className={`shrink-0 rounded p-0.5 hover:bg-background ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></span>
                 )}
-                {/* Their SaaS account, one click from their page (Derek, 2026-10-06). */}
-                {clientView && contactForClient(activeClient)?.saasUrl && (
-                  <a href={contactForClient(activeClient)!.saasUrl} target="_blank" rel="noopener noreferrer" title="Open their SaaS account"
-                    className="rounded-[5px] bg-accent-soft px-2 py-0.5 text-[13px] font-bold text-accent ring-1 ring-accent/30 hover:ring-accent">SaaS account ↗</a>
-                )}
-                {/* Quick links in the name row (header G), not a row of their own. */}
+                {/* Their SaaS account first (Derek, 2026-10-06), then the quick
+                    links (header G), on one line: the ones that fit, the rest
+                    under + More (2026-10-14). */}
                 {clientView && (
-                  <QuickLinksBar inline links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
+                  <QuickLinksBar fit links={clientLinks.filter((l) => l.clientId === activeClient)} canEdit={canAdmin}
+                    lead={contactForClient(activeClient)?.saasUrl ? { label: "SaaS account ↗", url: contactForClient(activeClient)!.saasUrl!, title: "Open their SaaS account" } : null}
                     onEdit={(link) => setLinkModal({ initial: link })} onDelete={deleteLink} onReorder={(ids) => reorderLinks(activeClient, ids)}
                     onAdd={(v) => saveLink(activeClient, undefined, { ...v, groupLabel: "", color: "" })} />
                 )}
@@ -3014,7 +3100,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             </>)}
           </div>
 
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <div className={`ml-auto flex items-center justify-end gap-1.5 sm:gap-2 ${isClientDetail ? "shrink-0 flex-nowrap" : "flex-wrap"}`}>
           {/* The only way into the create form since the floating "+" was
               removed, and the only way to make a task at all from All Tasks,
               where the inline row is off because no client is selected.
@@ -3070,33 +3156,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {/* Who follows them, left of the ⋮ (Derek, 2026-10-06; was beside the name). */}
               {followingControl}
               {overflowControl}
-              {/* New last, on the far right (mockup C): a task, or an email or
-                  text to them (Derek, 2026-10-06). */}
-              {(() => {
-                const ct = contactForClient(activeClient);
-                const canMsg = canMessageClient(activeClient);
-                const first = (clientById(activeClient)?.name ?? "").trim().split(/\s+/)[0] || "them";
-                const item = "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-[15px] hover:bg-background";
-                return (
-                  <span className="relative inline-flex">
-                    <button onClick={openComposer} title="New task (press c)"
-                      className="inline-flex items-center gap-1 rounded-l-md bg-accent px-3 py-1.5 text-[14px] font-semibold text-white hover:opacity-90">
-                      <I.plus /> New task
-                    </button>
-                    <button onClick={() => setNewMenuOpen((o) => !o)} aria-expanded={newMenuOpen} aria-label="More ways to start" title="Email or text them"
-                      className="rounded-r-md border-l border-white/25 bg-accent px-2 text-[13px] text-white hover:opacity-90">▾</button>
-                    {newMenuOpen && <>
-                      <div className="fixed inset-0 z-40" onClick={() => setNewMenuOpen(false)} />
-                      <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-                        <button onClick={() => { setNewMenuOpen(false); openComposer(); }} className={item}><I.plus /> New task</button>
-                        {canMsg && ct?.email && <button onClick={() => { setNewMenuOpen(false); openClientEmail(activeClient, {}); }} className={item}>✉️ Email {first}</button>}
-                        {canMsg && ct?.phone && <button onClick={() => { setNewMenuOpen(false); openClientText(activeClient); }} className={item}>💬 Text {first}</button>}
-                        {!canMsg && <div className="px-3 py-2 text-[14px] text-muted">Messages are off for this client.</div>}
-                      </div>
-                    </>}
-                  </span>
-                );
-              })()}
+              {/* New task last, on the far right (mockup C). Email and Text are
+                  in the Conversation now (2026-10-14). */}
+              <button onClick={openComposer} title="New task (press c)"
+                className="inline-flex shrink-0 items-center gap-1 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-semibold text-white hover:opacity-90">
+                <I.plus /> New task
+              </button>
             </div>
           )}
 
@@ -3145,11 +3210,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
           </div>
           {/* Part of the bar, full width (Derek, 2026-10-05: "fill in the whole bar"). */}
-          {needsStrip && <div className="basis-full">{needsStrip}</div>}
         </header>
 
-        {/* Phones: the boxes under the header (the header is hidden there). */}
-        {needsStrip && <div className="shrink-0 border-b bg-surface px-4 py-3 sm:hidden">{needsStrip}</div>}
+        {/* The three answers, under the header on every size (2026-10-14). */}
+        {needsStrip && <div className="shrink-0 border-b bg-surface px-3 py-2.5 sm:px-5">{needsStrip}</div>}
         {!myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !clientView && (
           <QuickLinksBar
             links={clientLinks.filter((l) => l.clientId === activeClient)}
@@ -3370,6 +3434,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </>
         )}
       </main>
+      {conversationFeed}
 
       {selectedTaskIds.size > 0 && (
         // One tidy row (Derek, 2026-10-12: "how can we improve the bulk bar"):
