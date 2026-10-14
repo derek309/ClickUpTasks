@@ -1955,7 +1955,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="text-[16px] leading-snug sm:text-[18px]">
         {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
         <span className="font-semibold">{face && turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{turnPicks
-          ? <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word} title="Change whose turn it is">{t.word}</span>} onChange={(a) => assignStep(sub, a, isActive)} />
+          // Inline, as the pickers after it are: on its own it took a line.
+          ? <span className="inline-flex items-baseline"><InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word} title="Change whose turn it is">{t.word}</span>} onChange={(a) => assignStep(sub, a, isActive)} /></span>
           : t.word}</span>
         {/* The comma rides inside the picker's box: on a phone it wrapped onto
             the start of the next line. */}
