@@ -1271,6 +1271,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
       doc: ["Write a document", `A document on this step, for ${firstName} to review.`],
       page: ["Build an HTML review", `An HTML page on this step, for ${firstName} to review.`],
+      // Meet now picked here turns this step into "Meet with <first>" (meetNow.ts withMeetNowSteps).
+      meetnow: ["Start a meeting now", `A link to join, sent to ${firstName} now; this step becomes the meeting.`],
     };
     const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
     return (
