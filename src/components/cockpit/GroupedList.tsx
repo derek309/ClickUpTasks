@@ -645,9 +645,11 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
   );
 }
 
-export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22, label }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number;
+export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22, label, noFace = false }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number;
   /** Words beside the face, part of the same button (Derek, 2026-10-12: "click the names too"). */
-  label?: React.ReactNode }) {
+  label?: React.ReactNode;
+  /** The name alone, a word in a sentence (the step page's header, 2026-10-13). */
+  noFace?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -656,7 +658,7 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
       <button ref={ref} title={waiting ? (client ? `Waiting on ${client.name}` : "Waiting on the client") : undefined} onClick={(e) => { e.stopPropagation(); setPos(menuPos(ref, 190, (users.length + 2) * 32 + 8)); setOpen((o) => !o); }} className={label ? "inline-flex items-center gap-1.5 rounded-full hover:opacity-80" : "rounded-full hover:opacity-80"}>
         {/* The client only stands in when nobody owns a waiting task. With an
             owner the face stays theirs, and the row says who it waits on. */}
-        {waiting && !value
+        {noFace && label ? null : waiting && !value
           // Same visual language as a user's own Avatar (colored circle +
           // initials) — this task's blocker is that specific client, not a
           // generic "someone external" state, so it should read like one at

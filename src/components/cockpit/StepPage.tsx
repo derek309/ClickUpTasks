@@ -7,7 +7,7 @@
 // opens full page to work in, like a handoff. Messages to the client are
 // ordinary messages; they show here because they were sent while the step
 // ran (stepWindow), nothing is filed apart for the client.
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting,
@@ -18,7 +18,6 @@ import { ActionMenu } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
-import { safeMessageHtml } from "@/lib/safeHtml";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 
 /** The end of every step (Derek, 2026-10-13: "more guidance at the end of
@@ -79,7 +78,35 @@ export function NextChoices({ intro, choices, moreLabel }: { intro?: React.React
   );
 }
 
-export function StepPage({ task, sub, client, firstName, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
+/** The step's directions read as the task's description does: muted, four
+ *  lines, then Read more, which opens the rest in place. A click on the text
+ *  edits it. */
+function ClampedDirections({ text, onEdit }: { text: string; onEdit: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || more) return;
+    const check = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, more]);
+  return (
+    <div className="flex flex-col items-start">
+      {/* A div, not a button: a button won't clamp to four lines. */}
+      <div ref={ref} role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }} title="Click to edit"
+        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${more ? "" : "line-clamp-4"}`}>{text}</div>
+      {(cut || more) && (
+        <button onClick={() => setMore(!more)} aria-expanded={more} className="text-[16px] font-semibold text-accent hover:underline">{more ? "Show less" : "Read more"}</button>
+      )}
+    </div>
+  );
+}
+
+export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
   controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
@@ -100,7 +127,8 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   onDelete?: () => void;
   /** Make this step its own task (Derek, 2026-10-13). */
   onToTask?: () => void;
-  /** The step's date, who has it, its stage, attach and delete. */
+  /** The step's sentence under its name, like the task's: its state, who has
+   *  it, its due date and follow up, each a word to change. */
   controls?: React.ReactNode;
   /** Where it sits in the steps, and the arrows to the one before and after
    *  (Derek, 2026-10-11: "can the arrows move them through the steps?"). */
@@ -124,7 +152,7 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   /** Finish the whole task from the bottom of the step. */
   onFinishTask?: () => void;
   /** Whose move it is, the same colour and sentence as the step's row. */
-  tone?: { state?: string; say: string | null; sayTone: string; rowTone: string };
+  tone?: { state?: string; say: string | null; word?: string; sayTone: string; rowTone: string };
   /** A Text or Chat step opens on that box, ready to write (2026-10-13). */
   startTalk?: "client" | "text" | "email";
   /** The client's waiting step: what is out with them, in place of adding work
@@ -520,6 +548,46 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
     </section>
   );
 
+  // Why it is whose move, when the sentence's first word doesn't say it all.
+  // A bare "Your turn" or "With Claude" is the sentence itself (2026-10-13).
+  const reason = tone?.say && !sub.done && tone.say !== tone.word && !["Your turn", "With Claude"].includes(tone.say) ? tone.say : null;
+  // The directions, under the sentence the way the task shows its description
+  // (Derek, 2026-10-13): muted text, four lines, Read more; a click edits.
+  // Added from + Add like the rest (Derek, 2026-10-11); the ✳ above copies
+  // them for Claude.
+  const dirText = htmlToText(sub.notes ?? "").replace(/\s*\n\s*/g, " ").trim();
+  const directions = (
+    <>
+      {!dirOpen && dirRemoved !== null && (
+        <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
+      )}
+      {dirOpen && (
+        <section aria-label="Directions" className="mt-1 flex flex-col gap-2">
+          {dirEditing ? (<>
+            <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
+              onChange={(html) => {
+                if (dirTimer.current) clearTimeout(dirTimer.current);
+                dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
+                dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
+              }}
+              placeholder="What we want on this step: what to make, what to change, where things are…" />
+            {/* They save as you type; Done closes (Derek, 2026-10-12: "no way
+                to save or close the directions"). */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }} className="h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90">Done</button>
+              <span className="text-[16px] text-muted">Saves as you type.</span>
+              <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="ml-auto rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
+            </div>
+          </>) : dirText ? (
+            <ClampedDirections text={dirText} onEdit={() => setDirEditing(true)} />
+          ) : (
+            <button onClick={() => setDirEditing(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
+          )}
+        </section>
+      )}
+    </>
+  );
+
   // Drawn at the page level: inside the task drawer its own layer kept the
   // app's sidebar on top of the full page (Derek, 2026-10-11).
   if (typeof document === "undefined") return null;
@@ -577,27 +645,29 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                     className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[20px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background sm:text-[24px]" />
                 </div>
                 {whatsNext && <div className="truncate text-[16px] text-muted" title={sub.title.replace(/: what's next\?$/, "")}>After: {sub.title.replace(/: what's next\?$/, "")}</div>}
-                {(sub.done || !isCurrent || round) && (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
-                    {round && <span className="font-semibold text-foreground">{round}</span>}
-                    {(sub.done || !isCurrent) && <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>}
-                    {sub.done && <button onClick={onReopen} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Reopen this step</button>}
-                  </div>
-                )}
-                {/* Whose move it is, as on the step's row (2026-10-13). A bare
-                    "Your turn", or a bare "With Claude" beside Assign Claude,
-                    says nothing the page doesn't, so no band then (Derek,
-                    2026-10-13); your move with a reason ("Claude
-                    finished its part", "Ryan wrote") reads in strong red on
-                    the page, not pale red on pale pink. */}
-                {tone?.say && !sub.done && !["Your turn", "With Claude"].includes(tone.say) && (
-                  <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold ${tone.state === "mine" ? "leading-snug text-red-700 dark:text-red-300" : `rounded-[5px] px-3 py-2 ${tone.rowTone} ${tone.sayTone}`}`}>
-                    <span>{tone.say}</span>
+                {/* Read like the task's header (Derek, 2026-10-13): the name,
+                    one sentence ("● Your turn, assigned to Derek, due Oct 14,
+                    follow up set a date"), then the directions in muted text. */}
+                {controls}
+                {/* Why it is whose move, when the sentence's first word doesn't
+                    say it all ("Claude finished its part. Your turn", "Ryan
+                    wrote", "Claude is working"): a line, no box, strong red
+                    for your move, the step's own colour otherwise. */}
+                {reason && (
+                  <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold leading-snug ${tone!.sayTone}`}>
+                    <span>{reason}</span>
                     {/* The cloud session working it (lib/claudeCloud). */}
                     {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
                   </div>
                 )}
-                {controls}
+                {(sub.done || round) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
+                    {round && <span className="font-semibold text-foreground">{round}</span>}
+                    {sub.done && <span>{`${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}`}</span>}
+                    {sub.done && <button onClick={onReopen} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Reopen this step</button>}
+                  </div>
+                )}
+                {directions}
               </div>
               {followBox}
               {planBits}
@@ -632,37 +702,6 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                       </div>
                     );
                   })()}
-                </section>
-              )}
-              {/* Directions: what we want on this step, added from + Add like
-                  the rest (Derek, 2026-10-11). The ✳ above copies it for Claude. */}
-              {!dirOpen && dirRemoved !== null && (
-                <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
-              )}
-              {dirOpen && (
-                <section aria-labelledby="step-directions" className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 id="step-directions" className="text-[17px] font-bold">Directions</h3>
-                    {/* Read, or write in (Derek, 2026-10-12: "no way to save or
-                        close the directions"). They save as you type; Done closes. */}
-                    {dirEditing
-                      ? <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }} className="ml-auto h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90">Done</button>
-                      : <button onClick={() => setDirEditing(true)} className="ml-auto h-9 rounded-[5px] px-3 text-[16px] font-semibold text-accent hover:bg-background">Edit</button>}
-                    <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
-                  </div>
-                  {!dirEditing ? (
-                    <div role="button" tabIndex={0} onClick={() => setDirEditing(true)} onKeyDown={(e) => { if (e.key === "Enter") setDirEditing(true); }} title="Click to edit"
-                      className="rte-content cursor-text rounded-[5px] px-1 py-0.5 text-[16px] hover:bg-background" dangerouslySetInnerHTML={{ __html: safeMessageHtml(sub.notes ?? "") }} />
-                  ) : (
-                  <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
-                    onChange={(html) => {
-                      if (dirTimer.current) clearTimeout(dirTimer.current);
-                      dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
-                      dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
-                    }}
-                    placeholder="What we want on this step: what to make, what to change, where things are…" />
-                  )}
-                  {dirEditing && <p className="text-[16px] text-muted">Saves as you type.</p>}
                 </section>
               )}
               {todoList}

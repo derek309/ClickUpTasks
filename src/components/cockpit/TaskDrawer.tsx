@@ -1695,80 +1695,74 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </ul>
     </div>
   );
-  // A step's controls, on its page (Derek, 2026-10-11: "move all the actions
-  // into the step"): its date, who has it, its stage, attach, delete.
-  const stepControls = (sub: Subtask, isActive: boolean) => (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[16px]">
-      {/* A step has its own due date (Derek, 2026-10-11: "now there is just a
-          due date"); the follow up date is the task's, in its sentence. */}
-      {(() => {
-        const d = sub.due ?? null;
-        const t = d && !sub.done ? stepDateLabel(d).tone : "later";
-        return (
-          <span className="inline-flex items-center gap-1">
-            <span className="text-muted">Due</span>
-            <InlineDate value={d} onChange={(v) => { onPatchSub(sub.id, { due: v }); if (isActive && v && sub.assigneeId && sub.assigneeId !== task.assigneeId) onPatch(handoffDates(v)); }} onClear={() => onPatchSub(sub.id, { due: null })}
-              emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
-              className={`font-semibold underline decoration-dotted underline-offset-4 ${t === "late" ? "text-danger" : t === "soon" ? "text-highlight" : ""}`} />
-          </span>
-        );
-      })()}
-      {sub.onClient ? (
-        <span className="inline-flex items-center gap-1.5 font-medium"><span aria-hidden className="font-normal text-muted">·</span><span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>On {client.name}</span>
-      ) : (
-        // Who has it, labelled like Due and Follow up (Derek, 2026-10-11).
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="text-muted">·</span>
-          <span className="text-muted">Assign</span>
-          <InlineAssignee value={sub.assigneeId ?? null} size={24}
-            label={sub.assigneeId ? <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span> : undefined}
-            onChange={(a) => {
-              // Claude: due today, no follow up, started in the cloud (2026-10-13).
-              if (a === CLAUDE_ID) { toClaude(sub.id); return; }
-              // Given to a teammate: on their list today unless a follow up is already set.
-              onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
-              // The current step's owner decides the status: a teammate makes it
-              // Delegated, back to the owner returns it to the step's own stage.
-              if (isActive) {
-                const status = statusForStep(task.status, stepStage({ ...sub, assigneeId: a ?? undefined }, task.assigneeId));
-                const toTeammate = !!a && a !== task.assigneeId;
-                onPatch({ ...(status ? { status } : {}), ...(toTeammate ? handoffDates(sub.due) : {}) });
-              }
-              // Giving the current step to a teammate: the follow up finishes
-              // when they mark it done (brief, section 6).
-              if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
-            }} />
-        </span>
-      )}
-      {/* A teammate's step has their own date: the day it lands on their list.
-          Claude has none (due today, no follow up), so Claude's step shows no
-          second date (Derek, 2026-10-13: "I don't understand"). */}
-      {!sub.onClient && !sub.done && sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID && (
-        <span className="inline-flex items-center gap-1">
-          <span className="text-muted">On {userById(sub.assigneeId)?.name.split(" ")[0] ?? "their"}&apos;s list</span>
-          <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
-            emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))}
-            className="font-semibold underline decoration-dotted underline-offset-4" />
-        </span>
-      )}
-      {/* No stage to pick: the step is the stage (Derek, 2026-10-11). The task's
-          follow up date, settable from the step it is about. The same day as
-          the step's due date, or none, reads as the due date alone with a
-          small "+ Follow up" to set a different one (Derek, 2026-10-13). */}
-      {isActive && !sub.done && (followUp && followUp.slice(0, 10) !== (sub.due ?? "").slice(0, 10) ? (
-        <span className="inline-flex items-center gap-1">
-          {/* Yours, the task's: when you check back on a teammate's step. */}
-          <span className="text-muted">{sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID ? "You check back" : "Follow up"}</span>
-          <InlineDate value={followUp} onChange={(v) => moveStepDate(v)} onClear={() => moveStepDate(null)}
-            emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
-            className="font-semibold underline decoration-dotted underline-offset-4" />
-        </span>
-      ) : (
-        <InlineDate value={null} onChange={(v) => moveStepDate(v)}
-          emptyLabel={<span className="font-semibold text-accent">+ {sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID ? "You check back" : "Follow up"}</span>} formatValue={formatDue} />
-      ))}
-    </div>
-  );
+  // A step's header on its page reads like the task's (Derek, 2026-10-13):
+  // "● Your turn, assigned to Derek, due Oct 14, 1 day left, follow up set a
+  // date", the name and each date a word to change. It holds what the Due ·
+  // Assign · Follow up row did, with the same pickers doing the same things.
+  const stepControls = (sub: Subtask, isActive: boolean) => {
+    const t = stepTone(sub);
+    const stage = stepStage(sub, task.assigneeId);
+    const d = sub.due ?? null;
+    const dueTone = d && !sub.done ? stepDateLabel(d).tone : "later";
+    const who = sub.assigneeId ?? task.assigneeId;
+    const whoName = who ? userById(who)?.name.split(" ")[0] ?? "someone" : "nobody";
+    // A teammate's step has their own date, the day it lands on their list,
+    // and yours reads "you check back". Claude has none (due today, no follow
+    // up), so Claude's step shows no second date (Derek, 2026-10-13).
+    const teammate = !sub.onClient && !!sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID;
+    // The task's follow up, the same day as the step's due date or none,
+    // reads as "set a date" (Derek, 2026-10-13).
+    const fu = followUp && followUp.slice(0, 10) !== (d ?? "").slice(0, 10) ? followUp : null;
+    const dateWord = `-mx-1 ${word} text-[16px] sm:text-[18px]`;
+    const setADate = <span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>;
+    // Each part after the first word: its words, then its picker.
+    const parts: { lead: string; pick: React.ReactNode }[] = [];
+    // The client's own step: "Waiting on Ryan" already says who has it.
+    if (!sub.onClient) parts.push({ lead: "assigned to", pick: (
+      <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word}>{whoName}</span>}
+        onChange={(a) => {
+          // Claude: due today, no follow up, started in the cloud (2026-10-13).
+          if (a === CLAUDE_ID) { toClaude(sub.id); return; }
+          // Given to a teammate: on their list today unless a follow up is already set.
+          onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
+          // The current step's owner decides the status: a teammate makes it
+          // Delegated, back to the owner returns it to the step's own stage.
+          if (isActive) {
+            const status = statusForStep(task.status, stepStage({ ...sub, assigneeId: a ?? undefined }, task.assigneeId));
+            const toTeammate = !!a && a !== task.assigneeId;
+            onPatch({ ...(status ? { status } : {}), ...(toTeammate ? handoffDates(sub.due) : {}) });
+          }
+          // Giving the current step to a teammate: the follow up finishes
+          // when they mark it done (brief, section 6).
+          if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
+        }} />
+    ) });
+    parts.push({ lead: d ? "due" : "", pick: (
+      <InlineDate value={d} onChange={(v) => { onPatchSub(sub.id, { due: v }); if (isActive && v && sub.assigneeId && sub.assigneeId !== task.assigneeId) onPatch(handoffDates(v)); }} onClear={() => onPatchSub(sub.id, { due: null })}
+        emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>}
+        formatValue={(v) => `${formatDue(v)}${sub.done ? "" : `, ${dueCountdown(v)}`}`}
+        className={`${dateWord} ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`} />
+    ) });
+    if (teammate && !sub.done) parts.push({ lead: `on ${userById(sub.assigneeId!)?.name.split(" ")[0] ?? "their"}'s list`, pick: (
+      <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
+        emptyLabel={setADate} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))} className={dateWord} />
+    ) });
+    if (isActive && !sub.done) parts.push({ lead: teammate ? "you check back" : "follow up", pick: (
+      <InlineDate value={fu} onChange={(v) => moveStepDate(v)} onClear={fu ? () => moveStepDate(null) : undefined}
+        emptyLabel={setADate} formatValue={formatDue} className={dateWord} />
+    ) });
+    return (
+      <div className="text-[16px] leading-snug sm:text-[18px]">
+        {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
+        <span className="font-semibold"><span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />{t.word}</span>
+        {/* The comma rides inside the picker's box: on a phone it wrapped onto
+            the start of the next line. */}
+        {parts.map((p, i) => (
+          <Fragment key={i}>{i === 0 ? ", " : " "}{p.lead ? `${p.lead} ` : ""}<span className="inline-flex items-baseline">{p.pick}{i < parts.length - 1 ? "," : ""}</span></Fragment>
+        ))}
+      </div>
+    );
+  };
   // A step on the task: one line that says what is happening inside it, the
   // whole of it a click to open the step (Derek, 2026-10-11: "make the bar
   // clickable", "this is all informational").
@@ -1889,7 +1883,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
         : (() => { const prev = steps[steps.findIndex((x) => x.id === sub.id) - 1]; return prev?.done && prev.assigneeId === CLAUDE_ID ? "Claude finished its part. Your turn" : "Your turn"; })()
       ) : null;
-    return { state, say, sayTone, rowTone: ROW_TONE[state] };
+    // The short word the step page's sentence opens with ("● Your turn,
+    // assigned to Derek, …"); say is the longer reason, when it has one.
+    const word = state === "done" ? "Done" : state === "claude" ? "With Claude" : state === "mine" ? "Your turn" : state === "later" ? "Comes later" : say ?? "Waiting";
+    return { state, say, word, sayTone, rowTone: ROW_TONE[state] };
   };
   const stepRow = (sub: Subtask, i: number) => {
     const isActive = activeStep?.id === sub.id;
