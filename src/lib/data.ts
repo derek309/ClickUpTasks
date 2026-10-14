@@ -3098,6 +3098,15 @@ export function statusForStep(current: TaskStatus, next: TaskStatus | null): Tas
   return next;
 }
 
+/** The status a task moves to when a step is given to Claude: Delegated, as
+ *  for any teammate, only while Claude in the cloud can start on it. Not set
+ *  up (cloudReady false), the task stays on its owner, so its header never
+ *  says Delegated while the step says Claude has not started (Derek,
+ *  2026-10-14). Unknown (null) is treated as ready, as before. */
+export function statusForClaudeStep(current: TaskStatus, step: Pick<Subtask, "title" | "stage" | "assigneeId" | "onClient">, ownerId: string | null, cloudReady: boolean | null): TaskStatus | null {
+  return cloudReady === false ? null : statusForStep(current, stepStage(step, ownerId));
+}
+
 /** A client sent changes on a review: the review step is done, and two steps
  *  follow it, making the changes and a fresh client review. Returns the new
  *  list, or null when this round was already added. */

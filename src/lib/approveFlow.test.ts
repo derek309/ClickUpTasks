@@ -128,3 +128,14 @@ describe("a done What's next is named for how it ended", () => {
     expect(nameDoneWhatsNext(clean)).toBe(clean);
   });
 });
+
+import { statusForClaudeStep } from "./data";
+
+describe("a step given to Claude", () => {
+  const step = { title: "Put it in the Bulk customers blast", assigneeId: "u_claude" };
+  it("delegates the task only while Claude in the cloud can start", () => {
+    expect(statusForClaudeStep("approved", step, "u_derek", true)).toBe("delegated");
+    expect(statusForClaudeStep("approved", step, "u_derek", null)).toBe("delegated");
+    expect(statusForClaudeStep("approved", step, "u_derek", false)).toBeNull();
+  });
+});

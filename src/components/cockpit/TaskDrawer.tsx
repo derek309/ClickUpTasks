@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -74,6 +74,11 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
 /** Contacts whose SaaS link was checked against GoHighLevel this session,
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
+
+// Whether Claude in the cloud can start a step, learned from the first step
+// given to Claude in this tab (the claude-cloud route answers 501 until
+// CLAUDE_ROUTINE_ID is set). Null until known.
+const claudeCloud: { ready: boolean | null } = { ready: null };
 
 export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, onAddStepToTask }: {
   task: Task;
@@ -2244,17 +2249,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list = answerWhatsNext(list, stepId, (asked && suggestionFor(asked)?.name) ?? "Work out the next step and do it",
       { assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined, toClaudeAt: new Date().toISOString(), cloudError: undefined });
     const step = list.find((x) => x.id === stepId)!;
-    const st = statusForStep(task.status, stepStage(step, task.assigneeId));
+    const before = task.status;
+    const st = statusForClaudeStep(task.status, step, task.assigneeId ?? null, claudeCloud.ready);
     const saved = onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
     // After the save lands: before it, the server has no such step yet (404).
     void Promise.resolve(saved).then(() => authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }))
       .then(async (res) => {
         // One toast; what happened shows on the step itself. A start that
         // failed says why there (the server sets cloudSession when it starts).
-        if (res.ok) return;
+        if (res.ok) { claudeCloud.ready = true; return; }
         const j = (await res.json().catch(() => ({}))) as { error?: string };
         if (res.status === 409) return;
         onPatchSub(stepId, { cloudError: res.status === 501 ? "not_set_up" : j.error || "error" });
+        // Not set up: the task stays on its owner, not Delegated.
+        if (res.status === 501) {
+          claudeCloud.ready = false;
+          if (st && taskRef.current.status === st) onPatch({ status: before });
+        }
       })
       .catch(() => onPatchSub(stepId, { cloudError: "Couldn't reach the app" }));
     pushToast("Given to Claude");
