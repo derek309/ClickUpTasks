@@ -401,3 +401,32 @@ describe("following up while waiting", () => {
     expect(followUpsLine([{ via: "email", at: "2026-10-13T12:00:00Z" }, { via: "call", at: "2026-10-14T12:00:00Z" }])).toBe("Emailed Oct 13, called Oct 14");
   });
 });
+
+import { stepForNewWork } from "./data";
+
+describe("where Claude's work goes on a task with steps", () => {
+  const C = "u_claude";
+  it("on Claude's own open step", () => {
+    const list = [s("a", "Research", { done: true, doneAt: "2026-10-12T10:00:00Z" }), s("b", "Draft the blog post", { assigneeId: C }), s("c", "Derek review")];
+    expect(stepForNewWork(list, "doc", { claudeId: C })).toEqual({ holdOn: "b", madeOn: "b" });
+  });
+  it("moves on from the step Claude just finished, the way a tick carries it (October Newsletter)", () => {
+    const list = [
+      s("a", "Draft Email Campaign HTML", { done: true, doneAt: "2026-10-12T20:09:00Z", assigneeId: C }),
+      s("b", "Derek review: newsletter email"), s("c", "Send the newsletter to Brandon for review"),
+    ];
+    expect(stepForNewWork(list, "page", { claudeId: C })).toEqual({ holdOn: "b", madeOn: "a" });
+    // Already approved: finished work stays where it was made.
+    expect(stepForNewWork(list, "page", { claudeId: C, finished: true })).toEqual({ holdOn: "a", madeOn: "a" });
+  });
+  it("else the current step, never the client's own waiting step", () => {
+    const list = [s("a", "Draft", { done: true, doneAt: "2026-10-12T10:00:00Z", assigneeId: "u_derek" }), s("w", "Waiting on Brian", { onClient: true }), s("b", "Schedule")];
+    expect(stepForNewWork(list, "doc", { claudeId: C })).toEqual({ holdOn: "b", madeOn: "b" });
+  });
+  it("the step named wins, and no open steps means nowhere", () => {
+    const list = [s("a", "Draft", { assigneeId: C }), s("b", "Review")];
+    expect(stepForNewWork(list, "image", { claudeId: C, stepId: "b" })).toEqual({ holdOn: "b", madeOn: "b" });
+    expect(stepForNewWork([s("a", "Draft", { done: true })], "doc", { claudeId: C })).toBeNull();
+    expect(stepForNewWork([], "doc", { claudeId: C })).toBeNull();
+  });
+});

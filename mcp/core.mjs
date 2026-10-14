@@ -472,7 +472,9 @@ export function createServer(opts = {}) {
           await update(winner);
         }
       }
-      return { content: [{ type: "text", text: `Updated project instructions on ${t.title}` }] };
+      // On a step like the rest of Claude's work (hosted server only).
+      const placed = html && opts.services?.placeWork ? await opts.services.placeWork(t.id, "brief") : "";
+      return { content: [{ type: "text", text: `Updated project instructions on ${t.title}${placed}` }] };
     });
 
   server.tool("create_task",
@@ -1047,6 +1049,8 @@ export function createServer(opts = {}) {
   const reply = (text) => ({ content: [{ type: "text", text }] });
   const services = opts.services;
   if (services) {
+    // Which step holds the work (Derek, 2026-10-13: Claude's drafts sat "Not on a step").
+    const STEP = z.string().optional().describe("a step's id or title to put this work on; left out, it goes on your own open step, else moves on from the step you just finished to the next one, else the current step. Work a step already holds stays there unless you name one");
     const KIND = z.enum(["doc", "image", "page", "video"]).describe('"doc" the client document, "image" the image review, "page" the HTML review, "video" the video review');
     // The kinds a chat can supply the content for. A video is uploaded in the app
     // (hundreds of megabytes, straight from a Mac to storage), so add_review_version
@@ -1078,8 +1082,8 @@ export function createServer(opts = {}) {
 
     server.tool("create_review",
       "Start a review on a task (one of each kind per task). Refused on private and Personal tasks. A new review is named after the task unless title is given.",
-      { task_id: z.string(), kind: KIND, title: z.string().optional() },
-      async ({ task_id, kind, title }) => reply(await services.createReview(task_id, kind, title)));
+      { task_id: z.string(), kind: KIND, title: z.string().optional(), step: STEP },
+      async ({ task_id, kind, title, step }) => reply(await services.createReview(task_id, kind, title, step)));
 
     server.tool("update_review",
       "Rename a review, pick its stage by hand, reopen one the client approved so it can change again, or relabel an image review's images or an HTML review's pages. Completed locks it; any stage but approved clears a client approval.",
@@ -1098,16 +1102,17 @@ export function createServer(opts = {}) {
     const RESOLVE = z.union([z.literal("all"), z.array(z.string())]).optional()
       .describe('the comments this version deals with, marked done after it is saved: their ids from get_review, or "all" when it deals with every open one. Always pass the ones you finished; leave out only those you did not.');
     const withResolved = async (out, task_id, kind, which) => which ? `${out}\n${await services.resolveComments(task_id, kind, which)}` : out;
-    const writeDocument = async ({ task_id, body, title, resolve_comments }) => {
+    const writeDocument = async ({ task_id, body, title, resolve_comments, step }) => {
       const html = docTextToHtml(body);
       if (!docHtmlToText(html)) return reply("The document is empty.");
-      return reply(await withResolved(await services.writeDocument(task_id, html, title), task_id, "doc", resolve_comments));
+      return reply(await withResolved(await services.writeDocument(task_id, html, title, step), task_id, "doc", resolve_comments));
     };
     const writeSchema = {
       resolve_comments: RESOLVE,
       task_id: z.string(),
       body: z.string().min(1).describe("the whole document, in the simple markdown described above"),
       title: z.string().optional().describe("the document's name; omit to keep it"),
+      step: STEP,
     };
     const writeWhat = `Create a task's client document, or replace its working copy, as a draft. Pass the WHOLE document every time (read it with get_review first when editing). The client sees it only after send_for_review. ${DOC_TEXT} Refused once the client approved (update_review with reopen first).`;
     server.tool("write_document", writeWhat, writeSchema, writeDocument);
@@ -1134,12 +1139,13 @@ export function createServer(opts = {}) {
         keep_others: z.boolean().optional().describe("keep the working copy's other images or pages and replace or add only these"),
         html: z.string().optional(), name: z.string().optional().describe("the version's file name"),
         resolve_comments: RESOLVE,
+        step: STEP,
       },
-      async ({ task_id, kind, image_url, upload_id, images, pages, keep_others, html, name, resolve_comments }) => reply(await withResolved(await services.addVersion(task_id, kind, {
+      async ({ task_id, kind, image_url, upload_id, images, pages, keep_others, html, name, resolve_comments, step }) => reply(await withResolved(await services.addVersion(task_id, kind, {
         imageUrl: image_url, uploadId: upload_id, html, name,
         ...(images ? { images: images.map((i) => ({ imageUrl: i.image_url, uploadId: i.upload_id, name: i.name, label: i.label, position: i.position })), keepOthers: !!keep_others } : {}),
         ...(pages ? { pages: pages.map((p) => ({ html: p.html, name: p.name, label: p.label, position: p.position })), keepOthers: !!keep_others } : {}),
-      }), task_id, kind, resolve_comments)));
+      }, step), task_id, kind, resolve_comments)));
 
     server.tool("use_version",
       "Make an earlier version the working copy again (on the client document, bring back an earlier version's text). send_for_review sends it.",

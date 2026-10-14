@@ -54,9 +54,9 @@ describe("review tools over MCP", () => {
     const writeDocument = vi.fn(async () => "Updated.");
     const client = await connect({ writeDocument });
     await call(client, "write_document", { task_id: "t_1", body: "## Fall sale\n\nHello **there**" });
-    expect(writeDocument).toHaveBeenCalledWith("t_1", "<h2>Fall sale</h2><p>Hello <strong>there</strong></p>", undefined);
+    expect(writeDocument).toHaveBeenCalledWith("t_1", "<h2>Fall sale</h2><p>Hello <strong>there</strong></p>", undefined, undefined);
     await call(client, "write_client_document", { task_id: "t_1", body: "Hi", title: "Flyer" });
-    expect(writeDocument).toHaveBeenLastCalledWith("t_1", "<p>Hi</p>", "Flyer");
+    expect(writeDocument).toHaveBeenLastCalledWith("t_1", "<p>Hi</p>", "Flyer", undefined);
     expect(await call(client, "write_document", { task_id: "t_1", body: "   " })).toBe("The document is empty.");
     expect(writeDocument).toHaveBeenCalledTimes(2);
   });
@@ -67,7 +67,7 @@ describe("review tools over MCP", () => {
     await call(client, "add_review_comment", { task_id: "t_1", kind: "image", text: "Bigger logo", pin: { version: 2, x: 0.5, y: 0.25 } });
     expect(services.addComment).toHaveBeenCalledWith("t_1", "image", "Bigger logo", { quote: undefined, pin: { version: 2, x: 0.5, y: 0.25 } });
     await call(client, "add_review_version", { task_id: "t_1", kind: "image", image_url: "https://example.com/logo.png" });
-    expect(services.addVersion).toHaveBeenCalledWith("t_1", "image", { imageUrl: "https://example.com/logo.png", uploadId: undefined, html: undefined, name: undefined });
+    expect(services.addVersion).toHaveBeenCalledWith("t_1", "image", { imageUrl: "https://example.com/logo.png", uploadId: undefined, html: undefined, name: undefined }, undefined);
     await call(client, "add_review_version", {
       task_id: "t_1", kind: "image", keep_others: true,
       images: [{ image_url: "https://example.com/back.png", label: "Back", position: 2 }],
@@ -75,7 +75,7 @@ describe("review tools over MCP", () => {
     expect(services.addVersion).toHaveBeenLastCalledWith("t_1", "image", {
       imageUrl: undefined, uploadId: undefined, html: undefined, name: undefined, keepOthers: true,
       images: [{ imageUrl: "https://example.com/back.png", uploadId: undefined, name: undefined, label: "Back", position: 2 }],
-    });
+    }, undefined);
     await call(client, "add_review_version", {
       task_id: "t_1", kind: "page",
       pages: [{ html: "<p>Welcome</p>", label: "Welcome email" }, { html: "<p>Reminder</p>" }],
@@ -83,7 +83,7 @@ describe("review tools over MCP", () => {
     expect(services.addVersion).toHaveBeenLastCalledWith("t_1", "page", {
       imageUrl: undefined, uploadId: undefined, html: undefined, name: undefined, keepOthers: false,
       pages: [{ html: "<p>Welcome</p>", name: undefined, label: "Welcome email", position: undefined }, { html: "<p>Reminder</p>", name: undefined, label: undefined, position: undefined }],
-    });
+    }, undefined);
     await call(client, "add_review_comment", { task_id: "t_1", kind: "image", text: "Darker", pin: { version: 1, x: 0.1, y: 0.2, image: "Back" } });
     expect(services.addComment).toHaveBeenLastCalledWith("t_1", "image", "Darker", { quote: undefined, pin: { version: 1, x: 0.1, y: 0.2, image: "Back" } });
     await call(client, "remove_version", { task_id: "t_1", kind: "page", version: "next" });

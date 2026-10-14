@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
+  addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
@@ -462,4 +462,37 @@ export async function stepsOnClientEmail(taskId: string, m: { id: string; subjec
     status = made ? statusForStep(row.status, "in_progress") : null;
     return made;
   }, false, () => (status ? { status } : null));
+}
+
+/** Client work Claude made or changed over the MCP goes on a step (Derek,
+ *  2026-10-13: the October Newsletter's page and the October Blog documents
+ *  sat "Not on a step"): the step named, else where stepForNewWork puts it.
+ *  Work a step already holds stays where it is unless a step is named. Tasks
+ *  without open steps are left alone. The step's title, or a sentence saying
+ *  why nothing moved. */
+export async function holdMadeWork(taskId: string, key: DeliverableKey, claudeId: string, stepRef?: string): Promise<{ on: string | null; note?: string }> {
+  let on: string | null = null;
+  let note: string | undefined;
+  const { data: doc } = key === "email" ? { data: null } : await supabaseAdmin.from("task_documents").select("status").eq("task_id", taskId).eq("kind", key).is("deleted_at", null).maybeSingle();
+  const status = (doc as { status?: string } | null)?.status;
+  const finished = status === "approved" || status === "completed";
+  await rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    const plan = planSteps(list);
+    if (!plan.length) return null;
+    let stepId: string | undefined;
+    const ref = stepRef?.trim();
+    if (ref) {
+      const named = matchStep(plan, ref);
+      if (typeof named === "string") { note = named; return null; }
+      stepId = named.id;
+    }
+    const held = stepHolding(list, key);
+    if (held && (!stepId || held.id === stepId)) { on = held.title; return null; }
+    const place = stepForNewWork(list, key, { claudeId, stepId, finished });
+    if (!place) return null;
+    on = list.find((x) => x.id === place.holdOn)?.title ?? null;
+    return holdOnStep(list, place.holdOn, key).map((x) => (x.id === place.madeOn && !x.madeHere?.includes(key) ? { ...x, madeHere: [...(x.madeHere ?? []), key] } : x));
+  });
+  return { on, note };
 }

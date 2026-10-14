@@ -3684,3 +3684,30 @@ export function ownNewSteps(before: Subtask[], after: Subtask[], ownerId: string
 export function carryForward(holds: string[] | undefined, finished: (key: DeliverableKey) => boolean): DeliverableKey[] {
   return (holds ?? []).filter((k): k is DeliverableKey => ["doc", "image", "page", "video", "brief", "email"].includes(k) && !finished(k as DeliverableKey));
 }
+
+/** Where client work made from outside the app (Claude over the MCP) goes on
+ *  a task with steps, as the step id that holds it and the step that made it
+ *  (madeHere), or null when there are no open steps to hold it. In order: the
+ *  step named (`stepId`, already matched); else Claude's own open step; else,
+ *  when the step finished last was Claude's, the work moves on from it the
+ *  way a tick carries it (carryForward: the next open step, unless the work
+ *  is already finished, when it stays); else the current step. A client's
+ *  own waiting step never holds it (its holds are not shown). (Derek,
+ *  2026-10-13: the October Newsletter's page sat "Not on a step".) */
+export function stepForNewWork(subtasks: Subtask[], key: DeliverableKey, opts: { claudeId: string; stepId?: string; finished?: boolean }): { holdOn: string; madeOn: string } | null {
+  const plan = planSteps(subtasks);
+  if (opts.stepId) {
+    const named = plan.find((x) => x.id === opts.stepId);
+    return named ? { holdOn: named.id, madeOn: named.id } : null;
+  }
+  const open = plan.filter((x) => !x.done && !x.onClient);
+  const mine = open.find((x) => x.assigneeId === opts.claudeId);
+  if (mine) return { holdOn: mine.id, madeOn: mine.id };
+  const last = plan.filter((x) => x.done && x.doneAt).sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""))[0];
+  if (last && last.assigneeId === opts.claudeId) {
+    const moving = carryForward([key], () => !!opts.finished).length > 0;
+    const after = open[0];
+    return { holdOn: moving && after ? after.id : last.id, madeOn: last.id };
+  }
+  return open[0] ? { holdOn: open[0].id, madeOn: open[0].id } : null;
+}

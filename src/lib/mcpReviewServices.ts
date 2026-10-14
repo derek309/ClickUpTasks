@@ -28,6 +28,8 @@ import { placeDraftLink } from "./draftLink";
 import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
 import { addBusinessDaysIso, htmlToText, todayPacific } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
+import { holdMadeWork } from "./stepsServer";
+import type { DeliverableKey } from "./data";
 import { TASK_FILES_BUCKET } from "./db";
 import { kindInSentence, kindTitle, kindWhat, type FileKind, type ReviewKind } from "./reviewKinds";
 import { MAX_SET_IMAGES, cleanImageLabel, imageLabel, parseImageSet, type ImageSetItem } from "./imageSet";
@@ -94,6 +96,16 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     const body = typeof doc.body === "string" ? doc.body : "";
     return body && !shown.some((v) => v.body === body) ? body : null;
   }
+  /** What Claude makes goes on a step, like work made in the app (Derek,
+   *  2026-10-13): the step named, else Claude's open step, else on from the
+   *  step Claude just finished (stepsServer holdMadeWork). The words to add
+   *  to the reply. */
+  async function place(taskId: string, key: DeliverableKey, step?: string): Promise<string> {
+    try {
+      const r = await holdMadeWork(taskId, key, memberId, step);
+      return r.note ? ` ${r.note}` : r.on ? ` It's on the step "${r.on}".` : "";
+    } catch { return ""; }
+  }
   /** Keep one image for an image review: fetched from a public link, or an upload
    *  from start_image_upload. */
   async function storeImage(documentId: string, input: { imageUrl?: string; uploadId?: string; name?: string }, who: DocActor): Promise<{ ok: true; fileId: string } | { ok: false; error: string }> {
@@ -116,7 +128,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
    *  2026-09-14) or two emails (2026-09-16). Without keepOthers the list is the whole
    *  version, in order; with it, each one replaces the one at its position in the
    *  working copy (or is added at the end), and the rest carry over. */
-  async function addSet(taskId: string, kind: FileKind, entries: (VersionImage | VersionPage)[], keepOthers: boolean): Promise<string> {
+  async function addSet(taskId: string, kind: FileKind, entries: (VersionImage | VersionPage)[], keepOthers: boolean, step?: string): Promise<string> {
     const word = kind === "page" ? "page" : "image";
     const task = await taskFor(taskId);
     if (typeof task === "string") return task;
@@ -151,7 +163,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
     if (!picked.ok) { await undo(); return picked.error; }
     await event(task.id, `${await actor.label()} added a new version of the ${what(kind)}`);
     const names = items.map((_, i) => `"${imageLabel(items, i, word)}"`).join(", ");
-    return `Added a new version of the ${what(kind)} on "${task.title}" with ${items.length} ${items.length === 1 ? word : `${word}s: ${names}`}. It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
+    return `Added a new version of the ${what(kind)} on "${task.title}" with ${items.length} ${items.length === 1 ? word : `${word}s: ${names}`}.${await place(task.id, kind, step)} It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
   }
 
   /** "Back" for a set's second of two images, "" for a version of one. */
@@ -161,6 +173,8 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
   };
 
   return {
+    /** Puts work made outside these tools (the project instructions) on a step. */
+    placeWork: (taskId: string, key: DeliverableKey, step?: string) => place(taskId, key, step),
     async listReviews(taskId: string): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
@@ -254,7 +268,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return out.join("\n");
     },
 
-    async createReview(taskId: string, kind: ReviewKind, title?: string): Promise<string> {
+    async createReview(taskId: string, kind: ReviewKind, title?: string, step?: string): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const made = await createReview(task, kind, actor);
@@ -263,7 +277,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         const named = await renameReview(task.id, kind, actor, title);
         if (!named.ok) return named.error;
       }
-      if (!made.created) return `"${task.title}" already has a ${what(kind)}, so nothing new was made. get_review shows it.`;
+      if (!made.created) return `"${task.title}" already has a ${what(kind)}, so nothing new was made. get_review shows it.${step ? await place(task.id, kind, step) : ""}`;
       await event(task.id, `${await actor.label()} started the ${what(kind)}`);
       const next = {
         doc: "write_document writes it",
@@ -273,7 +287,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         // straight from a Mac to storage.
         video: "upload the video on the task in the app",
       }[kind];
-      return `Created the ${what(kind)} on "${task.title}". ${next}, then send_for_review sends it.`;
+      return `Created the ${what(kind)} on "${task.title}".${await place(task.id, kind, step)} ${next}, then send_for_review sends it.`;
     },
 
     async updateReview(taskId: string, kind: ReviewKind, change: { title?: string; stage?: ReviewStage; reopen?: boolean; imageLabels?: string[] }): Promise<string> {
@@ -310,7 +324,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return `On the ${what(kind)}: ${done.join(", ")}.`;
     },
 
-    async writeDocument(taskId: string, html: string, title?: string): Promise<string> {
+    async writeDocument(taskId: string, html: string, title?: string, step?: string): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const made = await createReview(task, "doc", actor);
@@ -323,7 +337,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       if (!r.ok) return r.error;
       await event(task.id, `${await actor.label()} ${made.created ? "wrote" : "updated"} the client document draft`);
       const version = Number(r.document.version ?? 0);
-      return `${made.created ? "Created" : "Updated"} the client document on "${task.title}". ${version ? `The client still sees version ${version} until it's sent.` : "It hasn't been sent to the client."} send_for_review sends it.`;
+      return `${made.created ? "Created" : "Updated"} the client document on "${task.title}".${await place(task.id, "doc", step)} ${version ? `The client still sees version ${version} until it's sent.` : "It hasn't been sent to the client."} send_for_review sends it.`;
     },
 
     async startImageUpload(taskId: string, fileName: string, size: number): Promise<string> {
@@ -339,9 +353,9 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         + `Then call add_review_version with kind "image" and upload_id "${r.path}".`;
     },
 
-    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string; images?: VersionImage[]; pages?: VersionPage[]; keepOthers?: boolean }): Promise<string> {
-      if (kind === "image" && input.images?.length) return addSet(taskId, kind, input.images, !!input.keepOthers);
-      if (kind === "page" && input.pages?.length) return addSet(taskId, kind, input.pages, !!input.keepOthers);
+    async addVersion(taskId: string, kind: FileKind, input: { imageUrl?: string; uploadId?: string; html?: string; name?: string; images?: VersionImage[]; pages?: VersionPage[]; keepOthers?: boolean }, step?: string): Promise<string> {
+      if (kind === "image" && input.images?.length) return addSet(taskId, kind, input.images, !!input.keepOthers, step);
+      if (kind === "page" && input.pages?.length) return addSet(taskId, kind, input.pages, !!input.keepOthers, step);
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
       const made = await createReview(task, kind, actor);
@@ -368,7 +382,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         return picked.error;
       }
       await event(task.id, `${await actor.label()} added a new version of the ${what(kind)}`);
-      return `Added a new version of the ${what(kind)} on "${task.title}". It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
+      return `Added a new version of the ${what(kind)} on "${task.title}".${await place(task.id, kind, step)} It's the working copy (version "next"), not sent yet: send_for_review sends it.`;
     },
 
     async useVersion(taskId: string, kind: ReviewKind, version: ReviewVersion): Promise<string> {
