@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, todayIso, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, todayIso, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, closeOpenSteps, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 import { queueEntry, queueExit, queuePromotions, queueSettings, type QPatch } from "../../../mcp/queue.mjs";
 
@@ -274,7 +274,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // Finished: a "Task done" step records who and when; reopened, it goes.
     if (synced.status === "done" && before.status !== "done") {
       const base = dropOpenWhatsNext(synced.subtasks ?? before.subtasks);
-      synced.subtasks = [...base.filter((x) => x.addedFor !== "finished"), taskDoneStep({ createdAt: before.createdAt, subtasks: base }, me.id, me.name, new Date().toISOString(), () => newId("s_"))];
+      const at = new Date().toISOString();
+      synced.subtasks = [...closeOpenSteps(base.filter((x) => x.addedFor !== "finished"), at, me.id), taskDoneStep({ createdAt: before.createdAt, subtasks: base }, me.id, me.name, at, () => newId("s_"))];
     } else if (synced.status && synced.status !== "done" && before.status === "done") {
       const base = synced.subtasks ?? before.subtasks;
       if (base.some((x) => x.addedFor === "finished")) synced.subtasks = base.filter((x) => x.addedFor !== "finished");

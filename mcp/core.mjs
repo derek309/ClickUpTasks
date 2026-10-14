@@ -905,8 +905,10 @@ export function createServer(opts = {}) {
         const open = plan.filter((x) => !x.done);
         const days = Math.max(0, Math.round((Date.parse(at) - Date.parse(before.created_at)) / 86400000));
         const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
-        const notes = `<p>Took ${days === 0 ? "less than a day" : days === 1 ? "1 day" : `${days} days`} from when it was made.</p>${plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done.</p>` : ""}${open.length ? `<p>Left open:</p><ul>${open.map((x) => `<li>${esc(x.title)}</li>`).join("")}</ul>` : ""}`;
-        patch.subtasks = [...subs.filter((x) => x.addedFor !== "finished"), { id: rid("s_"), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${memberNames[ME] || "Claude"} · ${when}`, notes, assigneeId: ME }];
+        const notes = `<p>Took ${days === 0 ? "less than a day" : days === 1 ? "1 day" : `${days} days`} from when it was made.</p>${plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done before the task was.</p>` : ""}${open.length ? `<p>Closed with the task:</p><ul>${open.map((x) => `<li>${esc(x.title)}</li>`).join("")}</ul>` : ""}`;
+        // Every step still open closes with the task (data.ts closeOpenSteps).
+        const closed = subs.filter((x) => x.addedFor !== "finished").map((x) => x.done ? x : { ...x, done: true, doneAt: at, outcome: x.outcome || "Closed with the task", doneBy: ME });
+        patch.subtasks = [...closed, { id: rid("s_"), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${memberNames[ME] || "Claude"} · ${when}`, notes, assigneeId: ME }];
       } else if (status !== "done" && before.status === "done" && subs.some((x) => x.addedFor === "finished")) {
         patch.subtasks = subs.filter((x) => x.addedFor !== "finished");
       }

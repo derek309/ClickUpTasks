@@ -1389,6 +1389,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Said, never asked (Derek, 2026-10-13: a browser box asking to "mark it
     // done" was the wrong word and in the way). What is left stays on the step.
     if (ask) pushToast(`"${sub!.title}" ${ask}; it stays on the step.`);
+    // A finished task asks nothing more: the step is ticked, no What's next,
+    // no next step made (Derek, 2026-10-14: ticking steps on a done task
+    // opened What's next and a suggested step).
+    if (taskRef.current.status === "done") {
+      onToggleSub(sid, true);
+      onPatchSub(sid, { doneAt: new Date().toISOString(), outcome, ...(meId ? { doneBy: meId } : {}) });
+      setAutoDone(null);
+      return;
+    }
     // Changes done and no client review next: the next step is telling the
     // client, with the email drafted for us to read and send. Nothing goes to
     // the client by itself (Derek, 2026-10-11).
@@ -3007,6 +3016,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; doneId?: string; held?: string[]; via?: "email" | "sms" | "chat"; said?: string } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
+  // Marking the task done closes an open What's next with it.
+  useEffect(() => { if (task.status === "done") setSentNext(null); }, [task.status]);
   // Escape closes this box first, not the task behind it.
   useEscapeToClose(closeSentNext, !!sentStep);
   // The suggestion comes off: a check in is removed; an approval keeps its

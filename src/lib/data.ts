@@ -3319,6 +3319,14 @@ export function addedReason(addedFor: string | undefined, clientFirstName: strin
 export type DeliverableKey = "doc" | "image" | "page" | "video" | "brief" | "email";
 export const attachmentKey = (id: string) => `att:${id}`;
 
+/** A task marked done closes every step still open, period (Derek,
+ *  2026-10-14: "once it's marked done mark all the steps done"): ticked
+ *  now, by whoever finished the task, "Closed with the task" as the outcome.
+ *  Steps already done are left as they were. */
+export function closeOpenSteps(subtasks: Subtask[], at: string, byId: string | null): Subtask[] {
+  return subtasks.map((s) => s.done ? s : { ...s, done: true, doneAt: at, outcome: s.outcome || "Closed with the task", ...(byId ? { doneBy: byId } : {}) });
+}
+
 /** The last step of a finished task, a record (Derek, 2026-10-12: "a final
  *  step with Task Done, who completed it, the date and time"): who and when
  *  as its outcome, and in its notes how long it took, how the steps went and
@@ -3331,8 +3339,8 @@ export function taskDoneStep(task: Pick<Task, "createdAt" | "subtasks">, byId: s
   const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
   const lines = [
     `<p>Took ${days === 0 ? "less than a day" : days === 1 ? "1 day" : `${days} days`} from when it was made.</p>`,
-    plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done.</p>` : "",
-    open.length ? `<p>Left open:</p><ul>${open.map((s) => `<li>${esc(s.title)}</li>`).join("")}</ul>` : "",
+    plan.length ? `<p>${plan.length - open.length} of ${plan.length} steps done before the task was.</p>` : "",
+    open.length ? `<p>Closed with the task:</p><ul>${open.map((s) => `<li>${esc(s.title)}</li>`).join("")}</ul>` : "",
   ].join("");
   return { id: makeId(), title: "Task done", done: true, doneAt: at, addedFor: "finished", outcome: `Done by ${byName} · ${when}`, notes: lines, ...(byId ? { assigneeId: byId } : {}) };
 }
