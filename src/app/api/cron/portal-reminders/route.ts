@@ -4,24 +4,33 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { buildPortalReminder } from "@/lib/portalReminderServer";
-import { subtractBusinessDaysIso, todayPacific } from "@/lib/data";
-import { isReminderHour, PORTAL_REMINDER_PREFIX, REMINDER_GAP_BUSINESS_DAYS, REVIEW_STATUS, thisWeek } from "@/lib/portalReminders";
+import { toPacificDate, todayPacific } from "@/lib/data";
+import { isReminderHour, PORTAL_REMINDER_PREFIX, REVIEW_STATUS } from "@/lib/portalReminders";
+import { isReminderDay, reminderQueueStatus, reminderSettings } from "@/lib/reminderSchedule";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Monday at 8 AM (Wednesday dropped 2026-10-07) (Derek, 2026-10-05: "remind them what we need
-// from them and what's outstanding"). Each client with something waiting on
-// them gets one email from the person who looks after them: what we need, with
-// the dates, what we're working on (when their portal shows it), and a button
-// to their tasks page. Queued through scheduled_messages like the review
-// reminders, so it retries, signs as the sender and lands in the conversation.
-// Clients with nothing waiting on them get nothing. Since 2026-10-07 each one
-// waits in the Inbox, "Reminder emails going out", until someone sends it, and
-// only this week's items go in.
+// The client reminder at 8 AM (Derek, 2026-10-05: "remind them what we need
+// from them"). Each client with something waiting on them gets one email
+// from the person who looks after them: how many things we need, by list, and
+// a button to their client portal (the same words as Remind on the client
+// page). Queued through scheduled_messages like the review reminders, so it
+// retries, signs as the sender and lands in the conversation. Clients with
+// nothing waiting on them get nothing.
 //
-// vercel.json runs it at 15:00 and 16:00 UTC on Mondays; it only
-// sends in the one that is 8 AM in California. An admin can POST ?dry=1 to see
-// the emails without sending, and ?force=1 to send outside the hour.
+// When, per client (Derek, 2026-10-14), set on the client page's waiting
+// card and saved in clients.reminders (lib/reminderSchedule): Mondays, every
+// few business days, picked weekdays, or off; and either waiting in the
+// Inbox, "Reminder emails going out", until someone sends it (the default,
+// as since 2026-10-07), or sent on its own by the 15 minute sender. Nothing
+// chosen is Mondays, for review. The old weekday "follow up due" emails are
+// gone: the Monday only cron had made them dead since 2026-10-07, and the
+// client's schedule is what decides the day now.
+//
+// vercel.json runs it at 15:00 and 16:00 UTC Monday to Friday; it only acts
+// in the one that is 8 AM in California. An admin can POST ?dry=1 to see who
+// would get one today without queuing anything, and ?force=1 to run outside
+// the hour (each client's schedule still decides).
 
 export const maxDuration = 60;
 export async function GET(req: NextRequest) { return run(req); }
@@ -33,50 +42,54 @@ async function run(req: NextRequest) {
   const dry = req.nextUrl.searchParams.get("dry") === "1";
   const force = req.nextUrl.searchParams.get("force") === "1";
   const nowMs = Date.now();
-  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a Monday in California" });
-  const monday = new Date(nowMs).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short" }) === "Mon";
+  if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a weekday in California" });
   const today = todayPacific();
 
   // Open, shared tasks waiting on a client: who gets an email at all.
-  const { data: waiting, error } = await supabaseAdmin.from("tasks").select("id, client_id, title, due, follow_up_at")
-    .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).like("client_id", "cl_%").limit(2000);
+  const { data: waiting, error } = await supabaseAdmin.from("tasks").select("client_id")
+    .eq("waiting_on_client", true).neq("status", "done").eq("is_private", false).eq("hidden_from_client", false).is("deleted_at", null).like("client_id", "cl_%").limit(5000);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const byClient = new Map<string, { title: string; due: string | null }[]>();
-  const rows = ((waiting ?? []) as any[]).map((x) => ({ id: x.id as string, client_id: x.client_id as string, title: x.title as string, due: (x.due ?? null) as string | null, followUpAt: (x.follow_up_at ?? null) as string | null }));
-  // Whose follow up date has come round: the reason to write on a weekday.
-  const followUpDue = rows.filter((t) => !!t.followUpAt && t.followUpAt <= today);
-  const dueClients = new Set(followUpDue.map((t) => t.client_id));
-  // Monday: everyone with something this week. Other days: only those with a
-  // follow up due, and then everything they owe this week goes in the one email.
-  for (const t of rows.filter((t) => monday || dueClients.has(t.client_id)).filter((t) => thisWeek([t], today).length || followUpDue.includes(t)))
-    byClient.set(t.client_id, [...(byClient.get(t.client_id) ?? []), { title: t.title, due: t.due }]);
+  const clientIds = [...new Set(((waiting ?? []) as any[]).map((x) => x.client_id as string))].filter((id) => id !== "cl_workspace");
 
-  const startOfDay = new Date(`${today}T00:00:00-08:00`).toISOString();
-  const tally = { clients: byClient.size, queued: 0, nothingSent: 0, noEmail: 0, noSender: 0, alreadyToday: 0 };
-  const previews: { client: string; to: string; subject: string }[] = [];
-  for (const clientId of byClient.keys()) {
-    if (clientId === "cl_workspace") continue;
-    // One reminder in REMINDER_GAP_BUSINESS_DAYS at most, sent or waiting for review.
-    const gapStart = new Date(`${subtractBusinessDaysIso(today, REMINDER_GAP_BUSINESS_DAYS - 1)}T00:00:00-08:00`).toISOString();
-    const { data: sent } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).gte("scheduled_at", gapStart < startOfDay ? gapStart : startOfDay).limit(1);
-    if (sent?.length) { tally.alreadyToday++; continue; }
-    // Last week's still waiting for review: not a second one (audit 2026-10-07).
+  // Each one's schedule. Before supabase/client-reminders.sql has run the
+  // column isn't there: everyone gets the default, Mondays for review.
+  const settings = new Map<string, unknown>();
+  let settingsMissing = false;
+  if (clientIds.length) {
+    const { data: rows, error: sErr } = await supabaseAdmin.from("clients").select("id, reminders").in("id", clientIds);
+    if (sErr) settingsMissing = true;
+    for (const r of (rows ?? []) as any[]) settings.set(r.id as string, r.reminders ?? null);
+  }
+
+  const tally = { clients: clientIds.length, queued: 0, sentOnTheirOwn: 0, notToday: 0, off: 0, alreadyToday: 0, waitingReview: 0, nothingSent: 0, noEmail: 0, noSender: 0 };
+  const previews: { client: string; to: string; subject: string; goes: "on its own" | "for review" }[] = [];
+  for (const clientId of clientIds) {
+    const setting = settings.get(clientId) ?? null;
+    if (reminderSettings(setting).schedule === "off") { tally.off++; continue; }
+    // The newest reminder sent or queued for them, whatever became of it.
+    const { data: last } = await supabaseAdmin.from("scheduled_messages").select("scheduled_at").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).order("scheduled_at", { ascending: false }).limit(1);
+    const lastDay = last?.[0]?.scheduled_at ? toPacificDate(last[0].scheduled_at as string) : null;
+    // One a day at most.
+    if (lastDay && lastDay >= today) { tally.alreadyToday++; continue; }
+    if (!isReminderDay(setting, today, lastDay)) { tally.notToday++; continue; }
+    // The last one still waiting for review: not a second one (audit 2026-10-07).
     const { data: open } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).eq("status", REVIEW_STATUS).limit(1);
-    if (open?.length) { tally.alreadyToday++; continue; }
+    if (open?.length) { tally.waitingReview++; continue; }
     // The same builder Refresh uses in the Inbox (lib/portalReminderServer).
-    const built = await buildPortalReminder(clientId, { today, monday, dry });
+    const built = await buildPortalReminder(clientId, { dry });
     if (!built.ok) { if (built.reason === "no_email") tally.noEmail++; else if (built.reason === "nothing") tally.nothingSent++; continue; }
     const owner = await resolveNotifyRecipient(built.assignedTo);
     if (!owner) { tally.noSender++; continue; }
-    const email = built.email;
-    if (dry) { previews.push({ client: built.clientName, to: built.to, subject: email.subject }); continue; }
+    const status = reminderQueueStatus(setting, REVIEW_STATUS);
+    if (dry) { previews.push({ client: built.clientName, to: built.to, subject: built.email.subject, goes: status === REVIEW_STATUS ? "for review" : "on its own" }); continue; }
+    // "pending" now: the 15 minute sender (cron/send-scheduled) sends it on its next run.
     const { error: qErr } = await supabaseAdmin.from("scheduled_messages").insert({
       id: PORTAL_REMINDER_PREFIX + randomUUID(), client_id: clientId, task_id: null, channel: "email",
-      subject: email.subject, body: email.body, scheduled_at: new Date(nowMs).toISOString(), status: REVIEW_STATUS, created_by: owner,
+      subject: built.email.subject, body: built.email.body, scheduled_at: new Date(nowMs).toISOString(), status, created_by: owner,
     });
-    if (!qErr) tally.queued++;
+    if (!qErr) { tally.queued++; if (status !== REVIEW_STATUS) tally.sentOnTheirOwn++; }
   }
-  const out = { ok: true, dry, ...tally, ...(dry ? { previews } : {}) };
+  const out = { ok: true, dry, today, ...(settingsMissing ? { settingsMissing } : {}), ...tally, ...(dry ? { previews } : {}) };
   console.log("[cron/portal-reminders]", JSON.stringify({ ...out, previews: undefined }));
   return NextResponse.json(out);
 }

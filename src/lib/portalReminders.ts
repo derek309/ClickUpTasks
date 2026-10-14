@@ -1,74 +1,58 @@
-// The Monday and Wednesday morning email to each client (Derek, 2026-10-05):
-// what we need from them, and what's still in the works, with a button to
-// their portal. Pure, so the wording and the timing can be tested.
+// The reminder email to a client: how many things we need from them, and a
+// link to their client portal (Derek, 2026-10-14: "just tell them counts of
+// what we need, we can't move forward until we get this, link to the client
+// portal, we don't want them replying"). One wording, used by Remind on the
+// client page (Cockpit remindDraftFor) and by the 8 AM job
+// (portalReminderServer), so the two can't drift. Pure, so it can be tested.
 
-import { draftLinkAsButton, draftLinkHtml, escapeHtml } from "./draftLink";
+import { draftLinkHtml, escapeHtml, type DraftLink } from "./draftLink";
+import { orderLists } from "./listOrder";
 
 export const PORTAL_REMINDER_PREFIX = "smr_portal_";
 const TZ = "America/Los_Angeles";
 
-/** Monday, 8 AM in California (the cron runs at 15:00 and 16:00 UTC so one
- *  of them is 8 AM whether it's summer or winter). Every weekday was tried
- *  for follow ups and held back to Monday (Derek, 2026-10-07: "leave it on
- *  Monday for now"); a follow up that came due by then joins Monday's email. */
+/** 8 AM in California on a weekday (the cron runs at 15:00 and 16:00 UTC
+ *  Monday to Friday so one of them is 8 AM whether it's summer or winter).
+ *  Which weekdays a client is reminded on is their own setting
+ *  (reminderSchedule.ts); Mondays when nothing is chosen. */
 export function isReminderHour(nowMs: number): boolean {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", hour12: false }).formatToParts(new Date(nowMs)).map((x) => [x.type, x.value]));
-  return p.weekday === "Mon" && Number(p.hour) % 24 === 8;
+  return ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(p.weekday) && Number(p.hour) % 24 === 8;
 }
 
-/** At most one reminder to a client in this many business days, however many
- *  follow ups come due (Derek: "I don't want the client getting tons of emails"). */
-export const REMINDER_GAP_BUSINESS_DAYS = 3;
-
-const shortDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-
-export type ReminderTask = { title: string; due: string | null };
-
-/** The Sunday that ends this week (today, when today is Sunday). */
-export function endOfWeek(today: string): string {
-  const d = new Date(`${today}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
-  return d.toISOString().slice(0, 10);
-}
-
-/** This week's only, so a reminder doesn't bury them (Derek, 2026-10-07: "not
- *  the whole week ... what we're actually working on this week"): late, or
- *  due by Sunday. Something with no date isn't this week's. */
-export function thisWeek<T extends ReminderTask>(tasks: T[], today: string): T[] {
-  const end = endOfWeek(today);
-  return tasks.filter((t) => !!t.due && t.due <= end);
-}
-
-/** Every reminder email waits in the Inbox for someone to read it first
- *  (Derek, 2026-10-07): queued at this status, which the 15 minute sender
- *  never picks up; Send there moves it on. */
+/** Reminder emails written for review wait in the Inbox for someone to read
+ *  them first (Derek, 2026-10-07): queued at this status, which the 15 minute
+ *  sender never picks up; Send there moves it on. A client set to "send on
+ *  its own" is queued as pending instead. */
 export const REVIEW_STATUS = "review";
 
-/** The email, or null when nothing is waiting on them this week (no reminder
- *  then). Counts only, never what the items are (Derek, 2026-10-13: Carol
- *  answered a listed email item by item instead of opening her tasks): how
- *  many are overdue, due today and coming up, and one button to her tasks,
- *  where she answers, adds a task or talks to us. */
-export function portalReminderEmail(o: { firstName: string | null; needs: ReminderTask[]; all?: ReminderTask[]; working?: ReminderTask[]; showWorking?: boolean; portalUrl: string; monday: boolean; today: string }): { subject: string; body: string } | null {
-  if (!o.needs.length) return null;
-  const every = o.all?.length ? o.all : o.needs;
-  const overdue = every.filter((t) => t.due && t.due < o.today).length;
-  const today = every.filter((t) => t.due === o.today).length;
-  const later = every.length - overdue - today;
-  const parts = [overdue && `${overdue} overdue`, today && `${today} due today`, later && `${later} coming up`].filter(Boolean) as string[];
-  const line = (n: number, what: string, color: string) => n ? `<li><b style="color:${color}">${n}</b> ${what}</li>` : "";
-  const button = { url: o.portalUrl, label: "Open your tasks" };
+export type ReminderGroup = { name: string; count: number };
+
+/** What is waiting, counted by list in the client's list order; anything on
+ *  no list (or a list that's gone) counts under Other. */
+export function reminderGroups(waiting: { projectId: string | null }[], lists: { id: string; name: string; position?: number | null }[]): ReminderGroup[] {
+  const order = orderLists(lists);
+  return [...order.map((pr) => ({ name: pr.name, count: waiting.filter((t) => t.projectId === pr.id).length })),
+    { name: "Other", count: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)).length }].filter((g) => g.count > 0);
+}
+
+/** The reminder, or null when nothing is waiting. Counts only, never what the
+ *  items are (Carol answered a listed email item by item instead of opening
+ *  her portal, 2026-10-13); a count per list when there are several. The
+ *  link goes in as a plain link line; the server turns it into a button. */
+export function reminderEmail(o: { firstName: string | null; groups: ReminderGroup[]; link: DraftLink | null }): { subject: string; body: string; aiContext: string } | null {
+  const total = o.groups.reduce((n, g) => n + g.count, 0);
+  if (!total) return null;
+  const things = (n: number) => `${n} ${n === 1 ? "thing" : "things"}`;
+  const several = o.groups.length > 1;
+  const countHtml = several ? `<ul>${o.groups.map((g) => `<li><p>${escapeHtml(g.name)}: ${g.count}</p></li>`).join("")}</ul>` : "";
   return {
-    subject: `${overdue ? "Your attention needed" : o.monday ? "This week" : "Quick check in"}: ${parts.join(", ")}`,
-    body: draftLinkAsButton(
-      `<p>Hi${o.firstName ? ` ${escapeHtml(o.firstName)}` : ""},</p>` +
-      `<p>${overdue ? "We need your help to keep your project moving." : "Here is where things stand with what we need from you."} On your tasks page right now:</p>` +
-      `<ul>${line(overdue, overdue === 1 ? "task is overdue" : "tasks are overdue", "#b91c1c")}${line(today, today === 1 ? "is due today" : "are due today", "#b45309")}${line(later, later === 1 ? "is coming up" : "are coming up", "#334155")}</ul>` +
-      `<p><b>Click the button below to take care of them.</b></p>${draftLinkHtml(button)}` +
-      `<p>On your tasks page you can:</p>` +
-      `<ul><li>Answer each one, or send files, right on the task</li><li>Add something new with <b>New task</b></li><li>Chat with us about any of them</li></ul>` +
-      `<p>Please use your tasks page rather than replying to this email, so nothing gets missed.</p><p>Thanks!</p>`,
-      button,
-    ),
+    subject: `We need ${things(total)} from you to move forward`,
+    body: `<p>Hi ${escapeHtml(o.firstName?.trim() || "there")},</p><p>We can't move forward until we get ${things(total)} from you${several ? ":" : "."}</p>`
+      + `${countHtml}<p>Each one is in your client portal, where you can answer it or upload what we need.</p>`
+      + `${draftLinkHtml(o.link)}<p>Please use the portal rather than replying to this email, so nothing gets missed.</p><p>Thanks!</p>`,
+    aiContext: `A short reminder that we can't move forward until the client gets us ${things(total)}. Give only the counts${several ? ` by list (${o.groups.map((g) => `${g.name}: ${g.count}`).join(", ")})` : ""}, never the items themselves. Send them to the client portal link to answer or upload each one, and ask them to use the portal rather than replying to the email.`,
   };
 }
+
+export const REMINDER_LINK_LABEL = "Open your client portal";

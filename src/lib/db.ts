@@ -9,6 +9,7 @@ import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
 import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
+import { reminderSettings } from "./reminderSchedule";
 import { APPROVED_DAYS } from "./openReviews";
 import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
 import type { ClientDraftInput } from "./pendingSends";
@@ -59,8 +60,11 @@ export { titleCase };
 // the same reason, so that migration is also migrate-before-deploy.
 // Both portal switches are on unless someone turned them off (Derek, 2026-10-05:
 // "turn these on by default"); a client read from the database always has them set.
-const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks !== false, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null,  portal_shows_all_tasks: c.portalShowsAllTasks !== false });
-export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, shareToken: r.share_token ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null,  portalShowsAllTasks: r.portal_shows_all_tasks === true });
+const clientToRow = (c: Client) => ({ id: c.id, name: c.name, color: c.color, ghl_location_id: c.ghlLocationId, status: c.status ?? "claimed", type: c.type ?? "client", assigned_to: c.assignedTo ?? [], can_message: c.canMessage ?? [], linked_contact_id: c.linkedContactId ?? null, linked_contact_ids: c.linkedContactIds ?? [], share_token: c.shareToken ?? null, can_request_new_tasks: c.canRequestNewTasks !== false, in_trial: c.inTrial === true, trial_ends_at: c.trialEndsAt ?? null,  portal_shows_all_tasks: c.portalShowsAllTasks !== false,
+  // Only once the column is there (supabase/client-reminders.sql), as with a task's queue columns.
+  ...(c.reminders !== undefined ? { reminders: c.reminders } : {}) });
+export const rowToClient = (r: any): Client => ({ id: r.id, name: titleCase(r.name), color: r.color, ghlLocationId: r.ghl_location_id ?? "", status: (r.status as Client["status"]) ?? "claimed", type: (r.type as Client["type"]) ?? "client", assignedTo: r.assigned_to ?? [], canMessage: r.can_message ?? [], linkedContactId: r.linked_contact_id ?? null, linkedContactIds: r.linked_contact_ids ?? [], aiSummary: r.ai_summary ?? null, aiSummaryAt: r.ai_summary_at ?? null, shareToken: r.share_token ?? null, canRequestNewTasks: r.can_request_new_tasks === true, inTrial: r.in_trial === true, trialEndsAt: r.trial_ends_at ?? null,  portalShowsAllTasks: r.portal_shows_all_tasks === true,
+  ...("reminders" in r ? { reminders: r.reminders ? reminderSettings(r.reminders) : null } : {}) });
 
 const contactToRow = (c: Contact) => ({ id: c.id, client_id: c.clientId, name: c.name, email: c.email, phone: c.phone ?? null, ghl_contact_id: c.ghlContactId, company_name: c.company ?? null, city: c.city ?? null, state: c.state ?? null, saas_url: c.saasUrl ?? null });
 export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client_id, name: titleCase(r.name), email: r.email ?? "", phone: r.phone ?? "", ghlContactId: r.ghl_contact_id ?? "", company: r.company_name ?? "", city: r.city ?? "", state: r.state ?? "", saasUrl: r.saas_url ?? "", additionalEmails: r.additional_emails ?? [] });

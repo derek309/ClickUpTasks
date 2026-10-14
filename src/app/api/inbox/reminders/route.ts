@@ -4,13 +4,12 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { resolveContact, sendScheduledMessageNow } from "@/lib/sendMessageServer";
 import { PORTAL_REMINDER_PREFIX, REVIEW_STATUS } from "@/lib/portalReminders";
 import { buildPortalReminder } from "@/lib/portalReminderServer";
-import { todayPacific } from "@/lib/data";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // Reminder emails going out (Derek, 2026-10-07: "we have to review the
 // reminder emails before they go out ... if there's something wrong, we can
-// adjust it before we send it"). The Monday and Wednesday client reminders and
+// adjust it before we send it"). The 8 AM client reminders and
 // the document review nudges queue at REVIEW_STATUS, which the 15 minute
 // sender never picks up. The top of the Inbox lists them here.
 //
@@ -61,10 +60,8 @@ export async function POST(req: NextRequest) {
     if (!b.id.startsWith(PORTAL_REMINDER_PREFIX)) return NextResponse.json({ error: "Only a client reminder can be refreshed." }, { status: 400 });
     const { data: row } = await supabaseAdmin.from("scheduled_messages").select("client_id, body").eq("id", b.id).eq("status", REVIEW_STATUS).maybeSingle();
     if (!row) return NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
-    // Keeps the opening it had: the Monday one says "this week".
-    const monday = String((row as any).body ?? "").includes("keep things moving this week");
-    const built = await buildPortalReminder((row as any).client_id, { today: todayPacific(), monday });
-    if (!built.ok) return NextResponse.json({ error: built.reason === "nothing" ? "Nothing is waiting on them this week any more. Use Don't send." : built.reason === "no_email" ? "They have no email on file." : "That client is gone." }, { status: 409 });
+    const built = await buildPortalReminder((row as any).client_id);
+    if (!built.ok) return NextResponse.json({ error: built.reason === "nothing" ? "Nothing is waiting on them any more. Use Don't send." : built.reason === "no_email" ? "They have no email on file." : "That client is gone." }, { status: 409 });
     const { data } = await supabaseAdmin.from("scheduled_messages").update({ subject: built.email.subject, body: built.email.body }).eq("id", b.id).eq("status", REVIEW_STATUS).select("id");
     return data?.length ? NextResponse.json({ ok: true, subject: built.email.subject, body: built.email.body }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
   }

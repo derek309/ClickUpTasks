@@ -18,7 +18,7 @@ import {
   addDaysIso,
   DUE_BUCKETS,
   dueBucketOf,
-  TRIAL_DAYS, trialState,
+  TRIAL_DAYS, trialState, todayPacific,
   STATUS_META,
   STATUS_ORDER, HIDDEN_STATUSES, pickableStatuses,
   viewerDueDate, isOnPlateOf,
@@ -106,6 +106,8 @@ import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
 import { orderLists } from "@/lib/listOrder";
+import { REMINDER_LINK_LABEL, reminderEmail, reminderGroups } from "@/lib/portalReminders";
+import { reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { ClientConversation } from "./cockpit/ClientConversation";
 import { sendFromFeed, useClientSavedDraft } from "./cockpit/clientFeedDrafts";
@@ -706,28 +708,28 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const waiting = waitingTasksFor(clientId);
     const url = getClientShareUrl(clientId);
     if (!url) pushToast("No portal link could be made for this client, so the reminder has no link. An admin needs to create the share link first.");
-    const link = url ? { url, label: "Open your client portal" } : null;
-    // Counts only, never the tasks themselves, and the portal is where they
-    // answer, not a reply (Derek, 2026-10-14: "just tell them counts of what
-    // we need, we can't move forward until we get this, link to the client
-    // portal, we don't want them replying"). Counted by list, in the
-    // client's list order; one list needs no breakdown.
-    const order = orderLists(projectsForClient(clientId));
-    const groups = [...order.map((pr) => ({ name: pr.name, items: waiting.filter((t) => t.projectId === pr.id) })),
-      { name: "Other", items: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)) }].filter((g) => g.items.length);
-    const total = waiting.length;
-    const things = (n: number) => `${n} ${n === 1 ? "thing" : "things"}`;
-    const countHtml = groups.length > 1
-      ? `<ul>${groups.map((g) => `<li><p>${escapeHtml(g.name)}: ${g.items.length}</p></li>`).join("")}</ul>`
-      : "";
-    return {
-      subject: `We need ${things(total)} from you to move forward`,
-      body: `<p>Hi ${escapeHtml(firstName)},</p><p>We can't move forward until we get ${things(total)} from you${groups.length > 1 ? ":" : "."}</p>`
-        + `${countHtml}<p>Each one is in your client portal, where you can answer it or upload what we need.</p>`
-        + `${draftLinkHtml(link)}<p>Please use the portal rather than replying to this email, so nothing gets missed.</p><p>Thanks!</p>`,
-      link,
-      aiContext: `A short reminder that we can't move forward until the client gets us ${things(total)}. Give only the counts${groups.length > 1 ? ` by list (${groups.map((g) => `${g.name}: ${g.items.length}`).join(", ")})` : ""}, never the items themselves. Send them to the client portal link to answer or upload each one, and ask them to use the portal rather than replying to the email.`,
-    };
+    const link = url ? { url, label: REMINDER_LINK_LABEL } : null;
+    // Counts only, by list, never the tasks themselves, and the portal is
+    // where they answer, not a reply (Derek, 2026-10-14). The same words the
+    // 8 AM job sends (lib/portalReminders reminderEmail).
+    const email = reminderEmail({ firstName, groups: reminderGroups(waiting, projectsForClient(clientId)), link });
+    return { subject: email?.subject ?? "", body: email?.body ?? "", link, aiContext: email?.aiContext ?? "" };
+  };
+  // A client's reminder schedule, from the waiting card (Derek, 2026-10-14).
+  // Admin only, like the portal switches: clients_write RLS is is_admin().
+  // "since" moves only when the days change, so turning sends itself on or
+  // off doesn't restart an every few days count.
+  const setClientReminders = (clientId: string, next: ClientReminders) => {
+    const c = clientById(clientId);
+    if (!c) return;
+    const before = reminderSettings(c.reminders ?? null);
+    const r = reminderSettings(next);
+    const sameDays = before.schedule === r.schedule && before.every === r.every && String(before.days ?? []) === String(r.days ?? []);
+    const nc: Client = { ...c, reminders: { ...r, since: sameDays && before.since ? before.since : todayPacific() } };
+    setClients((cs) => cs.map((x) => (x.id === clientId ? nc : x)));
+    markOwnClientWrite(nc.id);
+    upsertClient(nc);
+    pushToast(`${c.name}: ${reminderLine(nc.reminders)}`);
   };
   // Remind, from the client page (Derek, 2026-10-14): the reminder is written
   // as their saved email and shows as a draft in the Conversation, opened
@@ -2641,6 +2643,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       ...(whereNewMessageGoes({ channel: "chat", tasks: clientTasks, messages: said, contactId: ct.id, first }).taskId ? ["chat" as const] : [])];
     return { cid, ct, first, canMsg, said, clientTasks, queued, draftCount, channels };
   })() : null;
+  // Outside the strip's render below: it writes through a ref (markOwnClientWrite).
+  const setActiveClientReminders = (r: ClientReminders) => setClientReminders(activeClient, r);
   const needsStrip = talk ? (() => {
           const { cid, ct, first, canMsg, said, draftCount } = talk;
           const waiting = waitingTasksFor(cid).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
@@ -2651,6 +2655,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 unanswered={unanswered ? waitingLine(first, unanswered.at) : null}
                 draftCount={draftCount} feedOpen={feedFor === cid} onToggleFeed={() => setFeedClient(feedFor === cid ? null : cid)}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
+                reminders={clientById(cid)?.reminders} onSetReminders={canAdmin && clientById(cid)?.reminders !== undefined ? setActiveClientReminders : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(cid)}
                 requestChannels={[...(ct?.email ? ["email" as const] : []), ...(ct?.phone ? ["sms" as const] : [])]}
                 onRequest={canMsg ? (ch) => void requestMeeting(cid, ch, inboxPrefs.defaultCalendarId ?? null) : null}

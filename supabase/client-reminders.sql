@@ -1,0 +1,22 @@
+-- ClickUpTasks — when each client gets their reminder email. Run once.
+--
+-- Derek, 2026-10-14: "a remind every X business days or set custom, can you
+-- pick days of the week ... then we can set by client". Set on the client
+-- page's waiting card, read by the 8 AM job (/api/cron/portal-reminders):
+--
+--   { "schedule": "monday" | "every" | "days" | "off",
+--     "every": 2..10,          business days between reminders ("every")
+--     "days": [1..5],          Monday 1 to Friday 5 ("days")
+--     "auto": true | false,    sends itself, or waits in the Inbox for review
+--     "since": "yyyy-mm-dd" }  the day it was chosen
+--
+-- Null is nothing chosen: Mondays, waiting for review, which is what every
+-- client gets today. Nullable, no default and no backfill, so nothing
+-- changes for anyone until someone picks a schedule.
+--
+-- The app and the job both work before this runs (the save leaves the column
+-- out until a client has it, and the job treats everyone as Mondays). No RLS
+-- change needed: clients_write (rls.sql) is already admin only, and the
+-- schedule is an admin setting like the portal switches.
+
+alter table clients add column if not exists reminders jsonb;

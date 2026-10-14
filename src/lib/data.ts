@@ -4,6 +4,8 @@
 // Supabase; Phase 2-3 sync clients/contacts/tasks with GoHighLevel sub-accounts.
 // ---------------------------------------------------------------------------
 
+import type { ClientReminders } from "./reminderSchedule";
+
 /** Today's date in the user's local timezone (yyyy-mm-dd). */
 /** yyyy-mm-dd in the team's timezone. Server code uses this, never todayIso():
  *  the server clock is UTC, so after 5 PM Pacific todayIso() already says
@@ -449,6 +451,11 @@ export interface Client {
   /** Portal shows every non-private task on the account, not just the ones
    *  waiting on the client. Off by default — see supabase/portal-all-tasks.sql. */
   portalShowsAllTasks?: boolean;
+  /** When this client gets the "we need N things from you" reminder, and
+   *  whether it sends itself (lib/reminderSchedule, supabase/client-reminders.sql).
+   *  null: nothing chosen, so Mondays for review. Absent (undefined) until the
+   *  column exists, so a save never names it before the SQL has run. */
+  reminders?: ClientReminders | null;
 }
 
 /** A quick-access link on a client's page (live site, WP admin, etc.), stored

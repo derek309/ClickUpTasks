@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { MoveMeeting, cancelMeeting, meetingCanChange, meetingCantChangeWhy, useNextMeeting } from "./MeetingMenu";
 import { loadBookingLinks } from "./useCalendar";
+import { EVERY_CHOICES, WEEKDAY_SHORT, reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 
 const TZ = "America/Los_Angeles";
 const timeOnly = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
@@ -30,7 +31,7 @@ function Answer({ title, line, tone }: { title: string; line: string; tone?: str
   );
 }
 
-export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered = null, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onRemind, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
+export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered = null, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onRemind, reminders, onSetReminders = null, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -47,6 +48,10 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
   oldestWaiting: string | null;
   /** Writes the reminder as a draft in the feed. */
   onRemind: (() => void) | null;
+  /** When the 8 AM job reminds them (lib/reminderSchedule); null or absent is Mondays, for review. */
+  reminders?: ClientReminders | null;
+  /** Saves a new schedule. Admins only, and only once the column exists. */
+  onSetReminders?: ((r: ClientReminders) => void) | null;
   canBook: boolean;
   onBook: () => void;
   /** The ways they can be asked to pick a time: email, text, or both. */
@@ -112,8 +117,14 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
       </button>
 
       <div className={`${cell} ${waiting ? "bg-highlight-soft" : "bg-background"}`}>
-        <Answer title={waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`} line={oldestWaiting ?? "Ball's in our court"} tone={waiting ? "text-highlight" : undefined} />
-        {waiting > 0 && onRemind && <button onClick={onRemind} title="Writes the reminder as a draft in the conversation, to read and send" className={btn}>Remind</button>}
+        <span className="block min-w-0 flex-1">
+          <Answer title={waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`} line={oldestWaiting ?? "Ball's in our court"} tone={waiting ? "text-highlight" : undefined} />
+          {/* When the 8 AM email goes (Derek, 2026-10-14). */}
+          {waiting > 0 && <span className="block text-[16px] text-muted">{reminderLine(reminders ?? null)}</span>}
+        </span>
+        {waiting > 0 && (onRemind || onSetReminders) && (
+          <RemindButtons first={first} onRemind={onRemind} reminders={reminders ?? null} onSetReminders={onSetReminders} btn={btn} item={item} />
+        )}
       </div>
 
       <div className={`${cell} bg-background`}>
@@ -177,5 +188,96 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
       </div>
     </div>
     </div>
+  );
+}
+
+/** Remind, and beside it ▾ for when the 8 AM email goes (Derek, 2026-10-14:
+ *  "a remind every X business days or set custom, can you pick days of the
+ *  week ... then we can set by client"). A menu under the button, a sheet
+ *  along the bottom on a phone. Every choice saves as it's made. */
+function RemindButtons({ first, onRemind, reminders, onSetReminders, btn, item }: {
+  first: string;
+  onRemind: (() => void) | null;
+  reminders: ClientReminders | null;
+  onSetReminders: ((r: ClientReminders) => void) | null;
+  btn: string;
+  item: string;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
+  const s = reminderSettings(reminders);
+  const save = (r: Partial<ClientReminders>) => onSetReminders?.({ schedule: s.schedule, auto: s.auto, every: s.every, days: s.days, ...r });
+  const onDays = s.schedule === "monday" || s.schedule === "days";
+  const days = s.schedule === "monday" ? [1] : s.days ?? [];
+  const toggleDay = (d: number) => {
+    // The last day stays: no days at all is what Off is for.
+    if (days.includes(d) && days.length === 1) return;
+    save({ schedule: "days", days: days.includes(d) ? days.filter((x) => x !== d) : [...days, d] });
+  };
+  const radio = (on: boolean) => <span aria-hidden className={`mt-1 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full ring-2 ${on ? "ring-accent" : "ring-[var(--border)]"}`}>{on && <span className="h-2.5 w-2.5 rounded-full bg-accent" />}</span>;
+  const row = "flex w-full items-start gap-3 rounded-[5px] px-3 py-2.5 text-left text-[16px] hover:bg-background";
+  const chip = (on: boolean) => `h-10 rounded-[5px] px-2 text-[16px] font-semibold ring-inset ${on ? "bg-accent-soft text-accent ring-2 ring-accent" : "bg-surface ring-1 ring-[var(--border)] hover:ring-accent"}`;
+  const pick = (f: () => void) => () => { setOpen(false); f(); };
+  return (
+    <span className="relative flex shrink-0">
+      {onRemind && <button onClick={onRemind} title="Writes the reminder as a draft in the conversation, to read and send" className={`${btn} ${onSetReminders ? "rounded-r-none" : ""}`}>Remind</button>}
+      {onSetReminders && (
+        <button onClick={() => setOpen(!open)} aria-expanded={open} aria-label="When reminders go" title="When reminders go"
+          className={`${btn} ${onRemind ? "-ml-px rounded-l-none px-2.5" : ""}`}>{onRemind ? "▾" : "Reminders ▾"}</button>
+      )}
+      {open && onSetReminders && <>
+        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+        <div role="dialog" aria-label={`Reminders for ${first}`}
+          className="fixed inset-x-3 bottom-3 z-50 max-h-[80vh] overflow-y-auto rounded-[5px] bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)] sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-11 sm:w-80 sm:pb-1.5">
+          <div className="px-3 pb-1 pt-2 text-[16px] font-bold sm:hidden">Reminders for {first}</div>
+          {onRemind && <>
+            <button onClick={pick(onRemind)} className={item}><b className="block font-semibold">Remind now</b><span className="text-muted">A draft in the conversation, to read and send</span></button>
+            <div className="my-1 border-t" />
+          </>}
+          <div className="px-3 pb-1 pt-2 text-[16px] font-semibold">Email {first} at 8 AM</div>
+          <div role="radiogroup" aria-label="When">
+            <button role="radio" aria-checked={onDays} onClick={() => { if (!onDays) save({ schedule: "monday", days: undefined }); }} className={row}>
+              {radio(onDays)}<span className="min-w-0 flex-1"><b className="block font-semibold">On these days</b></span>
+            </button>
+            {onDays && (
+              <span className="grid grid-cols-5 gap-1.5 px-3 pb-2 pl-[42px]">
+                {WEEKDAY_SHORT.map((label, i) => (
+                  <button key={label} role="checkbox" aria-checked={days.includes(i + 1)} onClick={() => toggleDay(i + 1)} className={chip(days.includes(i + 1))}>{label}</button>
+                ))}
+              </span>
+            )}
+            <button role="radio" aria-checked={s.schedule === "every"} onClick={() => { if (s.schedule !== "every") save({ schedule: "every", every: 3, days: undefined }); }} className={row}>
+              {radio(s.schedule === "every")}<span className="min-w-0 flex-1"><b className="block font-semibold">Every few business days</b>{s.schedule === "every" && <span className="text-muted">Counted from the last one</span>}</span>
+            </button>
+            {s.schedule === "every" && (
+              <span role="radiogroup" aria-label="How many business days" className="grid grid-cols-3 gap-1.5 px-3 pb-2 pl-[42px]">
+                {EVERY_CHOICES.map((n) => (
+                  <button key={n} role="radio" aria-checked={s.every === n} onClick={() => save({ every: n })} className={chip(s.every === n)}>{n} days</button>
+                ))}
+              </span>
+            )}
+            <button role="radio" aria-checked={s.schedule === "off"} onClick={() => { if (s.schedule !== "off") save({ schedule: "off", days: undefined }); }} className={row}>
+              {radio(s.schedule === "off")}<span className="min-w-0 flex-1"><b className="block font-semibold">Off</b><span className="text-muted">Only when you press Remind</span></span>
+            </button>
+          </div>
+          {s.schedule !== "off" && <>
+            <div className="my-1 border-t" />
+            <div role="radiogroup" aria-label="How it goes">
+              <button role="radio" aria-checked={!s.auto} onClick={() => { if (s.auto) save({ auto: false }); }} className={row}>
+                {radio(!s.auto)}<span className="min-w-0 flex-1"><b className="block font-semibold">Wait for me to send</b><span className="text-muted">In the Inbox under Reminder emails going out</span></span>
+              </button>
+              <button role="radio" aria-checked={s.auto} onClick={() => { if (!s.auto) save({ auto: true }); }} className={row}>
+                {radio(s.auto)}<span className="min-w-0 flex-1"><b className="block font-semibold">Send on its own</b><span className="text-muted">Goes out at 8 AM without a check</span></span>
+              </button>
+            </div>
+          </>}
+        </div>
+      </>}
+    </span>
   );
 }
