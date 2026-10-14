@@ -151,3 +151,14 @@ describe("a finished step lets go of work never made", () => {
     expect(withoutPlaceholders({ holds: ["page"] }, present)).toBeNull();
   });
 });
+
+import { laterWord } from "./data";
+
+describe("a step that is not current yet", () => {
+  const plan = [{ id: "s1" }, { id: "s7" }, { id: "s8" }];
+  it("says Comes later only with no date", () => {
+    expect(laterWord({ id: "s8" }, plan)).toBe("Comes later");
+    expect(laterWord({ id: "s8", due: "2026-10-14" }, plan)).toBe("Up after step 2");
+    expect(laterWord({ id: "s8", followUpAt: "2026-10-14" }, plan)).toBe("Up after step 2");
+  });
+});

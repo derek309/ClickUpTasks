@@ -3399,6 +3399,16 @@ export function turnReason(prev: Pick<Subtask, "done" | "title" | "assigneeId" |
   return null;
 }
 
+/** What a step that is not current yet says, when it has no other word:
+ *  "Comes later" only with no date; a step with a due date or on someone's
+ *  list already says where it sits ("Up after step 7"), never a second answer
+ *  to "when" (Derek, 2026-10-14). */
+export function laterWord(sub: Pick<Subtask, "id" | "due" | "followUpAt">, plan: Pick<Subtask, "id">[]): string {
+  if (!sub.due && !sub.followUpAt) return "Comes later";
+  const at = plan.findIndex((x) => x.id === sub.id);
+  return at > 0 ? `Up after step ${at}` : "Up next";
+}
+
 /** When the current step last turned to you: the newest email on it, the
  *  step before it finishing (the client's reply, or Claude), the step
  *  starting (a changes step from the portal or a review sent back), or the

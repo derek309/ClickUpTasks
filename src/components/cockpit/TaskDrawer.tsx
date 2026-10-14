@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1992,7 +1992,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ) : null;
     // The short word the step page's sentence opens with ("● Your turn,
     // assigned to Derek, …"); say is the longer reason, when it has one.
-    const word = state === "done" ? "Done" : state === "claude" ? "Claude's turn" : state === "mine" ? "Your turn" : state === "later" ? "Comes later" : say ?? "Waiting";
+    const word = state === "done" ? "Done" : state === "claude" ? "Claude's turn" : state === "mine" ? "Your turn" : state === "later" ? laterWord(sub, steps) : say ?? "Waiting";
     return { state, say, word, sayTone, rowTone: ROW_TONE[state] };
   };
   // phoneHidden: folded away on a phone only (the second of the last two done).
