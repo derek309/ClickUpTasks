@@ -915,6 +915,13 @@ export interface Subtask {
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;
+  /** A "what's next?" answered by a pick: what it asked, so Change can put
+   *  the question back (Derek, 2026-10-14: once picked, the choices are gone
+   *  for good unless Change is pressed). */
+  asked?: { title: string; assigneeId?: string | null; due?: string | null };
+  /** On a "what's next?" step: the next step its context points to (the
+   *  original ask), worked out once and kept (lib/nextStepSuggest). */
+  suggested?: { name: string; kind?: string };
   /** Who closed the step, when the app knows: "client" (their button), a
    *  member's id (a teammate marking it, Claude as u_claude). Older steps have
    *  none and are read from their assignee. */
@@ -3535,6 +3542,50 @@ export function addWhatsNextStep(subtasks: Subtask[], doneId: string, makeId: ()
   const list = [...subtasks];
   list.splice(at + 1, 0, { id: makeId(), title: `${base}: what's next?`, done: false, addedFor: key, startedAt: now });
   return list;
+}
+
+/** The name a pick gives the step it is made on: what the step now does
+ *  (Derek, 2026-10-14: a picked What's next kept its "…: what's next?" name). */
+export function pickStepTitle(key: string, clientFirst: string): string | null {
+  if (key === "email") return `Email ${clientFirst}`;
+  if (key === "text") return `Text ${clientFirst}`;
+  if (key === "chat") return `Chat with ${clientFirst}`;
+  return quickStepName(key as DeliverableKey);
+}
+
+/** A "what's next?" answered by a pick: it becomes that step, named for it,
+ *  keeping what it asked so Change can ask again. Steps not asking are
+ *  patched as they are. */
+export function answerWhatsNext(subtasks: Subtask[], id: string, title: string | null, patch: Partial<Subtask> = {}): Subtask[] {
+  return subtasks.map((x) => {
+    if (x.id !== id) return x;
+    if (!asksWhatsNext(x)) return { ...x, ...patch };
+    return { ...x, ...patch, title: title?.trim() || x.suggested?.name || "Work out the next step",
+      asked: { title: x.title, assigneeId: x.assigneeId ?? null, due: x.due ?? null } };
+  });
+}
+
+/** Change, on a picked What's next: the question comes back as it was, with
+ *  its choices; the work the pick made stays on the task. Null when the step
+ *  was not a picked What's next or is done. */
+export function reopenWhatsNext(subtasks: Subtask[], id: string): Subtask[] | null {
+  const s = subtasks.find((x) => x.id === id);
+  if (!s?.asked || s.done) return null;
+  const a = s.asked;
+  return subtasks.map((x) => {
+    if (x.id !== id) return x;
+    const { asked: _a, toClaudeAt: _t, cloudError: _e, cloudSession: _c, namedFrom: _n, ...rest } = x;
+    return { ...rest, title: a.title, assigneeId: a.assigneeId ?? undefined, due: a.due ?? undefined };
+  });
+}
+
+/** The line a picked What's next shows in place of its choices: who has it
+ *  and when ("Given to Claude, due today"). */
+export function pickedSays(s: Pick<Subtask, "assigneeId" | "due">, meId: string | null | undefined, ownerId: string | null | undefined, today: string, nameOf: (id: string) => string): string {
+  const who = s.assigneeId ?? ownerId ?? null;
+  const on = who === CLAUDE_ID ? "Given to Claude" : who && who !== meId ? `Given to ${nameOf(who)}` : "Yours";
+  const due = s.due ? (s.due === today ? "due today" : `due ${formatDue(s.due)}`) : null;
+  return [on, due].filter(Boolean).join(", ");
 }
 
 /** The step holding `key`, or null. */

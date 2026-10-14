@@ -21,7 +21,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -52,6 +52,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   onMarkDone: () => void;
   onSendHeldEmail?: () => void;
   onOpenStep: () => void;
+  /** A What's next answered by a pick: what it became, and Change to ask again. */
+  picked?: { says: string; onChange: () => void };
 }) {
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const dir = useStepDirections({ sub, onPatchSub, inline: true });
@@ -103,6 +105,11 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
           <span>{tone.say ?? tone.word}</span>
           {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
         </div>
+        {picked && (
+          <p className="text-[16px] text-foreground">{picked.says}{" · "}
+            <button onClick={picked.onChange} title="Put the question back and pick again" className="font-semibold text-accent underline-offset-4 hover:underline">Change</button>
+          </p>
+        )}
         {context && <p className="whitespace-pre-line text-[16px] leading-relaxed text-foreground [overflow-wrap:anywhere]">{context}</p>}
       </div>
       {/* A meeting started now: its link, one tap away (Derek, 2026-10-14). */}

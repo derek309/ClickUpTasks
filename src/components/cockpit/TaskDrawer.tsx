@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, tickedSteps, turnReason, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, tickedSteps, turnReason, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -2049,6 +2049,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true) ?? undefined}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
+            picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
             onMarkDone={() => completeStep(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
             onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
@@ -2161,7 +2162,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!make && taskRef.current.subtasks.some((x) => x.id === stepId && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
     let list = [...taskRef.current.subtasks];
     if (make) list.splice(insertBefore ? list.findIndex((x) => x.id === insertBefore) : list.length, 0, make);
-    list = list.map((x) => (x.id === stepId ? { ...x, assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined, toClaudeAt: new Date().toISOString(), cloudError: undefined } : x));
+    // A "what's next?" given to Claude becomes Claude's step, named for the
+    // next thing its context asks for (Derek, 2026-10-14).
+    const asked = list.find((x) => x.id === stepId);
+    list = answerWhatsNext(list, stepId, asked?.suggested?.name ?? "Work out the next step and do it",
+      { assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined, toClaudeAt: new Date().toISOString(), cloudError: undefined });
     const step = list.find((x) => x.id === stepId)!;
     const st = statusForStep(task.status, stepStage(step, task.assigneeId));
     const saved = onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
@@ -3317,6 +3322,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (a.who === "client") { askClientOn(stepId, a.when); return; }
     if (a.who && a.who !== st.assigneeId) assignStep(st, a.who, isActive);
     setStepDue(st, a.when, isActive);
+    // A "what's next?" given to a person is answered: it becomes that step.
+    if (asksWhatsNext(st)) onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, stepId, null) });
   };
   // A task made from the new task box with step 1's action picked: the same
   // start + Add step gives a new step (submitNew), once, as it opens.
@@ -3374,12 +3381,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
     const pick = (key: DeliverableKey) => {
-      // A step still named "…: what's next?" takes the name of what it makes.
-      const title = namedForWork(sub, key);
+      // A step still named "…: what's next?" takes the name of what it makes,
+      // and its choices are gone until Change (Derek, 2026-10-14).
+      const asking = asksWhatsNext(sub);
+      const title = asking ? pickStepTitle(key, firstName) : namedForWork(sub, key);
       const made = !deliverablePresent(key);
       const list = holdOnStep(taskRef.current.subtasks, sub.id, key)
         .map((x) => (x.id === sub.id && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
-      onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
+      onPatch({ subtasks: asking ? answerWhatsNext(list, sub.id, title) : title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
       // Shown on the step, not opened: a tap on it opens the editor (Derek,
       // 2026-10-14). An email is the exception, its window is the work.
       if (key === "email" && !deliverablePresent(key)) setPendingStart(key);
@@ -3403,9 +3412,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }),
     // A text or a portal chat drafted on the step, read and sent from it (2026-10-13).
     ...(messageDest?.phone ? [{ key: "text", label: "Text", disabled: sub.draftMessage?.channel === "sms", note: sub.draftMessage?.channel === "sms" ? "on this step" : undefined,
-      onPick: () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.body ?? "" } } : x)) }) }] : []),
+      onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("text", firstName), { draftMessage: { channel: "sms" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
     ...(hasMessaging ? [{ key: "chat", label: "Chat", disabled: sub.draftMessage?.channel === "chat", note: sub.draftMessage?.channel === "chat" ? "on this step" : undefined,
-      onPick: () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: "chat" as const, body: x.draftMessage?.body ?? "" } } : x)) }) }] : []),
+      onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("chat", firstName), { draftMessage: { channel: "chat" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
     { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) },
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).

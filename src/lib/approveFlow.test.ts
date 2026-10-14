@@ -88,3 +88,28 @@ describe("why it is your turn", () => {
     expect(turnReason({ ...claudes, done: false }, "u_derek", "Brian", name)).toBeNull();
   });
 });
+
+import { answerWhatsNext, pickStepTitle, pickedSays, reopenWhatsNext } from "./data";
+
+describe("a pick answers What's next for good, until Change", () => {
+  const q = (): Subtask[] => [
+    { id: "s7", title: "Build the HTML review version", done: true, assigneeId: "u_claude" },
+    { id: "q", title: "Brian approved: what's next?", done: false, addedFor: "ok:page:4", assigneeId: "u_derek", suggested: { name: "Put it in the Bulk customers blast" } },
+  ];
+  it("Give it to Claude makes it Claude's step, named from the context, and Change asks again", () => {
+    const given = answerWhatsNext(q(), "q", q()[1].suggested!.name, { assigneeId: "u_claude", due: "2026-10-14" });
+    expect(given[1]).toMatchObject({ title: "Put it in the Bulk customers blast", assigneeId: "u_claude", asked: { title: "Brian approved: what's next?", assigneeId: "u_derek" } });
+    expect(pickedSays(given[1], "u_derek", "u_derek", "2026-10-14", () => "")).toBe("Given to Claude, due today");
+    const back = reopenWhatsNext(given, "q")!;
+    expect(back[1]).toMatchObject({ title: "Brian approved: what's next?", assigneeId: "u_derek" });
+    expect(back[1].asked).toBeUndefined();
+    expect(reopenWhatsNext(back, "q")).toBeNull();
+  });
+  it("an action names the step for what it does", () => {
+    expect(pickStepTitle("email", "Brian")).toBe("Email Brian");
+    expect(pickStepTitle("page", "Brian")).toBe("Create HTML Review");
+    expect(answerWhatsNext(q(), "q", pickStepTitle("email", "Brian"))[1].title).toBe("Email Brian");
+    // A step not asking is only patched.
+    expect(answerWhatsNext(q(), "s7", "x", { due: "2026-10-15" })[0]).toMatchObject({ title: "Build the HTML review version", due: "2026-10-15" });
+  });
+});
