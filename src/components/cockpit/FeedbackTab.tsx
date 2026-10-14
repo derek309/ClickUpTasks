@@ -12,9 +12,14 @@ import { usePersisted } from "@/lib/usePersisted";
 
 export const FEEDBACK_TASK_ID = "t_yhveqva5";
 
-export function FeedbackTab({ where, onSend }: {
+// On a phone the tab is gone (Derek, 2026-10-14): it sat over the page's
+// right edge. "Send feedback" in the menu opens the box there instead, as a
+// sheet at the bottom (openNonce).
+export function FeedbackTab({ where, onSend, openNonce = 0 }: {
   where: string;
   onSend: (body: string, images: File[]) => void;
+  /** Opens the box when it changes (the phone menu's Send feedback). */
+  openNonce?: number;
 }) {
   const [savedTop, saveTop] = usePersisted("feedbackTabTop", 60, (v) => typeof v === "number" && v > 0 && v < 100);
   const [side, saveSide] = usePersisted<"left" | "right">("feedbackTabSide", "right", (v) => v === "left" || v === "right");
@@ -22,6 +27,11 @@ export function FeedbackTab({ where, onSend }: {
   const top = dragAt?.top ?? savedTop;
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [seenNonce, setSeenNonce] = useState(openNonce);
+  if (openNonce !== seenNonce) {
+    setSeenNonce(openNonce);
+    if (openNonce) { setOpen(true); setHidden(false); }
+  }
   const [text, setText] = useState("");
   const [shots, setShots] = useState<{ file: File; url: string }[]>([]);
   const [capturing, setCapturing] = useState(false);
@@ -83,8 +93,8 @@ export function FeedbackTab({ where, onSend }: {
   const place: React.CSSProperties = dragAt
     ? { left: Math.min(window.innerWidth - 24, Math.max(0, dragAt.x - 11)) }
     : left ? { left: 0 } : { right: 0 };
-  const panel = open && !capturing && (
-    <div className={`${left ? "ml-1" : "mr-1"} w-[300px] max-w-[calc(100vw-48px)] rounded-[5px] border bg-surface p-3 shadow-lg`}>
+  const panelBox = (phone: boolean) => (
+    <div className={phone ? "w-full rounded-[5px] border bg-surface p-3 shadow-lg" : `${left ? "ml-1" : "mr-1"} w-[300px] max-w-[calc(100vw-48px)] rounded-[5px] border bg-surface p-3 shadow-lg`}>
       <div className="flex items-center justify-between">
         <span className="text-[16px] font-semibold">Feedback</span>
         <button onClick={() => setOpen(false)} aria-label="Close feedback" className="rounded px-1.5 text-[16px] text-muted hover:bg-background">×</button>
@@ -114,6 +124,7 @@ export function FeedbackTab({ where, onSend }: {
       </div>
     </div>
   );
+  const panel = open && !capturing && panelBox(false);
   const tab = (
     <div className="group relative">
       <button onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setDragAt(null); }}
@@ -128,9 +139,12 @@ export function FeedbackTab({ where, onSend }: {
         className={`absolute -top-2 ${left ? "-right-2" : "-left-2"} hidden h-4 w-4 items-center justify-center rounded-full bg-foreground text-[11px] leading-none text-[color:var(--surface)] group-hover:flex`}>×</button>
     </div>
   );
-  return (
-    <div className="fixed z-[90] flex items-start" style={{ top: `${top}%`, transform: "translateY(-50%)", ...place }}>
+  return (<>
+    <div className="fixed z-[90] hidden items-start sm:flex" style={{ top: `${top}%`, transform: "translateY(-50%)", ...place }}>
       {left ? <>{tab}{panel}</> : <>{panel}{tab}</>}
     </div>
-  );
+    {open && !capturing && (
+      <div className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-[90] sm:hidden">{panelBox(true)}</div>
+    )}
+  </>);
 }

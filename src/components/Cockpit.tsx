@@ -519,6 +519,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [bulkDelegateOpen, setBulkDelegateOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
+  // The phone menu's Send feedback opens the Feedback box (its tab is desktop only).
+  const [feedbackNonce, setFeedbackNonce] = useState(0);
   // New Client settings sheet (item 7) — replaces the three standing toggles
   // that used to live directly in the kebab menu (a menu mixing persistent
   // toggles with one-shot actions gave no signal about what closes it).
@@ -2722,6 +2724,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.gear />
             </button>
           </div>
+          {/* A phone has no Feedback tab on the edge (Derek, 2026-10-14): it is here. */}
+          <button onClick={() => { setSidebarOpen(false); setFeedbackNonce((n) => n + 1); }}
+            className="mb-1 flex h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[16px] text-muted hover:bg-background hover:text-foreground sm:hidden">
+            <I.comment className="shrink-0" /> Send feedback
+          </button>
           {/* Inbox and Calendar as two icons side by side (Derek, 2026-10-05: no text),
               then the Agency and Directory sub-accounts in GoHighLevel, in a new tab. */}
           <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
@@ -3717,7 +3724,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             className="rounded-md bg-white/20 px-2.5 py-1 text-[13px] font-semibold hover:bg-white/30">Reload</button>
         </div>
       )}
-      <FeedbackTab where={openTask ? `the task "${openTask.title}" (${openTask.id})` : settingsView ? "Settings" : inboxView ? "the Inbox" : myWork ? "My work" : "the task list"}
+      <FeedbackTab openNonce={feedbackNonce} where={openTask ? `the task "${openTask.title}" (${openTask.id})` : settingsView ? "Settings" : inboxView ? "the Inbox" : myWork ? "My work" : "the task list"}
         onSend={async (body, images) => {
           // Straight to the database: the feedback task may not be in this
           // teammate's loaded tasks, so addComment (which needs it) won't do.
