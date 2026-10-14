@@ -40,6 +40,7 @@ let handoffFromUrl: string | null = typeof window === "undefined" ? null : new U
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
+import { clientFirstName } from "@/lib/clientFirstName";
 import { filesOfEmail } from "@/lib/emailFiles";
 import { ClientWebsite } from "./ClientWebsite";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
@@ -161,9 +162,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const linkedContact = contactById(task.clientId.startsWith("cl_") ? task.clientId.slice(3) : task.contactId);
   const messageDest = linkedContactInfo ?? linkedContact;
   /** The client's first name, as the steps and their emails say it: the
-   *  person's own when we have one, and never "The" (The Artist Workshop
-   *  read "Email The", Derek, 2026-10-13). */
-  const firstName = [messageDest?.name, client.name].map((n) => (n ?? "").trim().split(/\s+/).find((w) => !/^the$/i.test(w)) ?? "").find(Boolean) || "them";
+   *  person's own when we have one, else the whole business name, the same
+   *  rule as the client page (Derek, 2026-10-13: "The Artist Workshop", not
+   *  "Artist"). */
+  const firstName = clientFirstName(messageDest, client.name);
   // A reply goes to whoever wrote the email it answers, not the client's main
   // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
   // Same rule as the server's replyRecipientFor.
