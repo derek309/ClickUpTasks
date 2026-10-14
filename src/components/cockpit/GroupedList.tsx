@@ -24,7 +24,7 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, onClearNeedsYou, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
@@ -47,6 +47,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // just which list. Optional: a view without folders passes nothing.
   folderById?: (id: string | null | undefined) => { name: string } | null;
   onOpen: (id: string) => void; onOpenClient?: (clientId: string) => void; onPatch: (taskId: string, patch: Partial<Task>) => void; canQuickAdd: boolean; quickAddHint: string;
+  /** The × on a red Needs you line: clears it until something new happens. */
+  onClearNeedsYou?: (taskId: string) => void;
   // A plus on each coloured group bar, handing back the group you clicked.
   //
   // Only passed where there is nowhere better to put it — the personal list,
@@ -251,7 +253,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} listsFor={listsFor} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
+                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} listsFor={listsFor} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onClearNeedsYou={onClearNeedsYou ? () => onClearNeedsYou(t.id) : undefined} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -273,9 +275,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, listsFor, folderById, contactById, onOpen, onPatch, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, listsFor, folderById, contactById, onOpen, onPatch, onClearNeedsYou, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
   task: Task; preview?: string; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
-  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; listsFor?: (clientId: string) => Project[]; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void;  delegatedTo?: string | null; lensId?: string;
+  clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; listsFor?: (clientId: string) => Project[]; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onClearNeedsYou?: () => void; delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
   // Drop-onto-this-row-to-merge — independent of the drag-to-reorder-groups
@@ -465,7 +467,16 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
                 phone, where one line is the subject and nothing else. It is a
                 glance; the whole message is in the task. Words only, in
                 keeping with the no icon rule below. */}
-            {need ? <span className="min-w-0 text-[16px] font-semibold leading-snug text-red-700 dark:text-red-300">{need}</span>
+            {/* The × clears it out for now (Derek, 2026-10-13); it comes back
+                when something new happens. Its own click and keys, so the row
+                does not open. */}
+            {need ? <span className="flex min-w-0 items-start gap-2">
+                <span className="min-w-0 text-[16px] font-semibold leading-snug text-red-700 dark:text-red-300">{need}</span>
+                {onClearNeedsYou && <button type="button" aria-label="Clear from Needs you" title="Clear from Needs you"
+                  onClick={(e) => { e.stopPropagation(); onClearNeedsYou(); }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="shrink-0 rounded-[5px] px-1.5 text-[16px] font-semibold leading-snug text-red-700 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-500/20">×</button>}
+              </span>
               : preview && !isDone && <span className="line-clamp-2 min-w-0 break-words text-[16px] leading-snug text-muted sm:line-clamp-1 sm:text-[13px]" title={preview}>{preview}</span>}
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
                 on tasks list view"). A repeat arrow, a paperclip, a comment

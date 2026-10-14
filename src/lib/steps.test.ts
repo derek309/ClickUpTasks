@@ -384,6 +384,23 @@ describe("needs you", () => {
     const again = { ...base, subtasks: [{ ...seen.subtasks[0], fromEmails: [...seen.subtasks[0].fromEmails, email("2026-10-13T15:00:00Z")] }] };
     expect(needsYou(again, "u_derek", "Pam")).toBe("Pam wrote. Reply");
   });
+
+  it("the × clears only the step that needs you, and nothing when nothing does", async () => {
+    const { needsYou, clearedFromNeedsYou } = await import("./data");
+    const base = { status: "in_progress" as const, assigneeId: "u_derek" };
+    const email = { messageId: "m", from: "pam@x.com", subject: "Hi", body: "Videos?", at: "2026-10-13T10:00:00Z" };
+    const task = { ...base, subtasks: [
+      { id: "a", title: "Draft", done: true, doneAt: "2026-10-13T09:00:00Z" },
+      { id: "r", title: "Reply to Pam", done: false, startedAt: "2026-10-13T10:00:00Z", fromEmails: [email] },
+      { id: "z", title: "Send", done: false },
+    ] };
+    const cleared = clearedFromNeedsYou(task, "u_derek", "2026-10-13T12:00:00Z")!;
+    expect(cleared.map((x) => x.seenAt)).toEqual([undefined, "2026-10-13T12:00:00Z", undefined]);
+    expect(cleared.map((x) => x.done)).toEqual([true, false, false]);
+    expect(needsYou({ ...task, subtasks: cleared }, "u_derek", "Pam")).toBeNull();
+    expect(clearedFromNeedsYou(task, "u_other", "2026-10-13T12:00:00Z")).toBeNull();
+    expect(clearedFromNeedsYou({ ...task, subtasks: cleared }, "u_derek", "2026-10-13T13:00:00Z")).toBeNull();
+  });
 });
 
 describe("following up while waiting", () => {

@@ -3313,6 +3313,16 @@ export function needsYouSince(subtasks: Subtask[], cur: Subtask): string {
   return [cur.startedAt, prev?.doneAt, ...(cur.fromEmails ?? []).map((e) => e.at)].filter((x): x is string => !!x).sort().pop() ?? "";
 }
 
+/** The × on a Needs you line (Derek, 2026-10-13: "sometimes we can't do it
+ *  now but want to clear it out"): the steps with the one that needs you
+ *  stamped seen, the same stamp moving the date uses, so the task leaves
+ *  Needs you until something new happens. Null when it does not need you. */
+export function clearedFromNeedsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">, meId: string | null | undefined, now: string): Subtask[] | null {
+  if (!needsYou(task, meId)) return null;
+  const cur = currentStep(task.subtasks);
+  return cur ? task.subtasks.map((x) => (x.id === cur.id ? { ...x, seenAt: now } : x)) : null;
+}
+
 /** Step templates are off (Derek, 2026-10-13: "use it naturally as we work
  *  through it ... trying to pre-design it before we use it causes more
  *  confusion"). Saved templates are kept; true brings back Save as template,

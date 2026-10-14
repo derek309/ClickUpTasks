@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -288,6 +288,18 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     return saved;
   };
 
+  // The × on a red Needs you line: the step is marked seen and nothing else
+  // moves, so the task goes back to its own group until something new
+  // happens (Derek, 2026-10-13: "sometimes we can't do it now but want to
+  // clear it out").
+  const clearNeedsYou = (id: string) => {
+    const before = tasksRef.current.find((x) => x.id === id);
+    const subtasks = before ? clearedFromNeedsYou(before, me.id, new Date().toISOString()) : null;
+    if (!subtasks) return;
+    patchTask(id, { subtasks });
+    pushToast("Cleared from Needs you. It comes back when something new happens.");
+  };
+
   const toggleTaskSelection = (id: string) => setSelectedTaskIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const clearSelection = () => setSelectedTaskIds(new Set());
   // Reuses patchTask per task (not a raw update()) so a bulk change still
@@ -460,5 +472,5 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
   };
-  return { patchTask, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask };
+  return { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask };
 }
