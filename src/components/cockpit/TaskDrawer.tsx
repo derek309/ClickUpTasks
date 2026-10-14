@@ -782,6 +782,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const sentMail = (k: string) => (k.startsWith("mail:") ? (messages ?? []).find((m) => sentEmailKey(m.id) === k) ?? null : null);
   const clientChanges = task.subtasks.filter((s) => s.fromClient);
   const activeStep = currentStep(task.subtasks);
+  // A step's email: a placeholder until something is written in it.
+  const emailMarker = task.draftEmail ? "Draft email, ready to send" : "Email to write";
   const progress = stepProgress(task.subtasks);
   /** The step a deliverable or a link or file is on, by its title (phase 4). */
   // A review sent before 2026-10-11 is held by the client's waiting step; it
@@ -1879,7 +1881,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // work itself under its row (Derek, 2026-10-12: "I should be working in
     // the email").
     const markers = [
-      ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
+      // An email held with nothing written yet is a placeholder, said apart
+      // from a draft ready to send.
+      ...(["doc", "image", "page", "video", "brief"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
+      ...(holds.includes("email") ? [`${WORK_ICON.email} ${emailMarker}`] : []),
       ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
@@ -1890,9 +1895,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // that it's attached and approved and ready, but they can't open it from here").
     const heldHere = isActive && !sub.onClient ? (() => {
       const lines = [
-        ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => {
+        ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && (deliverablePresent(k) || k === "email")).map((k) => {
           const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{deliverableName(k)}</span>{r ? stageChip(r.status) : <span className="text-muted">{k === "email" ? "Draft" : KIND_LABEL[k]}</span>}</span>;
+          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{k === "email" && !task.draftEmail ? emailMarker : deliverableName(k)}</span>{r ? stageChip(r.status) : k === "email" && !task.draftEmail ? null : <span className="text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}</span>;
         }),
         ...holds.filter((k) => !!sentMail(k)).map((k) => <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>✉</span><span className="min-w-0 truncate font-medium">{sentMail(k)!.subject?.trim() || "Email"}</span><span className="text-muted">Sent</span></span>),
         ...holds.filter((k) => k.startsWith("att:")).map((k) => { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>🔗</span><span className="min-w-0 truncate">{a.name}</span></span> : null; }),
@@ -2955,7 +2960,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="w-7 shrink-0 tabular-nums text-muted" title={on.title}>{stepNumberOf(on.id) || ""}</span>
         <span aria-hidden className="shrink-0">{WORK_ICON[k]}</span>
         <span className="min-w-0 flex-1 truncate font-medium">{deliverableName(k)}</span>
-        {r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? "Draft" : KIND_LABEL[k]}</span>}
+        {r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}
       </button>
     );
   };
