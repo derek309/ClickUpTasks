@@ -1515,12 +1515,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
   // message, opens the draft email window. A draft already here opens as it is;
   // a reply replaces it, after a confirm when it has writing in it.
-  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }) => {
+  // keepHold: the caller has put the email on its step already.
+  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }, keepHold = false) => {
     const current = task.draftEmail;
     const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
     if (!keepCurrent) {
       const now = new Date().toISOString();
-      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now } });
+      // A new draft sits on the step it answers: the open step holding the
+      // client's email it replies to, else the current step. Left where it
+      // was, a "Let (client) know" step holding an email with no draft was
+      // finished by an unrelated email from the Email button (t_rdjvekub).
+      const list = taskRef.current.subtasks;
+      const target = keepHold ? undefined
+        : (reply?.replyTo ? list.find((x) => !x.done && x.fromEmails?.some((e) => e.messageId === reply.replyTo)) : undefined)
+          ?? currentStep(list);
+      const moveHold = !!target && !target.onClient && !isHandoffStep(target, task.assigneeId) && !target.holds?.includes("email");
+      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now },
+        ...(moveHold ? { subtasks: holdOnStep(list, target!.id, "email") } : {}) });
     }
     setEmailOpenNonce((n) => n + 1);
   };
@@ -2092,7 +2103,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const id = newId("s_");
     if (asking) setAskNext(null);
     onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, ...stepOwnerFields() }], id, "email") });
-    if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail();
+    if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail(undefined, true);
   };
   // A text or a portal chat as a step of its own, like Email (2026-10-13): its
   // page opens on that box; sending it finishes the step and asks what's next.
@@ -2738,7 +2749,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
     return (
       <NextChoices intro={`Waiting on ${firstName}${since ? ` since ${since}` : ""}${waitingFor}${done ? `. ${done}` : ""}. This step finishes by itself when ${firstName} replies${stepAfter(task.subtasks, ps.id) ? `, and "${stepAfter(task.subtasks, ps.id)!.title}" starts` : ""}. Still nothing? Follow up:`} choices={[
-        ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(); } }] : []),
+        ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }] : []),
         ...(messageDest?.phone ? [{ label: "Text a follow up", says: "A text to write and send here. It keeps waiting.", onClick: () => draftOn("sms") }] : []),
         { label: "I called them", says: "Notes the call and checks again in 3 business days.", onClick: () => {
           const due = addBusinessDaysIso(TODAY, 3);
@@ -2964,7 +2975,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     setPendingStart(null);
     if (k === "doc") setDocStartNonce((n) => n + 1);
     else if (k === "brief") setBriefStartNonce((n) => n + 1);
-    else if (k === "email") startDraftEmail();
+    else if (k === "email") startDraftEmail(undefined, true);
     else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
   }, [pendingStart, task.subtasks]); // eslint-disable-line react-hooks/exhaustive-deps
   // Files uploaded from a step's menu land on that step once they arrive.
@@ -3579,7 +3590,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   const now = new Date().toISOString();
                   onPatch({ draftEmail: { subject: subject.trim() || task.title, body: plainTextToHtml(body), createdAt: now, updatedAt: now } });
                   setEmailOpenNonce((n) => n + 1);
-                } else startDraftEmail();
+                } else startDraftEmail(undefined, true);
               }}
               onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
               followBox={!ps.done && ps.finishWhen === "reply" ? undefined : isCur && canNudge ? (
