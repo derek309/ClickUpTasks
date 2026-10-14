@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, tickedSteps, turnReason, nameDoneWhatsNext, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -18,6 +18,7 @@ import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
 import { nextStepFromContext, whatsNextContext } from "@/lib/nextStepSuggest";
+import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu, PhonePage, type ActionMenuItem } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
@@ -3549,6 +3550,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const files = filesOfEmail(e, task.attachments, messages?.find((m) => m.id === e.messageId));
           return (
             <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done} light={light}
+              approve={(() => {
+                // "approved" by email, with a review still open: mark it here.
+                if (!readsAsApproval(clientEmailText(e.body, e.from))) return undefined;
+                const k = reviewToApprove({ ...(reviews.page ? { page: reviews.page } : {}), ...(reviews.doc ? { doc: reviews.doc } : {}), ...(reviews.image ? { image: reviews.image } : {}), ...(reviews.video ? { video: reviews.video } : {}) },
+                  [...(sub.holds ?? []), ...(sub.waitsOn ? [sub.waitsOn] : [])].filter((x): x is "page" | "doc" | "image" | "video" => ["page", "doc", "image", "video"].includes(x)));
+                return k ? { label: `Mark version ${reviews[k]!.version} approved`, onClick: () => void markReview(k, "approved") } : undefined;
+              })()}
               files={files.length ? (
                 <div className="flex flex-wrap items-start gap-2">
                   {files.map((a) => a.kind === "image" && a.path && attImageUrls[a.path] ? (

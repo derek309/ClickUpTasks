@@ -7,7 +7,7 @@
 // that replaces the list, with the task it belongs to on the right.
 // Mockup he picked: https://claude.ai/artifact/HQwjkE4nCCx4QqFWcPLFQX
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, signatureCut, tidyEmailText, htmlToText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
+import { CLAUDE_ID, PERSONAL_CLIENT_ID, type Contact, WORKSPACE_CLIENT_ID, HIDDEN_STATUSES, STATUS_META, STATUS_ORDER, isOverdue, splitQuotedEmail, signatureCut, tidyEmailText, htmlToText, clientEmailText, looksLikeHtml, plainTextToHtml, type Attachment, type Message, type Task } from "@/lib/data";
 import { authedFetch, supabase } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
 import { createPortal } from "react-dom";
@@ -30,6 +30,9 @@ import { isSignatureImage } from "@/lib/emailFiles";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
 import { smsText } from "@/lib/smsText";
+import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
+import { kindQuery } from "@/lib/reviewKinds";
+import { fetchTaskDocument } from "@/lib/db";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -1061,9 +1064,46 @@ function EmailItem({ m, t, p, open, onToggle, onAnswer, first }: {
             : m.channel === "call" && m.ghlMessageId && m.ghlConversationId ? <CallPlayer m={m} peerName={t.peerName} />
             : <EmailBody body={m.body} signer={mine ? p.me.name : name} />}
           {m.attachments?.length > 0 && <Files m={m} p={p} />}
+          {!mine && m.channel === "email" && t.taskId && readsAsApproval(clientEmailText(plainBody, name)) && <ApproveFromEmail taskId={t.taskId} p={p} />}
         </div>
       )}
     </article>
+  );
+}
+
+// The client's email reads as approving the review out with them (Derek,
+// 2026-10-14): one tap marks that version approved, the same as Approved in
+// the review window. The server finishes the step making it and adds "<Client>
+// approved: what's next?", which the task opens on.
+function ApproveFromEmail({ taskId, p }: { taskId: string; p: InboxViewProps }) {
+  type Open = { status: string; version: number };
+  const [pick, setPick] = useState<{ kind: "doc" | "image" | "page" | "video"; version: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const kinds = ["page", "doc", "image", "video"] as const;
+    void Promise.all(kinds.map((k) => fetchTaskDocument(taskId, k))).then((docs) => {
+      if (!live) return;
+      const reviews: Partial<Record<(typeof kinds)[number], Open>> = {};
+      docs.forEach((d, i) => { if (d) reviews[kinds[i]] = { status: d.status, version: d.version }; });
+      const k = reviewToApprove(reviews);
+      setPick(k ? { kind: k, version: reviews[k]!.version } : null);
+    });
+    return () => { live = false; };
+  }, [taskId]);
+  if (!pick) return null;
+  const approve = async () => {
+    setBusy(true);
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/document${kindQuery(pick.kind)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "approved" }) });
+    setBusy(false);
+    if (!res.ok) { p.pushToast("Could not mark it approved."); return; }
+    setPick(null);
+    p.pushToast(`Version ${pick.version} approved`);
+    p.onOpenTask(taskId, "Inbox");
+  };
+  return (
+    <button onClick={() => void approve()} disabled={busy}
+      className="mt-3 inline-flex h-10 items-center rounded-[5px] border bg-surface px-3 font-semibold text-success hover:bg-background disabled:opacity-60">✓ Mark version {pick.version} approved</button>
   );
 }
 

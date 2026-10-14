@@ -129,7 +129,7 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
 
 /** The client's email a "Reply to …" step answers (Derek, 2026-10-12): click
  *  to read it, Reply to start the answer on this step. */
-export function ReceivedEmailBox({ email, answered, onReply, files, light = false }: {
+export function ReceivedEmailBox({ email, answered, onReply, files, light = false, approve }: {
   email: ReceivedEmail;
   /** Reply as a light button (the task page's one dark button is Done). */
   light?: boolean;
@@ -137,6 +137,9 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
   onReply?: () => void;
   /** The files that came with it, always in view (Derek, 2026-10-13). */
   files?: ReactNode;
+  /** It reads as the client approving the review out with them: one tap
+   *  marks that version approved (Derek, 2026-10-14). */
+  approve?: { label: string; onClick: () => void };
 }) {
   const [open, setOpen] = useState(false);
   const tone = reviewTone(answered ? "approved" : "with_client");
@@ -151,6 +154,10 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
           <span className="block truncate text-[16px] text-muted">From {email.from} · {timeAgo(email.at)}{answered ? " · answered" : ""}</span>
         </span>
         <span aria-hidden className="shrink-0 text-[16px] text-muted">{open ? "Hide" : "Read"}</span>
+        {approve && (
+          <button onClick={(e) => { e.stopPropagation(); approve.onClick(); }}
+            className="shrink-0 rounded-[5px] border bg-surface px-3 py-1.5 text-[16px] font-semibold text-success hover:bg-background">✓ {approve.label}</button>
+        )}
         {onReply && !answered && (
           <button onClick={(e) => { e.stopPropagation(); onReply(); }}
             className={`shrink-0 rounded-[5px] px-3 py-1.5 text-[16px] font-semibold ${light ? "border bg-surface text-accent hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>Reply</button>
