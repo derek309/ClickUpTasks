@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -413,30 +413,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     const src = tasksRef.current.find((x) => x.id === id);
     const sub = src?.subtasks.find((x) => x.id === stepId);
     if (!src || !sub) return;
-    const now = new Date().toISOString();
-    const newStepId = newId("s_");
-    const theirs = src.subtasks.filter((x) => x.fromClient && x.stepId === stepId);
-    const made: Task = {
-      ...src,
-      id: newId("t_"),
-      title: sub.title,
-      description: "",
-      status: "todo",
-      assigneeId: sub.assigneeId ?? src.assigneeId,
-      due: sub.due ?? src.due,
-      subtasks: [
-        { ...sub, id: newStepId, done: false, doneAt: undefined, outcome: undefined, startedAt: now, holds: undefined, madeHere: undefined, waitsOn: undefined, addedFor: undefined, onClient: undefined },
-        ...theirs.map((x) => ({ ...x, id: newId("s_"), stepId: newStepId })),
-      ],
-      attachments: [],
-      comments: [{ id: newId("cm_"), authorId: me.id, body: `made this from the step "${sub.title}" on "${src.title}"`, at: now, kind: "event" as const }],
-      draftEmail: null,
-      ghlTaskId: null,
-      followUpAt: null,
-      recurrence: "none",
-      createdAt: now,
-      createdBy: me.id,
-    };
+    const made = taskFromStep(src, stepId, me.id, new Date().toISOString(), newId, `made this from the step "${sub.title}" on "${src.title}"`);
+    if (!made) return;
     setTasks((ts) => [...ts, made]);
     upsertTask(made, me.id);
     patchTask(id, { subtasks: src.subtasks.filter((x) => x.id !== stepId && !(x.fromClient && x.stepId === stepId)) });

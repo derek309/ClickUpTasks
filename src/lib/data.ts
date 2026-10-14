@@ -1121,6 +1121,63 @@ export interface Task {
   createdBy?: string | null;
 }
 
+/** A step made its own task (stepToTask), built field by field rather than
+ *  as a copy of the task it came from: the client, contact, list, owner and
+ *  priority carry over, and the step with its directions and to dos is step 1.
+ *  Nothing of the old task's wait, schedule, sizing or repeat comes along, and
+ *  a step that was Claude's goes to whoever moved it, so no routine starts by
+ *  itself. Links to the old task's files (att:) are dropped: they stay there. */
+export function taskFromStep(src: Task, stepId: string, meId: string, now: string, makeId: (prefix: string) => string, note: string): Task | null {
+  const sub = src.subtasks.find((x) => x.id === stepId);
+  if (!sub) return null;
+  const newStepId = makeId("s_");
+  const mine = (who: string | null | undefined) => (who === CLAUDE_ID ? meId : who ?? null);
+  const uses = (sub.uses ?? []).filter((k) => !k.startsWith("att:"));
+  const step: Subtask = {
+    ...sub, id: newStepId, done: false, doneAt: undefined, outcome: undefined, startedAt: now, holds: undefined, madeHere: undefined, waitsOn: undefined, addedFor: undefined, onClient: undefined,
+    followUps: undefined, finishWhen: undefined, emailedAt: undefined, draftMessage: undefined, cloudSession: undefined, fromEmails: undefined, toClaudeAt: undefined, cloudError: undefined,
+    uses: uses.length ? uses : undefined,
+    ...(sub.assigneeId === CLAUDE_ID ? { assigneeId: meId } : {}),
+  };
+  const theirs = src.subtasks.filter((x) => x.fromClient && x.stepId === stepId).map((x) => ({ ...x, id: makeId("s_"), stepId: newStepId }));
+  return {
+    id: makeId("t_"),
+    projectId: src.projectId,
+    clientId: src.clientId,
+    contactId: src.contactId,
+    title: sub.title,
+    description: "",
+    status: "todo",
+    priority: src.priority,
+    priorityAuto: false,
+    assigneeId: mine(sub.assigneeId ?? src.assigneeId),
+    waitingOnClient: false,
+    clientResponse: null,
+    due: sub.due ?? src.due,
+    followUpAt: null,
+    lastActivityAt: now,
+    recurrence: "none",
+    recurrenceInterval: undefined,
+    recurrenceUnit: undefined,
+    recurrenceDaysOfMonth: undefined,
+    recurrenceNth: undefined,
+    recurrenceWeekday: undefined,
+    size: null,
+    sizeHours: null,
+    labelIds: [],
+    ghlTaskId: null,
+    private: src.private,
+    hiddenFromClient: src.hiddenFromClient,
+    stageId: null,
+    subtasks: [step, ...theirs],
+    attachments: [],
+    comments: [{ id: makeId("cm_"), authorId: meId, body: note, at: now, kind: "event" }],
+    draftEmail: null,
+    createdAt: now,
+    createdBy: meId,
+  };
+}
+
 /** A custom Kanban-style column for one project's own task board (e.g.
  * "Backlog / Designing / In Review / Shipped") — layered ON TOP OF the
  * existing status funnel (todo/in_progress/review/done), not a replacement:

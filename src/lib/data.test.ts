@@ -1418,3 +1418,29 @@ describe("longStepsNamed", () => {
     expect(longStepsNamed(null, after)).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("taskFromStep", () => {
+  it("builds the new task from the step, not a copy of the old task", async () => {
+    const { taskFromStep } = await import("./data");
+    let n = 0;
+    const src = {
+      id: "t1", projectId: "p1", clientId: "cl_1", contactId: "ct_1", title: "Old", description: "<p>old</p>", status: "waiting", priority: "high", assigneeId: "u_derek",
+      waitingOnClient: true, clientResponse: { body: "x", attachments: [], submittedAt: "2026-10-01" }, due: "2026-10-20", followUpAt: "2026-10-15", recurrence: "weekly", recurrenceInterval: 2,
+      size: "m", labelIds: ["l1"], ghlTaskId: "g1", private: false, stageId: "st1", attachments: [{ id: "a1" }], comments: [], createdAt: "2026-10-01", priorityAuto: true,
+      subtasks: [
+        { id: "s1", title: "Decide the pet care page", done: false, assigneeId: "u_claude", notes: "<p>do it</p>", todos: [{ id: "td1", title: "Pick", done: false }],
+          uses: ["doc", "att:a1"], followUps: [{ via: "email", at: "2026-10-02" }], finishWhen: "reply", emailedAt: "x", cloudSession: { url: null, at: "x" }, fromEmails: [] },
+        { id: "r1", title: "Bigger logo", done: false, fromClient: true, stepId: "s1" },
+      ],
+    } as unknown as Parameters<typeof taskFromStep>[0];
+    const t = taskFromStep(src, "s1", "u_justin", "2026-10-13T00:00:00Z", (p) => `${p}${++n}`, "made")!;
+    expect(t).toMatchObject({ clientId: "cl_1", contactId: "ct_1", projectId: "p1", priority: "high", assigneeId: "u_justin", status: "todo",
+      waitingOnClient: false, clientResponse: null, stageId: null, priorityAuto: false, size: null, recurrence: "none", followUpAt: null, due: "2026-10-20", attachments: [], labelIds: [], ghlTaskId: null });
+    expect(t.recurrenceInterval).toBeUndefined();
+    const step = t.subtasks[0];
+    expect(step).toMatchObject({ title: "Decide the pet care page", notes: "<p>do it</p>", assigneeId: "u_justin", uses: ["doc"] });
+    expect(step.todos).toHaveLength(1);
+    for (const k of ["followUps", "finishWhen", "emailedAt", "cloudSession", "fromEmails"] as const) expect(step[k]).toBeUndefined();
+    expect(t.subtasks[1]).toMatchObject({ title: "Bigger logo", stepId: step.id });
+  });
+});
