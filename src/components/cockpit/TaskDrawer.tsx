@@ -1216,7 +1216,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Ticked done: what's next is asked at once, with the plan's next step
     // or a blank to name one (Derek, 2026-10-12: "a way to create the next step").
     const nextId = advanceFrom(sid);
-    if (nextId && sub) setSentNext({ taskId: task.id, stepId: nextId, done: sub.title });
+    if (nextId && sub) setSentNext({ taskId: task.id, stepId: nextId, done: sub.title, doneId: sid, held: sub.holds });
   };
   // The current step's date is the follow up's: one date, written to both.
   // The task's follow up date, managed by the task (Derek, 2026-10-11), apart
@@ -1378,16 +1378,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the next three business days; the owner comes back the day after, and the
   // follow up finishes itself if the client approves first. An open follow up
   // keeps its own words and date and only gains the finish line.
+  // The step a review is being sent from, when it is not the current one
+  // (What's next's "Email Ryan to review" for the step just ticked).
+  const reviewSendFrom = useRef<string | null>(null);
   const followUpOnReview = (kind: TaskDocumentKind, name: string, reminderEveryDays = 1) => {
     const watch = `approved:${kind}`;
+    // Sent from What's next for the step just ticked: the client's waiting
+    // step follows that step, not whatever is current now.
+    const fromId = reviewSendFrom.current;
+    reviewSendFrom.current = null;
+    const from = (fromId ? taskRef.current.subtasks.find((x) => x.id === fromId) : null) ?? activeStep;
     // With steps, our step is done and the client's own step starts: on
     // them, waiting, holding the review (Derek, 2026-10-11).
     // Once: a step already waiting on them for this review (made by the send
     // itself) is not doubled (Derek, 2026-10-13: Justin got two "Waiting on").
     const alreadyWaiting = taskRef.current.subtasks.some((x) => !x.done && x.onClient && x.waitsOn === kind);
-    if (activeStep && !activeStep.onClient && !alreadyWaiting && !isHandoffStep(activeStep, task.assigneeId)) {
+    if (from && !from.onClient && !alreadyWaiting && !isHandoffStep(from, task.assigneeId)) {
       const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
-      const list = addClientReviewStep(taskRef.current.subtasks, activeStep.id, firstName, name, kind as DeliverableKey, due, () => newId("s_"));
+      const list = addClientReviewStep(taskRef.current.subtasks, from.id, firstName, name, kind as DeliverableKey, due, () => newId("s_"));
       if (list) {
         onPatch({ subtasks: list });
         const waiting = list.find((x) => !x.done && x.onClient && x.waitsOn === kind);
@@ -1497,6 +1505,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [briefPresence, setBriefPresence] = useState<{ taskId: string; exists: boolean }>({ taskId: task.id, exists: false });
   const showBrief = canHaveDocument && briefPresence.taskId === task.id && briefPresence.exists;
   const [reviewStartNonce, setReviewStartNonce] = useState<Record<FileKind, number>>({ image: 0, page: 0, video: 0 });
+  // What's next's "Email Ryan to review": sends the review the way its own
+  // Send for review does (TaskDocument's sendNonce).
+  const [reviewSendNonce, setReviewSendNonce] = useState<Record<FileKind, number>>({ image: 0, page: 0, video: 0 });
   const [emailOpenNonce, setEmailOpenNonce] = useState(0);
   // Email on this task, from the dock, the "+ Draft email" chip or Reply on a
   // message, opens the draft email window. A draft already here opens as it is;
@@ -2571,7 +2582,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // here's my suggestion and dates, approve or change"; "a pop up marked
   // Approved"): the step it made or started, as a sentence to say yes to or
   // change. Closing keeps it as it is.
-  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; via?: "email" | "sms" | "chat"; said?: string } | null>(null);
+  // doneId and held: the step just ticked and what it held then, so an
+  // unsent HTML review on it can be emailed for review from here.
+  const [sentNext, setSentNext] = useState<{ taskId: string; stepId: string; approved?: string; done?: string; doneId?: string; held?: string[]; via?: "email" | "sms" | "chat"; said?: string } | null>(null);
   const sentStep = sentNext?.taskId === task.id ? task.subtasks.find((x) => x.id === sentNext.stepId) ?? null : null;
   const closeSentNext = () => setSentNext(null);
   // Escape closes this box first, not the task behind it.
@@ -2615,6 +2628,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const nextBody = (inline: boolean) => !sentStep ? null : (() => {
     const stg = stepStage(sentStep, task.assigneeId);
     const asking = asksWhatsNext(sentStep) || !sentStep.title;
+    // The step just ticked held an HTML review not sent yet: emailing it to the
+    // client for review comes first (Derek, 2026-10-14: "Create newsletter",
+    // Done, then email the client to review, then a step waits on them). The
+    // same send as the review's own Send for review: the review goes out, the
+    // client's one waiting step follows the ticked step, the email opens.
+    const sentFrom = sentNext?.doneId ? task.subtasks.find((x) => x.id === sentNext.doneId) ?? null : null;
+    const reviewToSend = !!sentFrom && !!sentNext?.held?.includes("page") && reviews.page?.status === "draft"
+      && hasMessaging && !!messageDest?.email;
+    const emailForReview = () => {
+      onPatch({ subtasks: dropSuggestion(sentStep) });
+      closeSentNext();
+      reviewSendFrom.current = sentFrom!.id;
+      setReviewSendNonce((r) => ({ ...r, page: r.page + 1 }));
+    };
     return (
       <div className="relative" onKeyDown={inline ? (e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); startNext(); } } : undefined}>
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
@@ -2638,7 +2665,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           </span>.
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button onClick={inline ? startNext : closeSentNext} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
+          {reviewToSend && <button onClick={emailForReview} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Email {firstName} to review</button>}
+          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
           {/* Hand the next step straight to Claude and move on (Derek, 2026-10-13:
               "now the next step is for me to delegate it to Claude"). */}
           {!asking && !sentStep.onClient && sentStep.assigneeId !== CLAUDE_ID && (
@@ -2924,7 +2952,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
     <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onDeletedCount={countDeleted(kind)} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
-      startNonce={reviewStartNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
+      startNonce={reviewStartNonce[kind]} sendNonce={reviewSendNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
         const kinds = p.taskId === task.id ? p.kinds : [];
         if (p.taskId === task.id && kinds.includes(kind) === exists) return p;

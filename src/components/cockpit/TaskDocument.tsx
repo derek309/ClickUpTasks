@@ -86,7 +86,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onDeletedCount, deletedOpenNonce = 0 }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, sendNonce = 0, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onDeletedCount, deletedOpenNonce = 0 }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -107,6 +107,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   onEmailClient?: (review: { kind: TaskDocumentKind; url: string | null; name: string; text: string; changes: string | null }) => boolean;
   /** Bumped by the line's chip: start it if there is none, then show it. */
   startNonce: number;
+  /** Bumped by What's next's "Email Ryan to review": sends it for review the
+   *  way its own Send for review button does, then the email to the client. */
+  sendNonce?: number;
   /** Tells the drawer whether a document exists, so it can hide the chip. */
   onPresence: (exists: boolean) => void;
   /** Just sent to the client. The drawer sets the follow up from it; without
@@ -680,6 +683,24 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     else if (url) pushToast(`Sent for review. Share this link: ${url}`);
     else pushToast("Sent for review.");
   };
+
+  // What's next's "Email Ryan to review" (Derek, 2026-10-14: build the HTML
+  // review, Done, then email the client): the same send as the button, so the
+  // client's one waiting step and the review email follow as they do there.
+  // With nothing to send yet, the review opens instead.
+  const sendSeen = useRef(sendNonce);
+  useEffect(() => {
+    if (sendNonce === sendSeen.current) return;
+    sendSeen.current = sendNonce;
+    if (!doc || busy !== null) return;
+    const shut = !!doc.approvedAt || doc.status === "completed";
+    const ready = !shut && (!versioned || !!doc.body) && (doc.version === 0 || doc.draftDirty);
+    void (async () => {
+      if (ready) { await send(); return; }
+      pushToast(`This ${titleInSentence} has nothing new to send.`);
+      switchView({ full: true }, doc);
+    })();
+  }, [sendNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The one link control (Derek, 2026-09-11: "just need a copy link button that's
   // all keep it simple"). Sending makes the link; deleting the document ends it.
