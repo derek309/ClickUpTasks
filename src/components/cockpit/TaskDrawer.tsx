@@ -3328,30 +3328,50 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // 2026-10-13): unsent drafts (the email, a step's text or chat), reviews
   // not yet approved or completed, project instructions not done, and files
   // an open step still needs.
-  type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; onClick: () => void };
+  // `line` is the state said in words, with a real date where there is one,
+  // for the phone's second line ("Step 3 · With Ryan, viewed Oct 12"), kept
+  // short so it fits one line at 375px.
+  type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; line: string; onClick: () => void };
   const openStepFor = (id: string) => () => setOpenStepPage({ taskId: task.id, id, full: false });
+  const dayOf = (iso: string | null | undefined) => (iso ? formatDue(iso.slice(0, 10)) : null);
+  const words = (...bits: (string | null | undefined | false)[]) => bits.filter(Boolean).join(" · ");
   const actionRows: ActionRow[] = [
     ...DELIVERABLE_KEYS.filter((k) => workCompact(k) && !workFinished(k, workOn(k))).map((k): ActionRow => {
       const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-      return { key: k, step: workOn(k), icon: WORK_ICON[k], title: deliverableName(k), onClick: () => openWork(k),
-        state: r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span> };
+      const label = k === "email" ? emailMarker : k === "brief" ? "Not done yet" : KIND_LABEL[k];
+      const saved = dayOf(task.draftEmail?.updatedAt ?? task.draftEmail?.createdAt);
+      const line = r ? `${REVIEW_STATUS[r.status] ?? r.status}${r.status !== "draft" && r.clientViewedAt ? `, viewed ${dayOf(r.clientViewedAt)}` : ""}`
+        : k === "email" ? (saved ? `Draft from ${saved}` : "Draft, ready to send")
+        : label;
+      return { key: k, step: workOn(k), icon: WORK_ICON[k], title: deliverableName(k), onClick: () => openWork(k), line,
+        state: r ? stageChip(r.status) : <span className="text-muted">{label}</span> };
     }),
     ...steps.filter((st) => !st.done && !!st.draftMessage).map((st): ActionRow => {
       const sms = st.draftMessage!.channel === "sms";
+      const label = st.draftMessage!.body.trim() ? "Ready to send" : "To write";
       return { key: `talk:${st.id}`, step: st, icon: sms ? "📱" : "💬", title: sms ? `Text to ${firstName}` : `Chat with ${firstName}`, onClick: openStepFor(st.id),
-        state: <span className="shrink-0 text-muted">{st.draftMessage!.body.trim() ? "Ready to send" : "To write"}</span> };
+        line: st.due ? `${label}, due ${formatDue(st.due)}` : label, state: <span className="text-muted">{label}</span> };
     }),
     ...steps.filter((st) => !st.done && !st.onClient).flatMap((st) => missingNeeds(st).map((n): ActionRow => (
-      { key: `need:${st.id}:${n}`, step: st, icon: "📎", title: n, onClick: openStepFor(st.id), state: <span className="shrink-0 text-muted">Still needed</span> }))),
+      { key: `need:${st.id}:${n}`, step: st, icon: "📎", title: n, onClick: openStepFor(st.id), line: st.due ? `Needed by ${formatDue(st.due)}` : "Still needed", state: <span className="text-muted">Still needed</span> }))),
   ];
-  const actionLine = (row: ActionRow) => (
-    <button key={row.key} onClick={row.onClick} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
-      <span className="w-7 shrink-0 tabular-nums text-muted" title={row.step?.title}>{row.step ? stepNumberOf(row.step.id) || "" : ""}</span>
-      <span aria-hidden className="shrink-0">{row.icon}</span>
-      <span className="min-w-0 flex-1 truncate font-medium">{row.title}</span>
-      {row.state}
-    </button>
-  );
+  // Readable on a phone (Derek, 2026-10-13): the title wraps, and under it
+  // one muted line says the step and the state. From sm up it is one row,
+  // the step spelled out in front.
+  const actionLine = (row: ActionRow) => {
+    const n = row.step ? stepNumberOf(row.step.id) : 0;
+    return (
+      <button key={row.key} onClick={row.onClick} className="flex w-full min-w-0 items-start gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background sm:items-center">
+        <span className="hidden w-16 shrink-0 whitespace-nowrap tabular-nums text-muted sm:block" title={row.step?.title}>{n ? `Step ${n}` : ""}</span>
+        <span aria-hidden className="w-5 shrink-0 text-center">{row.icon}</span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="font-medium [overflow-wrap:anywhere] sm:truncate">{row.title}</span>
+          <span className="text-[16px] text-muted sm:hidden">{words(n ? `Step ${n}` : null, row.line)}</span>
+        </span>
+        <span className="hidden shrink-0 sm:inline-flex">{row.state}</span>
+      </button>
+    );
+  };
 
   // Nothing left to do and nothing drawn in full: the card is one line.
   const actionsDone = !actionRows.length && !looseWork && deletedOpen === 0;
