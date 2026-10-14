@@ -895,6 +895,10 @@ export interface Subtask {
   followUps?: { via: "email" | "sms" | "chat" | "call"; at: string }[];
   /** A Claude Code cloud session working this step, to watch (lib/claudeCloud). */
   cloudSession?: { url: string | null; at: string };
+  /** When the step was given to Claude, and why Claude could not start in
+   *  the cloud ("not_set_up" or the routine's error), cleared once it starts. */
+  toClaudeAt?: string;
+  cloudError?: string;
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // The link on the step, merged into the steps as they are now.
   const at = new Date().toISOString();
   const { data: cur } = await supabaseAdmin.from("tasks").select("subtasks").eq("id", id).maybeSingle();
-  const list = ((cur?.subtasks as Subtask[] | null) ?? []).map((s) => (s.id === step.id ? { ...s, cloudSession: { url: r.url, at } } : s));
+  const list = ((cur?.subtasks as Subtask[] | null) ?? []).map((s) => (s.id === step.id ? { ...s, cloudSession: { url: r.url, at }, cloudError: undefined } : s));
   await supabaseAdmin.from("tasks").update({ subtasks: list, updated_by: null }).eq("id", id);
   await supabaseAdmin.rpc("append_comment", { task_id: id, comment: { id: "cm_" + crypto.randomUUID(), authorId: access.user.memberId ?? "u_derek", at, kind: "event", body: `started Claude on "${step.title}" in the cloud` } });
   return NextResponse.json({ ok: true, url: r.url });

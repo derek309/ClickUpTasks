@@ -1855,7 +1855,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       later: "",
     };
     const sayTone = state === "mine" ? "text-red-700 dark:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
-    const say = state === "claude" ? "Claude is working on it"
+    const say = state === "claude" ? (
+        sub.cloudSession ? "Claude is working"
+        : sub.cloudError ? `Claude has not started: ${sub.cloudError === "not_set_up" ? "not set up" : sub.cloudError}`
+        : sub.toClaudeAt ? `With Claude since ${sub.toClaudeAt.slice(0, 10) === TODAY ? "" : `${formatDue(sub.toClaudeAt.slice(0, 10))}, `}${new Date(sub.toClaudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`
+        : "With Claude")
       : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `Waiting on ${firstName}` : `With ${userById(person ?? null)?.name.split(" ")[0] ?? "a teammate"}`)
       : state === "mine" ? (
         tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
@@ -2078,19 +2082,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!make && taskRef.current.subtasks.some((x) => x.id === stepId && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
     let list = [...taskRef.current.subtasks];
     if (make) list.splice(insertBefore ? list.findIndex((x) => x.id === insertBefore) : list.length, 0, make);
-    list = list.map((x) => (x.id === stepId ? { ...x, assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined } : x));
+    list = list.map((x) => (x.id === stepId ? { ...x, assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined, toClaudeAt: new Date().toISOString(), cloudError: undefined } : x));
     const step = list.find((x) => x.id === stepId)!;
     const st = statusForStep(task.status, stepStage(step, task.assigneeId));
     const saved = onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
     // After the save lands: before it, the server has no such step yet (404).
     void Promise.resolve(saved).then(() => authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }))
       .then(async (res) => {
-        const j = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
-        if (res.ok) pushToast("Claude is on it", j.url ? { label: "Watch", run: () => window.open(j.url!, "_blank", "noopener") } : undefined);
-        else if (res.status !== 501) pushToast(`On Claude's list. Claude couldn't start in the cloud: ${j.error ?? "error"}`);
-        else pushToast("Given to Claude");
+        // One toast; what happened shows on the step itself. A start that
+        // failed says why there (the server sets cloudSession when it starts).
+        if (res.ok) return;
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 409) return;
+        onPatchSub(stepId, { cloudError: res.status === 501 ? "not_set_up" : j.error || "error" });
       })
-      .catch(() => pushToast("Given to Claude"));
+      .catch(() => onPatchSub(stepId, { cloudError: "Couldn't reach the app" }));
+    pushToast("Given to Claude");
   };
   const claudeStep = () => {
     if (asking) setAskNext(null);
