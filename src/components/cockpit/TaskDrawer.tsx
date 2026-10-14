@@ -2294,7 +2294,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <CurrentStep key={sub.id} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
             clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
-            addOptions={stepAddOptions(sub)}
+            addOptions={withGiveClaude(sub, stepAddOptions(sub))}
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
             files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
             incoming={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "came") ?? undefined}
@@ -3107,7 +3107,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       .flatMap((x) => { const o = nextOptions.find((y) => y.key === x.kind && !y.disabled); return o ? [{ ...o, label: x.label }] : []; });
     const nextRows = addRowsOf(nextOptions, firstName, new Set(nextSuggest.map((x) => x.key)));
     return (
-      <div className="relative" onKeyDown={inline ? (e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); startNext(); } } : undefined}>
+      <div className="relative" onKeyDown={inline && !setupNow ? (e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); startNext(); } } : undefined}>
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
         <button onClick={closeSentNext} aria-label="Close" title="Close, change nothing"
           className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.close /></button>
@@ -3120,13 +3120,18 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // by when and what, one line each; an action tap folds it into the
           // sentence below.
           <div className="mt-0.5">
-            <StepSetup key={sentStep.id} name={nameRow} {...setupNow} submit={undefined} longHint meId={meId ?? null}
+            <StepSetup key={sentStep.id} name={nameRow} {...setupNow} submit="Save next step" skip={false} enterSubmits longHint meId={meId ?? null}
               lead={[
                 ...(reviewToSend ? [{ key: "reviewemail", label: `Email ${firstName} to review`, onPick: emailForReview }] : []),
                 ...nextSuggest,
               ]}
               rows={nextRows.rows.map((r) => ({ label: r.label, items: r.items }))} more={nextRows.rest}
-              onDone={(a, run) => { setNextSetupDone(sentStep.id); applySetup(sentStep.id, a, run); }} />
+              onDone={(a, run) => {
+                setNextSetupDone(sentStep.id); applySetup(sentStep.id, a, run);
+                // Save next step (no action picked): the picks are kept and
+                // the card closes, as the old Start it did once answered.
+                if (!run) { const id = sentStep.id; closeSentNext(); if (stepPageOpen() && !asksWhatsNext(sentStep)) setOpenStepPage({ taskId: task.id, id, full: openStepPage!.full }); }
+              }} />
           </div>
         ) : (<>
         {nameRow}
@@ -3143,7 +3148,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </>)}
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {reviewToSend && !setupNow && <button onClick={emailForReview} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Email {firstName} to review</button>}
-          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend && !setupNow ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : waiting ? `Wait for ${firstName}` : inline ? "Start it" : "Looks good"}</button>
+          {!setupNow && <button onClick={inline ? startNext : closeSentNext} className={reviewToSend ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : waiting ? `Wait for ${firstName}` : "Save next step"}</button>}
           {/* Hand the next step straight to Claude and move on (Derek, 2026-10-13:
               "now the next step is for me to delegate it to Claude"). In the
               set up, Claude is a choice of Whose turn. */}
@@ -3171,7 +3176,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               // Each makes its own step and opens it, set up first.
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
             ]} />
-          <span className="ml-auto hidden text-[16px] text-muted sm:inline">{waiting ? "Enter to wait" : inline ? "Enter to start it" : "Enter to keep it"}</span>
+          <span className="ml-auto hidden text-[16px] text-muted sm:inline">{setupNow ? "" : waiting ? "Enter to wait" : "Enter to save"}</span>
         </div>
         {/* Small, at the bottom (Derek, 2026-10-14). */}
         <button onClick={() => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); }}
@@ -3687,6 +3692,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
     ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : [])];
   };
+  // The step's own + Add offers handing it to Claude, as What's next does
+  // (Derek, 2026-10-14: "the next action is to delegate to Claude, how do I
+  // do that?"): Claude's turn, due today, started in the cloud when set up.
+  const withGiveClaude = <T extends { key: string; label: string; disabled: boolean; onPick: () => void }>(sub: Subtask, opts: T[]) =>
+    sub.done || sub.onClient || sub.assigneeId === CLAUDE_ID ? opts
+      : [...opts, { key: "claude", label: "Give to Claude", disabled: false, onPick: () => toClaude(sub.id) } as T];
   // What a step holds, drawn on it: its deliverables as their own rows (the
   // current step's reviews with their open comments), then its links and files.
   // A step's needs, and which of them what it holds already meets.
@@ -4439,7 +4450,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               }}
               controls={stepControls(ps, isCur)}
               setup={setupOf(ps, setupFor[ps.id])}
-              addOptions={stepAddOptions(ps)}
+              addOptions={withGiveClaude(ps, stepAddOptions(ps))}
               onSendHeldEmail={heldEmailSendFor(ps)}
               canText={!!messageDest?.phone && mayContactClient}
               onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
