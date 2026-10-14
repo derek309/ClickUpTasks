@@ -129,8 +129,10 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
 
 export function EmailWindow({
   draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, heading, subheading, subjectFallback,
-  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp,
+  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp, sendNote,
 }: {
+  /** One line under Send: the step it finishes and when it checks in. */
+  sendNote?: (followUpDate: string | null) => string | null;
   /** On a task: offer Follow up in X days beside Send. */
   followUp?: boolean;
   draft: EmailDraft;
@@ -470,6 +472,10 @@ export function EmailWindow({
               <span className="text-[16px] text-muted">{saveLabel}</span>
               <button onClick={discard} className={`ml-auto ${quiet} hover:text-danger`}>Discard</button>
             </div>
+            {(() => {
+              const note = onSend && sendNote ? sendNote(followUp ? followUpDate : null) : null;
+              return note ? <p className="mt-2 text-[16px] text-muted">{note}</p> : null;
+            })()}
           </div>
 
           <div className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">

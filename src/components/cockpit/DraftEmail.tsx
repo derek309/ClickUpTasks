@@ -14,9 +14,11 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, onSent, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
+export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
+  /** Said under Send: the step it will finish and when it checks in. */
+  sendNote?: (followUpDate: string | null) => string | null;
   /** The email really went out: its step keeps a box for it. */
   onSent?: (message: Message) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
@@ -70,7 +72,7 @@ export function DraftEmail({ task, onPatch, onSent, toEmail, onSend, onSchedule,
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
           onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} ccContacts={ccContacts} onUpload={onUpload}
-          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp />
+          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp sendNote={sendNote} />
       )}
     </>
   );

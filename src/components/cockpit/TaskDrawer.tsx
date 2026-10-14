@@ -2678,7 +2678,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // nothing). The check in follows and What's next opens.
   const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
   // A Text or Chat step the same way, by its name (2026-10-13).
-  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
+  // What a send will do to the steps, worked out once: finishTalkStep acts on
+  // it and the email window says it under Send before it goes.
+  type TalkPlan = { kind: "reminder" | "wait" | "finish"; cur: Subtask; due: string; holder?: Subtask };
+  const talkStepPlan = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): TalkPlan | null => {
     // Sent from a step's own page: that step. An email sent from the task's
     // email window: the open step holding that email, else the current one.
     // It used to be the current one always, so "Reply to media" was ticked,
@@ -2688,14 +2691,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const cur = stepId ? taskRef.current.subtasks.find((x) => x.id === stepId && !x.done) : holder ?? currentStep(taskRef.current.subtasks);
     // A reminder held on a review out with the client: a follow up on that
     // wait, and the email comes off the step.
-    if (cur?.onClient && channel === "email" && cur.holds?.includes("email")) {
-      const due = followUpDate || addBusinessDaysIso(TODAY, 2);
-      const list = recordFollowUp(taskRef.current.subtasks, cur.id, "email", due).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
-      onPatch({ subtasks: list, followUpAt: due });
-      pushToast(`${cur.followUps?.length || cur.waitsOn ? "Reminder sent" : "Sent"}. Waiting on ${firstName}; checking again ${formatDue(due)}.`);
-      return true;
-    }
-    if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return false;
+    if (cur?.onClient && channel === "email" && cur.holds?.includes("email")) return { kind: "reminder", cur, due: followUpDate || addBusinessDaysIso(TODAY, 2) };
+    if (!cur || cur.onClient || isHandoffStep(cur, task.assigneeId)) return null;
     const name = cur.title.trim();
     // The "Follow up in" picked beside Send (Derek, 2026-10-12): the check in,
     // the task's follow up, and a due date already earlier all move to it.
@@ -2703,15 +2700,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const due = followUpDate || addBusinessDaysIso(TODAY, 3);
     // Sent while waiting on them (a check in is current): a follow up on that
     // wait, its date moved, not a step done (Derek, 2026-10-13).
-    if (cur.finishWhen === "reply") {
+    if (cur.finishWhen === "reply") return { kind: "wait", cur, due };
+    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
+      : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
+    return fits ? { kind: "finish", cur, due, holder } : null;
+  };
+  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
+    const plan = talkStepPlan(channel, followUpDate, stepId);
+    if (!plan) return false;
+    const { cur, due, holder } = plan;
+    if (plan.kind === "reminder") {
+      const list = recordFollowUp(taskRef.current.subtasks, cur.id, "email", due).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
+      onPatch({ subtasks: list, followUpAt: due });
+      pushToast(`${cur.followUps?.length || cur.waitsOn ? "Reminder sent" : "Sent"}. Waiting on ${firstName}; checking again ${formatDue(due)}.`);
+      return true;
+    }
+    if (plan.kind === "wait") {
       const list = recordFollowUp(taskRef.current.subtasks, cur.id, channel, due).map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
       onPatch({ subtasks: list, followUpAt: due });
       pushToast(`${channel === "sms" ? "Text" : channel === "chat" ? "Chat" : "Email"} sent. Still waiting on ${firstName}; checking again ${formatDue(due)}.`);
       return true;
     }
-    const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
-      : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
-    if (!fits) return false;
     const made0 = addCheckInStep(taskRef.current.subtasks, cur.id, firstName, due, () => newId("s_"), undefined, channel);
     if (!made0) return false;
     // The current step above it was an emailing step too ("Reply to media"):
@@ -2765,8 +2774,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
   // or the chip below. Sending goes through the same path as the composer.
+  // The review an email from the window sends with it, from the current step.
+  const sendReviewKind = () => activeStep && !activeStep.onClient && !isHandoffStep(activeStep, task.assigneeId)
+    ? (["page", "image", "video", "doc"] as const).find((k) => activeStep.holds?.includes(k)) ?? null : null;
+  // Under Send: which step it will finish and when it checks in, by the same
+  // order onSend below takes (to dos asked, a review, the client's step, then
+  // talkStepPlan). Blank when no step will change.
+  const sendNote = (followUpDate: string | null): string | null => {
+    if (taskRef.current.draftEmail?.asks) return null;
+    if (activeStep && sendReviewKind()) return `Finishes: ${activeStep.title}, then checks in ${formatDue(addBusinessDaysIso(TODAY, reviewFollowUpDays(1)))}`;
+    if (activeStep?.onClient && !activeStep.holds?.includes("email")) return null;
+    const plan = talkStepPlan("email", followUpDate);
+    if (!plan) return null;
+    if (plan.kind === "finish") return `Finishes: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
+    return `A follow up on: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
+  };
   const draftEmailBlock = (
-    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch}
+    <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} sendNote={hasMessaging ? sendNote : undefined}
       onSent={(m) => {
         const list = taskRef.current.subtasks;
         const on = stepHolding(list, "email");
@@ -2790,8 +2814,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         // the client's waiting step starts with the document and this email
         // on it (Derek, 2026-10-11: "the email and the document can live in
         // here").
-        const reviewKind = activeStep && !activeStep.onClient && !isHandoffStep(activeStep, task.assigneeId)
-          ? (["page", "image", "video", "doc"] as const).find((k) => activeStep.holds?.includes(k)) ?? null : null;
+        const reviewKind = sendReviewKind();
         if (activeStep && reviewKind) {
           const name = reviews[reviewKind]?.title?.trim() || (reviewKind === "doc" ? "the document" : "the review");
           const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
