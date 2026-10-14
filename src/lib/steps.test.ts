@@ -165,6 +165,15 @@ describe("steps added by what happens", () => {
     expect(addedReason("page:2", "Brian")).toBe("Added when Brian sent changes");
     expect(addedReason(undefined, "Brian")).toBeNull();
   });
+  it("a What's next pick says what it came after, never that the client sent changes (t_mv5llezz0)", () => {
+    const titles: Record<string, string> = { s4: "Reply to Brian: PPAI Promo Pro Daily Ad" };
+    expect(addedReason("next:s4", "Brian", (id) => titles[id])).toBe('Added after "Reply to Brian: PPAI Promo Pro Daily Ad"');
+    expect(addedReason("next:gone", "Brian", (id) => titles[id])).toBeNull();
+    expect(addedReason("next:s4", "Brian")).toBeNull();
+    expect(addedReason("reply:msg_1", "Brian")).toBe("Added when Brian emailed");
+    expect(addedReason("meeting", "Brian")).toBeNull();
+    expect(addedReason("changes", "Brian")).toBe("Added when Brian sent changes");
+  });
   it("sending the email starts a check-in that a reply finishes", () => {
     const out = addCheckInStep([s("t", "Let Brian know")], "t", "Brian", "2026-10-14", id, now)!;
     expect(out[1]).toMatchObject({ title: "Check in if Brian hasn't replied", stage: "waiting", due: "2026-10-14", finishWhen: "reply" });
@@ -328,6 +337,19 @@ describe("a browser save keeps what the server did meanwhile", () => {
   it("keeps the server's change to a step this edit did not touch", () => {
     const remote = [a, { ...b, done: true, outcome: "Brian replied" }];
     expect(mergeSubtasks([a, b], [{ ...a, title: "Write it" }, b], remote)[1]).toMatchObject({ done: true, outcome: "Brian replied" });
+  });
+  it("a tick here and a link put on the same step elsewhere both stay (t_mv5llezz0)", () => {
+    const reply = s("r", "Reply to Brian", { holds: ["email"] });
+    const local = [{ ...reply, done: true, doneAt: "2026-10-14T16:05:26.206Z", outcome: "Done" }, b];
+    const remote = [{ ...reply, holds: ["email", "att:at_1"] }, b];
+    expect(mergeSubtasks([reply, b], local, remote)[0]).toMatchObject({ done: true, doneAt: "2026-10-14T16:05:26.206Z", outcome: "Done", holds: ["email", "att:at_1"] });
+  });
+  it("a field this edit cleared stays cleared, one it left alone keeps the server's value", () => {
+    const st = s("x", "Write", { due: "2026-10-15", notes: "<p>Old</p>" });
+    const remote = [{ ...st, notes: "<p>New</p>" }];
+    const out = mergeSubtasks([st], [{ ...st, due: undefined }], remote)[0];
+    expect(out.due).toBeUndefined();
+    expect(out.notes).toBe("<p>New</p>");
   });
   it("this edit wins on what it changed, and its deletes stick", () => {
     const remote = [{ ...a, title: "Server" }, b];

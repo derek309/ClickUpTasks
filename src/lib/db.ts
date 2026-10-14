@@ -652,18 +652,23 @@ export const bulkUpsertTasks = (ts: Task[], updatedBy?: string | null) => {
 // A key the app clears (set to undefined) is sent as null, which removes it.
 const clearedAsNull = (patch: Partial<Subtask>) =>
   Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === undefined ? null : v]));
-export const patchSubtaskDb = (taskId: string, subId: string, patch: Partial<Subtask>, author: string | null) => {
+// In line with the task's other saves (inOrder): a step's tick went out beside
+// the save that came next, which read the steps before the tick landed, took
+// the step as untouched by its edit (mergeSubtasks) and wrote it back open
+// (t_mv5llezz0, 2026-10-14: Done · what's next? on Brian's reply step made the
+// What's next step, and the reply step stayed open with its doneAt set).
+export const patchSubtaskDb = (taskId: string, subId: string, patch: Partial<Subtask>, author: string | null) => inOrder(taskId, () => {
   noteTaskWrite(taskId);
   return save(() => supabase.rpc("patch_subtask", { task_id: taskId, subtask_id: subId, patch: clearedAsNull(patch), author }));
-};
-export const appendSubtasksDb = (taskId: string, items: Subtask[], author: string | null) => {
+});
+export const appendSubtasksDb = (taskId: string, items: Subtask[], author: string | null) => inOrder(taskId, () => {
   noteTaskWrite(taskId);
   return save(() => supabase.rpc("append_subtasks", { task_id: taskId, items, author }));
-};
-export const removeSubtaskDb = (taskId: string, subId: string, author: string | null) => {
+});
+export const removeSubtaskDb = (taskId: string, subId: string, author: string | null) => inOrder(taskId, () => {
   noteTaskWrite(taskId);
   return save(() => supabase.rpc("remove_subtask", { task_id: taskId, subtask_id: subId, author }));
-};
+});
 
 // Atomic JSONB array-append (see supabase/realtime.sql append_comment) —
 // avoids the read-then-full-row-replace race that a plain upsertTask() would

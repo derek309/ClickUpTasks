@@ -3218,15 +3218,24 @@ export function changesTelling(subtasks: Subtask[], doneId: string, taskOwnerId:
 export const changesNeedTelling = (subtasks: Subtask[], doneId: string, taskOwnerId: string | null) => changesTelling(subtasks, doneId, taskOwnerId) !== null;
 
 /** Why a step was added by itself, said on it. */
-export function addedReason(addedFor: string | undefined, clientFirstName: string): string | null {
+/** Why the app added a step, from its addedFor; null when its name already
+ *  says it or the reason is not known. `titleOf` names the step a What's next
+ *  followed (Derek, 2026-10-14: a What's next pick read "Added when Brian sent
+ *  changes", the fallback every unknown reason fell into). */
+export function addedReason(addedFor: string | undefined, clientFirstName: string, titleOf?: (stepId: string) => string | undefined): string | null {
   if (!addedFor) return null;
-  if (addedFor === "changes") return `Added when ${clientFirstName} sent changes`;
+  // A changes round: "changes", or the review it was on ("page:2").
+  if (addedFor === "changes" || /^(doc|image|page|video)(:|$)/.test(addedFor)) return `Added when ${clientFirstName} sent changes`;
   if (addedFor.startsWith("tell:")) return "Added when the changes were marked done";
   if (addedFor.startsWith("checkin:")) return "Added when the email went";
   if (addedFor.startsWith("ok:")) return "Added when it was approved";
   if (addedFor.startsWith("sent:")) return `Added when it went to ${clientFirstName}`;
-  if (addedFor.startsWith("emailed:")) return null;
-  return `Added when ${clientFirstName} sent changes`;
+  if (addedFor.startsWith("reply:")) return `Added when ${clientFirstName} emailed`;
+  if (addedFor.startsWith("next:")) {
+    const after = titleOf?.(addedFor.slice(5))?.replace(/: what's next\?$/, "").trim();
+    return after ? `Added after "${after}"` : null;
+  }
+  return null;
 }
 
 // ── What a step holds (phase 4) ─────────────────────────────────────────────
@@ -3861,12 +3870,24 @@ export function homeStepFor(subtasks: Subtask[], key: string, offId: string): Su
  *  `base` is what the browser had before its edit, `local` what it wants to
  *  write, `remote` what the database holds now. The server adds and changes
  *  steps by itself (stepsServer), so anything it added or changed that this
- *  edit did not touch is kept; whatever this edit changed or deleted wins. */
+ *  edit did not touch is kept; whatever this edit changed or deleted wins.
+ *  A step both changed is merged field by field (2026-10-14, t_mv5llezz0):
+ *  the fields this edit changed are ours, the rest the database's, so a tick
+ *  here and a link put on the same step elsewhere both stay. */
 export function mergeSubtasks(base: Subtask[], local: Subtask[], remote: Subtask[]): Subtask[] {
-  const same = (a: Subtask | undefined, b: Subtask | undefined) => JSON.stringify(a) === JSON.stringify(b);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const baseById = new Map(base.map((x) => [x.id, x]));
   const remoteById = new Map(remote.map((x) => [x.id, x]));
   const localIds = new Set(local.map((x) => x.id));
+  const mergeStep = (was: Subtask, mine: Subtask, theirs: Subtask): Subtask => {
+    const out: Record<string, unknown> = { ...theirs };
+    const w = was as unknown as Record<string, unknown>, m = mine as unknown as Record<string, unknown>;
+    for (const k of new Set([...Object.keys(w), ...Object.keys(m)])) {
+      if (same(w[k], m[k])) continue;
+      if (m[k] === undefined) delete out[k]; else out[k] = m[k];
+    }
+    return out as unknown as Subtask;
+  };
   // Ours, taking the database's copy of each item this edit left alone; an
   // item deleted elsewhere that this edit did not touch stays deleted.
   const out: Subtask[] = [];
@@ -3874,7 +3895,7 @@ export function mergeSubtasks(base: Subtask[], local: Subtask[], remote: Subtask
     const was = baseById.get(item.id);
     const now = remoteById.get(item.id);
     if (was && same(was, item)) { if (now) out.push(now); continue; }
-    out.push(item);
+    out.push(was && now ? mergeStep(was, item, now) : item);
   }
   // Items added elsewhere since: after the item they follow in the database.
   remote.forEach((item, i) => {

@@ -2048,7 +2048,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(sub.draftMessage ? [sub.draftMessage.channel === "sms" ? "📱 1" : "💬 1"] : []),
     ];
     const missing = !sub.done ? missingNeeds(sub) : [];
-    const reason = !sub.done ? addedReason(sub.addedFor, firstName) : null;
+    const reason = !sub.done ? addedReason(sub.addedFor, firstName, (id) => task.subtasks.find((x) => x.id === id)?.title) : null;
     const { say, sayTone, rowTone } = stepTone(sub);
     return (
       <Fragment key={sub.id}>
