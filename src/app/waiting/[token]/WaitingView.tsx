@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { timeAgo, type Attachment } from "@/lib/data";
 import { uploadSharedFile } from "@/lib/docFileUpload";
+import { doneByMonth, doneLines, monthCount, ongoingWork, type DoneLine } from "@/lib/portalDone";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 type WaitingProject = { id: string; name: string };
@@ -32,6 +33,10 @@ type WaitingTask = {
   review?: string | null;
   /** Changes they sent, ticked off by the team. */
   changes?: { id: string; title: string; done: boolean }[];
+  /** How often it repeats ("Every month"), or null. */
+  repeat?: string | null;
+  /** Finished a while ago and sent short; ?detail= fetches it in full. */
+  short?: boolean;
 };
 // "Here's where you are, what's done, what's next" — see
 // A draft attachment is either a stored file (has `path`, uploaded via
@@ -606,6 +611,12 @@ export default function WaitingView({ token }: { token: string }) {
   // 2026-10-08: "so they can refer back, especially for recurring tasks").
   const [doneSort, setDoneSort] = useState<"newest" | "oldest">("newest");
   const [doneGroup, setDoneGroup] = useState<"month" | "list">("month");
+  // Which months, lists and folded repeats are open, and which show all their rows.
+  const [doneOpen, setDoneOpen] = useState<Record<string, boolean>>({});
+  // Finished tasks before the 13 months the list holds.
+  const [olderDone, setOlderDone] = useState(0);
+  // Finished tasks fetched in full when opened (the list sends them short).
+  const [details, setDetails] = useState<Record<string, WaitingTask>>({});
   // "What we're working on" starts open (Derek, 2026-09-16: "default it open",
   // reversing 2026-08-26). A client can still fold it away.
   const [inProgressOpen, setInProgressOpen] = useState(true);
@@ -652,6 +663,7 @@ export default function WaitingView({ token }: { token: string }) {
       setClientName(j.clientName ?? null);
       setCanRequestNewTasks(j.canRequestNewTasks === true);
       setProjects(Array.isArray(j.projects) ? j.projects : []);
+      setOlderDone(typeof j.olderDone === "number" ? j.olderDone : 0);
       const list: WaitingTask[] = Array.isArray(j.tasks) ? j.tasks : [];
       setTasks(list);
       // Seed an empty draft per task — only for tasks with no draft yet, so
@@ -721,7 +733,17 @@ export default function WaitingView({ token }: { token: string }) {
   // Looked up from the full list, not a filtered one — a task opened via a
   // deep link should still open in detail regardless of which section it's
   // actually in.
-  const selectedTask = selectedTaskId ? (tasks ?? []).find((t) => t.id === selectedTaskId) ?? null : null;
+  const listed = selectedTaskId ? (tasks ?? []).find((t) => t.id === selectedTaskId) ?? null : null;
+  const selectedTask = listed?.short ? details[listed.id] ?? listed : listed;
+  // A finished task the list sent short comes in full once opened.
+  useEffect(() => {
+    if (!listed?.short || details[listed.id]) return;
+    const id = listed.id;
+    fetch(`/api/waiting/${token}?detail=${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j?.task) setDetails((d) => ({ ...d, [id]: j.task as WaitingTask })); })
+      .catch(() => undefined);
+  }, [listed?.id, listed?.short]); // eslint-disable-line react-hooks/exhaustive-deps
   const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? null : null);
   const doneCount = completedTasks.length;
   // Everyone on our side who has written to them, newest first, once each.
@@ -1182,54 +1204,120 @@ export default function WaitingView({ token }: { token: string }) {
                   </div>
                 );
                 if (showing === "done") {
+                  // Ongoing work, then everything finished by month (Derek,
+                  // 2026-10-13, portal-done-by-month-mockup.html).
                   const finished = all.filter((t) => t.status === "done");
-                  const when = (t: WaitingTask) => t.doneAt ?? t.due ?? "";
-                  finished.sort((a, b) => (doneSort === "newest" ? when(b).localeCompare(when(a)) : when(a).localeCompare(when(b))));
-                  const monthOf = (t: WaitingTask) => { const d = when(t); return d ? new Date(d.length === 10 ? `${d}T12:00:00` : d).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "Earlier"; };
-                  const groups: { key: string; items: WaitingTask[] }[] = [];
-                  for (const t of finished) {
-                    const key = doneGroup === "month" ? monthOf(t) : projectName(t.projectId) ?? "Other";
-                    const g = groups.find((x) => x.key === key);
-                    if (g) g.items.push(t); else groups.push({ key, items: [t] });
-                  }
+                  const cards = ongoingWork(all);
                   const pick = (on: boolean) => `h-10 rounded-[5px] px-3 text-[16px] font-semibold ${on ? "bg-surface text-foreground shadow-[var(--shadow-sm)]" : "text-muted hover:text-foreground"}`;
+                  const byList = doneGroup === "list" && projects.length > 1;
+                  const groups: { key: string; label: string; count: string; open: boolean; lines: DoneLine[] }[] = byList
+                    ? (() => {
+                        const lists = new Map<string, WaitingTask[]>();
+                        for (const t of finished) { const k = projectName(t.projectId) ?? "Other"; lists.set(k, [...(lists.get(k) ?? []), t]); }
+                        return [...lists.entries()].map(([k, items], i) => ({ key: `list:${k}`, label: k, count: `${items.length} done`, open: doneOpen[`list:${k}`] ?? i === 0, lines: doneLines(items, doneSort) }));
+                      })()
+                    : (() => {
+                        // This month open, the rest folded; with nothing done this month, the newest shown open.
+                        const months = doneByMonth(finished, doneSort);
+                        const first = months.find((m) => m.current)?.key ?? (doneSort === "newest" ? months[0]?.key : months[months.length - 1]?.key);
+                        return months.map((m) => ({ key: m.key, label: m.label, count: monthCount(m), open: doneOpen[m.key] ?? m.key === first, lines: m.lines }));
+                      })();
+                  const SHOW_FIRST = 8;
+                  const tag = (t: WaitingTask) => (projects.length > 1 && !byList ? projectName(t.projectId) : null);
+                  const taskRow = (t: WaitingTask, at: string, marker: string | null, inner = false) => (
+                    <button key={t.id} onClick={() => openTask(t.id)}
+                      className={`grid w-full grid-cols-[72px_1fr] items-center gap-x-3 gap-y-0.5 border-t px-4 py-3 text-left hover:bg-background sm:grid-cols-[80px_1fr_auto] ${inner ? "pl-8" : ""}`}>
+                      <span className="text-[16px] tabular-nums text-muted">{at ? shortDate(at) : ""}</span>
+                      <span className="min-w-0 break-words text-[16px]">
+                        <span className="mr-2 font-extrabold text-success" aria-hidden>✓</span>
+                        <span className="font-semibold">{t.title}</span>
+                        {marker && <span className="text-muted"> · {marker}</span>}
+                      </span>
+                      <span className="col-start-2 text-[16px] text-muted sm:col-start-3">{tag(t) ?? ""}</span>
+                    </button>
+                  );
+                  const line = (l: DoneLine) => {
+                    if (l.kind === "task") return taskRow(l.task as WaitingTask, l.at, l.marker);
+                    const openFold = !!doneOpen[`fold:${l.key}:${l.at}`];
+                    return (
+                      <div key={`fold:${l.key}`}>
+                        <button onClick={() => setDoneOpen((o) => ({ ...o, [`fold:${l.key}:${l.at}`]: !openFold }))} aria-expanded={openFold}
+                          className="grid w-full grid-cols-[72px_1fr] items-center gap-x-3 border-t px-4 py-3 text-left hover:bg-background sm:grid-cols-[80px_1fr_auto]">
+                          <span className="text-[16px] tabular-nums text-muted">{l.at ? shortDate(l.at) : ""}</span>
+                          <span className="min-w-0 break-words text-[16px]">
+                            <span className="mr-2 font-extrabold text-success" aria-hidden>✓</span>
+                            <span className="font-semibold">{l.label}</span>
+                            <span className="font-semibold text-success"> · {l.count} times{byList ? "" : " this month"}</span>
+                          </span>
+                          <span className="col-start-2 text-[16px] text-accent sm:col-start-3">{openFold ? "Hide" : "Show each"}</span>
+                        </button>
+                        {openFold && [...l.tasks].sort((a, b) => ((doneSort === "newest" ? -1 : 1) * (a.doneAt ?? "").localeCompare(b.doneAt ?? ""))).map((t) => taskRow(t as WaitingTask, t.doneAt ?? t.due ?? "", null, true))}
+                      </div>
+                    );
+                  };
                   return (
                     <div className="space-y-4">
                       {toggle}
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Order">
-                          <button onClick={() => setDoneSort("newest")} className={pick(doneSort === "newest")}>Newest first</button>
-                          <button onClick={() => setDoneSort("oldest")} className={pick(doneSort === "oldest")}>Oldest first</button>
-                        </div>
-                        {projects.length > 1 && (
-                          <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Group">
-                            <button onClick={() => setDoneGroup("month")} className={pick(doneGroup === "month")}>By month</button>
-                            <button onClick={() => setDoneGroup("list")} className={pick(doneGroup === "list")}>By list</button>
+                      {cards.length > 0 && (
+                        <section className="pt-2">
+                          <h2 className="text-[20px] font-bold">Ongoing work</h2>
+                          <p className="mb-3 text-[16px] text-muted">The work we do for you on a schedule, and when each was last done.</p>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                            {cards.map((c) => (
+                              <div key={c.key} className="rounded-[5px] border border-t-4 bg-surface p-4 shadow-[var(--shadow-sm)]" style={{ borderTopColor: "var(--success)" }}>
+                                <b className="block break-words text-[17px]">{c.title}</b>
+                                <span className="text-[16px] text-muted">{c.every}</span>
+                                <span className="mt-2.5 block text-[16px] font-bold text-success">{c.lastDone ? `✓ Last done ${shortDate(c.lastDone)}` : "Not done yet"}</span>
+                                {c.nextDue && <span className="block text-[16px] text-muted">Next due {shortDate(c.nextDue)}</span>}
+                              </div>
+                            ))}
                           </div>
-                        )}
+                        </section>
+                      )}
+                      <div className="flex flex-wrap items-end justify-between gap-3 pt-2">
+                        <div>
+                          <h2 className="text-[20px] font-bold">{byList ? "Done by list" : "Done by month"}</h2>
+                          <p className="text-[16px] text-muted">Everything finished, {doneSort === "newest" ? "newest" : "oldest"} first.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-3">
+                          <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Order">
+                            <button onClick={() => setDoneSort("newest")} className={pick(doneSort === "newest")}>Newest first</button>
+                            <button onClick={() => setDoneSort("oldest")} className={pick(doneSort === "oldest")}>Oldest first</button>
+                          </div>
+                          {projects.length > 1 && (
+                            <div className="inline-flex gap-1 rounded-[5px] bg-border/60 p-1" role="group" aria-label="Group">
+                              <button onClick={() => setDoneGroup("month")} className={pick(doneGroup === "month")}>By month</button>
+                              <button onClick={() => setDoneGroup("list")} className={pick(doneGroup === "list")}>By list</button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                       {finished.length === 0 ? (
                         <div className="rounded-[5px] border bg-surface px-5 py-4 text-[16px] text-muted">Nothing finished yet.</div>
-                      ) : groups.map((g) => (
-                        <div key={g.key} className="overflow-hidden rounded-[5px] border bg-surface shadow-[var(--shadow-sm)]">
-                          <div className="flex items-center gap-2 border-b bg-success-soft/50 px-4 py-2.5">
-                            <b className="text-[17px]">{g.key}</b>
-                            <span className="text-[16px] text-muted">{g.items.length} done</span>
-                          </div>
-                          {g.items.map((t) => (
-                            <button key={t.id} onClick={() => openTask(t.id)}
-                              className="flex w-full items-center gap-3 border-t px-4 py-3 text-left first:border-t-0 hover:bg-background">
-                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-success text-[13px] font-bold text-white">✓</span>
-                              <span className="min-w-0 flex-1">
-                                <b className="block break-words text-[17px] font-semibold">{t.title}</b>
-                                {doneGroup === "month" && projects.length > 1 && projectName(t.projectId) && <span className="text-[16px] text-muted">{projectName(t.projectId)}</span>}
-                              </span>
-                              <span className="shrink-0 text-[16px] text-muted">{when(t) ? shortDate(when(t).slice(0, 10)) : ""}</span>
-                              <span className="text-muted" aria-hidden>›</span>
+                      ) : groups.map((g) => {
+                        const more = !!doneOpen[`more:${g.key}`];
+                        const lines = g.open ? (more ? g.lines : g.lines.slice(0, SHOW_FIRST)) : [];
+                        const hidden = g.lines.length - SHOW_FIRST;
+                        return (
+                          <section key={g.key} className="overflow-hidden rounded-[5px] border bg-surface shadow-[var(--shadow-sm)]">
+                            <button onClick={() => setDoneOpen((o) => ({ ...o, [g.key]: !g.open }))} aria-expanded={g.open}
+                              className={`flex w-full flex-wrap items-baseline justify-between gap-x-3 px-4 py-3 text-left ${g.open ? "border-b" : ""}`} style={{ background: "color-mix(in srgb, var(--accent) 8%, var(--surface))" }}>
+                              <b className="text-[19px]">{g.label}</b>
+                              <span className="text-[16px] text-muted">{g.count}{g.open ? "" : <> · <span className="font-semibold text-accent">Show</span></>}</span>
                             </button>
-                          ))}
-                        </div>
-                      ))}
+                            {lines.map(line)}
+                            {g.open && hidden > 0 && (
+                              <button onClick={() => setDoneOpen((o) => ({ ...o, [`more:${g.key}`]: !more }))}
+                                className="w-full border-t px-4 py-3 text-left text-[16px] font-semibold text-accent hover:bg-background">
+                                {more ? "Show fewer" : `Show ${hidden} more${byList ? "" : ` from ${g.label.split(" ")[0]}`}`}
+                              </button>
+                            )}
+                          </section>
+                        );
+                      })}
+                      {olderDone > 0 && (
+                        <p className="text-center text-[16px] text-muted">{olderDone === 1 ? "1 more task was" : `${olderDone} more tasks were`} finished more than a year ago.</p>
+                      )}
                     </div>
                   );
                 }
