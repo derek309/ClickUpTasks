@@ -565,18 +565,9 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
             <div className="flex min-w-0 flex-col gap-5">
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-3">
-                  {/* The tick the step lines use, in place of a Mark done button
-                      (Derek, 2026-10-11). The client's own step is answered below instead. */}
-                  {/* Any open step can be ticked, not only the current one. */}
-                  {/* A check in waiting on a reply keeps its tick beside its follow ups. */}
-                  {(sub.done || !doneActions || sub.finishWhen === "reply") && (
-                    <button onClick={sub.done ? onReopen : onMarkDone} aria-pressed={sub.done}
-                      title={sub.done ? "Done. Click to reopen this step" : "Mark this step done"} aria-label={sub.done ? "Reopen this step" : "Mark this step done"}
-                      className={`group/tick flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${sub.done ? "bg-accent text-white hover:opacity-80" : "text-accent ring-2 ring-inset ring-accent hover:bg-accent hover:text-white"}`}>
-                      {/* A ring, not a border: globals.css recolours every border. */}
-                      <I.check className={`h-4 w-4 ${sub.done ? "" : "opacity-30 group-hover/tick:opacity-100"}`} />
-                    </button>
-                  )}
+                  {/* No tick beside the title: the step is finished with the button at
+                      the bottom, which then asks what's next (Derek, 2026-10-13). A
+                      done step reopens from its Done line below. */}
                   {/* A "what's next?" step reads as that, its old name under it, and
                       the box names the next step (Derek, 2026-10-13: the last
                       step's whole instruction as its title was a mess). */}
@@ -590,6 +581,7 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                     {round && <span className="font-semibold text-foreground">{round}</span>}
                     {(sub.done || !isCurrent) && <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>}
+                    {sub.done && <button onClick={onReopen} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Reopen this step</button>}
                   </div>
                 )}
                 {/* Whose move it is, as on the step's row (2026-10-13). A bare
