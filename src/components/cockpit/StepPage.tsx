@@ -14,7 +14,7 @@ import {
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
-import { ActionMenu, MenuSheet } from "./ActionMenu";
+import { ActionMenu, MenuSheet, type ActionMenuItem } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
@@ -326,7 +326,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
   return { todos, show, showTodos, setShowTodos, ref, node };
 }
 
-export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
+export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
   controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates }: {
   task: Task;
   sub: Subtask;
@@ -342,6 +342,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   onRename: (title: string) => void;
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
+  /** Hand the step on while working it (Derek, 2026-10-14): Give to Claude
+   *  in plain sight beside Done, everyone else under Delegate. */
+  onGiveClaude?: () => void;
+  delegate?: ActionMenuItem[];
   onReopen: () => void;
   /** Deletes the step; at the very bottom of its page (Derek, 2026-10-11). */
   onDelete?: () => void;
@@ -967,7 +971,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                       <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
                     </div>
                   ) : (
-                    <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
+                      {onGiveClaude && <button onClick={onGiveClaude} title="Claude's turn, due today" className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background"><I.bolt className="h-4 w-4" /> Give to Claude</button>}
+                      {!!delegate?.length && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={delegate} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
+                    </div>
                   )}
                 </div>
               ) : null}

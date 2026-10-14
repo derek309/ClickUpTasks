@@ -12,7 +12,7 @@ import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/l
 import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
-import { ActionMenu } from "./ActionMenu";
+import { ActionMenu, type ActionMenuItem } from "./ActionMenu";
 import { I, LinkedText } from "./ui";
 
 type AddOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
@@ -23,7 +23,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false, waitDates }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false, waitDates }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -69,6 +69,11 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   onMarkDone: () => void;
   onSendHeldEmail?: () => void;
   onOpenStep: () => void;
+  /** Hand this step on while working it (Derek, 2026-10-14: "I'm going to be
+   *  delegating stuff to Claude a lot, and it's hidden"): Give to Claude as
+   *  its own button, everyone else under Delegate. */
+  onGiveClaude?: () => void;
+  delegate?: ActionMenuItem[];
   /** A What's next answered by a pick: what it became, and Change to ask again. */
   picked?: { says: string; onChange: () => void };
   /** A "what's next?" step's suggested next step, shown in its name box;
@@ -230,6 +235,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
         </>) : (
           <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
         ))}
+        {!sub.done && !sub.onClient && onGiveClaude && <button onClick={onGiveClaude} title="Claude's turn, due today" className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background"><I.bolt className="h-4 w-4" /> Give to Claude</button>}
+        {!sub.done && !sub.onClient && !!delegate?.length && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={delegate} triggerClassName={link} />}
         <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
       </div>
     </div>

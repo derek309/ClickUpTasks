@@ -2291,7 +2291,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <li key={sub.id} data-step={sub.id} aria-current="step" className={`px-4 py-4 sm:px-5 ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${STEP_BAR[t.state] ?? ""}`}>
         {nextInline() ? nextBody(true) : (
-          <CurrentStep key={sub.id} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
+          <CurrentStep key={sub.id} {...handOn(sub)} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
             clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
             addOptions={withGiveClaude(sub, stepAddOptions(sub))}
@@ -3702,6 +3702,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const withGiveClaude = <T extends { key: string; label: string; disabled: boolean; onPick: () => void }>(sub: Subtask, opts: T[]) =>
     sub.done || sub.onClient || sub.assigneeId === CLAUDE_ID ? opts
       : [...opts, { key: "claude", label: "Give to Claude", disabled: false, onPick: () => toClaude(sub.id) } as T];
+  // Handing a step on while working it, beside Done (Derek, 2026-10-14:
+  // "I'm going to be delegating stuff to Claude a lot, and it's hidden"):
+  // Give to Claude as its own button, a teammate, you again or the client
+  // under Delegate. The same moves as the step's Whose turn.
+  const handOn = (sub: Subtask): { onGiveClaude?: () => void; delegate: { label: string; onClick: () => void }[] } => {
+    if (sub.done || sub.onClient) return { delegate: [] };
+    const isActive = currentStep(taskRef.current.subtasks)?.id === sub.id;
+    const people = isPersonal ? [] : assignableUsers().filter((u) => u.id !== CLAUDE_ID && u.id !== meId && u.id !== sub.assigneeId);
+    return {
+      onGiveClaude: sub.assigneeId === CLAUDE_ID ? undefined : () => toClaude(sub.id),
+      delegate: [
+        ...(meId && sub.assigneeId && sub.assigneeId !== meId ? [{ label: "Back to me", onClick: () => assignStep(sub, meId, isActive) }] : []),
+        ...people.map((u) => ({ label: u.name, onClick: () => assignStep(sub, u.id, isActive) })),
+        ...(mayContactClient && !isPersonal ? [{ label: `${firstName} (client): ask them by email`, onClick: () => { askClientOn(sub.id); } }] : []),
+      ],
+    };
+  };
   // What a step holds, drawn on it: its deliverables as their own rows (the
   // current step's reviews with their open comments), then its links and files.
   // A step's needs, and which of them what it holds already meets.
@@ -4430,7 +4447,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
+            <StepPage task={task} sub={ps} key={ps.id} {...handOn(ps)} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
               nextPanel={sentStep ? nextBody(true) : undefined}
               onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
