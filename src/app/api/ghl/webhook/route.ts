@@ -5,6 +5,7 @@ import { titleCase, advanceDue, type Recurrence, type RecurrenceUnit, type Subta
 import { isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
+import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -89,7 +90,8 @@ export async function POST(req: NextRequest) {
     const nextDue = advanceDue((patch.due as string | undefined) ?? (row.due as string | null), row.recurrence as Recurrence, row.recurrence_interval as number | undefined, row.recurrence_unit as RecurrenceUnit | undefined, row.recurrence_days_of_month as number[] | undefined, row.recurrence_nth as number | undefined, row.recurrence_weekday as number | undefined);
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { created_at, ...rest } = row;
-    await supabaseAdmin.from("tasks").insert({
+    // On a queue list it goes to the end of the line with no date, as in the app.
+    await supabaseAdmin.from("tasks").insert(await queueRepeatCopy({
       ...rest, ...patch,
       id: "t_" + randomUUID().replace(/-/g, ""),
       status: "todo",
@@ -99,8 +101,10 @@ export async function POST(req: NextRequest) {
       client_response: null,
       ghl_task_id: null,
       updated_by: null,
-    });
+    }));
   }
+  // A queue list: the Now task finished in GoHighLevel brings the next one up.
+  if (patch.status === "done") await promoteQueueForTask(row.id as string, (row.project_id as string | null) ?? null);
 
   return NextResponse.json({ ok: true, updated: Object.keys(patch) });
 }

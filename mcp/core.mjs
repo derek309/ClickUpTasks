@@ -8,6 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
+import { QUEUE_TASK_COLS, promoteQueueStore, queuePatchRow, queueTaskFromRow } from "./queue.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -225,6 +226,28 @@ export function createServer(opts = {}) {
   }
   const patchTask = (id, patch) => sb(`tasks?id=eq.${enc(id)}${LIVE}`, "PATCH", patch);
   const noTask = (id) => ({ content: [{ type: "text", text: `No task ${id}.` }] });
+  // A queue list's reads and writes (mcp/queue.mjs). On a database without
+  // the queue columns (supabase/task-queues.sql) the reads fail and the queue
+  // rules do nothing.
+  const queueStore = {
+    async queue(projectId) {
+      const [p] = await sb(`projects?select=queue&id=eq.${enc(projectId)}&limit=1`);
+      return p?.queue ?? null;
+    },
+    async tasks(projectId) {
+      try {
+        const rows = await sb(`tasks?select=${QUEUE_TASK_COLS.replace(/\s/g, "")}&project_id=eq.${enc(projectId)}&status=neq.done${LIVE}`);
+        return (rows || []).map(queueTaskFromRow);
+      } catch { return null; }
+    },
+    async write(p) {
+      await patchTask(p.id, { ...queuePatchRow(p), updated_by: null });
+      if (p.due) {
+        await sb("rpc/append_comment", "POST", { task_id: p.id, comment: { id: rid("cm_"), authorId: ME, body: `came up next in the queue, due ${p.due}`, at: nowIso(), kind: "event" } });
+        await patchTask(p.id, { updated_by: null });
+      }
+    },
+  };
 
   // Push a status change to GoHighLevel for a GHL-linked task (best-effort).
   async function pushGhlStatus(t) {
@@ -650,6 +673,22 @@ export function createServer(opts = {}) {
       if (!Object.keys(patch).length) return { content: [{ type: "text", text: stepLine ? `Updated ${id}.${stepLine}` : "Nothing to update — provide at least one field." }] };
       const [t] = await patchTask(id, patch);
       if (!t) return noTask(id);
+      // Moved to another list (mcp/queue.mjs, as the app does): out of a queue
+      // its saved date comes back; into one it waits where its priority puts
+      // it (not placed yet). Then both lists' Now check. Quiet on a database
+      // without the queue columns.
+      if (patch.project_id && patch.project_id !== before.project_id) {
+        try {
+          const [row] = await sb(`tasks?select=queue_pos,queue_saved_due,due&id=eq.${enc(id)}${LIVE}`);
+          const [list] = await sb(`projects?select=queue&id=eq.${enc(patch.project_id)}&limit=1`);
+          const move = {};
+          if (row?.queue_saved_due) { if (!row.due && patch.due === undefined) move.due = row.queue_saved_due; move.queue_saved_due = null; }
+          if (list?.queue) move.queue_pos = null;
+          if (Object.keys(move).length) await patchTask(id, { ...move, updated_by: null });
+          await promoteQueueStore(queueStore, before.project_id);
+          await promoteQueueStore(queueStore, patch.project_id);
+        } catch { /* no queue columns yet */ }
+      }
       // The Changes line, appended atomically like add_comment; updated_by
       // cleared after so it shows live for everyone.
       if (moveLine) {
@@ -719,9 +758,13 @@ export function createServer(opts = {}) {
       // Done throws out an unsent draft email, as the app does.
       if (status === "done") patch.draft_email = null;
       const [t] = await patchTask(id, patch);
+      // A queue list: the Now task finished or waiting brings the next one up
+      // (mcp/queue.mjs, the app's own rule).
+      const promoted = status !== before.status ? await promoteQueueStore(queueStore, t?.project_id) : [];
       let ghl = "";
       if (t?.ghl_task_id) { try { const ok = await pushGhlStatus(t); ghl = ok ? " (synced to GoHighLevel)" : " (GoHighLevel push failed)"; } catch { ghl = " (GoHighLevel push errored)"; } }
-      return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}` }] };
+      const next = promoted.filter((p) => p.due).map((p) => `${p.id} (due ${p.due})`);
+      return { content: [{ type: "text", text: `Set ${id} → ${status}.${ghl}${next.length ? ` Next in the queue: ${next.join(", ")}.` : ""}` }] };
     });
 
   server.tool("add_comment",

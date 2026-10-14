@@ -5,6 +5,7 @@ import { advanceDue, clientAnswerPatch, type Recurrence, type RecurrenceUnit, ty
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { resolveWaitingToken } from "@/lib/waitingToken";
+import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
 
 // Public, token-gated — lets the client set a task's review outcome directly
 // (Aug 3 Derek/Justin call: "needs changes" or "approved," right in the chat,
@@ -81,8 +82,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       ghl_task_id: null,
       updated_by: null,
     };
-    await supabaseAdmin.from("tasks").insert(clone);
+    // On a queue list it goes to the end of the line with no date, as in the app.
+    await supabaseAdmin.from("tasks").insert(await queueRepeatCopy(clone));
   }
+  // A queue list: the client approving the Now task brings the next one up.
+  if (status === "done") await promoteQueueForTask(taskId, (task.project_id as string | null) ?? null);
 
   if (notifyRecipient) {
     // Bell only, no companion email. Setting a review outcome is a status

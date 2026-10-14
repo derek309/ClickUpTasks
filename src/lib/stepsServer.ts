@@ -12,6 +12,7 @@ import {
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
+import { promoteQueueForTask } from "./queueServer";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -39,7 +40,12 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     const dates = datesForCurrentStep(r.subtasks ?? [], next, { assigneeId: r.assignee_id, due: r.due, followUpAt: r.follow_up_at });
     const { data: wrote } = await supabaseAdmin.from("tasks")
       .update({ subtasks: next, updated_by: null, ...(dates.due ? { due: dates.due } : {}), ...(dates.followUpAt ? { follow_up_at: dates.followUpAt } : {}), ...(made ? { follow_up_at: made.due } : {}), ...(extra?.() ?? {}) }).eq("id", taskId).eq("updated_at", (row as TaskRow).updated_at).select("id");
-    if (wrote?.length) return true;
+    if (wrote?.length) {
+      // A queue list: the step may have finished the Now task or handed it to
+      // the client, so the next one in line may be up (lib/queueServer).
+      await promoteQueueForTask(taskId);
+      return true;
+    }
   }
   return false;
 }
