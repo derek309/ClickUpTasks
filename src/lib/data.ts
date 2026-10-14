@@ -3278,9 +3278,11 @@ export function restoreStep(subtasks: Subtask[], step: Subtask, stepAt?: number,
 
 /** Why a task needs the person looking, or null (Derek, 2026-10-13: "after
  *  Claude is done or a client responds, I'm missing it"). Only when its
- *  current step is that person's move because someone else just acted: the
- *  client wrote or sent changes, a review came back, Claude or a teammate
- *  finished their step. It stops on its own once they act, because the
+ *  current step is that person's move for one of two reasons (Derek,
+ *  2026-10-13, narrowed to exactly these): the client wrote (an email, a
+ *  reply by text or chat, a portal request, changes sent back on a review),
+ *  or Claude finished its step. A teammate finishing, or a review coming
+ *  back approved, is not one. It stops on its own once they act, because the
  *  current step moves on. Tasks without steps are left to the old signals. */
 export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">, meId: string | null | undefined, clientFirst = "The client"): string | null {
   if (!meId || task.status === "done") return null;
@@ -3297,15 +3299,14 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   const at = plan.findIndex((x) => x.id === cur.id);
   const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
   if (!prev) return null;
-  if (prev.addedFor?.startsWith("ok:")) return `${clientFirst} approved. Your turn`;
   if (prev.finishWhen === "reply" && prev.outcome?.endsWith(" replied")) return `${clientFirst} replied. Your turn`;
   if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
-  if (prev.assigneeId && prev.assigneeId !== meId) return `${userById(prev.assigneeId)?.name.split(" ")[0] ?? "A teammate"} finished. Your turn`;
   return null;
 }
 
 /** When the current step last turned to you: the newest email on it, the
- *  step before it finishing, or the step starting. */
+ *  step before it finishing (the client's reply, or Claude), or the step
+ *  starting (a changes step from the portal or a review sent back). */
 export function needsYouSince(subtasks: Subtask[], cur: Subtask): string {
   const plan = planSteps(subtasks);
   const at = plan.findIndex((x) => x.id === cur.id);

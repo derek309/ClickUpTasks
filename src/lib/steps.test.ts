@@ -362,7 +362,7 @@ describe("step history", () => {
 });
 
 describe("needs you", () => {
-  it("says why the current step is your move after someone else acted, and nothing otherwise", async () => {
+  it("says why the current step is your move after the client wrote or Claude finished, and nothing otherwise", async () => {
     const { needsYou, CLAUDE_ID } = await import("./data");
     const base = { status: "in_progress" as const, assigneeId: "u_derek" };
     const claude = { ...base, subtasks: [{ id: "a", title: "Draft it", done: true, assigneeId: CLAUDE_ID }, { id: "b", title: "Send it", done: false, startedAt: "x" }] };
@@ -370,6 +370,16 @@ describe("needs you", () => {
     expect(needsYou(claude, "u_justin", "Pam")).toBeNull();
     const changes = { ...base, subtasks: [{ id: "c", title: "Changes from Pam", done: false, addedFor: "changes", startedAt: "x" }, { id: "r", title: "Bigger logo", done: false, fromClient: true, stepId: "c" }] };
     expect(needsYou(changes, "u_derek", "Pam")).toBe("Pam sent changes: 1 to do");
+    const replied = { ...base, subtasks: [{ id: "w", title: "Check in", done: true, finishWhen: "reply" as const, outcome: "Pam replied" }, { id: "n", title: "Next", done: false, startedAt: "x" }] };
+    expect(needsYou(replied, "u_derek", "Pam")).toBe("Pam replied. Your turn");
+    const asked = { ...base, subtasks: [{ id: "d", title: "Changes to the page", done: false, addedFor: "page:2", startedAt: "x" }] };
+    expect(needsYou(asked, "u_derek", "Pam")).toBe("Pam asked for changes");
+    // Only the client writing and Claude finishing: a teammate finishing, or
+    // a review coming back approved, does not put it in Needs you.
+    const teammate = { ...base, subtasks: [{ id: "a", title: "Draft it", done: true, assigneeId: "u_justin" }, { id: "b", title: "Send it", done: false, startedAt: "x" }] };
+    expect(needsYou(teammate, "u_derek", "Pam")).toBeNull();
+    const approved = { ...base, subtasks: [{ id: "a", title: "Pam reviews", done: true, addedFor: "ok:page:2", onClient: true }, { id: "b", title: "Publish", done: false, startedAt: "x" }] };
+    expect(needsYou(approved, "u_derek", "Pam")).toBeNull();
     const waiting = { ...base, subtasks: [{ id: "w", title: "Check in", done: false, finishWhen: "reply" as const, startedAt: "x" }] };
     expect(needsYou(waiting, "u_derek", "Pam")).toBeNull();
     expect(needsYou({ ...base, subtasks: [{ id: "p", title: "Plain", done: false }] }, "u_derek")).toBeNull();
