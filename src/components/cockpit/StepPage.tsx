@@ -308,9 +308,16 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // it: finishing is sending (Derek, 2026-10-13: "Send the email to Ryan").
   const sendReady = !!onSendHeldEmail && holdsKind("email")
     && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
-  const suggestButtons = (compact: boolean, dark = false) => suggestions.map((x) => (
-    <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center rounded-[5px] text-[16px] font-semibold ${dark ? "bg-accent text-white hover:opacity-90" : "border bg-surface text-accent hover:bg-background"}`}>{x.label}</button>
-  ));
+  // Light, never dark: the only dark button on a step is the one that
+  // finishes it (Derek, 2026-10-14). Outlined with a ring, its kind's icon.
+  const suggestButtons = (compact: boolean) => suggestions.map((x) => {
+    const Icon = ADD_ICON[x.kind];
+    return (
+      <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center gap-1.5 rounded-[5px] bg-surface text-[16px] font-semibold text-accent ring-1 ring-inset ring-border hover:bg-background hover:ring-accent`}>
+        {Icon && <Icon className="h-4 w-4 shrink-0" />}{x.label}
+      </button>
+    );
+  });
   const [draft, setDraft] = useState("");
   const nextRef = useRef<HTMLElement | null>(null);
   const hasNext = !!nextPanel;
@@ -522,8 +529,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
       {addMenu(false)}
     </section>
   );
-  // An empty open step (Derek, 2026-10-14): what its name suggests first, dark,
-  // then the Add menu's own choices in three labelled rows, each doing what
+  // An empty open step (Derek, 2026-10-14): what its name suggests first,
+  // light, then the Add menu's own choices in three labelled rows, each doing what
   // picking it from + Add does. A suggested one isn't shown twice.
   const suggested = new Set<string>(suggestions.map((x) => x.kind));
   const rowKeys = new Set<string>(ADD_ROWS.flatMap((r) => r.keys));
@@ -534,7 +541,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const addRest = options.filter((o) => !rowKeys.has(o.key));
   const addRows = (
     <section aria-label="Add to this step" className="flex flex-col gap-3">
-      {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false, true)}</div>}
+      {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}</div>}
       <div className="flex flex-col gap-1">
         {addRowList.map((r, i) => (
           <div key={r.label} role="group" aria-label={r.label} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
