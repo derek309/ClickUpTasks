@@ -2236,7 +2236,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
   const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   const { createTasksFromDump } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles });
-  const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary, draftDescription, draftingDescription } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
+  const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
   const { getClientShareUrl, copyClientShareLink, copyProjectShareLink } = useShareLinks({ clientById, pushToast, canAdmin, setClients, markOwnClientWrite, projectById, setProjects });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
@@ -3469,7 +3469,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // The client's portal, opened straight on this task (Derek, 2026-10-12).
             const url = getClientShareUrl(openTask.clientId, { taskId: openTask.id });
             if (url) navigator.clipboard?.writeText(url).then(() => pushToast("Client portal link copied, opens on this task"), () => pushToast(`Share this link: ${url}`));
-          }} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} onDraftDescription={draftDescription} draftingDescription={draftingDescription} pushToast={pushToast} meId={me.id}
+          }} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientPortalUrl={getClientShareUrl(openTask.clientId, { taskId: openTask.id })}

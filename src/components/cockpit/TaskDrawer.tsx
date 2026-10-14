@@ -26,7 +26,6 @@ import { ImageLightbox } from "./TaskWorkItem";
 import { ClientGhlKey } from "./ClientGhlKey";
 import { SizePicker } from "./SizePicker";
 import { InlineAssignee, InlineDate, InlineDue } from "./GroupedList";
-import { RichTextEditor } from "./RichTextEditor";
 import { useTaskMessaging } from "./TaskMessaging";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { useEscapeToClose } from "./useEscapeToClose";
@@ -67,7 +66,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, onDraftDescription, draftingDescription, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -109,8 +108,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onDeleteMessage?: (id: string) => void;
   onEditMessage?: (id: string, body: string, subject?: string | null) => void;
   onCopyClientLink?: () => void; // copies this client's public /waiting/[token] link
-  onDraftDescription?: (title: string, description: string, prompt?: string) => Promise<string | null>; // Gemini draft, never saves
-  draftingDescription?: boolean;
   pushToast: (text: string, action?: { label: string; run: () => void }, secondaryAction?: { label: string; run: () => void }) => void;
   meId: string;
   onDeleteComment?: (commentId: string) => void;
@@ -189,14 +186,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [comment, setComment] = useState("");
   const [commentTaskId, setCommentTaskId] = useState(task.id);
   if (commentTaskId !== task.id) { setCommentTaskId(task.id); setComment(""); }
-  // Title textarea is fully controlled, so it needs its own local draft (the
-  // description field below doesn't — RichTextEditor already treats `value`
-  // as boot-time-only content, see its own comment).
+  // Title textarea is fully controlled, so it needs its own local draft.
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [titleDraftTaskId, setTitleDraftTaskId] = useState(task.id);
   if (titleDraftTaskId !== task.id) { setTitleDraftTaskId(task.id); setTitleDraft(task.title); }
   const titleCommit = useDebouncedCommit();
-  const descriptionCommit = useDebouncedCommit();
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
@@ -288,9 +282,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!current.some((a) => a.id === id)) return;
     onPatch({ attachments: current.map((a) => (a.id === id ? { ...a, name: clean } : a)) });
   };
-  // Reads as text until you click Edit: a live editor on every task put a
-  // formatting toolbar in front of what the description actually says.
-  const [descEditing, setDescEditing] = useState(false);
+  // The task id whose old description is open in full (Read more). Keyed by
+  // task, because the drawer is not remounted when the task changes.
+  const [descExpanded, setDescExpanded] = useState<string | null>(null);
   // The client reminders on each review that is with the client, as the
   // reviews themselves report them (TaskDocument onReminders). Keyed by task,
   // like the other state here, because the drawer is not remounted per task.
@@ -317,13 +311,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [renamingAttId, setRenamingAttId] = useState<string | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [descDraftPrompt, setDescDraftPrompt] = useState("");
-  // RichTextEditor only takes `value` as its boot-time content and never
-  // re-syncs from props after mount (see its own comment) — a caller that
-  // programmatically replaces the content, like the AI draft below, has to
-  // force a remount via a changing `key`, same as the email composer's
-  // emailFocusNonce.
-  const [descFocusNonce, setDescFocusNonce] = useState(0);
   const [attSort, setAttSort] = useState<"added" | "name" | "type">("added");
   // Drag-to-reorder — only meaningful in "added" order (the stored array
   // order); dragging a name/type-sorted view and writing that back as
@@ -1488,17 +1475,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="mt-1.5 text-[16px] text-muted">Submitted {timeAgo(task.clientResponse.submittedAt)}</div>
     </div>
   ) : null;
-  // "Prompt Claude" for the description — same intent-in, Gemini-drafts-it
-  // pattern as the message composers below, just replacing the description
-  // instead of filling a subject/body. Never saves on its own; the drafted
-  // text lands in the editor exactly like typing it, so Save still works
-  // the normal way.
-  const runDraftDescription = async () => {
-    if (!onDraftDescription || draftingDescription) return;
-    const body = await onDraftDescription(task.title, task.description, descDraftPrompt.trim() || undefined);
-    if (body) { onPatch({ description: plainTextToHtml(body) }); setDescFocusNonce((n) => n + 1); }
-  };
-
   const hasDescription = htmlToText(task.description).trim().length > 0;
   // A client document is for sharing, so a private task and the Personal client
   // never get one. Whether one exists is only known once TaskDocument loads it,
@@ -1566,58 +1542,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <TaskBrief key={`brief-${task.id}`} task={task} clientName={client.name} pushToast={pushToast} startNonce={briefStartNonce}
       onPresence={(exists) => setBriefPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
-  const descriptionBlock = (
-    <div>
-      {/* Reads as text until you click it. A permanently-live editor put a
-          formatting toolbar and an AI prompt box in the rail on every task,
-          which is most of why this column looked twice the weight of the
-          mockup it came from. */}
-      {/* One line under the details until it is clicked, then the editor
-          (task detail redesign, 2026-10-11: no Description tab, no post at
-          the top of the feed). */}
-      {descEditing ? (
-        <RichTextEditor key={`task-desc-${task.id}-${descFocusNonce}`} value={task.description} onChange={(html) => descriptionCommit.schedule(() => onPatch({ description: html }))} placeholder="Directions: what this task needs…" />
-      ) : (
-        // The full width and up to three lines, then Read more (Derek, 2026-10-12).
-        <button onClick={() => setDescEditing(true)} title={hasDescription ? "Show all and edit" : "Add directions"} aria-label={hasDescription ? "Directions, show all or edit" : "Add directions"}
-          className="-mx-1 block min-h-8 w-full rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted hover:bg-background hover:text-foreground">
-          {hasDescription ? (<>
-            {/* Closed up: paragraphs run on, cut at a word, with "… Read more"
-                on the same line (Derek, 2026-10-12). */}
-            {(() => {
-              const full = htmlToText(task.description).replace(/\s*\n\s*/g, " ").trim();
-              if (full.length <= 260) return <span className="[overflow-wrap:anywhere]">{full}</span>;
-              const cut = full.slice(0, 260).replace(/\s+\S*$/, "");
-              return <span className="[overflow-wrap:anywhere]">{cut}… <span className="whitespace-nowrap font-semibold text-accent">Read more</span></span>;
-            })()}
-          </>) : <span className="text-accent underline decoration-dotted underline-offset-4">Add directions</span>}
-        </button>
-      )}
-      {descEditing && (
-        <button onClick={() => { descriptionCommit.flush(); setDescEditing(false); }}
-          className="mt-1.5 text-[16px] text-accent underline underline-offset-[3px]">Done editing</button>
-      )}
-      {descEditing && onDraftDescription && (
-        <div className="mt-2 flex shrink-0 items-start gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 p-1.5">
-          <span aria-hidden className="pt-1 pl-1 text-[16px]">✨</span>
-          {/* A textarea that grows with the text rather than an input that
-              scrolls it sideways — a real instruction runs past one line, and
-              you can't check what you asked for if you can't see it. Enter
-              still writes, Shift+Enter now gets a new line. */}
-          <textarea value={descDraftPrompt} rows={1}
-            onChange={(e) => { setDescDraftPrompt(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`; }}
-            onKeyDown={(e) => { if (e.key !== "Enter" || e.shiftKey || draftingDescription) return; e.preventDefault(); runDraftDescription(); }}
-            placeholder="Tell Claude what to write… (Enter to write, Shift+Enter for a new line)"
-            className="max-h-[200px] min-w-0 flex-1 resize-none self-center overflow-y-auto bg-transparent px-1 py-1 text-[16px] leading-snug outline-none placeholder:text-muted" />
-          <button onClick={runDraftDescription} disabled={draftingDescription}
-            title={descDraftPrompt.trim() ? "Draft this with Claude" : "Draft a description from the task title"}
-            className="mt-0.5 shrink-0 rounded-md border border-accent/40 bg-surface px-2.5 py-1 text-[16px] font-medium text-accent disabled:opacity-40">
-            {draftingDescription ? "Drafting…" : descDraftPrompt.trim() ? "Write it" : "Draft it"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  // Read only (Derek, 2026-10-14): a task's directions live on step 1 now, so
+  // an old task's description shows here as it always has, muted with Read
+  // more, and a task with none shows nothing. No editor, no Add directions.
+  const descriptionBlock = !hasDescription ? null : (() => {
+    const full = htmlToText(task.description).replace(/\s*\n\s*/g, " ").trim();
+    const expanded = descExpanded === task.id;
+    // Closed up: paragraphs run on, cut at a word, with "… Read more" on the
+    // same line (Derek, 2026-10-12). Open, the paragraphs keep their breaks.
+    if (expanded) return (
+      <div className="whitespace-pre-line text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere]">
+        {htmlToText(task.description).trim()}
+        {" "}<button type="button" onClick={() => setDescExpanded(null)} className="whitespace-nowrap font-semibold text-accent hover:underline">Show less</button>
+      </div>
+    );
+    if (full.length <= 260) return <div className="text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere]">{full}</div>;
+    const cut = full.slice(0, 260).replace(/\s+\S*$/, "");
+    return (
+      <div className="text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere]">
+        {cut}… <button type="button" onClick={() => setDescExpanded(task.id)} className="whitespace-nowrap font-semibold text-accent hover:underline">Read more</button>
+      </div>
+    );
+  })();
   // Message this task's linked GHL contact directly, without leaving the
   // drawer — sends via the same GHL Conversations API path as the Chat
   // tab's Messages composer, so it shows up there too (a message isn't
@@ -2996,8 +2942,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this task"
       // Plain like Link and + Attach beside it, no box (Derek, 2026-10-13).
       triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline" items={[
-      // Called directions, like a step's (Derek, 2026-10-13).
-      !hasDescription && { label: "Directions", onClick: () => setDescEditing(true) },
       canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
       canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
       ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
@@ -3606,7 +3550,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           ) : null;
         })()}
         {chipRow}
-        <div className="mt-0.5">{descriptionBlock}</div>
+        {descriptionBlock && <div className="mt-0.5">{descriptionBlock}</div>}
       </div>
       {renderPlan()}
       {clientResponseBlock}
