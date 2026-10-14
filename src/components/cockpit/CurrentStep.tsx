@@ -21,7 +21,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -41,6 +41,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   /** What the step's + Add offers (TaskDrawer stepAddOptions). */
   addOptions?: AddOption[];
   held?: React.ReactNode;
+  /** Its links and files, their own row under the work. */
+  files?: React.ReactNode;
   /** The client's waiting step: the review out with them, in place of held. */
   outFor?: React.ReactNode;
   /** How a waiting, check in or "what's next?" step ends, in place of Done. */
@@ -145,6 +147,12 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
       {followBox}
       {planBits}
       {outFor ?? held}
+      {!outFor && files && (
+        <section aria-label="Links and files" className="flex flex-col gap-1.5">
+          <h4 className="text-[16px] font-semibold text-muted">Links and files</h4>
+          {files}
+        </section>
+      )}
       {/* A wait on the client gets no to do box until one is added. */}
       {/* Nor a step with no name yet, or still asking what's next: a to do
           there has nothing to belong to (Derek, 2026-10-14). */}

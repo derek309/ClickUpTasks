@@ -310,7 +310,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -368,6 +368,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   outFor?: React.ReactNode;
   /** In place of Mark done: how it ended, like "Derek approved" or "sent changes". */
   doneActions?: React.ReactNode;
+  /** The links and files the step holds: their own row, apart from Actions. */
+  files?: React.ReactNode;
   /** Sends the unsent email to the client held on this step, the way its
    *  window's Send does. Missing when there is none to send. */
   onSendHeldEmail?: () => void;
@@ -827,7 +829,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {setup ? null : outFor !== undefined ? outFor : empty && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
+              {setup ? null : outFor !== undefined ? outFor : empty && !files && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : null}
               {/* Saved links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
@@ -861,6 +863,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 </section>
               )}
               {todo.node}
+              {/* Actions right under the to dos, even with no work on it yet. */}
+              {!setup && outFor === undefined && !held && !(empty && !files && !dir.open) && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-center gap-2">
@@ -868,7 +872,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     {outFor === undefined && !setup && <>{suggestButtons(true)}{addMenu(true)}</>}
                   </div>
                   {held}
-                  {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}
+                </section>
+              )}
+              {/* Links and files, apart from what does something (Derek,
+                  2026-10-14); they come in by paste or drag (2026-10-11). */}
+              {(files || held) && (
+                <section aria-labelledby="step-files" className="flex flex-col gap-2">
+                  {files && <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>}
+                  {files}
                   <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
                 </section>
               )}

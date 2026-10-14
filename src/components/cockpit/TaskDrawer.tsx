@@ -2129,7 +2129,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
             clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
             addOptions={stepAddOptions(sub)}
-            held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true) ?? undefined}
+            held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
+            files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
             onCopyForClaude={() => void copyForClaude()}
@@ -3563,11 +3564,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // light: on the task page, where the current step's Done is the one dark
   // button (Derek, 2026-10-14), its sends and opens are light.
-  const stepHeld = (sub: Subtask, light = false) => {
+  // part: "work" is what does something (client work, messages, emails),
+  // "files" the links and files it holds, each its own row (Derek,
+  // 2026-10-14: a link read as an action beside Email Brian).
+  const stepHeld = (sub: Subtask, light = false, part: "work" | "files" | "all" = "all") => {
     const keys = (sub.holds ?? []).filter((k) =>
-      (DELIVERABLE_KEYS as string[]).includes(k) || (k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)) || !!sentMail(k));
-    const emails = sub.fromEmails ?? [];
-    const dm = sub.draftMessage;
+      (part !== "files" && ((DELIVERABLE_KEYS as string[]).includes(k) || !!sentMail(k)))
+      || (part !== "work" && k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
+    const emails = part === "files" ? [] : sub.fromEmails ?? [];
+    const dm = part === "files" ? undefined : sub.draftMessage;
     if (!keys.length && !emails.length && !dm) return null;
     const sortable = keys.length > 1;
     return (
@@ -4226,7 +4231,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
               followBox={nudgeBoxFor(ps, isCur)}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
-              held={ps.onClient ? undefined : stepHeld(withSentHolds(ps)) ?? undefined}
+              held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
+              files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
               onCopyPortalLink={onCopyClientLink}
               savedLinks={(clientLinks ?? []).map((l) => {
                 const att = task.attachments.find((a) => a.url === l.url);
