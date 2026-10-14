@@ -20,6 +20,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 import { ADD_ICON, ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
+import type { HistoryStep } from "@/lib/stepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
 
 /** The set up a step shows before anything else (StepSetup): its answers
@@ -35,6 +36,11 @@ export type StepSetupProps = {
   /** The action already chosen (Quick step): shown picked. */
   preset?: string | null;
   onDone: (answer: SetupAnswer, run?: () => void) => void;
+  /** For the three recommended actions (StepSetup). */
+  stepName?: string;
+  context?: string | null;
+  history?: HistoryStep[];
+  submit?: string;
 };
 
 /** The end of every step (Derek, 2026-10-13: "more guidance at the end of

@@ -47,8 +47,8 @@ import { talkStepPlan as planTalkStep, talkSendPatch, type TalkPlan } from "@/li
 import { EmailPreview, ReceivedEmailBox, SentEmailBox, ShowLink } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { conversationSummary } from "@/lib/conversationSummary";
-import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices } from "@/lib/stepSetup";
-import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
+import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices, setupHistory, recommendActions, historyKinds } from "@/lib/stepSetup";
+import { StepSetup, WhatsNextPicks, addRowsOf, type NextPick, type SetupAction, type SetupAnswer } from "./StepSetup";
 import { suggestStepActions } from "@/lib/stepSuggest";
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
@@ -81,7 +81,7 @@ const saasChecked = new Map<string, boolean>();
 // CLAUDE_ROUTINE_ID is set). Null until known.
 const claudeCloud: { ready: boolean | null } = { ready: null };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, onAddStepToTask }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -145,6 +145,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onStepsFromServer?: (subtasks: Subtask[]) => void;
   /** The client's other tasks, for "the next step is already that task". */
   sameClientTasks?: Task[];
+  /** Every task loaded, for the set up's history: what steps named like a
+   *  new one held before, for this client or you (lib/stepSetup). */
+  historyTasks?: Task[];
   /** Adds a step to another task (Add it to <task> on What's next). */
   onAddStepToTask?: (taskId: string, step: Subtask) => void;
 }) {
@@ -1270,6 +1273,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, done: true, doneAt: now, outcome: `Added to ${other.title}`, ...(meId ? { doneBy: meId } : {}) } : x)) });
     pushToast(`Added to ${other.title}`, { label: "The task is finished", run: () => onPatch({ status: "done" }) });
   };
+  // What steps held before, this client's and yours, read once per task
+  // list (lib/stepSetup setupHistory), not per letter typed.
+  const setupHist = useMemo(() => setupHistory(historyTasks ?? [], { id: task.id, clientId: task.clientId }, meId ?? null),
+    [historyTasks, task.id, task.clientId, meId]);
   const whatsNextActions = (sid: string) => {
     const sub = task.subtasks.find((x) => x.id === sid);
     const sg = sub ? suggestionFor(sub) : null;
@@ -1282,18 +1289,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // Meet now picked here turns this step into "Meet with <first>" (meetNow.ts withMeetNowSteps).
       meetnow: ["Start a meeting now", `A link to join, sent to ${firstName} now; this step becomes the meeting.`],
     };
-    const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
+    const ideas: NextPick[] = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ key: o.key, label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
+    // The same as the set up (Derek, 2026-10-14): what the context asks for
+    // first, the dark button, then two more by the set up's ranking, the rest
+    // behind All actions, and "The task is finished" a small link, never the
+    // highlighted choice while the context asks for more.
+    const lead: NextPick[] = [
+      ...(other ? [{ key: "addto", label: `Add it to ${other.title}`, says: `Adds a step on "${other.title}" to include this task, linked back, and finishes this one's What's next.`, onClick: () => addToTask(sid, other) }] : []),
+      ...(sg ? [{ key: "suggestion", label: sg.name, says: "Makes it the next step, with the work it needs on it.", onClick: () => acceptSuggestion(sid) }] : []),
+    ];
+    const claude: NextPick = { key: "claude", label: "Give it to Claude", says: sg ? `Claude does "${sg.name}", due today.` : "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) };
+    const finishMail: NextPick[] = hasMessaging && !!messageDest?.email ? [{ key: "finishmail", label: `Finish and email ${firstName}`, says: `Marks it done and opens an email telling ${firstName} it's done, to read and send.`, onClick: () => finishTask(sid, true) }] : [];
+    // The suggestion already does its kind of work: not offered twice.
+    const offered = [...lead, ...ideas.filter((x) => x.key !== sg?.kind), claude];
+    const prev = sub ? planSteps(task.subtasks).filter((x) => x.done && x.id !== sid).pop() : undefined;
+    const keys = recommendActions({
+      lead: lead.map((x) => x.key), context: sg?.kind, stepName: sg?.name ?? "",
+      history: historyKinds(sg?.name ?? prev?.title ?? "", setupHist),
+      available: offered.map((x) => x.key), fallbacks: ["claude", ...ideas.map((x) => x.key)],
+    });
+    const picks = keys.flatMap((k) => offered.filter((x) => x.key === k));
     return (
-      <NextChoices heading={false} intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
-        // What the context asks for comes first, and the task is never
-        // "finished" by default while it asks for more (Derek, 2026-10-14).
-        ...(other ? [{ label: `Add it to ${other.title}`, says: `Adds a step on "${other.title}" to include this task, linked back, and finishes this one's What's next.`, primary: true, onClick: () => addToTask(sid, other) }] : []),
-        ...(sg ? [{ label: sg.name, says: "Makes it the next step, with the work it needs on it.", primary: !other, onClick: () => acceptSuggestion(sid) }] : []),
-        ...ideas,
-        { label: "Give it to Claude", says: sg ? `Claude does "${sg.name}", due today.` : "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
-        { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: !sg, onClick: () => finishTask(sid) },
-        ...(hasMessaging && !!messageDest?.email ? [{ label: `Finish and email ${firstName}`, says: `Marks it done and opens an email telling ${firstName} it's done, to read and send.`, onClick: () => finishTask(sid, true) }] : []),
-      ]} />
+      <WhatsNextPicks picks={picks} rest={[...offered.filter((x) => !keys.includes(x.key)), ...finishMail]}
+        finish={{ key: "finish", label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, onClick: () => finishTask(sid) }} />
     );
   };
   const completeStep = (sid: string, outcome = "Done") => {
@@ -2514,7 +2532,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const lead = suggestStepActions(subDraft, firstName).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
     const grouped = addRowsOf(options, firstName, new Set(lead.map((x) => x.key)));
     return (
-      <StepSetup {...props} meId={meId ?? null} lead={lead} rows={grouped.rows} more={more} search={!sheet} enterSubmits={sheet}
+      <StepSetup {...props} meId={meId ?? null} lead={lead} rows={grouped.rows} more={more} enterSubmits={sheet} submit="Add step" longHint
         onAnswer={(a) => { newAnswer.current = a; }} onDone={submitNew}
         name={sheet ? (
           // No keyboard on open (Derek, 2026-10-14, iPhone: the keyboard and the
@@ -2952,7 +2970,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // by when and what, one line each; an action tap folds it into the
           // sentence below.
           <div className="mt-0.5">
-            <StepSetup key={sentStep.id} name={nameRow} {...setupNow} meId={meId ?? null}
+            <StepSetup key={sentStep.id} name={nameRow} {...setupNow} submit={undefined} longHint meId={meId ?? null}
               lead={[
                 ...(reviewToSend ? [{ key: "reviewemail", label: `Email ${firstName} to review`, onPick: emailForReview }] : []),
                 ...nextSuggest,
@@ -3428,6 +3446,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
   /** The set up for a step, or null when it has none to show. */
   const setupOf = (sub: Subtask, entry: SetupEntry | undefined): StepSetupProps | null => {
+    const stepName = sub.title.replace(/: what's next\?$/, "");
     if (!entry || sub.done || (!entry.force && setupSkipped(sub))) return null;
     const who = entry.who ?? preselectWho(sub, meId ?? null);
     const list = whoChoices(meId ?? null, setupTeammates(), mayContactClient);
@@ -3442,6 +3461,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       today: TODAY,
       preset: entry.preset ?? null,
       onDone: (a, run) => applySetup(sub.id, a, run),
+      // The three recommended actions read the name, what the context asks
+      // for and what steps named like it held before.
+      stepName,
+      context: sub.suggested?.kind ?? (asksWhatsNext(sub) ? suggestionFor(sub)?.kind ?? null : null),
+      history: setupHist,
+      submit: "Looks good",
     };
   };
   // An older handoff opened as a step: its brief, steps, files and reviews

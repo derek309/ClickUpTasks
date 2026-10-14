@@ -27,6 +27,9 @@ const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back)|follow[\s-]?up|foll
 // HTML review, never an email to the client (Derek, 2026-10-14: "Schedule
 // Campaign to bulk customers" offered "Email Brian").
 const MASS = /\b(?:campaigns?|blasts?|newsletters?|bulk)\b/i;
+/** A send to the client's own customers (a campaign, blast, newsletter or
+ *  bulk send), never an email to the client. */
+export const isMassSend = (title: string) => MASS.test(title ?? "");
 const TEXT_WORD = /\b(?:text|texts|sms)\b/i;
 const DOC_NOUN = /\b(plan|proposal|brief|copy)\b/i;
 const DOC_WORD = /\b(?:write|draft|document|doc|post|posts|blog|blogs|article|articles)\b/i;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CLAUDE_ID, type Subtask } from "./data";
-import { setupSkipped, preselectWho, preselectWhen, whenChoices, whenKeyFor, rankTeammates, whoChoices, impliedBy } from "./stepSetup";
+import { setupSkipped, preselectWho, preselectWhen, whenChoices, whenKeyFor, rankTeammates, whoChoices, impliedBy, recommendActions, historyKinds, setupHistory, stepKinds, actionGroup } from "./stepSetup";
 
 const step = (p: Partial<Subtask> = {}): Subtask => ({ id: "s_1", title: "Write the plan", done: false, ...p });
 // A Wednesday: tomorrow is Thursday, three business days is Monday.
@@ -82,5 +82,74 @@ describe("whose turn choices", () => {
       expect(len).not.toBe(4);
       expect(len).toBeLessThanOrEqual(5);
     }
+  });
+});
+
+describe("three recommended actions", () => {
+  const ALL = ["directions", "checklist", "email", "text", "chat", "doc", "image", "page", "video", "claude"];
+  it("the name's suggestion first, then the fallbacks", () => {
+    expect(recommendActions({ lead: ["doc"], available: ALL })).toEqual(["doc", "directions", "checklist"]);
+    expect(recommendActions({ available: ALL })).toEqual(["directions", "checklist", "claude"]);
+  });
+  it("the action already chosen comes first", () => {
+    expect(recommendActions({ preset: "video", lead: ["doc"], available: ALL })).toEqual(["video", "doc", "directions"]);
+  });
+  it("then what the context asks for, then history", () => {
+    expect(recommendActions({ lead: ["page"], context: "email", history: ["image", "page"], available: ALL })).toEqual(["page", "email", "image"]);
+    expect(recommendActions({ context: "doc", history: ["video"], available: ALL })).toEqual(["doc", "video", "directions"]);
+  });
+  it("never the same action twice", () => {
+    expect(recommendActions({ lead: ["doc"], context: "doc", history: ["doc", "doc"], available: ALL })).toEqual(["doc", "directions", "checklist"]);
+  });
+  it("never three from one group", () => {
+    const r = recommendActions({ lead: ["doc"], context: "image", history: ["page", "video"], available: ALL });
+    expect(r).toEqual(["doc", "image", "directions"]);
+    expect(new Set(r.map(actionGroup)).size).toBeGreaterThan(1);
+  });
+  it("only what is on offer", () => {
+    expect(recommendActions({ lead: ["doc"], context: "email", available: ["directions", "checklist"] })).toEqual(["directions", "checklist"]);
+  });
+  it("a campaign, bulk or newsletter step never gets Email from context or history", () => {
+    expect(recommendActions({ context: "email", history: ["email", "page"], available: ALL, stepName: "Schedule Campaign to bulk customers" })).toEqual(["page", "directions", "checklist"]);
+    expect(recommendActions({ context: "email", available: ALL, stepName: "Send the newsletter" })[0]).not.toBe("email");
+    // An ordinary step does.
+    expect(recommendActions({ context: "email", available: ALL, stepName: "Send Brian the plan" })[0]).toBe("email");
+  });
+});
+
+describe("history", () => {
+  const T = (id: string, clientId: string, createdAt: string, subtasks: Partial<Subtask>[]) => ({ id, clientId, createdAt, subtasks: subtasks.map((x) => ({ title: "", ...x })) });
+  it("reads what a step held as actions", () => {
+    expect(stepKinds({ holds: ["doc", "att:1", "email"] })).toEqual(["doc", "email"]);
+    expect(stepKinds({ todos: [{ id: "t", title: "x", done: false }], draftMessage: { channel: "sms", body: "" } })).toEqual(["checklist", "text"]);
+    expect(stepKinds({})).toEqual([]);
+  });
+  it("takes this client's steps and your own, never this task's, the newest first", () => {
+    const tasks = [
+      T("t_old", "cl_a", "2026-01-01", [{ title: "Old flyer", holds: ["image"] }]),
+      T("t_self", "cl_a", "2026-10-01", [{ title: "Flyer", holds: ["video"] }]),
+      T("t_new", "cl_a", "2026-10-02", [{ title: "Spring flyer", holds: ["page"] }, { title: "Call", holds: [] }]),
+      T("t_mine", "cl_b", "2026-09-01", [{ title: "Flyer for Pam", holds: ["doc"], assigneeId: "u_me" }, { title: "Flyer", holds: ["video"], assigneeId: "u_other" }]),
+    ];
+    const h = setupHistory(tasks, { id: "t_self", clientId: "cl_a" }, "u_me");
+    expect(h.map((x) => x.kinds[0])).toEqual(["page", "doc", "image"]);
+  });
+  it("ranks kinds by how many words the names share", () => {
+    const h = [
+      { words: ["spring", "flyer"], kinds: ["image"] },
+      { words: ["flyer"], kinds: ["page"] },
+      { words: ["blog"], kinds: ["doc"] },
+    ];
+    expect(historyKinds("Make the spring flyer", h)).toEqual(["image", "page"]);
+    expect(historyKinds("Call Pam", h)).toEqual([]);
+    expect(historyKinds("", h)).toEqual([]);
+  });
+});
+
+describe("What's next picks", () => {
+  it("the suggestion first, then context, history and its own fallbacks", () => {
+    const avail = ["suggestion", "email", "text", "doc", "page", "meetnow", "claude"];
+    expect(recommendActions({ lead: ["suggestion"], history: ["doc"], available: avail, fallbacks: ["claude", "email"] })).toEqual(["suggestion", "doc", "claude"]);
+    expect(recommendActions({ available: avail, fallbacks: ["claude", "email", "text"] })).toEqual(["claude", "email", "text"]);
   });
 });
