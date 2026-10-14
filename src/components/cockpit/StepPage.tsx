@@ -32,9 +32,12 @@ export function NextChoices({ intro, choices }: { intro?: React.ReactNode; choic
       {intro && <p className="text-[16px] text-muted">{intro}</p>}
       <div className="flex flex-col divide-y rounded-[5px] border bg-surface">
         {choices.map((c) => (
-          <div key={c.label} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
-            <button onClick={c.onClick} className={`h-10 min-w-[12rem] rounded-[5px] px-4 text-left text-[16px] font-semibold ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
-            <span className="min-w-0 flex-1 text-[16px] text-muted">{c.says}</span>
+          // On a phone the button gets its own line and what it does sits
+          // under it, full width (Derek, 2026-10-13: each choice ran three
+          // lines tall in a narrow column); from sm up, side by side as before.
+          <div key={c.label} className="flex flex-col gap-1.5 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1">
+            <button onClick={c.onClick} className={`h-10 w-full rounded-[5px] px-4 text-left text-[16px] font-semibold sm:w-auto sm:min-w-[12rem] ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
+            <span className="min-w-0 text-[16px] text-muted sm:flex-1">{c.says}</span>
           </div>
         ))}
       </div>
@@ -264,9 +267,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           draft held on the step). The only box here is a note to the team. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button onClick={() => setShowSaid(!showSaid)} aria-expanded={showSaid} disabled={!saidMessages.length && !saidNotes.length}
-          className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default">
-          <h3 id="step-talk" className="text-[17px] font-bold">Messages on this step</h3>
-          <span className="min-w-0 truncate text-[16px] text-muted">{saidSummary}</span>
+          className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-left disabled:cursor-default sm:w-auto sm:flex-nowrap">
+          {/* On a phone the heading keeps its line and the summary takes the
+              next one, whole (Derek, 2026-10-13); from sm up, one line. */}
+          <h3 id="step-talk" className="shrink-0 text-[17px] font-bold">Messages on this step</h3>
+          <span className="order-last min-w-0 basis-full text-[16px] text-muted sm:order-none sm:basis-auto sm:truncate">{saidSummary}</span>
           {(saidMessages.length > 0 || saidNotes.length > 0) && <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />}
         </button>
         <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : "Note to the team"}</button>
