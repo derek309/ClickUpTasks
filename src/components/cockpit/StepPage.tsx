@@ -124,7 +124,7 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   /** Finish the whole task from the bottom of the step. */
   onFinishTask?: () => void;
   /** Whose move it is, the same colour and sentence as the step's row. */
-  tone?: { say: string | null; sayTone: string; rowTone: string };
+  tone?: { state?: string; say: string | null; sayTone: string; rowTone: string };
   /** A Text or Chat step opens on that box, ready to write (2026-10-13). */
   startTalk?: "client" | "text" | "email";
   /** The client's waiting step: what is out with them, in place of adding work
@@ -583,9 +583,13 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                     {(sub.done || !isCurrent) && <span>{sub.done ? `${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${timeAgo(sub.doneAt)}` : ""}` : "Comes later"}</span>}
                   </div>
                 )}
-                {/* Whose move it is, as on the step's row (2026-10-13). */}
-                {tone?.say && !sub.done && (
-                  <div className={`flex flex-wrap items-center gap-x-3 rounded-[5px] px-3 py-2 text-[16px] font-semibold ${tone.rowTone} ${tone.sayTone}`}>
+                {/* Whose move it is, as on the step's row (2026-10-13). A bare
+                    "Your turn" says nothing the page doesn't, so no band then
+                    (Derek, 2026-10-13); your move with a reason ("Claude
+                    finished its part", "Ryan wrote") reads in strong red on
+                    the page, not pale red on pale pink. */}
+                {tone?.say && !sub.done && tone.say !== "Your turn" && (
+                  <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold ${tone.state === "mine" ? "leading-snug text-red-700 dark:text-red-300" : `rounded-[5px] px-3 py-2 ${tone.rowTone} ${tone.sayTone}`}`}>
                     <span>{tone.say}</span>
                     {/* The cloud session working it (lib/claudeCloud). */}
                     {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
