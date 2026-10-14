@@ -2482,6 +2482,7 @@ export function googleLinkName(url: string): string | null {
     return "Google Drive link";
   }
   if (host === "calendar.google.com") return "Google Calendar event";
+  if (host === "mail.google.com") return "Gmail";
   if (host === "meet.google.com") return "Google Meet";
   return null;
 }
@@ -2570,7 +2571,12 @@ export function prettyLinkName(url: string): string {
   if (chat) return chat;
   let u: URL;
   try { u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`); } catch { return url.slice(0, 120); }
-  const host = u.hostname.replace(/^www\./, "");
+  return linkPathName(u) ?? u.hostname.replace(/^www\./, "");
+}
+
+/** The last part of a link's path that reads as a name ("How to fix the
+ *  thing"), skipping ids and hashes; null when there is none. */
+export function linkPathName(u: URL): string | null {
   const segments = u.pathname.split("/").filter(Boolean);
   for (let i = segments.length - 1; i >= 0; i--) {
     const raw = decodeURIComponent(segments[i]).replace(/\.(html?|php|aspx)$/i, "");
@@ -2586,7 +2592,7 @@ export function prettyLinkName(url: string): string {
     if (!words.includes(" ") && words.length > 24) continue;
     return `${words.charAt(0).toUpperCase()}${words.slice(1)}`.slice(0, 120);
   }
-  return host;
+  return null;
 }
 
 export function isSnoozed(task: { followUpAt?: string | null }, today: string = TODAY): boolean {

@@ -7,7 +7,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { clientEmailText, looksLikeHtml, timeAgo, type Attachment, type Message, type ReceivedEmail } from "@/lib/data";
 import { isPicture } from "@/lib/pictures";
-import { I } from "./ui";
+import { I, LinkedText } from "./ui";
 import { reviewTone } from "@/lib/reviewTone";
 import { safeMessageHtml } from "@/lib/safeHtml";
 import { recipientName } from "@/lib/emailHeader";
@@ -178,7 +178,7 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
       </div>
       {open && (
         <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
-          {clientEmailText(email.body, email.from) || email.body || "(no text)"}
+          <LinkedText text={clientEmailText(email.body, email.from) || email.body || "(no text)"} />
         </div>
       )}
       {files && <div className="border-t bg-surface px-3 py-2">{files}</div>}

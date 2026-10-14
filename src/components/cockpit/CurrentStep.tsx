@@ -13,7 +13,7 @@ import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
 import { ActionMenu } from "./ActionMenu";
-import { I } from "./ui";
+import { I, LinkedText } from "./ui";
 
 type AddOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
 
@@ -169,7 +169,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
             <button onClick={picked.onChange} title="Put the question back and pick again" className="font-semibold text-accent underline-offset-4 hover:underline">Change</button>
           </p>
         )}
-        {context && <p className="whitespace-pre-line text-[16px] leading-relaxed text-foreground [overflow-wrap:anywhere]">{context}</p>}
+        {context && <p className="whitespace-pre-line text-[16px] leading-relaxed text-foreground [overflow-wrap:anywhere]"><LinkedText text={context} /></p>}
       </div>
       {/* A meeting started now: its link, one tap away (Derek, 2026-10-14). */}
       {sub.meeting && !sub.done && <JoinNowLine meeting={sub.meeting} />}

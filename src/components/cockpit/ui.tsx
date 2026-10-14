@@ -4,7 +4,8 @@
 // helpers, and the list-view column definitions. Split out of Cockpit.tsx.
 import { useEffect, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
-import { users, userById, labelById, prettyLinkName, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
+import { users, userById, labelById, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
+import { shortLinkLabel } from "@/lib/linkify";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -413,7 +414,9 @@ export function renderRichText(body: string) {
     const url = trailing ? part.slice(0, -trailing.length) : part;
     return (
       <span key={i}>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{url}</a>
+        {/* Its short name, the address in the tooltip (lib/linkify); a click
+            opens it and nothing it sits in (Derek, 2026-10-14). */}
+        <a href={url} target="_blank" rel="noopener noreferrer" title={url} onClick={(e) => e.stopPropagation()} className="font-medium text-accent hover:underline">{shortLinkLabel(url)}</a>
         {trailing}
       </span>
     );
@@ -525,16 +528,16 @@ export function LinkedText({ text, className = "", chip = false, angleLabels = f
       <span key={`l${start}`} className={`group/link max-w-full gap-1 ${chip
         ? "mx-0.5 inline-flex items-center rounded-md border bg-surface py-0.5 pl-1.5 pr-1 align-middle shadow-[0_1px_1px_rgba(20,24,40,.05)] hover:border-accent"
         : "inline-flex items-baseline align-baseline"}`}>
-        <a href={href} target="_blank" rel="noopener noreferrer" title={href}
+        <a href={href} target="_blank" rel="noopener noreferrer" title={href} onClick={(e) => e.stopPropagation()}
           className={`inline-flex max-w-full gap-1 font-medium text-accent ${chip ? "items-center text-[14px]" : "items-baseline align-baseline hover:underline"}`}>
           <LinkFavicon url={href} className={chip ? "" : "translate-y-[2px]"} />
-          <span className="truncate">{label ?? prettyLinkName(href)}</span>
+          <span className="truncate">{label ?? shortLinkLabel(href)}</span>
         </a>
         {/* The pretty name hides the URL, so there has to be a way to get the
             real thing back out without opening the page first. Always visible
             on a chip: it is a button, and a button whose second action only
             appears on hover is one nobody finds on a touch screen. */}
-        <button onClick={() => { navigator.clipboard?.writeText(href); }} title="Copy this link"
+        <button onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(href); }} title="Copy this link"
           className={`rounded p-0.5 text-muted transition hover:text-foreground ${chip ? "" : "translate-y-[2px] opacity-0 group-hover/link:opacity-100"}`}>
           <I.copy className="h-3 w-3" />
         </button>

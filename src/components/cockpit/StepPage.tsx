@@ -13,7 +13,7 @@ import {
   htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting, PERSONAL_CLIENT_ID, isApprovalOutcome, doneWhen,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
-import { I, Avatar, CollapsibleText, newId } from "./ui";
+import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
 import { ActionMenu, MenuSheet } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
@@ -140,7 +140,7 @@ function ClampedDirections({ text, onEdit, six = false }: { text: string; onEdit
     <div className="flex flex-col items-start">
       {/* A div, not a button: a button won't clamp to four lines. */}
       <div ref={ref} role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }} title="Click to edit"
-        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${six ? "whitespace-pre-line" : ""} ${more ? "" : six ? "line-clamp-6" : "line-clamp-4"}`}>{text}</div>
+        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${six ? "whitespace-pre-line" : ""} ${more ? "" : six ? "line-clamp-6" : "line-clamp-4"}`}><LinkedText text={text} /></div>
       {(cut || more) && (
         <button onClick={() => setMore(!more)} aria-expanded={more} className="text-[16px] font-semibold text-accent hover:underline">{more ? "Show less" : "Read more"}</button>
       )}
@@ -275,7 +275,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
               <button onClick={() => onToggleClientItem?.(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
                 className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
               <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>
-                {c.title}<span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
+                <LinkedText text={c.title} /><span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
               </span>
             </li>
           ))}
@@ -288,7 +288,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
               <button onClick={() => toggleTodo(t)} aria-pressed={t.done} aria-label={t.done ? `Reopen ${t.title}` : `Mark ${t.title} done`}
                 className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${t.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{t.done && <I.check className="h-3.5 w-3.5" />}</button>
               <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${t.done ? "text-muted line-through" : ""}`}>
-                {t.title}{t.fromClient && <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}</span>}
+                <LinkedText text={t.title} />{t.fromClient && <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}</span>}
                 {(() => {
                   const w8 = todoWaiting(t, messages);
                   return w8 === "waiting" ? <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">? Asked {first} {timeAgo(t.askedAt!)}</span>
@@ -859,7 +859,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 {(sub.done || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                     {round && <span className="font-semibold text-foreground">{round}</span>}
-                    {sub.done && <span className={isApprovalOutcome(sub.outcome) ? "font-semibold text-success" : ""}>{`${sub.outcome ?? "Done"}${sub.doneAt ? ` · ${doneWhen(sub.doneAt)}` : ""}`}</span>}
+                    {sub.done && <span className={isApprovalOutcome(sub.outcome) ? "font-semibold text-success" : ""}><LinkedText text={sub.outcome ?? "Done"} />{sub.doneAt ? ` · ${doneWhen(sub.doneAt)}` : ""}</span>}
                     {sub.done && <button onClick={onReopen} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Reopen this step</button>}
                   </div>
                 )}
