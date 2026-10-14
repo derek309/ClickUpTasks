@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDayDate, TODAY,
   type Attachment, type Contact, type EmailDraft, type Message, type ScheduledMessage,
+  linkDisplayName,
 } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
@@ -24,7 +25,7 @@ import { BookingLinkMenu } from "./BookingLinkMenu";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { SchedulePopover } from "./SchedulePopover";
 import {
-  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemWindow,
+  FileDropLine, ImageLightbox, WorkItemWindow,
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 import { newId } from "./ui";
@@ -283,7 +284,8 @@ export function EmailWindow({
     setSaveState("saved");
   };
 
-  const imagePaths = attachments.filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!).join("|");
+  // The attached pictures and the task's own, for their thumbnails.
+  const imagePaths = [...new Set([...attachments, ...(taskItems ?? [])].filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!))].join("|");
   useEffect(() => {
     const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
     if (!missing.length) return;
@@ -316,7 +318,14 @@ export function EmailWindow({
   // Something already on the task: a stored file goes in as an attachment (the
   // send route takes files kept under the task), a saved link goes at the end of
   // the email as a link.
-  const taskFiles = (taskItems ?? []).filter((a) => a.path && !attachments.some((x) => x.path === a.path));
+  const taskFiles = (taskItems ?? []).filter((a) => a.path && !isPreviewableImage(a.name) && !attachments.some((x) => x.path === a.path));
+  // The task's pictures stay in the list, ticked once attached; a tap
+  // attaches or takes it off again (Derek, 2026-10-14).
+  const taskPics = (taskItems ?? []).filter((a) => a.path && isPreviewableImage(a.name));
+  const togglePic = (a: Attachment) => {
+    const on = attachments.find((x) => x.path === a.path);
+    setAttachments(on ? attachments.filter((x) => x.id !== on.id) : [...attachments, { ...a, id: newId("a_") }]);
+  };
   const taskLinks = (taskItems ?? []).filter((a) => a.kind === "link" && a.url);
   const addFromTask = (a: Attachment) => {
     if (a.path) { setAttachments([...attachments, { ...a, id: newId("a_") }]); return; }
@@ -371,9 +380,11 @@ export function EmailWindow({
   };
 
   const count = attachments.length;
-  const previewImages: PreviewImage[] = attachments
+  // The viewer shows the attached pictures, then the task's not attached.
+  const previewImages: PreviewImage[] = [...attachments, ...taskPics.filter((a) => !attachments.some((x) => x.path === a.path))]
     .filter((a) => a.path && isPreviewableImage(a.name) && thumbs[a.path])
     .map((a) => ({ id: a.id, name: a.name, url: thumbs[a.path!] }));
+  const openPic = (a: Attachment) => { const i = previewImages.findIndex((x) => x.url === thumbs[a.path ?? ""]); if (i >= 0) setLightbox(i); };
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(draft.updatedAt ?? draft.createdAt)}`;
   const shownName = recipientName(toName);
   const cannotSend = !toEmail ? "No linked contact to send to" : !onSend ? "You don't have permission to message this client" : undefined;
@@ -476,11 +487,17 @@ export function EmailWindow({
                 sending finishes; then the quiet controls. */}
             <div className="mt-4">
               <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
-                {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
                 {count > 0 && (
                   <ul className="mt-1.5 divide-y">
                     {attachments.map((a) => (
                       <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
+                        {/* An attached picture as itself; a tap shows it full size. */}
+                        {a.path && thumbs[a.path] && isPreviewableImage(a.name) && (
+                          <button onClick={() => openPic(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="shrink-0">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={thumbs[a.path]} alt="" className="h-10 w-10 rounded-[5px] object-cover ring-1 ring-[var(--border)]" />
+                          </button>
+                        )}
                         <span className="min-w-0 break-words font-medium">{a.name}</span>
                         {a.size && <span className="text-muted">{a.size}</span>}
                         <button onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>
@@ -488,20 +505,54 @@ export function EmailWindow({
                     ))}
                   </ul>
                 )}
-                {(taskFiles.length > 0 || taskLinks.length > 0) && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2 text-[16px]">
+                {(taskPics.length > 0 || taskFiles.length > 0 || taskLinks.length > 0) && (
+                  <div className="mt-2 flex flex-col gap-2 border-t pt-2 text-[16px]">
                     <span className="text-muted">From this task:</span>
-                    {taskFiles.map((a) => (
-                      <button key={a.id} onClick={() => addFromTask(a)} title="Attach this file" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">+ {a.name}</button>
-                    ))}
-                    {taskLinks.map((a) => (
-                      <button key={a.id} onClick={() => addFromTask(a)} title="Add this link to the end of the email" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">🔗 {a.name || a.url}</button>
-                    ))}
+                    {/* Pictures as small squares with their names; + to attach, ✓ attached. */}
+                    {taskPics.length > 0 && (
+                      <div className="flex flex-wrap gap-3">
+                        {taskPics.map((a) => {
+                          const on = attachments.some((x) => x.path === a.path);
+                          return (
+                            <div key={a.id} className="flex w-[72px] flex-col items-start gap-1">
+                              <div className="relative">
+                                <button onClick={() => togglePic(a)} aria-pressed={on} title={on ? `Attached. Tap to take ${a.name} off` : `Attach ${a.name}`}
+                                  className={`block h-14 w-14 overflow-hidden rounded-[5px] bg-background ring-inset ${on ? "ring-2 ring-accent" : "ring-1 ring-[var(--border)] hover:ring-accent"}`}>
+                                  {a.path && thumbs[a.path]
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    ? <img src={thumbs[a.path]} alt="" className="h-full w-full object-cover" />
+                                    : <span className="grid h-full w-full place-items-center text-muted">🖼️</span>}
+                                  <span aria-hidden className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-[14px] font-bold shadow ${on ? "bg-accent text-white" : "bg-surface text-accent ring-1 ring-[var(--border)]"}`}>{on ? "✓" : "+"}</span>
+                                </button>
+                                {a.path && thumbs[a.path] && (
+                                  <button onClick={() => openPic(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`}
+                                    className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-[13px] shadow ring-1 ring-[var(--border)] hover:text-accent">🔍</button>
+                                )}
+                              </div>
+                              <span className="w-full truncate text-[16px]" title={a.name}>{a.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(taskFiles.length > 0 || taskLinks.length > 0) && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {taskFiles.map((a) => (
+                          <button key={a.id} onClick={() => addFromTask(a)} title="Attach this file" className="rounded-[5px] border px-3 py-0.5 hover:border-accent hover:text-accent">+ {a.name}</button>
+                        ))}
+                        {taskLinks.map((a) => (
+                          <button key={a.id} onClick={() => addFromTask(a)} title="Add this link to the end of the email" className="rounded-[5px] border px-3 py-0.5 hover:border-accent hover:text-accent">🔗 {linkDisplayName(a) || a.url}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </FileDropLine>
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {/* One line (Derek, 2026-10-14): Send, the follow up day, Send later,
+                Discard, and when it was edited at the far end; it wraps only
+                when the width makes it. What sending finishes, under it. */}
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
               <button onClick={send} disabled={!!cannotSend} title={cannotSend}
                 className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">Send</button>
               {followUp && onSend && (
@@ -519,12 +570,8 @@ export function EmailWindow({
                   )}
                 </label>
               )}
-            </div>
-            {(() => {
-              const note = onSend && sendNote ? sendNote(followUp ? followUpDate : null) : null;
-              return note ? <p className="mt-2 text-[16px] text-muted">{note}</p> : null;
-            })()}
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+              {onSchedule && toEmail && <SchedulePopover label="Send later" onSchedule={schedule} />}
+              <button onClick={discard} className={`${quietText} hover:text-danger`}>Discard</button>
               {/* What a phone took off the top of the window. */}
               <button onClick={() => setShowTools((v) => !v)} aria-pressed={showTools} title="Bold, italic and the rest" aria-label="Formatting"
                 className={`${quietText} sm:hidden ${showTools ? "text-accent" : ""}`}>Aa</button>
@@ -532,10 +579,12 @@ export function EmailWindow({
                 <button onClick={() => setShowAi((v) => !v)} aria-pressed={showAi} title="Write with AI" aria-label="Write with AI"
                   className={`${quietText} sm:hidden ${showAi ? "text-accent" : ""}`}>✨</button>
               )}
-              {onSchedule && toEmail && <SchedulePopover label="Send later" onSchedule={schedule} />}
-              <button onClick={discard} className={`${quietText} hover:text-danger`}>Discard</button>
               <span className="ml-auto text-muted">{saveLabel}</span>
             </div>
+            {(() => {
+              const note = onSend && sendNote ? sendNote(followUp ? followUpDate : null) : null;
+              return note ? <p className="mt-2 text-[16px] text-muted">{note}</p> : null;
+            })()}
           </div>
 
           <div className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
