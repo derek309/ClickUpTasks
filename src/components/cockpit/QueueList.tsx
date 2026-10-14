@@ -4,17 +4,22 @@
 // queue-mockup.html): Now, Waiting, Up next ("2nd", "3rd", no dates) and
 // done. Drag a row to change the order; on a phone, tap a row's grip, then
 // the row it goes before. Moving someone else's task asks why and tells them.
+// The date on a row is a quick picker (Derek, 2026-10-14: "on queue we need
+// to be able to quick change dates"): Now's due, Waiting's check in, and an
+// Up next row's deadline. Picking one never moves the row; a deadline that
+// the line would miss warns, as before.
 // It reads only what it is handed: the list's tasks and its setting.
 
 import * as React from "react";
 import { CLAUDE_ID, currentStep, formatDue, needsYou, stepStage, userById, type Task } from "@/lib/data";
 import { deadlineWarnings, groupQueue, isQueueWaiting, type QueueSettings } from "../../../mcp/queue.mjs";
 import { Avatar } from "./ui";
+import { InlineDate } from "./GroupedList";
 import { isPlainLeftClick, taskHref } from "@/lib/navState";
 
 type Pending = { id: string; beforeId: string | null; up: boolean; moveUp?: boolean };
 
-export function QueueList({ name, tasks, settings, meId, clientFirst, today, onOpen, onMove, onMoveUp, onSettings }: {
+export function QueueList({ name, tasks, settings, meId, clientFirst, today, onOpen, onMove, onMoveUp, onSettings, onPatch }: {
   name: string;
   /** Every task on the list, done ones too. */
   tasks: Task[];
@@ -26,6 +31,9 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
   onMove: (id: string, beforeId: string | null, reason?: string) => void;
   onMoveUp: (id: string, reason?: string) => void;
   onSettings: (next: QueueSettings) => void;
+  /** A task edit, through the same save as the task page (Cockpit patchTask),
+   *  so a new due brings its follow up the usual way. */
+  onPatch: (id: string, patch: Partial<Task>) => void;
 }) {
   const g = React.useMemo(() => groupQueue(tasks, settings), [tasks, settings]);
   const warnings = React.useMemo(() => deadlineWarnings(tasks, settings, today), [tasks, settings, today]);
@@ -37,6 +45,8 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
   const [editing, setEditing] = React.useState(false);
 
   const order = [...g.now, ...g.waiting, ...g.upNext.map((u) => u.task)];
+  // A press on a row's date picker is not the start of a drag of the row.
+  const noDrag = React.useRef(false);
   const byId = (id: string) => tasks.find((t) => t.id === id) ?? null;
   const theirs = (t: Task) => !!t.assigneeId && t.assigneeId !== meId && t.assigneeId !== CLAUDE_ID;
 
@@ -86,7 +96,8 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
     return (
       <div key={t.id}
         draggable
-        onDragStart={(e) => { setDragId(t.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); }}
+        onPointerDownCapture={() => { noDrag.current = false; }}
+        onDragStart={(e) => { if (noDrag.current) { e.preventDefault(); return; } setDragId(t.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); }}
         onDragEnd={() => { setDragId(null); setOverId(null); }}
         onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverId(t.id); } }}
         onDrop={(e) => { e.preventDefault(); if (dragId) ask(dragId, t.id); }}
@@ -112,6 +123,31 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
       </div>
     );
   };
+
+  // A task's due as a real deadline, set or taken off the way the task page's
+  // ⋯ menu does it (TaskDrawer deadlineItem): off, its date is saved for when
+  // the queue is turned off and it waits in line with no date.
+  const deadlinePatch = (t: Task, d: string | null): Partial<Task> => (d ? { deadline: true, due: d, queueSavedDue: null } : { deadline: false, due: null, queueSavedDue: t.due });
+  // The picker, outside the title's link, and not a drag handle.
+  const datePick = (props: React.ComponentProps<typeof InlineDate>) => (
+    <span onPointerDown={() => { noDrag.current = true; }} className="inline-flex min-w-0">
+      <InlineDate {...props} className={`whitespace-nowrap hover:underline hover:underline-offset-4 ${props.className ?? ""}`} />
+    </span>
+  );
+  const nowDate = (t: Task) => datePick({
+    value: t.due, emptyLabel: "Set a due date", heading: t.deadline ? "Change the deadline" : "Change the due date", title: "Change the date",
+    formatValue: (iso) => `${t.deadline ? "Deadline" : "Due"} ${formatDue(iso)}`,
+    className: t.due ? `font-semibold ${t.deadline ? "text-red-700" : "text-orange-700"}` : "text-muted",
+    onChange: (d) => onPatch(t.id, t.deadline && !d ? deadlinePatch(t, null) : { due: d }),
+  });
+  const checkInDate = (t: Task) => datePick({
+    value: t.followUpAt ?? t.due, emptyLabel: "Set a check in", heading: "Check in on", title: "Change when to check in",
+    formatValue: (iso) => `Check in ${formatDue(iso)}`, className: "text-muted",
+    onChange: (d) => onPatch(t.id, { followUpAt: d }),
+  });
+  const deadlineDate = (t: Task, label: string) => t.deadline && t.due
+    ? datePick({ value: t.due, heading: "Change the deadline", title: "Change or clear the deadline", formatValue: (iso) => `Deadline ${formatDue(iso)}`, className: "font-bold text-red-700", onChange: (d) => onPatch(t.id, deadlinePatch(t, d)) })
+    : datePick({ value: null, emptyLabel: label, heading: "Set a deadline", title: "Set a deadline", className: "text-muted", onChange: (d) => { if (d) onPatch(t.id, deadlinePatch(t, d)); } });
 
   const group = (key: string, label: string, dot: string, head: string, count: number, body: React.ReactNode) => (
     <section key={key} className="mb-4 overflow-hidden rounded-[5px] border bg-surface">
@@ -163,11 +199,11 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
         )}
 
         {group("now", "Now", "#2563eb", "color-mix(in srgb, #2563eb 10%, var(--surface))", g.now.length,
-          g.now.length ? g.now.map((t) => row(t, t.due ? <span className={`whitespace-nowrap font-semibold ${t.deadline ? "text-red-700" : "text-orange-700"}`}>{t.deadline ? "Deadline" : "Due"} {formatDue(t.due)}</span> : null, true))
+          g.now.length ? g.now.map((t) => row(t, nowDate(t), true))
             : <p className="px-4 py-3 text-[16px] text-muted">Nothing is Now. The next one comes up when something is added.</p>)}
 
         {g.waiting.length > 0 && group("waiting", "Waiting", "#b7791f", "color-mix(in srgb, #b7791f 10%, var(--surface))", g.waiting.length,
-          g.waiting.map((t) => { const at = t.followUpAt ?? t.due; return row(t, at ? <span className="whitespace-nowrap text-muted">Check in {formatDue(at)}</span> : null, true); }))}
+          g.waiting.map((t) => row(t, checkInDate(t), true)))}
 
         {group("next", "Up next", "#9aa5b8", "color-mix(in srgb, #9aa5b8 12%, var(--surface))", g.upNext.length, <>
           {warnings.map((w) => (
@@ -176,9 +212,7 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
               <button type="button" onClick={() => askMoveUp(w.id)} className="underline underline-offset-4 hover:opacity-80">Move it up</button>
             </p>
           ))}
-          {nextShown.map((u) => row(u.task, u.task.deadline && u.task.due
-            ? <span className="whitespace-nowrap font-bold text-red-700">Deadline {formatDue(u.task.due)}</span>
-            : <span className="whitespace-nowrap text-muted">{u.label}</span>, false))}
+          {nextShown.map((u) => row(u.task, deadlineDate(u.task, u.label), false))}
           {!g.upNext.length && <p className="px-4 py-3 text-[16px] text-muted">Nothing waiting in line.</p>}
           {dragId && (
             <div onDragOver={(e) => { e.preventDefault(); setOverId("__end"); }} onDrop={(e) => { e.preventDefault(); ask(dragId, null); }}

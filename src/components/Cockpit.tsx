@@ -3443,7 +3443,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             <QueueList name={projectById(activeProject)!.name} tasks={baseTasks} settings={queueSettings(projectById(activeProject)!.queue)!}
               meId={me.id} clientFirst={(clientById(activeClient)?.name ?? "").trim().split(/\s+/)[0] || "The client"} today={TODAY}
               onOpen={setOpenTaskId} onMove={(id, beforeId, reason) => moveInQueue(activeProject, id, beforeId, reason)}
-              onMoveUp={(id, reason) => moveUpInQueue(activeProject, id, reason)} onSettings={(q) => setQueueSettings(activeProject, q)} />
+              onMoveUp={(id, reason) => moveUpInQueue(activeProject, id, reason)} onSettings={(q) => setQueueSettings(activeProject, q)} onPatch={patchTask} />
           ) : (
             <>
             {activeFilterBar}

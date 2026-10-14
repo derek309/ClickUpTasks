@@ -748,19 +748,21 @@ function useDatePopover() {
 // the follow-up date in the task drawer stops being a bare <input type=date>:
 // that rendered "08/31/2026" in native widget chrome beside a "Jul 22"
 // created date, in a taller box that knocked the whole row out of alignment.
-export function InlineDate({ value, onChange, onClear, className = "", emptyLabel = "—", formatValue = friendlyDue }: { value: string | null; onChange: (d: string | null) => void; onClear?: () => void; className?: string; emptyLabel?: React.ReactNode; formatValue?: (iso: string) => string }) {
+// `heading` says at the top of the picker what picking a date does ("Set a
+// deadline"), for a trigger whose label is not itself a date (a queue's 2nd).
+export function InlineDate({ value, onChange, onClear, className = "", emptyLabel = "—", formatValue = friendlyDue, heading, title }: { value: string | null; onChange: (d: string | null) => void; onClear?: () => void; className?: string; emptyLabel?: React.ReactNode; formatValue?: (iso: string) => string; heading?: string; title?: string }) {
   const { open, setOpen, ref, pos, openIt } = useDatePopover();
   return (
     <>
       <span className="flex min-w-0 items-center gap-1">
-        <button ref={ref} onClick={openIt} className={`min-w-0 truncate rounded px-1 py-0.5 text-left hover:bg-surface ${className}`}>
+        <button ref={ref} onClick={openIt} title={title} className={`min-w-0 truncate rounded px-1 py-0.5 text-left hover:bg-surface ${className}`}>
           {value ? formatValue(value) : emptyLabel}
         </button>
         {value && onClear && (
           <button onClick={onClear} title="Clear the date" className="shrink-0 px-0.5 text-muted hover:text-danger">×</button>
         )}
       </span>
-      {open && <DatePopover pos={pos} value={value} recurrence="none" onSelect={(d) => { onChange(d); setOpen(false); }} onClose={() => setOpen(false)} />}
+      {open && <DatePopover pos={pos} value={value} recurrence="none" heading={heading} onSelect={(d) => { onChange(d); setOpen(false); }} onClose={() => setOpen(false)} />}
     </>
   );
 }
@@ -806,7 +808,7 @@ export function InlineDue({ value, overdue, followUpAt = null, recurrence = "non
   );
 }
 
-function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void }) {
+function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onClose, heading }: { pos: { top: number; left: number; width: number }; value: string | null; recurrence: Recurrence; onSelect: (d: string | null) => void; onRecurrenceChange?: (r: Recurrence) => void; onClose: () => void; heading?: string }) {
   const [ym, setYm] = useState(() => { const [y, m] = (value ?? TODAY).split("-").map(Number); return { y, m: m - 1 }; });
   // Shared with the mind dump and the action dock — see DATE_QUICK_PICKS in
   // lib/data. This list used to count calendar days and offer "This weekend",
@@ -825,6 +827,7 @@ function DatePopover({ pos, value, recurrence, onSelect, onRecurrenceChange, onC
       <div className="fixed inset-0 z-[88]" onClick={(e) => { e.stopPropagation(); onClose(); }} />
       <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }} className="z-[89] flex flex-col rounded-xl border bg-surface shadow-xl sm:flex-row">
         <div className="w-full shrink-0 border-b p-1.5 sm:w-52 sm:border-b-0 sm:border-r">
+          {heading && <div className="px-2 pb-1 pt-0.5 text-[16px] font-semibold">{heading}</div>}
           {quicks.map(({ label, date }) => (
             <button key={label} onClick={() => onSelect(date)} className="flex w-full items-center justify-between gap-3 whitespace-nowrap rounded px-2 py-1.5 text-left text-[15px] hover:bg-background"><span>{label}</span><span className="text-[13px] text-muted">{formatDue(date)}</span></button>
           ))}
