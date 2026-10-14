@@ -3589,6 +3589,16 @@ export function pickedSays(s: Pick<Subtask, "assigneeId" | "due">, meId: string 
   return [on, due].filter(Boolean).join(", ");
 }
 
+/** A "what's next?" step that got done is named for how it ended, never
+ *  left with the question as its name (Derek, 2026-10-14: step 2 "Draft
+ *  email in html review: what's next?" read "Sent to Brian for review"). The
+ *  same list back when none needs it. */
+export function nameDoneWhatsNext(subtasks: Subtask[]): Subtask[] {
+  const needs = (x: Subtask) => x.done && /: what's next\?$/.test(x.title);
+  if (!subtasks.some(needs)) return subtasks;
+  return subtasks.map((x) => (needs(x) ? { ...x, title: x.outcome && x.outcome.trim() && x.outcome !== "Done" ? x.outcome.trim() : "Decided what's next" } : x));
+}
+
 /** The step holding `key`, or null. */
 export function stepHolding<T extends Pick<Subtask, "holds">>(subtasks: T[], key: string): T | null {
   return subtasks.find((s) => s.holds?.includes(key)) ?? null;

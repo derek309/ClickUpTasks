@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, tickedSteps, turnReason, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, tickedSteps, turnReason, nameDoneWhatsNext, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -142,7 +142,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // unticked that way, 2026-10-12). Steps the app adds by itself go on the
   // task's owner (data.ts ownNewSteps).
   const onPatch = (patch: Partial<Task>) => {
-    const p = patch.subtasks ? { ...patch, subtasks: ownNewSteps(taskRef.current.subtasks, patch.subtasks, task.assigneeId ?? null) } : patch;
+    const p = patch.subtasks ? { ...patch, subtasks: nameDoneWhatsNext(ownNewSteps(taskRef.current.subtasks, patch.subtasks, task.assigneeId ?? null)) } : patch;
     taskRef.current = { ...taskRef.current, ...p };
     return onPatchTask(p);
   };

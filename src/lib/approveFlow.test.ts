@@ -113,3 +113,18 @@ describe("a pick answers What's next for good, until Change", () => {
     expect(answerWhatsNext(q(), "s7", "x", { due: "2026-10-15" })[0]).toMatchObject({ title: "Build the HTML review version", due: "2026-10-15" });
   });
 });
+
+import { nameDoneWhatsNext } from "./data";
+
+describe("a done What's next is named for how it ended", () => {
+  it("takes its outcome, or Decided what's next", () => {
+    const list: Subtask[] = [
+      { id: "a", title: "Draft email in html review: what's next?", done: true, outcome: "Sent to Brian for review", addedFor: "next:x" },
+      { id: "b", title: "For Claude: what's next?", done: true, outcome: "Done", addedFor: "next:y" },
+      { id: "c", title: "Brian approved: what's next?", done: false, addedFor: "ok:page:4" },
+    ];
+    expect(nameDoneWhatsNext(list).map((x) => x.title)).toEqual(["Sent to Brian for review", "Decided what's next", "Brian approved: what's next?"]);
+    const clean = list.slice(2);
+    expect(nameDoneWhatsNext(clean)).toBe(clean);
+  });
+});

@@ -9,7 +9,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
-  todayPacific, withMeetingSteps, CLAUDE_ID, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
+  todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
@@ -32,7 +32,7 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
     const changed = await change(row as TaskRow, firstName);
     if (!changed) return false;
-    const next = ownNewSteps((row as TaskRow).subtasks ?? [], changed, (row as TaskRow).assignee_id);
+    const next = nameDoneWhatsNext(ownNewSteps((row as TaskRow).subtasks ?? [], changed, (row as TaskRow).assignee_id));
     // A changes step just made: the task's follow up is its due date (Derek, 2026-10-11).
     const before = new Set(((row as TaskRow).subtasks ?? []).map((x) => x.id));
     const made = followUpFromNew ? next.find((x) => !before.has(x.id) && x.stage === "changes_requested" && x.due) : null;
