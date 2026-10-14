@@ -48,6 +48,37 @@ export function useNextMeeting(clientId: string, ghlContactId: string | null): C
   return next?.key === key ? next.event : undefined;
 }
 
+/** Only an upcoming booking on a GoHighLevel calendar can move or be cancelled. */
+export const meetingCanChange = (event: CalendarEvent, at: number) => !!event.calendarId && Date.parse(event.start) > at;
+export const meetingCantChangeWhy = (event: CalendarEvent) =>
+  event.calendarId ? "It has started, so it can't move now." : "Not booked on a GoHighLevel calendar, so move it where it was made.";
+
+/** Cancels it in GoHighLevel, says so, and reads the meetings again. */
+export async function cancelMeeting(event: CalendarEvent, first: string, pushToast: (text: string) => void): Promise<boolean> {
+  const r = await authedFetch(`/api/calendar/appointment?id=${encodeURIComponent(event.id)}`, { method: "DELETE" }).catch(() => null);
+  const j = r ? await r.json().catch(() => ({})) : {};
+  pushToast(r?.ok ? `Cancelled: ${event.title}. GoHighLevel tells ${first}.` : j.error ?? "Couldn't cancel it.");
+  if (r?.ok) setTimeout(reloadEvents, 1500);
+  return !!r?.ok;
+}
+
+/** The booking window, moving this meeting to another time. */
+export function MoveMeeting({ event, first, meId, pushToast, defaultCalendarId, onSetDefault, onClose }: {
+  event: CalendarEvent & { calendarId: string };
+  first: string;
+  meId: string;
+  pushToast: (text: string) => void;
+  defaultCalendarId?: string | null;
+  onSetDefault?: (id: string | null) => void;
+  onClose: () => void;
+}) {
+  return (
+    <BookAppointment target={{ kind: "move", appointmentId: event.id, calendarId: event.calendarId, name: event.contactName ?? first, title: event.title }}
+      meId={meId} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault}
+      onClose={onClose} onDone={() => setTimeout(reloadEvents, 1500)} pushToast={pushToast} />
+  );
+}
+
 /** A ⋯ (or the given label) with Move and Cancel for one meeting, and Book when given. */
 export function MeetingMenu({ event, first, meId, pushToast, onBook, label, triggerClassName, title, defaultCalendarId, onSetDefault }: {
   event: CalendarEvent;
@@ -75,16 +106,12 @@ export function MeetingMenu({ event, first, meId, pushToast, onBook, label, trig
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open]);
-  // Only an upcoming booking on a GoHighLevel calendar can move or be cancelled.
-  const canChange = !!event.calendarId && Date.parse(event.start) > openedAt;
+  const canChange = meetingCanChange(event, openedAt);
   const cancel = async () => {
     setBusy(true);
-    const r = await authedFetch(`/api/calendar/appointment?id=${encodeURIComponent(event.id)}`, { method: "DELETE" }).catch(() => null);
-    const j = r ? await r.json().catch(() => ({})) : {};
+    await cancelMeeting(event, first, pushToast);
     setBusy(false);
     close();
-    pushToast(r?.ok ? `Cancelled: ${event.title}. GoHighLevel tells ${first}.` : j.error ?? "Couldn't cancel it.");
-    if (r?.ok) setTimeout(reloadEvents, 1500);
   };
   const item = "flex w-full items-center rounded-[5px] px-3 py-2 text-left text-[16px] hover:bg-background disabled:opacity-40";
   return (
@@ -111,7 +138,7 @@ export function MeetingMenu({ event, first, meId, pushToast, onBook, label, trig
             {event.joinUrl && <a href={event.joinUrl} target="_blank" rel="noopener noreferrer" onClick={close} className={item}>Join link</a>}
             <button onClick={() => { close(); setMoving(true); }} disabled={!canChange} className={item}>Move to another time…</button>
             <button onClick={() => setConfirm(true)} disabled={!canChange} className={`${item} text-danger`}>Cancel meeting…</button>
-            {!canChange && <span className="block px-3 py-1 text-[16px] text-muted">{event.calendarId ? "It has started, so it can't move now." : "Not booked on a GoHighLevel calendar, so move it where it was made."}</span>}
+            {!canChange && <span className="block px-3 py-1 text-[16px] text-muted">{meetingCantChangeWhy(event)}</span>}
             {onBook && <>
               <div className="my-1 border-t" />
               <button onClick={() => { close(); onBook(); }} className={item}>Book another meeting</button>
@@ -120,9 +147,8 @@ export function MeetingMenu({ event, first, meId, pushToast, onBook, label, trig
         </div>
       </>}
       {moving && event.calendarId && (
-        <BookAppointment target={{ kind: "move", appointmentId: event.id, calendarId: event.calendarId, name: event.contactName ?? first, title: event.title }}
-          meId={meId} defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault}
-          onClose={() => setMoving(false)} onDone={() => setTimeout(reloadEvents, 1500)} pushToast={pushToast} />
+        <MoveMeeting event={{ ...event, calendarId: event.calendarId }} first={first} meId={meId} pushToast={pushToast}
+          defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} onClose={() => setMoving(false)} />
       )}
     </span>
   );

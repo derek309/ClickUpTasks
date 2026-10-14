@@ -6,7 +6,7 @@
 // (mockup D: overdue moved beside the name). Each box
 // carries the one button that deals with it.
 import { useEffect, useState } from "react";
-import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
+import { MeetingMenu, MoveMeeting, cancelMeeting, meetingCanChange, meetingCantChangeWhy, useNextMeeting } from "./MeetingMenu";
 import { htmlToText, timeAgo } from "@/lib/data";
 import { fetchClientEmailDraft } from "@/lib/db";
 
@@ -49,6 +49,21 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   onSetDefault?: (id: string | null) => void;
 }) {
   const [askOpen, setAskOpen] = useState(false);
+  // On a phone, the three boxes are one line and one Contact menu (Derek,
+  // 2026-10-13); its meeting choices keep their own state so Move's window
+  // outlives the menu.
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactAt, setContactAt] = useState(0);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const closeContact = () => { setContactOpen(false); setConfirmCancel(false); };
+  useEffect(() => {
+    if (!contactOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setContactOpen(false); setConfirmCancel(false); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [contactOpen]);
   // Their drafts, here on their page (Derek, 2026-10-07: "bring in the drafted
   // emails and then open, review and send so we don't have to leave"). The
   // client's own saved email is read here; the rest come in as drafts.
@@ -77,8 +92,81 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   // One line each, the button inline: half the height (Derek, 2026-10-08).
   const box = "flex min-w-0 items-center gap-3 rounded-lg px-3 py-1.5";
   const btn = "h-9 shrink-0 rounded-md bg-surface px-3 text-[15px] font-semibold ring-1 hover:bg-background";
-  return (
-    <div className="grid gap-2.5 sm:grid-cols-3">
+  // The phone's one line: messages, what's waiting, the meeting.
+  const phoneLine: { text: string; tone?: string }[] = [
+    theirTurn
+      ? { text: `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : lastIn!.channel === "chat" ? "wrote in the portal" : "replied"} ${timeAgo(lastIn!.at)}`, tone: "font-semibold text-accent" }
+      : { text: last ? `Last ${last.channel === "sms" ? "text" : last.channel === "chat" ? "chat" : "email"} ${shortDay(last.at)}` : "No messages yet" },
+    waiting ? { text: `${waiting} waiting on ${first}`, tone: "font-semibold text-highlight" } : { text: "Ball's in our court" },
+    ...(meeting === undefined ? [] : [{ text: meeting ? `Next meeting ${when(meeting.start)}` : "No meeting booked" }]),
+  ];
+  const canChange = !!meeting && meetingCanChange(meeting, contactAt);
+  const hasContact = !!(onReply || onEmail || onText || onRemind || allDrafts.length || onRequest || canBook || meeting);
+  const item = "block w-full rounded-[5px] px-3 py-2.5 text-left text-[16px] hover:bg-background disabled:opacity-40";
+  const pick = (f: () => void) => () => { closeContact(); f(); };
+  const section = "px-3 pb-1 pt-2 text-[16px] font-bold";
+  return (<>
+    <div className="flex items-start gap-3 sm:hidden">
+      <p className="min-w-0 flex-1 text-[16px] leading-snug text-muted">
+        {phoneLine.map((p, i) => <span key={i}>{i > 0 && " · "}<span className={p.tone}>{p.text}</span></span>)}
+      </p>
+      {hasContact && (
+        <span className="relative shrink-0">
+          <button onClick={() => { if (contactOpen) closeContact(); else { setContactAt(Date.now()); setContactOpen(true); } }} aria-expanded={contactOpen}
+            className="h-9 shrink-0 rounded-[5px] bg-surface px-3 text-[16px] font-semibold ring-1 ring-[var(--border)] hover:bg-background">Contact{allDrafts.length > 0 && <span className="ml-1.5 rounded-[5px] bg-highlight px-1.5 text-[16px] text-white" title="Drafts not sent yet">{allDrafts.length}</span>}</button>
+          {contactOpen && <>
+            <div className="fixed inset-0 z-40" onClick={closeContact} />
+            {/* A sheet along the bottom of the screen, like Drafts. */}
+            <div className="fixed inset-x-3 bottom-3 z-50 max-h-[75vh] overflow-y-auto rounded-[5px] bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              <div className={section}>Contact {first}</div>
+              {theirTurn && onReply && <button onClick={pick(onReply)} className={`${item} font-semibold text-accent`}>Reply</button>}
+              {onText && <button onClick={pick(onText)} className={item}>Text</button>}
+              {onEmail && <button onClick={pick(onEmail)} className={item}>Email</button>}
+              {waiting > 0 && onRemind && <button onClick={pick(onRemind)} className={item}>Remind them what we&apos;re waiting on</button>}
+              {allDrafts.length > 0 && <>
+                <div className="my-1 border-t" />
+                <div className={section}>Drafts not sent</div>
+                {allDrafts.map((d) => (
+                  <button key={d.id} onClick={pick(d.open)} className={item}>
+                    <b className="block truncate font-semibold">{d.title}</b>
+                    <span className="block truncate text-muted">{d.where} · {shortDay(d.at)}</span>
+                  </button>
+                ))}
+              </>}
+              {(onRequest || canBook || meeting) && <>
+                <div className="my-1 border-t" />
+                <div className={section}>{meeting ? `Next meeting ${when(meeting.start)}` : "Meeting"}</div>
+                {meeting && (confirmCancel ? (
+                  <div className="flex flex-col gap-2 px-3 py-2 text-[16px]">
+                    <span className="font-semibold text-danger">Cancel it? GoHighLevel tells {first}.</span>
+                    <span className="flex gap-2">
+                      <button disabled={cancelling} onClick={async () => { setCancelling(true); await cancelMeeting(meeting, first, pushToast); setCancelling(false); closeContact(); }}
+                        className="h-9 rounded-[5px] bg-danger px-3 font-semibold text-white hover:opacity-90 disabled:opacity-50">{cancelling ? "Cancelling…" : "Yes, cancel"}</button>
+                      <button onClick={() => setConfirmCancel(false)} className="h-9 rounded-[5px] px-3 text-muted ring-1 ring-[var(--border)] hover:bg-background">Keep it</button>
+                    </span>
+                  </div>
+                ) : <>
+                  {meeting.joinUrl && <a href={meeting.joinUrl} target="_blank" rel="noopener noreferrer" onClick={closeContact} className={item}>Join link</a>}
+                  <button onClick={pick(() => setMoving(true))} disabled={!canChange} className={item}>Move to another time…</button>
+                  <button onClick={() => setConfirmCancel(true)} disabled={!canChange} className={`${item} text-danger`}>Cancel meeting…</button>
+                  {!canChange && <span className="block px-3 py-1 text-[16px] text-muted">{meetingCantChangeWhy(meeting)}</span>}
+                </>)}
+                {onRequest && <>
+                  <button onClick={pick(() => onRequest("email"))} className={item}><b className="block font-semibold">Request a meeting by email</b><span className="text-muted">Three open times and your link</span></button>
+                  <button onClick={pick(() => onRequest("sms"))} className={item}><b className="block font-semibold">Request a meeting by text</b><span className="text-muted">The same, short enough for a text</span></button>
+                </>}
+                {canBook && <button onClick={pick(onBook)} className={item}>{meeting ? "Book another meeting" : "Book a meeting"}</button>}
+              </>}
+            </div>
+          </>}
+        </span>
+      )}
+      {moving && meeting?.calendarId && (
+        <MoveMeeting event={{ ...meeting, calendarId: meeting.calendarId }} first={first} meId={meId} pushToast={pushToast}
+          defaultCalendarId={defaultCalendarId} onSetDefault={onSetDefault} onClose={() => setMoving(false)} />
+      )}
+    </div>
+    <div className="hidden gap-2.5 sm:grid sm:grid-cols-3">
       {/* Messages: their reply waiting on us, else when we last talked. */}
       <div className={`${box} ${theirTurn ? "bg-accent-soft" : "bg-background"}`}>
         <div className="min-w-0 flex-1 truncate">
@@ -138,5 +226,5 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
         {canBook && <button onClick={onBook} title="Book a time, or pick times to text them" className={`${btn} ring-[var(--border)]`}>Book</button>}
       </div>
     </div>
-  );
+  </>);
 }

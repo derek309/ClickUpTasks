@@ -2416,6 +2416,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       </>)}
     </div>
   );
+  // Everyone, Mine or Claude, full size for the phone's View menu.
+  const whoseOnPhone = filters.assignee === me.id ? "mine" : filters.assignee === CLAUDE_ID ? "claude" : "all";
+  const whosePhoneBtn = (on: boolean) => `flex-1 px-2.5 py-2 text-[16px] ${on ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`;
+  const mineTogglePhone = (
+    <span className="flex overflow-hidden rounded-[5px] ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={whoseOnPhone === "all"} className={whosePhoneBtn(whoseOnPhone === "all")}>Everyone</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={whoseOnPhone === "mine"} className={whosePhoneBtn(whoseOnPhone === "mine")}>Mine</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: CLAUDE_ID }))} aria-pressed={whoseOnPhone === "claude"} title="Tasks on Claude" className={whosePhoneBtn(whoseOnPhone === "claude")}>Claude</button>
+    </span>
+  );
   // On a phone, group, sort, filters, columns and the link to this view in
   // one small button, so the list starts one row under the title (Derek,
   // 2026-10-10, mockup 1).
@@ -2429,6 +2439,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       {viewOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setViewOpen(false)} />
         <div className="absolute right-0 z-40 mt-1 max-h-[75vh] w-72 max-w-[calc(100vw-1.5rem)] space-y-2.5 overflow-y-auto rounded-xl border bg-surface p-3 shadow-xl">
+          {/* A client page's Everyone, Mine or Claude lives here on a phone,
+              so the list tabs fit without scrolling sideways (Derek, 2026-10-13). */}
+          {clientView && <div className="space-y-1.5 border-b pb-2.5">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Whose tasks</div>
+            {mineTogglePhone}
+          </div>}
           {groupSortPanel}
           <div className="space-y-2.5 border-t pt-2.5">{filterPanel}</div>
           <div className="border-t pt-2.5">{columnsPanel}</div>
@@ -3280,7 +3296,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
                 onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onToggleListHidden={toggleProjectHidden} onMoveList={moveListToFolder}
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
-                trailing={<span className="inline-flex items-center gap-1.5">{mineToggle}{viewControl}</span>} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
+                trailing={<span className="hidden items-center gap-1.5 sm:inline-flex">{mineToggle}{viewControl}</span>} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
             );
           })()}
           {activeProject && stagesForProject(activeProject).length > 0 ? (
