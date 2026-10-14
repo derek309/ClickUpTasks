@@ -27,6 +27,16 @@ export function greetingHtml(contactName?: string | null): string {
 }
 export type ReviewEmail = { subject: string; body: string; link: DraftLink | null; aiContext: string };
 
+/** What a review email calls the review, in its subject, its sentence and its
+ *  link: the review's own name ("October Real Estate Newsletter Email"), the
+ *  first of the names given that is not blank (the name box as typed, then the
+ *  saved one), else the task's title. Never a step's name (Derek, 2026-10-14:
+ *  "Please review: Create newsletter document"). */
+export function reviewEmailName(reviewTitles: (string | null | undefined)[], taskTitle: string): string {
+  const clean = (s: string | null | undefined) => (s ?? "").trim().replace(/\s+/g, " ");
+  return reviewTitles.map(clean).find(Boolean) || clean(taskTitle);
+}
+
 // What the client can do from the link: one sentence for every kind, with only the
 // way they comment or change it told apart (Derek, 2026-09-13: image and HTML
 // reviews "need to be the same as doc").

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReviewEmail, greetingHtml } from "./reviewEmail";
+import { buildReviewEmail, greetingHtml, reviewEmailName } from "./reviewEmail";
 
 const URL = "https://clickuptasks.vercel.app/doc/doc_abc";
 
@@ -44,5 +44,23 @@ describe("buildReviewEmail", () => {
     expect(greetingHtml("  ")).toBe("<p>Hi,</p>");
     expect(greetingHtml(null)).toBe("<p>Hi,</p>");
     expect(greetingHtml("<Tom> Jones")).toBe("<p>Hi &lt;Tom&gt;,</p>");
+  });
+});
+
+describe("reviewEmailName", () => {
+  it("calls the review by its own name in the subject, the sentence and the link", () => {
+    const name = reviewEmailName(["", "October Real Estate Newsletter Email"], "Monthly newsletter");
+    const email = buildReviewEmail({ kind: "page", url: URL, name, text: "", changes: null });
+    expect(email.subject).toBe("Please review: October Real Estate Newsletter Email");
+    expect(email.body).toContain(`"October Real Estate Newsletter Email" is ready for your review.`);
+    expect(email.link).toEqual({ url: URL, label: `Open "October Real Estate Newsletter Email" to review` });
+  });
+  it("prefers the name as typed, then the saved one, tidied", () => {
+    expect(reviewEmailName(["  Fall   Flyer ", "Old name"], "Task")).toBe("Fall Flyer");
+    expect(reviewEmailName([null, " Saved name "], "Task")).toBe("Saved name");
+  });
+  it("falls back to the task's title when the review has no name", () => {
+    expect(reviewEmailName(["", "   ", null, undefined], " Monthly newsletter ")).toBe("Monthly newsletter");
+    expect(reviewEmailName([], "Monthly newsletter")).toBe("Monthly newsletter");
   });
 });

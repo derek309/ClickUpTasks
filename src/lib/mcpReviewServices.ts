@@ -23,7 +23,7 @@ import {
 import { fetchImage } from "./safeFetch";
 import { MAX_SHARED_FILE_BYTES } from "./uploadTypes";
 import { PAGE_TOO_BIG, pageText, pageTooBig } from "./pageHtml";
-import { buildReviewEmail } from "./reviewEmail";
+import { buildReviewEmail, reviewEmailName } from "./reviewEmail";
 import { placeDraftLink } from "./draftLink";
 import { summarizeDocChanges, summarizeTextChanges } from "./docDiff";
 import { addBusinessDaysIso, htmlToText, todayPacific } from "./data";
@@ -461,7 +461,7 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
         const { data: client } = await supabaseAdmin.from("clients").select("linked_contact_id").eq("id", task.client_id).maybeSingle();
         const contactId = (client?.linked_contact_id as string | null) || (task.client_id.startsWith("cl_") ? task.client_id.slice(3) : null);
         const { data: contact } = contactId ? await supabaseAdmin.from("contacts").select("name").eq("id", contactId).maybeSingle() : { data: null };
-        const built = buildReviewEmail({ kind, url: sent.url, name: ((doc.title as string) ?? "").trim() || task.title, text, changes, greetName: (contact?.name as string | undefined) ?? null });
+        const built = buildReviewEmail({ kind, url: sent.url, name: reviewEmailName([doc.title as string | null], task.title), text, changes, greetName: (contact?.name as string | undefined) ?? null });
         const now = new Date().toISOString();
         const draft = {
           ...built,

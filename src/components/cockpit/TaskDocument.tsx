@@ -35,6 +35,7 @@ import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
 import { formatPinTime, publishedFiles, type PinAnchor } from "@/lib/reviewPins";
 import { MAX_REMINDERS, reminderRound, reminderSummary } from "@/lib/reviewReminders";
 import { commentHint, isFileKind, kindInSentence, kindNewName, kindQuery, kindTitle, kindWhat } from "@/lib/reviewKinds";
+import { reviewEmailName } from "@/lib/reviewEmail";
 import { MAX_SET_IMAGES, frontFirst, imageLabel, parseImageSet, setFiles as imagesOf, type ImageSetItem } from "@/lib/imageSet";
 import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode, type PageEditsByFile } from "@/lib/pageFrameProtocol";
 import { VIDEO_WARN_BYTES, formatFileSize, isPreviewableImage, isReviewVideo } from "@/lib/uploadTypes";
@@ -216,14 +217,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   // What the editor holds right now, for Save draft and for switching views.
   const latestHtml = useRef<string | null>(null);
 
-  const load = useCallback(async () => {
+  // The review as saved now, also handed back to a caller that needs it at once.
+  const load = useCallback(async (): Promise<Doc | null> => {
     const fresh = await fetchTaskDocument(task.id, kind);
     const previous = versionRef.current;
     versionRef.current = fresh?.version ?? null;
     setDoc(fresh);
     setLoaded(true);
     void fetchDeletedTaskDocuments(task.id, kind).then(setDeletedDocs);
-    if (!fresh) return;
+    if (!fresh) return null;
     void fetchTaskDocumentFiles(fresh.id).then(setFiles);
     // An image or page review numbers its versions by file, so the line needs them to say "Version N".
     if (isFileKind(kind)) void fetchTaskDocumentVersions(fresh.id).then(setVersions);
@@ -240,6 +242,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     }
     const res = await docApi(task.id, kind, "/link");
     if (res.ok) setLink(await res.json());
+    return fresh;
   }, [task.id, kind]);
 
   // Fetch when the task opens. State is set only after the request resolves; the
@@ -657,6 +660,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const send = async () => {
     if (!doc) return;
     commit.flush();
+    titleCommit.flush();
     await saving.current;
     setBusy("send");
     const res = await api("/send", { method: "POST", body: JSON.stringify({ baseVersion: doc.version }) });
@@ -667,17 +671,21 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     // The last version the client saw, to say what this send changed.
     const previousBody = doc.version > 0 ? versions[0]?.body : undefined;
     const earlier = publishedFiles(versions).length;
-    await load();
+    const fresh = await load();
+    // The review's own name, as typed or as saved now (the AI names a review on
+    // the server as it first gets content, after this line may have loaded it),
+    // else the task's title (reviewEmailName).
+    const name = reviewEmailName([titleDraft, fresh ? fresh.title : doc.title], task.title);
     // The drawer moves the task to Waiting and sets the follow up in one edit;
     // anywhere else the task is only moved.
-    if (onSent) onSent(kind, doc.title.trim() || task.title, doc.reminderEveryDays);
+    if (onSent) onSent(kind, name, doc.reminderEveryDays);
     else if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
     const copied = !!url && await copy(url);
     // Straight into an email to the client, written with AI (Derek, 2026-09-11:
     // "when we send for review can it pop up a box to draft an email to the
     // client"). The document window closes so the email is the one on screen.
-    const emailing = onEmailClient?.({ kind, url, name: doc.title.trim() || task.title, ...await reviewEmail(sentBody, previousBody, earlier) }) ?? false;
+    const emailing = onEmailClient?.({ kind, url, name, ...await reviewEmail(sentBody, previousBody, earlier) }) ?? false;
     if (emailing) switchView({ full: false });
     if (copied) pushToast(emailing ? "Sent for review. Link copied and added to the email." : "Sent for review. Link copied, paste it to your client.");
     else if (url) pushToast(`Sent for review. Share this link: ${url}`);
@@ -746,15 +754,17 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   const emailClient = async () => {
     if (!doc || !onEmailClient) return;
     commit.flush();
+    titleCommit.flush();
     await saving.current;
     setBusy("email");
     const url = link?.live && link.copyable ? await fetchLink() : null;
+    const saved = await fetchTaskDocument(task.id, kind).catch(() => null);
     setBusy(null);
     // The last two versions the client saw: texts on a document, distinct files on an image or page review.
     const shown = publishedFiles(versions);
     const [latest, before] = versioned ? [shown.at(-1), shown.at(-2)] : [versions[0]?.body, versions[1]?.body];
     const opened = onEmailClient({
-      kind, url, name: doc.title.trim() || task.title,
+      kind, url, name: reviewEmailName([titleDraft, saved ? saved.title : doc.title], task.title),
       ...await reviewEmail(latest ?? doc.body, before, shown.length > 1 ? 1 : 0),
     });
     if (opened) switchView({ full: false });
