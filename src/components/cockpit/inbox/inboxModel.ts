@@ -260,7 +260,9 @@ export function mergeStates(cur: Map<string, InboxState>, read: Map<string, Inbo
     // Changed after this read began: yours. Changed before it, but the read
     // came back without that change (it began before the save landed): still
     // yours, or a Delete flashed back for two minutes (Derek, 2026-10-13).
-    const newer = !!local && (local.updatedAt ?? "") > (saved?.updatedAt ?? "");
+    // As times, not strings: the app writes "…Z", the database reads back "…+00:00".
+    const time = (t: string | null | undefined) => (t ? Date.parse(t) || 0 : 0);
+    const newer = !!local && time(local.updatedAt) > time(saved?.updatedAt);
     if (at < readStartedAt && !newer) continue;
     if (local) out.set(k, local); else out.delete(k);
   }

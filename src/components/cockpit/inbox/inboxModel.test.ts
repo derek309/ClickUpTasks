@@ -178,9 +178,17 @@ describe("refreshing the Inbox", () => {
   it("keeps a Delete the read began too early to see", async () => {
     const { mergeStates } = await import("./inboxModel");
     const local = { threadKey: "gm:3", readAt: null, snoozedUntil: null, doneAt: null, trashedAt: "2026-10-13T18:14:00Z", updatedAt: "2026-10-13T18:14:00Z" };
-    const stale = { threadKey: "gm:3", readAt: null, snoozedUntil: null, doneAt: null, trashedAt: null, updatedAt: "2026-10-13T17:00:00Z" };
+    const stale = { threadKey: "gm:3", readAt: null, snoozedUntil: null, doneAt: null, trashedAt: null, updatedAt: "2026-10-13T17:00:00+00:00" };
     const out = mergeStates(new Map([["gm:3", local]]), new Map([["gm:3", stale]]), new Map([["gm:3", 500]]), 1000);
     expect(out.get("gm:3")?.trashedAt).toBe("2026-10-13T18:14:00Z");
+  });
+  it("compares the saved time as a time, Z or +00:00", async () => {
+    const { mergeStates } = await import("./inboxModel");
+    // The same moment written two ways: not newer, so the read wins.
+    const local = { threadKey: "gm:4", readAt: null, snoozedUntil: null, doneAt: "2026-10-13T18:00:00Z", updatedAt: "2026-10-13T18:14:00Z" };
+    const saved = { threadKey: "gm:4", readAt: null, snoozedUntil: null, doneAt: null, updatedAt: "2026-10-13T18:14:00+00:00" };
+    const out = mergeStates(new Map([["gm:4", local]]), new Map([["gm:4", saved]]), new Map([["gm:4", 500]]), 1000);
+    expect(out.get("gm:4")?.doneAt).toBeNull();
   });
 });
 
