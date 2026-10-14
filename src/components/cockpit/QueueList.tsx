@@ -128,13 +128,13 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
 
         {pending && (() => {
           const t = byId(pending.id);
-          const owner = t?.assigneeId ? userById(t.assigneeId)?.name.split(" ")[0] ?? "its owner" : "its owner";
+          const owner = t?.assigneeId ? userById(t.assigneeId)?.name.split(" ")[0] ?? null : null;
           return (
             <form onSubmit={(e) => { e.preventDefault(); confirm(); }} className="mb-4 rounded-[5px] border bg-surface px-4 py-3">
-              <label htmlFor="queue-reason" className="block text-[16px] font-semibold">{t?.title} is {owner}&apos;s. Why move it {pending.up ? "up" : "down"}? {owner} will see this.</label>
+              <label htmlFor="queue-reason" className="block text-[16px] font-semibold">{t?.title} is {owner ? `${owner}'s` : "a teammate's"}. Why move it {pending.up ? "up" : "down"}? {owner ?? "They"} will see this.</label>
               <div className="mt-2 flex flex-wrap gap-2">
                 <input id="queue-reason" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} maxLength={140} placeholder="A short reason"
-                  className="h-11 min-w-0 flex-1 rounded-[5px] border bg-background px-3 text-[16px] outline-none focus:ring-2 focus:ring-accent" />
+                  className="h-11 min-w-0 flex-1 basis-full rounded-[5px] border bg-background px-3 text-[16px] outline-none focus:ring-2 focus:ring-accent sm:basis-auto" />
                 <button type="submit" disabled={!reason.trim()} className="h-11 rounded-[5px] bg-foreground px-4 text-[16px] font-semibold text-background disabled:opacity-40">Move it</button>
                 <button type="button" onClick={() => setPending(null)} className="h-11 px-2 text-[16px] font-semibold text-muted hover:text-foreground">Cancel</button>
               </div>
