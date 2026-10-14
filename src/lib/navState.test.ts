@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSearch, parseSearch, type NavState } from "./navState";
+import { buildSearch, parseSearch, ALL_TASKS_HREF, isPlainLeftClick, type NavState } from "./navState";
 
 // The URL is the app's shareable state: paste a link and land where the sender
 // was. Round-tripping is the property that matters — a link that does not
@@ -102,5 +102,32 @@ describe("the second half of a view", () => {
     ]) {
       expect(buildSearch(parseSearch(buildSearch(s)))).toBe(buildSearch(s));
     }
+  });
+});
+
+describe("the sidebar's links", () => {
+  it("opens Tasks as All Tasks for you in a new tab, and tidies back to a bare address", () => {
+    const s = parseSearch(ALL_TASKS_HREF.slice(1));
+    expect(s.view).toBeNull();
+    expect(s.client).toBe("all");
+    expect(s.assignee).toBe("mine");
+    expect(buildSearch(s)).toBe("");
+  });
+
+  it("restores every sidebar view from its own link", () => {
+    for (const v of ["work", "personal", "projects", "mail", "calendar", "settings"] as const)
+      expect(parseSearch(`?view=${v}`).view).toBe(v);
+    const pinned = parseSearch("?client=cl_x&project=p_y");
+    expect([pinned.view, pinned.client, pinned.project]).toEqual([null, "cl_x", "p_y"]);
+  });
+
+  it("keeps only a plain left click in the app, and leaves every other click to the browser", () => {
+    const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+    expect(isPlainLeftClick(click)).toBe(true);
+    expect(isPlainLeftClick({ ...click, button: 1 })).toBe(false);
+    expect(isPlainLeftClick({ ...click, metaKey: true })).toBe(false);
+    expect(isPlainLeftClick({ ...click, ctrlKey: true })).toBe(false);
+    expect(isPlainLeftClick({ ...click, shiftKey: true })).toBe(false);
+    expect(isPlainLeftClick({ ...click, altKey: true })).toBe(false);
   });
 });

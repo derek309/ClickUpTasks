@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { users, userById, labelById, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
 import { shortLinkLabel } from "@/lib/linkify";
+import { isPlainLeftClick } from "@/lib/navState";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -127,7 +128,7 @@ export function SideItem({ active, onClick, children, title, drag, href }: {
   if (href) {
     return (
       <a href={href} title={title} {...dragProps} className={className}
-        onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); onClick(); }}>
+        onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onClick(); }}>
         {children}
       </a>
     );

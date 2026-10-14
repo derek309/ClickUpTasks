@@ -130,7 +130,7 @@ import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
-import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
+import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, ALL_TASKS_HREF, isPlainLeftClick } from "@/lib/navState";
 import { shortcut } from "@/lib/platform";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { BookAppointment } from "./cockpit/BookAppointment";
@@ -930,7 +930,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => {
     if (!hydratedRef.current) return;
     const next = buildSearch(currentNav());
-    if (next !== window.location.search) window.history.pushState(null, "", next || window.location.pathname);
+    // A link that says the same view another way (the sidebar's Tasks link,
+    // ?assignee=mine, opened in a new tab) is tidied in place, not pushed as a
+    // second history entry that Back would land on to no effect.
+    const sameView = buildSearch(parseSearch(window.location.search)) === next;
+    if (next !== window.location.search) window.history[sameView ? "replaceState" : "pushState"](null, "", next || window.location.pathname);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsView, dirView, myWork, personalView, inboxView, activeClient, activeProject, openTaskId, clientTab, dmUserId, mailThread, allTasksScope, dashboardView, allTasksCompleted]);
   // Back/forward → state.
@@ -2825,10 +2829,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               <I.search className="shrink-0" /><span className="flex-1 truncate text-[15px]">Search</span>
               <kbd className="rounded border border-b-2 px-1.5 text-[12px] font-semibold">{shortcut("K")}</kbd>
             </button>
-            <button onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title={`${me.name} (${me.role}): Settings`} aria-label="Settings"
+            {/* A link too, like every row below it (Derek, 2026-10-14). */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
+            <a href="/?view=settings" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setDirView(null); setSidebarOpen(false); setOpenTaskId(null); setSettingsView(true); }} title={`${me.name} (${me.role}): Settings`} aria-label="Settings"
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-muted hover:bg-background hover:text-foreground">
               <I.gear />
-            </button>
+            </a>
           </div>
           {/* A phone has no Feedback tab on the edge (Derek, 2026-10-14): it is here. */}
           <button onClick={() => { setSidebarOpen(false); setFeedbackNonce((n) => n + 1); }}
@@ -2840,12 +2846,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
             {/* Links, so right click offers new tab, new window or side panel (Derek, 2026-10-05). */}
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
-            <a href="/?view=mail" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); goToView("inbox"); }} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
+            <a href="/?view=mail" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("inbox"); }} title="Inbox: your email, texts and task chats (press 1)" aria-label="Inbox"
               className={`relative grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "inbox" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>
               📥{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-2 top-1 rounded-full bg-accent px-1.5 text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
             </a>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for right click */}
-            <a href="/?view=calendar" onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); goToView("calendar"); }} title="Calendar: the next two weeks, from GoHighLevel" aria-label="Calendar"
+            <a href="/?view=calendar" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("calendar"); }} title="Calendar: the next two weeks, from GoHighLevel" aria-label="Calendar"
               className={`grid h-10 place-items-center rounded-lg text-[20px] transition ${dirView === "calendar" ? "bg-accent-soft ring-1 ring-accent/40" : "hover:bg-background"}`}>📅</a>
             {([["c_agency", "7B0Y8xCOblcTHzYnM1Kc", "Agency", "🏢"], ["c_directory", "GN4HK1ybbTBWcolEjLHl", "Directory", "📍"]] as const).map(([cid, fallback, label, icon]) => (
               <a key={cid} href={`https://app.gohighlevel.com/v2/location/${clientById(cid)?.ghlLocationId || fallback}/dashboard`} target="_blank" rel="noopener noreferrer"
@@ -2865,7 +2871,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               reach from the keyboard. It is now 2, and nothing else moved. */}
           {/* Your open tasks, not every task in the database. Every other row
               in this nav carries its count; this one was the exception. */}
-          <SideItem href="/" active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 3)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
+          <SideItem href={ALL_TASKS_HREF} active={allTasksView} title={`${openTaskCount} open task${openTaskCount === 1 ? "" : "s"} assigned to you (press 3)`} onClick={() => goToView("alltasks")}><I.list className="text-muted" /> <span>Tasks</span><span className="ml-auto text-[13px] text-muted">{openTaskCount}</span></SideItem>
           {/* "Client replies" nav item removed (Derek, 2026-08-09) — My Work
               and Follow Up already surface an open conversation-priority
               task each their own way (hasOpenConversationTask / Follow Up's
@@ -2950,7 +2956,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 return (
                   <SideItem key={c.id} href={`/?client=${encodeURIComponent(c.id)}`} active={active} drag={pinDrag("client", c.id)} title="Drag to reorder" onClick={() => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(c.id); setActiveProject(null); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); }}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: clientStatusMeta(c.status).dot }} /> <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
-                    <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
+                    <span role="button" tabIndex={-1} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleStar(c.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
                 );
               })}
@@ -2968,7 +2974,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                       {clientName && <span className="block truncate text-[11px] leading-tight text-muted">{clientName}</span>}
                       <span className="block truncate leading-tight">{p.name}</span>
                     </span>
-                    <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
+                    <span role="button" tabIndex={-1} onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleStarList(p.id); }} title="Unpin from sidebar" className="shrink-0 rounded p-0.5 text-amber-400 hover:bg-background"><I.star filled /></span>
                   </SideItem>
                 );
               })}

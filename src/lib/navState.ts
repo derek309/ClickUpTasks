@@ -80,6 +80,18 @@ export function parseSearch(search: string): NavState {
   };
 }
 
+// The sidebar's Tasks link. All Tasks for you writes nothing to the URL, but a
+// bare "/" opens a VA on Clients (their default), so a Tasks link opened in a
+// new tab spells it out; the app tidies it back to "/" once it's open.
+export const ALL_TASKS_HREF = "/?assignee=mine";
+
+// Sidebar rows are real links so right click, ⌘ or Ctrl click, middle click
+// and Shift click open them in a new tab or window the browser's own way. Only
+// a plain left click is the app's, moving in place without a reload.
+export function isPlainLeftClick(e: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
+  return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
+
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as
 // a hint on each sidebar item and handled by the keydown effect below.
 // The same order as ⌘K's Go to (Derek, 2026-10-05: "match the number keys"):
