@@ -2738,7 +2738,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const list = channel === "email" ? made : made.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
     if (openStep) setNextStepDone(openStep.id, true);
     const status = statusForStep(task.status, "waiting");
+    // As it was, for Undo: the email has gone, only the steps go back.
+    const was = { subtasks: taskRef.current.subtasks, status: taskRef.current.status, waitingOnClient: taskRef.current.waitingOnClient, followUpAt: taskRef.current.followUpAt, due: taskRef.current.due };
     onPatch({ subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) });
+    if (channel === "email") {
+      const joined = was.subtasks.find((x) => !x.done && x.finishWhen === "reply" && x.id !== cur.id);
+      const undo = () => {
+        const back = new Map(was.subtasks.map((x) => [x.id, x]));
+        const restored = taskRef.current.subtasks
+          .filter((x) => back.has(x.id) || x.addedFor !== `checkin:${cur.id}`)
+          .map((x) => {
+            const p = back.get(x.id);
+            if (!p) return x;
+            if (x.id === cur.id || x.id === alsoDone?.id) return { ...x, done: p.done, doneAt: p.doneAt, outcome: p.outcome };
+            if (x.id === joined?.id) return { ...x, due: p.due, followUps: p.followUps };
+            return x;
+          });
+        onPatch({ subtasks: restored, status: was.status, waitingOnClient: was.waitingOnClient, followUpAt: was.followUpAt, due: was.due });
+        setSentNext(null);
+      };
+      pushToast(`Sent. Finished "${cur.title}"; checking in ${formatDue(due)}`, { label: "Undo step changes", run: undo });
+    }
     const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`) ?? list.find((x) => !x.done && x.finishWhen === "reply");
     if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id, via: channel });
     if (checkIn?.addedFor === `checkin:${cur.id}`) setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
@@ -2851,6 +2871,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           return;
         }
         if (finishTalkStep("email", email.followUpDate)) return;
+        pushToast("Email sent");
         // Sent and waiting on them: the follow up date is when they get a
         // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
         // A due date inside that window already brings it back: no follow up then.
