@@ -1824,12 +1824,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const k = sentReviews(sub)[0];
     if (!k || sub.done) return null;
     const sent = followUpsLine(sub.followUps);
+    // The two answers are the choices; a reminder is one line under them,
+    // with the follow ups sent so far (Derek, 2026-10-13).
     return (
-      <NextChoices intro={`Still waiting? Send a reminder. Heard back by phone or email? Mark what ${firstName} said.${sent ? ` ${sent}.` : ""}`} choices={[
-        { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
-        { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
-        ...(hasMessaging && messageDest?.email ? [{ label: "Send a reminder", says: `An email nudging ${firstName} to look. This step keeps waiting.`, onClick: () => remindStep(sub) }] : []),
-      ]} />
+      <div className="flex flex-col gap-2">
+        <NextChoices intro={`Heard back by phone or email? Mark what ${firstName} said.`} choices={[
+          { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
+          { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
+        ]} />
+        {hasMessaging && messageDest?.email && (
+          <p className="text-[16px] text-muted">Still waiting?{" "}
+            <button onClick={() => remindStep(sub)} title={`An email nudging ${firstName} to look. This step keeps waiting.`} className="font-semibold text-accent underline underline-offset-4 hover:opacity-80">Send a reminder</button>
+          </p>
+        )}
+        {sent && <p className="text-[16px] text-muted">{sent}</p>}
+      </div>
     );
   };
   // Whose move a step is, as a colour and one sentence (Derek, 2026-10-13:
