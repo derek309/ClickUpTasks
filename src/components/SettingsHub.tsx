@@ -137,6 +137,14 @@ export default function SettingsHub({
             </button>
           );
         })}
+        {/* The AI proxy's own admin page (Derek, 2026-10-14), for admins; it
+            has its own sign in. Opens in a new tab. */}
+        {canAdmin && (
+          <a href="https://clickuplocal-ai-proxy.clickuplocal.workers.dev/admin" target="_blank" rel="noopener noreferrer"
+            className="mt-2 flex items-center gap-2.5 rounded-[5px] border-t px-2.5 pb-2 pt-3 text-left text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
+            <I.link className="h-4 w-4 shrink-0" /> AI proxy <span aria-hidden className="ml-auto">↗</span>
+          </a>
+        )}
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[880px] px-6 pb-16 pt-8">
