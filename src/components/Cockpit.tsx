@@ -113,6 +113,9 @@ import { pickThreeTimes } from "@/lib/improveText";
 // Read when a click needs the time, never while rendering.
 const nowMs = () => Date.now();
 import { FolderRail } from "./cockpit/FolderRail";
+import { QueueList } from "./cockpit/QueueList";
+import { useQueue } from "./cockpit/useQueue";
+import { queueSettings, upNextIds } from "../../mcp/queue.mjs";
 import InboxView from "./cockpit/inbox/InboxView";
 import { CalendarView } from "./cockpit/CalendarBoard";
 import { useInbox } from "./cockpit/inbox/useInbox";
@@ -1229,6 +1232,19 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     () => (canAdmin ? tasks : tasks.filter((t) => isOnPlateOf(t, me.id))),
     [tasks, canAdmin, me.id]
   );
+  // Tasks waiting in line on a queue list (Up next, mcp/queue.mjs): they show
+  // on their own list only, never on All tasks, a client's All or My work,
+  // unless they need you (a client wrote on one). Now and Waiting show as usual.
+  const queuedUpNext = useMemo(() => {
+    const ids = new Set<string>();
+    const queues = projects.filter((p) => queueSettings(p.queue));
+    if (!queues.length) return ids;
+    const byList = new Map<string, Task[]>(queues.map((p) => [p.id, []]));
+    for (const t of tasks) byList.get(t.projectId)?.push(t);
+    for (const p of queues) for (const id of upNextIds(byList.get(p.id) ?? [], queueSettings(p.queue)!)) ids.add(id);
+    return ids;
+  }, [tasks, projects]);
+  const inLineOnly = (t: Task) => queuedUpNext.has(t.id) && !needsYou(t, me.id);
   // What the All Tasks row in the sidebar counts: your own open work.
   //
   // It counted every task an admin could see, which is every task across
@@ -1242,8 +1258,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that is exactly why the two are separate stages — so an approved task is
   // still something you owe. Done is the only stage that is not.
   const openTaskCount = useMemo(
-    () => tasks.filter((t) => isOnPlateOf(t, me.id) && t.status !== "done").length,
-    [tasks, me.id],
+    () => tasks.filter((t) => isOnPlateOf(t, me.id) && t.status !== "done" && !inLineOnly(t)).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, me.id, queuedUpNext],
   );
   // Map indices for scopedTasks/clients/projects — every lookup helper below
   // (clientById, clientTaskCount, clientNeedsReview, hasOpenConversationTask,
@@ -1704,9 +1721,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // and project pickers keep the "cl_" rule: a sub account is not a client
   // there. This is a list of work, and those are.
   const baseTasks = useMemo(
-    () => scopedTasks.filter((t) => t.clientId !== PERSONAL_CLIENT_ID && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope))),
+    () => scopedTasks.filter((t) => t.clientId !== PERSONAL_CLIENT_ID && (activeClient === "all" || t.clientId === activeClient) && (!activeProject || t.projectId === activeProject) && (!activeFolder || projectById(t.projectId)?.folderId === activeFolder) && (activeClient !== "all" || allTasksScope === "all" || isOnPlateOf(t, allTasksScope === "mine" ? me.id : allTasksScope))
+      // Waiting in line on a queue: only on that list.
+      && (activeProject === t.projectId || !inLineOnly(t))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id]
+    [scopedTasks, activeClient, activeProject, activeFolder, projects, allTasksScope, me.id, queuedUpNext]
   );
 
   // Client/project-wide equivalent of TaskDrawer's per-task copyForClaude —
@@ -1829,8 +1848,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // nobody's. "3 tasks" on a client whose three tasks all belong to a
   // teammate is a number about someone else's day (Derek, 2026-09-28: "when I
   // look at the tasks nothing is for me").
-  const myClientTaskCount = (clientId: string) => (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser)).length;
-  const myProjectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser)).length;
+  const myClientTaskCount = (clientId: string) => (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser) && !inLineOnly(t)).length;
+  const myProjectTaskCount = (projectId: string) => (scopedTasksByProjectId.get(projectId) ?? []).filter((t) => t.status !== "done" && (!t.assigneeId || t.assigneeId === myWorkUser) && !inLineOnly(t)).length;
   // Open tasks bucketed by client, for the Clients directory's Tasks
   // column. One pass instead of a filter per row.
   // Not memoized: useMemo over a bucketing loop trips
@@ -2227,6 +2246,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { restoreClient, restoreProjectFromTrash, restoreTaskFromTrash, purgeClient, purgeProject, purgeTask, renameClient, deleteClient, addClientContact, addRemoteContact, mergeClients } = useClientAdmin({ subAccounts, setContacts, clients, setActiveClient, setMyWork, setPersonalView, setInboxView, setDmUserId, setSettingsView, setDirView, setAddClientOpen, pushToast, clientById, setClients, markOwnClientWrite, tasks, projects, setProjects, setTasks, me, setPromptDialog, setConfirmDialog, setClientLinks, setClientNotes, activeClient, contactById, setMessages, setFolders, setVaultFolders, setNotifications, syncMarks, olderTasksLoaded, resetConversations });
   const { saveTemplate, deleteTemplate, useTemplateAsTask, applyTemplate } = useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks });
   const { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
+  const { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue } = useQueue({ projectById, setProjects, tasksRef, setTasks, me, notify, pushToast });
   const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   const { createTasksFromDump } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles });
   const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
@@ -3290,7 +3310,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
                 onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
                 onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
-                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onToggleListHidden={toggleProjectHidden} onMoveList={moveListToFolder}
+                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onToggleListHidden={toggleProjectHidden} onToggleListQueue={toggleQueue} onMoveList={moveListToFolder}
                 onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
                 trailing={<span className="hidden items-center gap-1.5 sm:inline-flex">{mineToggle}{viewControl}</span>} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
             );
@@ -3300,6 +3320,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
               onReorderStages={(ids) => reorderStages(activeProject, ids)} />
+          ) : activeProject && queueSettings(projectById(activeProject)?.queue) ? (
+            // A queue list: its line instead of the grouped list (mcp/queue.mjs).
+            <QueueList name={projectById(activeProject)!.name} tasks={baseTasks} settings={queueSettings(projectById(activeProject)!.queue)!}
+              meId={me.id} clientFirst={(clientById(activeClient)?.name ?? "").trim().split(/\s+/)[0] || "The client"} today={TODAY}
+              onOpen={setOpenTaskId} onMove={(id, beforeId, reason) => moveInQueue(activeProject, id, beforeId, reason)}
+              onMoveUp={(id, reason) => moveUpInQueue(activeProject, id, reason)} onSettings={(q) => setQueueSettings(activeProject, q)} />
           ) : (
             <>
             {activeFilterBar}

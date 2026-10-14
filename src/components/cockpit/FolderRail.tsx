@@ -16,7 +16,7 @@ const FOLDERS_ON = false;
 export function FolderRail({
   folders, lists, activeFolder, activeProject, canAdmin, starredLists, onToggleStarList,
   onSelectAll, onCopyAllForClaude, onSelectFolder, onSelectList,
-  onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onToggleListHidden, onDeleteList, onMoveList,
+  onCreateFolder, onCreateList, onRenameFolder, onDeleteFolder, onRenameList, onToggleListHidden, onToggleListQueue, onDeleteList, onMoveList,
   onReorderFolders, onReorderLists, onAddTask, trailing, onCopyListForClaude }: {
   folders: Folder[];           // this client's folders, in order
   lists: Project[];            // this client's lists (projects), all of them
@@ -35,6 +35,9 @@ export function FolderRail({
   onRenameList: (id: string) => void;
   /** Private to the team: the list (and its tasks) kept off the client's portal. */
   onToggleListHidden?: (id: string) => void;
+  /** The list's Queue switch (mcp/queue.mjs). Offered once the database has
+   *  the queue column (a list's queue is then null or set, never undefined). */
+  onToggleListQueue?: (id: string) => void;
   onDeleteList: (id: string) => void;
   onMoveList: (id: string, folderId: string | null) => void;
   onReorderFolders: (orderedIds: string[]) => void;      // drag-sort folders (B5)
@@ -152,6 +155,17 @@ export function FolderRail({
           {item(starredLists.has(l.id) ? "☆ Unpin from sidebar" : "★ Pin to sidebar", () => onToggleStarList(l.id))}
           {item("Rename list", () => onRenameList(l.id))}
           {onToggleListHidden && item(l.hiddenFromClient ? "👁 Show in client portal" : "🔒 Private to the team (hide from client)", () => onToggleListHidden(l.id))}
+          {onToggleListQueue && l.queue !== undefined && (
+            // A switch, not a command: one task at a time, the rest in line.
+            <button role="switch" aria-checked={!!l.queue} onClick={() => { setMenu(null); onToggleListQueue(l.id); }}
+              title={l.queue ? "Turn the queue off: every date it saved comes back" : "One at a time: the rest wait in line with no date"}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+              <span aria-hidden className={`relative inline-block h-4 w-7 shrink-0 rounded-full transition ${l.queue ? "bg-accent" : "bg-border"}`}>
+                <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${l.queue ? "left-3.5" : "left-0.5"}`} />
+              </span>
+              Queue
+            </button>
+          )}
           {item("Delete list", () => onDeleteList(l.id), true)}
         </>,
         { dim: dragList === l.id, onDragStart: () => setDragList(l.id), onDrop: () => dropList(l.id) },

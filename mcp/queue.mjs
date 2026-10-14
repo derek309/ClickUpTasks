@@ -113,7 +113,7 @@ const byLine = (a, b) => (a.queuePos ?? 0) - (b.queuePos ?? 0) || String(a.creat
 
 /** The open tasks in line order: placed ones by their place, then the ones
  *  not placed yet, each where its priority puts it, oldest first.
- *  @param {QTask[]} tasks @param {QueueSettings} settings @returns {QTask[]} */
+ *  @template {QTask} T @param {T[]} tasks @param {QueueSettings} settings @returns {T[]} */
 export function queueOrder(tasks, settings) {
   const open = tasks.filter((t) => t.status !== "done");
   const line = open.filter((t) => t.queuePos != null).sort(byLine);
@@ -142,7 +142,7 @@ export function entryIndex(line, settings, priority) {
   return at;
 }
 
-/** @param {QTask[]} line @param {QueueSettings} settings */
+/** @template {QTask} T @param {T[]} line @param {QueueSettings} settings @returns {{ now: T[]; waiting: T[]; upNext: T[] }} */
 function splitLine(line, settings) {
   const waiting = line.filter(isQueueWaiting);
   const free = line.filter((t) => !isQueueWaiting(t));
@@ -165,7 +165,8 @@ export function ordinal(n) {
 
 /** The list as the queue shows it: Now, Waiting, Up next ("2nd", "3rd"...,
  *  counted after the Now tasks) and done, newest finished first.
- *  @param {QTask[]} tasks @param {QueueSettings} settings */
+ *  @template {QTask} T @param {T[]} tasks @param {QueueSettings} settings
+ *  @returns {{ now: T[]; waiting: T[]; done: T[]; upNext: { task: T; place: number; label: string }[] }} */
 export function groupQueue(tasks, settings) {
   const line = queueOrder(tasks, settings);
   const { now, waiting, upNext } = splitLine(line, settings);
