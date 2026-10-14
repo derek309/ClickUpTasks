@@ -8,7 +8,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep,
-  isHandoffStep, isLongTitle, ownNewSteps, planSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
+  isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -372,23 +372,34 @@ export async function tickTodo(taskId: string, ref: string, done: boolean, actor
 /** A draft email written from outside gets its own step (Derek, 2026-10-12:
  *  "sending an email kind of needs its own step"): "Email <client>: <subject>",
  *  made the current step. It goes on an existing step instead when one is
- *  named, when the current step is already about emailing them, or when the
- *  plan is asking what's next (that step takes the email's name). A step
- *  already holding a draft keeps it. Tasks without steps are left alone.
- *  The step's title, or null. */
-export async function holdDraftOnStep(taskId: string, subject: string, stepRef?: string): Promise<string | null> {
+ *  named (moved there from any step holding it: replace with a step, seen
+ *  2026-10-12 on t_mv5ma65g8), when the current step is already about emailing
+ *  them, or when the plan is asking what's next (that step takes the email's
+ *  name). With no step named, a step already holding a draft keeps it. A named
+ *  step that matches none or several changes nothing and says so. Tasks without
+ *  steps are left alone. The step's title (on), or why it stayed (note). */
+export async function holdDraftOnStep(taskId: string, subject: string, stepRef?: string): Promise<{ on: string | null; note?: string }> {
   let on: string | null = null;
+  let note: string | undefined;
   await rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
     const plan = planSteps(list);
     if (!plan.length) return null;
-    const held = stepHolding(list, "email");
-    if (held) { on = held.title; return null; }
-    const ref = stepRef?.trim();
-    const named = ref ? plan.find((x) => x.id === ref) ?? (() => { const h = plan.filter((x) => x.title.toLowerCase().includes(ref.toLowerCase())); return h.length === 1 ? h[0] : null; })() : null;
-    if (named) { on = named.title; return holdOnStep(list, named.id, "email"); }
-    const cur = currentStep(list);
     const title = `Email ${first}${subject.trim() ? `: ${subject.trim().slice(0, 80)}` : ""}`;
+    const held = stepHolding(list, "email");
+    const ref = stepRef?.trim();
+    if (ref) {
+      const named = matchStep(plan, ref);
+      if (typeof named === "string") { note = named; on = held?.title ?? null; return null; }
+      if (asksWhatsNext(named)) {
+        on = title;
+        return holdOnStep(list.map((x) => (x.id === named.id ? { ...x, title, makes: "email" as const } : x)), named.id, "email");
+      }
+      on = named.title;
+      return held?.id === named.id ? null : holdOnStep(list, named.id, "email");
+    }
+    if (held) { on = held.title; return null; }
+    const cur = currentStep(list);
     if (cur && !cur.onClient && (cur.makes === "email" || /^(email|let) /i.test(cur.title))) { on = cur.title; return holdOnStep(list, cur.id, "email"); }
     if (cur && asksWhatsNext(cur)) {
       on = title;
@@ -404,7 +415,35 @@ export async function holdDraftOnStep(taskId: string, subject: string, stepRef?:
     on = title;
     return holdOnStep(next, id, "email");
   });
-  return on;
+  return { on, note };
+}
+
+/** Takes a task's draft email off whichever step holds it (the draft itself
+ *  is cleared by the caller). A step made only for the email and not yet
+ *  done goes with it. Whether any step changed. */
+export async function releaseDraftFromSteps(taskId: string): Promise<boolean> {
+  return rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    const held = stepHolding(list, "email");
+    if (!held) return null;
+    const madeForIt = !held.done && !held.addedFor && held.makes === "email" && /^Email /.test(held.title) && !(held.todos ?? []).length && (held.holds ?? []).length === 1;
+    return madeForIt ? list.filter((x) => x.id !== held.id) : releaseFromSteps(list, "email");
+  });
+}
+
+/** A step by id, then by its whole title, then by a piece of its title that
+ *  only one step has ("what's next?" finds "Rebuild the page: what's next?",
+ *  not "Rebuild the page"). Else why not, as a sentence. */
+export function matchStep<T extends Pick<Subtask, "id" | "title">>(plan: T[], ref: string): T | string {
+  const want = ref.trim().toLowerCase();
+  const byId = plan.find((x) => x.id === ref.trim());
+  if (byId) return byId;
+  const whole = plan.filter((x) => x.title.trim().toLowerCase() === want);
+  if (whole.length === 1) return whole[0];
+  const part = plan.filter((x) => x.title.toLowerCase().includes(want));
+  if (part.length === 1) return part[0];
+  const list = (whole.length ? whole : part).map((x) => `"${x.title.slice(0, 60)}" [${x.id}]`).join("; ");
+  return part.length ? `"${ref}" matches ${part.length} steps, so the draft was not moved. Use the id: ${list}.` : `No step matching "${ref}", so the draft was not moved. get_task lists the steps.`;
 }
 
 /** A client's email on a task becomes a step to answer it (Derek, 2026-10-12).

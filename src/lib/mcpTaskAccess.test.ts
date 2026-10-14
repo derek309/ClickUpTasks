@@ -88,6 +88,7 @@ describe("what the MCP tools may see", () => {
       ["set_task_status", { id: "t_theirs", status: "done" }],
       ["add_comment", { id: "t_theirs", text: "hi" }],
       ["draft_email", { id: "t_theirs", subject: "s", body: "b" }],
+      ["delete_draft_email", { id: "t_theirs" }],
       ["check_item", { id: "t_theirs", item: "x" }],
       ["add_checklist_items", { id: "t_theirs", items: ["x"] }],
       ["delete_task", { id: "t_theirs" }],

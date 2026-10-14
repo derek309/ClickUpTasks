@@ -823,8 +823,21 @@ export function createServer(opts = {}) {
       if (!saved.length) return { content: [{ type: "text", text: `${id} already has a draft email waiting. Pass replace: true to swap it.` }] };
       // On a task with steps, the email has a step (Derek, 2026-10-12: "sending
       // an email kind of needs its own step"); once sent it stays there as Sent.
-      const on = opts.services?.holdDraftOnStep ? await opts.services.holdDraftOnStep(id, subject, step).catch(() => null) : null;
-      return { content: [{ type: "text", text: `Draft email saved on ${id}${on ? `, on the step "${on}"` : ""} — waiting for review in the app.` }] };
+      // With replace, a named step moves the draft there (2026-10-12, t_mv5ma65g8).
+      const placed = opts.services?.holdDraftOnStep ? await opts.services.holdDraftOnStep(id, subject, step).catch(() => null) : null;
+      const on = placed?.on;
+      return { content: [{ type: "text", text: `Draft email saved on ${id}${on ? `, on the step "${on}"` : ""} — waiting for review in the app.${placed?.note ? ` ${placed.note}` : ""}` }] };
+    });
+
+  server.tool("delete_draft_email",
+    "Delete the draft email waiting on a task (the one draft_email wrote) and take it off its step; a step made only for that email goes too. Nothing is sent. To move a draft to another step instead, call draft_email with replace: true and step. For Inbox drafts use delete_draft.",
+    { id: z.string() },
+    async ({ id }) => {
+      if (!await loadTask(id, "id")) return noTask(id);
+      const was = await sb(`tasks?id=eq.${enc(id)}${LIVE}&draft_email=not.is.null`, "PATCH", { draft_email: null, updated_by: null });
+      if (!was.length) return { content: [{ type: "text", text: `${id} has no draft email waiting.` }] };
+      const moved = opts.services?.releaseDraftFromSteps ? await opts.services.releaseDraftFromSteps(id).catch(() => false) : false;
+      return { content: [{ type: "text", text: `Deleted the draft email on ${id}${moved ? " and took it off its step" : ""}. Nothing was sent.` }] };
     });
 
   // Reading an Inbox conversation (2026-10-09: a Claude chat handed an Inbox

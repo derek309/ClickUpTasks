@@ -16,7 +16,7 @@ app). The tool definitions live in `core.mjs`, shared by two transports:
 ## Tools
 
 Tasks: `list_my_tasks`, `list_client_tasks`, `get_task`, `set_project_instructions`, `create_task`,
-`update_task`, `delete_task`, `set_task_status`, `add_comment`, `draft_email`,
+`update_task`, `delete_task`, `set_task_status`, `add_comment`, `draft_email`, `delete_draft_email`,
 `check_item`, `check_todo` (hosted only), `send_to_website` (hosted only), `add_checklist_items`, `list_members`, `list_clients`, `add_client`,
 `list_projects`, `list_notes`, `add_note`, `list_links`, `get_client_link`,
 `get_client_overview`.
@@ -29,7 +29,10 @@ the next step starts, the status follows, after the last step a "what's
 next?" step), `check_todo` ticks a step's to-do and resolves the client's
 comment it came from, and `draft_email` gives the email a step of its own
 ("Email <client>: <subject>", current) unless `step` names one or the current
-step is already an email step. The stdio server only ticks.
+step is already an email step. With `replace` and `step` it moves a waiting
+draft to that step (a step id, its whole title, or a piece only one title
+has). `delete_draft_email` clears the task's draft and takes it off its
+step. The stdio server only ticks.
 
 Inbox: `draft_message` (a new email or text in someone's Inbox, Drafts),
 `get_email_thread` (read one conversation from an Inbox link like

@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, stepsOnMeetingTranscript } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, releaseDraftFromSteps, stepsOnMeetingTranscript } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -174,12 +174,52 @@ describe("steps added on the server", () => {
   });
 
   it("a drafted email gets its own step right after the current one", async () => {
-    expect(await holdDraftOnStep("t1", "Your newsletter")).toBe("Email Brian: Your newsletter");
+    expect((await holdDraftOnStep("t1", "Your newsletter")).on).toBe("Email Brian: Your newsletter");
     expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Email Brian: Your newsletter", "Schedule it"]);
     expect(steps()[1].holds).toEqual(["email"]);
     // A second draft keeps to the step that holds one.
-    expect(await holdDraftOnStep("t1", "Other")).toBe("Email Brian: Your newsletter");
+    expect((await holdDraftOnStep("t1", "Other")).on).toBe("Email Brian: Your newsletter");
     expect(steps()).toHaveLength(3);
+  });
+
+  // Seen 2026-10-12 on t_mv5ma65g8: replace with a step left the draft on step 1.
+  it("a named step takes a draft another step holds, by id or by a piece of its title", async () => {
+    setup([
+      { id: "a", title: "Rebuild the page", done: true, holds: ["email"] },
+      { id: "w", title: "Rebuild the page: what's next?", done: false, addedFor: "next:a" },
+    ]);
+    expect((await holdDraftOnStep("t1", "Done", "what's next?")).on).toBe("Email Brian: Done");
+    expect(steps()[0].holds).toBeUndefined();
+    expect(steps()[1]).toMatchObject({ id: "w", title: "Email Brian: Done", holds: ["email"] });
+    // Back by id, and by a whole title that another title also contains.
+    expect((await holdDraftOnStep("t1", "Done", "a")).on).toBe("Rebuild the page");
+    expect(steps()[0].holds).toEqual(["email"]);
+    expect(steps()[1].holds).toBeUndefined();
+    expect((await holdDraftOnStep("t1", "Done", "email brian: done")).on).toBe("Email Brian: Done");
+    expect((await holdDraftOnStep("t1", "Done", "rebuild the page")).on).toBe("Rebuild the page");
+  });
+
+  it("a named step that matches none or several leaves the draft and says why", async () => {
+    setup([
+      { id: "a", title: "Rebuild the page", done: false, holds: ["email"] },
+      { id: "b", title: "Rebuild the menu", done: false },
+    ]);
+    const none = await holdDraftOnStep("t1", "Hi", "nothing like it");
+    expect(none).toEqual({ on: "Rebuild the page", note: expect.stringContaining("No step matching") });
+    const two = await holdDraftOnStep("t1", "Hi", "rebuild");
+    expect(two.note).toContain("matches 2 steps");
+    expect(steps()[0].holds).toEqual(["email"]);
+  });
+
+  it("a deleted draft comes off its step, and a step made only for it goes", async () => {
+    await holdDraftOnStep("t1", "Your newsletter");
+    expect(await releaseDraftFromSteps("t1")).toBe(true);
+    expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Schedule it"]);
+    setup([{ id: "a", title: "Write the newsletter", done: false, holds: ["email"] }, { id: "b", title: "Schedule it", done: false }]);
+    expect(await releaseDraftFromSteps("t1")).toBe(true);
+    expect(steps()).toHaveLength(2);
+    expect(steps()[0].holds).toBeUndefined();
+    expect(await releaseDraftFromSteps("t1")).toBe(false);
   });
 
   it("the meeting's transcript ticks its step and the meeting, holding the file", async () => {
