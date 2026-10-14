@@ -80,7 +80,7 @@ export function MoveMeeting({ event, first, meId, pushToast, defaultCalendarId, 
 }
 
 /** A ⋯ (or the given label) with Move and Cancel for one meeting, and Book when given. */
-export function MeetingMenu({ event, first, meId, pushToast, onBook, label, triggerClassName, title, defaultCalendarId, onSetDefault }: {
+export function MeetingMenu({ event, first, meId, pushToast, onBook, label, triggerClassName, title, defaultCalendarId, onSetDefault, openNonce = 0 }: {
   event: CalendarEvent;
   first: string;
   meId: string;
@@ -92,6 +92,9 @@ export function MeetingMenu({ event, first, meId, pushToast, onBook, label, trig
   title?: string;
   defaultCalendarId?: string | null;
   onSetDefault?: (id: string | null) => void;
+  /** Opens the menu from elsewhere when it changes (the task page's ⋮ menu):
+   *  the time it was asked, Date.now() in the click. */
+  openNonce?: number;
 }) {
   const [open, setOpen] = useState(false);
   // When the menu opened: a meeting that has started by then can't move.
@@ -99,6 +102,12 @@ export function MeetingMenu({ event, first, meId, pushToast, onBook, label, trig
   const [confirm, setConfirm] = useState(false);
   const [moving, setMoving] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Asked to open from elsewhere: opened as a click on it would.
+  const [seenNonce, setSeenNonce] = useState(openNonce);
+  if (openNonce !== seenNonce) {
+    setSeenNonce(openNonce);
+    if (openNonce) { setOpen(true); setOpenedAt(openNonce); }
+  }
   const close = () => { setOpen(false); setConfirm(false); };
   useEffect(() => {
     if (!open) return;

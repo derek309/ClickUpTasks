@@ -18,7 +18,7 @@ import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
 import { ActionDock } from "./ActionDock";
-import { ActionMenu, PhonePage } from "./ActionMenu";
+import { ActionMenu, PhonePage, type ActionMenuItem } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
@@ -55,7 +55,7 @@ import { type FileKind } from "@/lib/reviewKinds";
 import { QuickLinksBar } from "./ClientLinks";
 import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
-import { MeetingMenu, meetingWhen, useNextMeeting } from "./MeetingMenu";
+import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
@@ -3672,7 +3672,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The dock opens in Chat, Text or Call from here; n changes to ask again.
   const [dockRequest, setDockRequest] = useState<{ mode: "note" | "chat" | "sms" | "call" | "delegate"; text?: string; n: number } | null>(null);
   const askDock = (mode: "note" | "chat" | "sms" | "call" | "delegate", text?: string) => setDockRequest((r) => ({ mode, text, n: (r?.n ?? 0) + 1 }));
-  const topIcon = "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-accent transition hover:bg-background disabled:cursor-not-allowed disabled:text-muted disabled:opacity-50";
   const popover = (children: React.ReactNode, wide = false) => (<>
     <div className="fixed inset-0 z-30" onClick={() => setTopPanel(null)} />
     <div className={`absolute left-0 top-full z-40 mt-1 ${wide ? "w-[min(380px,calc(100vw-32px))]" : "w-[min(320px,calc(100vw-32px))]"} rounded-lg border bg-surface text-left text-[16px] text-foreground shadow-lg`}>{children}</div>
@@ -3729,89 +3728,113 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </div>);
   const phone = messageDest?.phone && mayContactClient ? messageDest.phone : null;
   const canBook = mayContactClient && !!messageDest?.ghlContactId;
-  // GHL and Client link, then the ways to reach the client. Chat and Email
-  // always stand beside the phone menu, never behind it: the team wants chat
-  // and email used more than calls and texts (Derek, 2026-10-11).
-  const clientActions = isPersonal ? null : (
-    <div role="group" aria-label="Client actions" className="flex flex-wrap items-center gap-0.5 sm:border-l sm:pl-2.5">
-      {ghlContactUrl && mayContactClient && (
-        <a href={ghlContactUrl} target="_blank" rel="noopener noreferrer" title="Open in GHL" aria-label="Open in GHL" className={topIcon}><I.bolt className="h-[18px] w-[18px]" /></a>
-      )}
-      {onCopyClientLink && <button onClick={onCopyClientLink} title="Copy the client portal link (opens on this task)" aria-label="Copy the client portal link" className={topIcon}><I.link className="h-5 w-5" /></button>}
-      {hasMessaging && (<>
-        <span aria-hidden className="mx-1.5 h-5 w-px bg-border" />
-        <button onClick={() => askDock("chat")} title="Chat" aria-label="Chat" className={topIcon}><I.chatBubbles className="h-5 w-5" /></button>
-        <button onClick={() => startDraftEmail()} disabled={!messageDest?.email} title={messageDest?.email ? `Email ${messageDest.email}` : "No email on file"} aria-label="Email" className={topIcon}><I.mail className="h-5 w-5" /></button>
-        <ActionMenu title={phone ? "Call or text" : "No phone on file"} triggerClassName="inline-flex h-10 shrink-0 items-center gap-0.5 rounded-lg pl-2.5 pr-1 text-accent transition hover:bg-background"
-          label={<><I.phone className="h-[18px] w-[18px]" /><I.chevron className="h-3.5 w-3.5 -rotate-90" /></>}
-          items={[
-            { label: "Call", onClick: () => askDock("call"), disabled: !phone },
-            { label: "Text", onClick: () => askDock("sms"), disabled: !phone },
-          ]} />
-        {nextMeeting && mayContactClient ? (
-          <MeetingMenu event={nextMeeting} first={(messageDest?.name || client.name).trim().split(/\s+/)[0] || "them"} meId={meId} pushToast={(m) => pushToast(m)}
-            onBook={canBook ? () => setBookOpen(true) : undefined} title={`Next meeting ${meetingWhen(nextMeeting.start)}: move or cancel`}
-            triggerClassName="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-accent transition hover:bg-background"
-            label={<><I.calendar className="h-5 w-5" /><span className="text-[16px] font-semibold">{new Date(nextMeeting.start).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" })}</span></>} />
-        ) : canBook && <button onClick={() => setBookOpen(true)} title="Book" aria-label="Book" className={topIcon}><I.calendar className="h-5 w-5" /></button>}
-      </>)}
-    </div>
-  );
-  const topLeft = (<>
-    <nav aria-label="Where this task lives" className="flex min-w-0 max-w-full items-center gap-1.5">
-      <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: client.color }} />
-      <span className="relative min-w-0">
-        <button onClick={() => setTopPanel((t) => (t === "client" ? null : "client"))} aria-expanded={topPanel === "client"} title={`About ${client.name}`}
-          className="block max-w-[24rem] truncate rounded px-1 font-semibold text-foreground hover:bg-background hover:underline">{client.name}</button>
-        {topPanel === "client" && clientPanel}
-      </span>
-      <span className="shrink-0">/</span>
-      <span className="min-w-0 truncate">{project.name}</span>
-      <span className="relative shrink-0">
-        <button onClick={() => setTopPanel((t) => (t === "move" ? null : "move"))} aria-expanded={topPanel === "move"} title="Move to another client or list" aria-label="Move to another client or list"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition hover:bg-background hover:text-foreground"><I.chevron className="h-4 w-4 -rotate-90" /></button>
+  // ── One top bar (Derek, 2026-10-14): "← client / list", then the step
+  // through the list, Copy for Claude, ⋮ and ×. The arrow and the client go
+  // back; the list name opens the move picker. The client icon row that sat
+  // under it (GoHighLevel, portal link, chat, email, phone, calendar) is in
+  // the ⋮ menu now, named, with the same handlers. One line on a phone: the
+  // client and list names shorten to fit.
+  const [meetingNonce, setMeetingNonce] = useState(0);
+  const reach = !isPersonal && hasMessaging;
+  const nextStepForClaude = activeStep && activeStep.assigneeId !== CLAUDE_ID ? activeStep : null;
+  const menuItems: (ActionMenuItem | false | null | undefined)[] = [
+    // Reaching the client.
+    reach && !!messageDest?.email && { label: `Email ${firstName}`, onClick: () => startDraftEmail(), divider: true },
+    reach && !!phone && { label: `Text ${firstName}`, onClick: () => askDock("sms") },
+    reach && !!phone && { label: `Call ${firstName}`, onClick: () => askDock("call") },
+    reach && { label: `Chat with ${firstName}`, onClick: () => askDock("chat") },
+    reach && nextMeeting && mayContactClient
+      ? { label: `Meeting ${new Date(nextMeeting.start).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" })}: move or cancel`, onClick: () => setMeetingNonce(Date.now()) }
+      : reach && canBook && { label: "Book a meeting", onClick: () => setBookOpen(true) },
+    // Links and where the client lives.
+    { label: "Copy link to task", onClick: onCopyLink, divider: true },
+    !isPersonal && onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
+    !isPersonal && !!clientPortalUrl && { label: "Open client portal", onClick: () => window.open(clientPortalUrl!, "_blank", "noopener,noreferrer") },
+    !isPersonal && !!ghlContactUrl && mayContactClient && { label: "Open in GoHighLevel", onClick: () => window.open(ghlContactUrl!, "_blank", "noopener,noreferrer") },
+    !isPersonal && { label: `About ${client.name}`, onClick: () => setTopPanel("client") },
+    // The task itself.
+    nextStepForClaude && { label: "Give to Claude", onClick: () => toClaude(nextStepForClaude.id), divider: true },
+    { label: "Labels", onClick: () => setLabelOpen(true), divider: !nextStepForClaude },
+    hideItem,
+    // In a queue list: its due date as a deadline (queues, 2026-10-14).
+    deadlineItem,
+    { label: "Duplicate here", onClick: () => onDuplicate() },
+    { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
+    task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
+    { label: full ? "Back to the side panel" : "Open full page", onClick: onToggleFull },
+    { label: "Delete task", onClick: onDelete, danger: true, divider: true },
+  ];
+  const barButton = "inline-flex h-9 w-8 sm:w-9 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
+  const taskBar = (
+    <div className="flex min-w-0 items-center gap-0.5 border-b px-2 py-1.5 text-[16px] text-muted sm:gap-1 sm:px-4 sm:py-2">
+      <nav aria-label="Where this task lives" className="relative flex min-w-0 flex-1 items-center">
+        <button onClick={onClose} title={`Back to ${slideBackLabel || client.name} (Esc)`}
+          className="flex min-w-[4.5rem] shrink items-center gap-1.5 rounded-lg px-1 py-1.5 font-semibold text-foreground hover:bg-background sm:px-1.5">
+          <span aria-hidden className="shrink-0">←</span>
+          <span aria-hidden className="hidden h-2.5 w-2.5 shrink-0 rounded-full sm:block" style={{ background: client.color }} />
+          <span className="min-w-0 truncate">{client.name}</span>
+        </button>
+        <span aria-hidden className="shrink-0">/</span>
+        <span className="flex min-w-[3.5rem] shrink-[3]">
+          <button onClick={() => setTopPanel((t) => (t === "move" ? null : "move"))} aria-expanded={topPanel === "move"} title="Move to another client or list"
+            className="flex min-w-0 items-center gap-0.5 rounded-lg px-1 py-1.5 hover:bg-background hover:text-foreground sm:px-1.5">
+            <span className="min-w-0 truncate">{project.name}</span>
+            <I.chevron className="h-3.5 w-3.5 shrink-0 -rotate-90" />
+          </button>
+        </span>
+        {/* Both open under the bar from its left edge, so neither runs off a phone. */}
         {topPanel === "move" && movePanel}
-      </span>
-    </nav>
-    {clientActions}
-  </>);
-  // Over the Inbox the header is narrow, so the client, list and client
-  // actions sit on their own row under it (2026-10-11, the move arrow there too).
-  const slideContext = <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">{topLeft}</div>;
-  const slideHeader = (
-    <div className="flex items-center gap-1 border-b px-3 py-2 text-[16px] text-muted">
-      <button onClick={onClose} title="Back (Esc)" className="min-w-0 truncate rounded-lg px-2 py-1.5 font-semibold hover:bg-background hover:text-foreground">← {slideBackLabel || "Inbox"}</button>
-      <span className="flex-1" />
+        {topPanel === "client" && clientPanel}
+      </nav>
       {/* Up and down the list it was opened from (j / k work too). */}
       {navTotal > 1 && (
-        <span className="mr-1 flex items-center">
-          <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" aria-label="Previous task" className="rounded-lg p-2 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="rotate-90" /></button>
-          <span className="min-w-[56px] text-center tabular-nums">{navIndex + 1} of {navTotal}</span>
-          <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className="rounded-lg p-2 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="-rotate-90" /></button>
+        <span className="flex shrink-0 items-center">
+          <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" aria-label="Previous task" className={barButton}><I.chevron className="rotate-90" /></button>
+          <span className="text-center tabular-nums sm:min-w-[56px]"><span className="sm:hidden">{navIndex + 1}/{navTotal}</span><span className="hidden sm:inline">{navIndex + 1} of {navTotal}</span></span>
+          <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className={barButton}><I.chevron className="-rotate-90" /></button>
         </span>
       )}
-      <button onClick={onToggleFull} title="Open the task on its own page" className="hidden h-9 items-center sm:inline-flex gap-1.5 rounded-lg px-2.5 font-semibold hover:bg-background hover:text-foreground">⤢<span className="hidden sm:inline"> Open full page</span></button>
-      <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>
-      <div className="relative">
-      <ActionMenu label={<I.dots />} title="More actions" triggerClassName="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground" items={[
-        { label: "Labels", onClick: () => setLabelOpen(true) },
-        { label: "Copy link to task", onClick: onCopyLink },
-        onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
-        hideItem,
-        deadlineItem,
-        { label: "Duplicate here", onClick: () => onDuplicate() },
-        task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
-        { label: "Delete task", onClick: onDelete, danger: true },
-      ]} />
-      {labelPicker}
+      {/* Icon only, so the client and list keep their room; named on hover and in ⋮. */}
+      {slideOver && !full && <button onClick={onToggleFull} title="Open full page" aria-label="Open full page" className={`${barButton} max-sm:hidden text-[18px]`}><span aria-hidden>⤢</span></button>}
+      {/* Copy for Claude is used on most tasks, so it sits out here, one click
+          (Derek, 2026-09-16: "put the little star icon on the outside"). */}
+      <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude" className={`${barButton} text-[18px] text-foreground`}><span aria-hidden>✳</span></button>
+      <div className="relative shrink-0">
+        <ActionMenu sheet label={<I.dots />} title="More actions" triggerClassName={barButton} items={menuItems} />
+        {nextMeeting && mayContactClient && (
+          <MeetingMenu event={nextMeeting} first={firstName} meId={meId} pushToast={(m) => pushToast(m)} openNonce={meetingNonce}
+            onBook={canBook ? () => setBookOpen(true) : undefined} triggerClassName="hidden" />
+        )}
+        {dupOpen && (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setDupOpen(false)} />
+            <div className="absolute right-0 top-full z-40 mt-1 w-80 max-w-[calc(100vw-24px)] rounded-lg border bg-surface p-2 text-left text-foreground shadow-lg">
+              <div className="px-2 pb-1.5 text-[16px] font-semibold">Duplicate into</div>
+              <select value={dupClient} onChange={(e) => setDupClient(e.target.value)}
+                className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none focus:border-accent">
+                {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <div className="max-h-52 overflow-y-auto">
+                {projectsFor(dupClient).length === 0 && <div className="px-2 py-2 text-[16px] text-muted">No lists in this client yet.</div>}
+                {projectsFor(dupClient).map((p) => (
+                  <button key={p.id} onClick={() => { setDupOpen(false); onDuplicate({ clientId: dupClient, projectId: p.id }); }}
+                    disabled={p.id === task.projectId && dupClient === task.clientId}
+                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[16px] hover:bg-background disabled:opacity-40">
+                    {p.name}{p.id === task.projectId && dupClient === task.clientId ? " · current" : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+        {labelPicker}
       </div>
-      <button onClick={onClose} title="Close" aria-label="Close" className="rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground"><I.close /></button>
+      <button onClick={onClose} title="Close" aria-label="Close" className={barButton}><I.close /></button>
     </div>
   );
 
   const mainColumn = (
     <>
-      {slideOver && !full && slideContext}
       {/* A plain title area, as in the mockup (Derek, 2026-10-11: remove the
           client colour tint; the dot in the top bar says whose task it is). */}
       <div>
@@ -3883,67 +3906,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </>
   );
 
-  const iconButton = "rounded-lg p-2 text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
-  const headerBar = (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-5 py-2 text-[16px] text-muted">
-          {topLeft}
-          <div className="ml-auto flex items-center gap-1">
-            {navTotal > 1 && (
-              <div className="mr-1 flex items-center">
-                <button onClick={onPrev} disabled={navIndex <= 0} title="Previous task (k)" aria-label="Previous task" className={iconButton}><I.chevron className="rotate-90" /></button>
-                <span className="min-w-[64px] text-center tabular-nums">{navIndex + 1} of {navTotal}</span>
-                <button onClick={onNext} disabled={navIndex < 0 || navIndex >= navTotal - 1} title="Next task (j)" aria-label="Next task" className={iconButton}><I.chevron className="-rotate-90" /></button>
-              </div>
-            )}
-            {/* Copy for Claude is used on most tasks, so it sits out here, one click
-                (Derek, 2026-09-16: "put the little star icon on the outside"). */}
-            <button onClick={copyForClaude} title="Copy for Claude" aria-label="Copy for Claude"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border text-[18px] leading-none text-foreground transition hover:bg-background">
-              <span aria-hidden>✳</span>
-            </button>
-            {/* The rarer actions, one click in. Five bare icons sat here with
-                Delete right beside Close. */}
-            <div className="relative">
-              <ActionMenu label={<I.dots />} title="More actions" triggerClassName={iconButton} items={[
-                { label: "Labels", onClick: () => setLabelOpen(true) },
-                { label: "Copy link to task", onClick: onCopyLink },
-        onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
-                hideItem,
-                deadlineItem,
-                { label: "Duplicate here", onClick: () => onDuplicate() },
-                { label: "Duplicate into another list", onClick: () => { setDupClient(task.clientId); setDupOpen(true); } },
-                task.priority === "conversation" && { label: "Merge into a task", onClick: onOpenMerge },
-                { label: full ? "Back to the side panel" : "Open full page", onClick: onToggleFull },
-                { label: "Delete task", onClick: onDelete, danger: true },
-              ]} />
-              {dupOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setDupOpen(false)} />
-                  <div className="absolute right-0 top-full z-40 mt-1 w-80 rounded-lg border bg-surface p-2 text-left text-foreground shadow-lg">
-                    <div className="px-2 pb-1.5 text-[16px] font-semibold">Duplicate into</div>
-                    <select value={dupClient} onChange={(e) => setDupClient(e.target.value)}
-                      className="mb-1 w-full rounded-md border bg-background px-2 py-1.5 text-[16px] outline-none focus:border-accent">
-                      {allClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                    <div className="max-h-52 overflow-y-auto">
-                      {projectsFor(dupClient).length === 0 && <div className="px-2 py-2 text-[16px] text-muted">No lists in this client yet.</div>}
-                      {projectsFor(dupClient).map((p) => (
-                        <button key={p.id} onClick={() => { setDupOpen(false); onDuplicate({ clientId: dupClient, projectId: p.id }); }}
-                          disabled={p.id === task.projectId && dupClient === task.clientId}
-                          className="block w-full truncate rounded-md px-2 py-1.5 text-left text-[16px] hover:bg-background disabled:opacity-40">
-                          {p.name}{p.id === task.projectId && dupClient === task.clientId ? " · current" : ""}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-              {labelPicker}
-            </div>
-            <button onClick={onClose} title="Close" aria-label="Close" className={iconButton}><I.close /></button>
-          </div>
-        </div>
-  );
   return (
     <>
       <div className={`fixed inset-0 ${full ? "z-40 bg-black/20" : slideOver ? "z-40 bg-black/30 backdrop-blur-[1.5px]" : "z-10 bg-black/20"}`} onClick={onClose} />
@@ -3954,7 +3916,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <aside onPaste={handlePaste} {...drawerDropProps}
         className={`${full ? "fixed inset-y-0 right-0 left-0 z-50 flex flex-col border-l bg-surface md:left-[var(--drawer-left,0px)]" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
-        <div className="hidden sm:block">{slideOver && !full ? slideHeader : headerBar}</div>
+        <div className="hidden sm:block">{taskBar}</div>
 
         {/* One scroll container and one column, 1280px at most, in every mode
             (task detail redesign, 2026-10-11: the client column is gone). */}
@@ -3962,8 +3924,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {/* All white, no boxed in sheet (Derek, 2026-09-16: "I don't like it
               boxed in so just make it all white"). */}
           <div className="min-w-0 flex-1 pb-32 sm:px-5 sm:pt-5">
-            <div className="sm:hidden">{slideOver && !full ? slideHeader : headerBar}</div>
-            <div className="px-2 pt-3 sm:px-0 sm:pt-0">
+            <div className="sm:hidden">{taskBar}</div>
+            <div className="px-2 sm:px-0">
             <div className="mx-auto w-full max-w-[1280px] px-4 py-4 sm:px-10 sm:py-5">
               {mainColumn}
             </div>

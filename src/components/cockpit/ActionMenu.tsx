@@ -10,7 +10,8 @@ import { quietButton } from "./TaskWorkItem";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { menuPos } from "./ui";
 
-export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean };
+/** divider: a thin line above the item, to group a long menu. */
+export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; divider?: boolean };
 
 /** On a phone a menu opens as a sheet at the bottom of the screen, like the
  *  client page's Contact sheet (2026-10-14): an anchored menu ran off the
@@ -88,12 +89,14 @@ export function ActionMenu({ label, title, items, triggerClassName = quietButton
     if (!open) setPos(menuPos(triggerRef, 220, shown.length * 40 + 14));
     setOpen((o) => !o);
   };
-  const itemButton = (item: ActionMenuItem) => (
-    <button key={item.label} role="menuitem" disabled={item.disabled}
-      onClick={() => { setOpen(false); item.onClick(); }}
-      className={`block w-full rounded-md px-3 py-2 text-left text-[16px] hover:bg-background disabled:opacity-50 ${item.danger ? "text-danger" : ""}`}>
-      {item.label}
-    </button>
+  const itemButton = (item: ActionMenuItem, i: number) => (
+    <div key={item.label} className={item.divider && i > 0 ? "mt-1 border-t pt-1" : undefined}>
+      <button role="menuitem" disabled={item.disabled}
+        onClick={() => { setOpen(false); item.onClick(); }}
+        className={`block w-full rounded-md px-3 py-2 text-left text-[16px] hover:bg-background disabled:opacity-50 ${item.danger ? "text-danger" : ""}`}>
+        {item.label}
+      </button>
+    </div>
   );
   return (
     <div className="relative">
