@@ -1,6 +1,7 @@
 "use client";
 
 import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou } from "@/lib/data";
+import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -2001,7 +2002,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const theirs = t.messages.find((m) => m.direction === "inbound" && m.channel === "email");
     if (theirs) {
       const from = (theirs.peerName ?? t.peerName).replace(/\s*\(via [^)]*\)\s*$/i, "").trim();
-      const made = addReplyStep([], { messageId: theirs.id, from, subject: decodeEntities(theirs.subject ?? t.subject ?? ""), body: clientEmailText(theirs.body ?? "", from).slice(0, 6000), at: theirs.at }, from.split(/\s+/)[0] || first, () => newId("s_"));
+      const made = addReplyStep([], { messageId: theirs.id, from, subject: decodeEntities(theirs.subject ?? t.subject ?? ""), body: clientEmailText(theirs.body ?? "", from).slice(0, 6000), at: theirs.at, fileKey: emailMessageKey({ id: theirs.id, rfc822_message_id: theirs.rfc822MessageId, gmail_message_id: theirs.gmailMessageId }) }, from.split(/\s+/)[0] || first, () => newId("s_"));
       if (made) task.subtasks = made.map((x) => ({ ...x, assigneeId: task.assigneeId ?? undefined }));
     }
     setTasks((ts) => [...ts, task]);

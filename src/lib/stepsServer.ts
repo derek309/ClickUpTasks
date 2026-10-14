@@ -452,7 +452,7 @@ export function matchStep<T extends Pick<Subtask, "id" | "title">>(plan: T[], re
  *  always: linked or added on purpose from the Inbox, so it is a step even on
  *  a task without steps and even when short. Otherwise (it arrived on a thread
  *  already linked) only on a task with steps, and not for a plain "thanks". */
-export async function stepsOnClientEmail(taskId: string, m: { id: string; subject: string | null; body: string; at: string; from: string | null }, always = false): Promise<boolean> {
+export async function stepsOnClientEmail(taskId: string, m: { id: string; subject: string | null; body: string; at: string; from: string | null; fileKey?: string }, always = false): Promise<boolean> {
   const text = clientEmailText(m.body ?? "", m.from);
   if (!always && isJustThanks(text)) return false;
   let status: TaskStatus | null = null;
@@ -460,7 +460,7 @@ export async function stepsOnClientEmail(taskId: string, m: { id: string; subjec
     const list = row.subtasks ?? [];
     if (!always && !planSteps(list).length) return null;
     const who = (m.from ?? "").replace(/\s*\(via [^)]*\)\s*$/i, "").trim().split(/\s+/)[0] || first;
-    const made = addReplyStep(list, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at }, who, () => newId("s_"));
+    const made = addReplyStep(list, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) }, who, () => newId("s_"));
     status = made ? statusForStep(row.status, "in_progress") : null;
     return made;
   }, false, () => (status ? { status } : null));

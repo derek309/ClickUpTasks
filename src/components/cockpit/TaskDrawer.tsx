@@ -40,6 +40,7 @@ let handoffFromUrl: string | null = typeof window === "undefined" ? null : new U
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
+import { filesOfEmail } from "@/lib/emailFiles";
 import { ClientWebsite } from "./ClientWebsite";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { TaskBrief } from "./TaskBrief";
@@ -3184,13 +3185,35 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             }} />
         )}
         {/* The client's email this step answers; Reply drafts the answer on it. */}
-        {emails.map((e) => (
-          <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done}
-            onReply={hasMessaging ? () => {
-              startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
-              onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
-            } : undefined} />
-        ))}
+        {emails.map((e) => {
+          // Its files, as they open in Links and files: a picture as itself,
+          // anything else by name and size (Derek, 2026-10-13).
+          const files = filesOfEmail(e, task.attachments, messages?.find((m) => m.id === e.messageId));
+          return (
+            <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done}
+              files={files.length ? (
+                <div className="flex flex-wrap items-start gap-2">
+                  {files.map((a) => a.kind === "image" && a.path && attImageUrls[a.path] ? (
+                    <button key={a.id} onClick={() => void openPreview(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="block overflow-hidden rounded-[5px] border bg-background hover:border-accent">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={attImageUrls[a.path]} alt={a.name} className="max-h-48 max-w-[280px] object-contain" />
+                    </button>
+                  ) : (
+                    <button key={a.id} onClick={() => (a.kind === "image" ? void openPreview(a) : a.path ? onDownloadFile(a.path) : a.url ? window.open(a.url, "_blank", "noopener,noreferrer") : undefined)} title={`Open ${a.name}`}
+                      className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background px-2.5 py-1 text-left text-[16px] hover:border-accent">
+                      <I.clip className="h-4 w-4 shrink-0 text-muted" />
+                      <span className="min-w-0 truncate font-medium text-accent">{a.name}</span>
+                      {a.size && <span className="shrink-0 text-muted">{a.size}</span>}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined}
+              onReply={hasMessaging ? () => {
+                startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
+                onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
+              } : undefined} />
+          );
+        })}
         {keys.map((k) => {
           const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
           const mail = sentMail(k);

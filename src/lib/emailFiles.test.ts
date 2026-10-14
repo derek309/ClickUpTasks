@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { isSignatureImage, kbOf, emailMessageKey, emailFileSources, planEmailFileCopy } from "./emailFiles";
+import { isSignatureImage, kbOf, emailMessageKey, emailFileSources, planEmailFileCopy, filesOfEmail } from "./emailFiles";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -177,5 +177,34 @@ describe("copyEmailFilesToTask", () => {
     const r = await copyEmailFilesToTask(fakeDb(), "m1", "t_1");
     expect(r.skipped).toEqual(["kitchen.jpg"]);
     expect(tables.tasks[0].attachments).toHaveLength(1);
+  });
+});
+
+describe("filesOfEmail", () => {
+  // Brian's task, 2026-10-13: his PDF was copied onto the task under the
+  // email's Message-ID, while his email on the step only knew the row id.
+  const rfc = "<SJ2PR12MB8133@namprd12.prod.outlook.com>";
+  const pdf = { id: "a1", name: "TRE Attendee-list-2027.pdf", emailSource: "email:rfc:sj2pr12mb8133@namprd12.prod.outlook.com:tre attendee-list-2027.pdf" };
+  const other = { id: "a2", name: "photo.jpg", emailSource: "email:gm:zzz:photo.jpg" };
+  const dropped = { id: "a3", name: "TRE Attendee-list-2027.pdf" };
+  const email = { messageId: "msg_1" };
+
+  it("finds the files by the key stored on the email", () => {
+    expect(filesOfEmail({ ...email, fileKey: "rfc:sj2pr12mb8133@namprd12.prod.outlook.com" }, [pdf, other, dropped]).map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("works the key out from the message row for an email stored before the key", () => {
+    expect(filesOfEmail(email, [pdf, other], { id: "msg_1", rfc822MessageId: rfc, gmailMessageId: "g1" }).map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("matches a file copied under the row id", () => {
+    expect(filesOfEmail(email, [{ id: "a4", name: "x.pdf", emailSource: "email:msg:msg_1:x.pdf" }, pdf]).map((a) => a.id)).toEqual(["a4"]);
+  });
+  it("falls back to the names the message lists, only among files from an email, without signature logos", () => {
+    const msg = { id: "msg_1", attachments: [{ name: "TRE Attendee-list-2027.pdf", size: "146 KB" }, { name: "image001.png", size: "4 KB", kind: "image" as const, gmailAttachmentId: "x" }] };
+    const logo = { id: "a5", name: "image001.png", emailSource: "email:gm:y:image001.png" };
+    expect(filesOfEmail(email, [pdf, dropped, logo], msg).map((a) => a.id)).toEqual(["a1"]);
+  });
+  it("shows nothing when nothing links a file to the email", () => {
+    expect(filesOfEmail(email, [pdf, other, dropped])).toEqual([]);
+    expect(filesOfEmail(email, [other], { id: "msg_1", attachments: [] })).toEqual([]);
   });
 });

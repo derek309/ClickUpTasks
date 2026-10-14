@@ -3201,7 +3201,10 @@ export function datesForCurrentStep(before: Subtask[], after: Subtask[], task: {
 }
 
 /** A client's email as a step keeps it. */
-export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string };
+/** fileKey: the email's key for its files (lib/emailFiles emailMessageKey),
+ *  so the files copied from it onto the task show with it (Derek, 2026-10-13:
+ *  Brian's PDF sat in Links and files but not with his email). */
+export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string; fileKey?: string };
 
 /** The email's own words: quoted history and signatures' "On … wrote:" cut off. */
 export function emailOwnWords(text: string): string {

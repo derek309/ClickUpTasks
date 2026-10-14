@@ -4,7 +4,7 @@
 // client box and just show sent, so it doesn't get lost and we can click to
 // review"). It says whether the client has written back since; the whole box
 // opens the email as it went out.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { clientEmailText, htmlToText, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
 import { reviewTone } from "@/lib/reviewTone";
 
@@ -61,10 +61,12 @@ export function SentEmailBox({ message, messages, firstName, onRemove }: {
 
 /** The client's email a "Reply to …" step answers (Derek, 2026-10-12): click
  *  to read it, Reply to start the answer on this step. */
-export function ReceivedEmailBox({ email, answered, onReply }: {
+export function ReceivedEmailBox({ email, answered, onReply, files }: {
   email: ReceivedEmail;
   answered: boolean;
   onReply?: () => void;
+  /** The files that came with it, always in view (Derek, 2026-10-13). */
+  files?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const tone = reviewTone(answered ? "approved" : "with_client");
@@ -89,6 +91,7 @@ export function ReceivedEmailBox({ email, answered, onReply }: {
           {clientEmailText(email.body, email.from) || email.body || "(no text)"}
         </div>
       )}
+      {files && <div className="border-t bg-surface px-3 py-2">{files}</div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stepsOnClientEmail } from "@/lib/stepsServer";
+import { emailMessageKey } from "@/lib/emailFiles";
 import { requireUser, type AuthedUser } from "@/lib/serverAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isClientVisible } from "@/lib/extensionApi";
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
 async function replyStepFor(taskId: string, rows: Record<string, unknown>[]) {
   const m = rows.filter((r) => r.direction === "inbound" && r.channel === "email").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
   if (!m) return;
-  await stepsOnClientEmail(taskId, { id: String(m.id), subject: (m.subject as string | null) ?? null, body: String(m.body ?? ""), at: String(m.created_at), from: (m.peer_name as string | null) ?? null }, true).catch(() => false);
+  await stepsOnClientEmail(taskId, { id: String(m.id), subject: (m.subject as string | null) ?? null, body: String(m.body ?? ""), at: String(m.created_at), from: (m.peer_name as string | null) ?? null, fileKey: emailMessageKey(m as { id: string; rfc822_message_id?: string | null; gmail_message_id?: string | null }) }, true).catch(() => false);
 }
 
 export async function POST(req: NextRequest) {

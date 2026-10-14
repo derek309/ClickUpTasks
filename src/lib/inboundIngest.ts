@@ -6,6 +6,7 @@
 // the client's followers + admins. Deliberately a separate copy from the
 // webhook (which stays untouched) — same behavior, different entry point.
 import { stepsOnClientEmail } from "./stepsServer";
+import { emailMessageKey } from "./emailFiles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { titleCase, todayPacific } from "@/lib/data";
 import { SAFE_CONTACT_ID, closeAnsweredReplyTask, isClosedReplyTask } from "@/lib/ghlConversationTask";
@@ -353,7 +354,7 @@ export async function ingestInboundMessage(opts: {
   await clientAnsweredOnTask(taskId, "reply");
   // A client's email is work to answer: a "Reply to …" step on a task with
   // steps (Derek, 2026-10-12), after the reply above finished any check-in.
-  if (channel === "email" && taskId) await stepsOnClientEmail(taskId, { id: messageId, subject: subject ?? null, body, at: opts.at ?? new Date().toISOString(), from: opts.fromName || contact.name }).catch(() => false);
+  if (channel === "email" && taskId) await stepsOnClientEmail(taskId, { id: messageId, subject: subject ?? null, body, at: opts.at ?? new Date().toISOString(), from: opts.fromName || contact.name, fileKey: emailMessageKey({ id: messageId, rfc822_message_id: opts.rfc822, gmail_message_id: opts.gmailMessageId }) }).catch(() => false);
   // With reply tasks off, a message on no task is news only in the Inbox:
   // no bell and no email about it.
   if (!taskId && !raiseReplyTasks()) return true;

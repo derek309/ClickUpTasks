@@ -67,3 +67,23 @@ export function planEmailFileCopy<T extends FileLike>(messageKey: string, files:
   });
   return out.slice(0, EMAIL_FILE_MAX_COUNT);
 }
+
+/** The task's files that came with one email, for its box on the step (Derek,
+ *  2026-10-13). A file copied from an email carries the email's key in its
+ *  marker (emailFileSources): the key stored on the email when it arrived, or
+ *  the one worked out from its message row. Emails from before the key was
+ *  stored, whose row is not at hand by its ids, fall back to the names of the
+ *  files the message lists, among the task's files that came from an email. */
+export function filesOfEmail<T extends Pick<Attachment, "name"> & Partial<Pick<Attachment, "emailSource">>>(
+  email: { messageId: string; fileKey?: string },
+  attachments: T[],
+  message?: { id: string; rfc822MessageId?: string | null; gmailMessageId?: string | null; attachments?: FileLike[] | null } | null,
+): T[] {
+  const keys = new Set([email.fileKey, `msg:${email.messageId}`]);
+  if (message) keys.add(emailMessageKey({ id: message.id, rfc822_message_id: message.rfc822MessageId, gmail_message_id: message.gmailMessageId }));
+  const prefixes = [...keys].filter(Boolean).map((k) => `email:${k}:`);
+  const byKey = attachments.filter((a) => !!a.emailSource && prefixes.some((p) => a.emailSource!.startsWith(p)));
+  if (byKey.length || !message?.attachments?.length) return byKey;
+  const names = new Set(message.attachments.filter((f) => !isSignatureImage(f)).map((f) => String(f.name || "").toLowerCase()).filter(Boolean));
+  return attachments.filter((a) => !!a.emailSource?.startsWith("email:") && names.has(a.name.toLowerCase()));
+}
