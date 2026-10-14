@@ -9,7 +9,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
-  todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
+  todayPacific, withMeetingSteps, CLAUDE_ID, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
@@ -160,7 +160,7 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
     const waiting = list.filter((x) => !x.done && x.finishWhen === "reply" && (!!x.startedAt || x.id === cur?.id)).map((x) => x.id);
     if (!waiting.length) return null;
     const now = new Date().toISOString();
-    const done = list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));
+    const done = list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied`, doneBy: "client" } : x));
     // The next step starts, as it does when someone ticks one in the app.
     const next = planSteps(done).find((x) => !x.done);
     status = statusForStep(row.status, next ? stepStage(next, row.assignee_id) : "in_progress");
@@ -363,7 +363,7 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
         return told;
       }
     }
-    let next = list.map((x) => (x.id === stepId ? { ...x, done: true, doneAt: now, outcome: "Done" } : x));
+    let next = list.map((x) => (x.id === stepId ? { ...x, done: true, doneAt: now, outcome: "Done", doneBy: CLAUDE_ID } : x));
     const after = stepAfter(next, stepId);
     if (after) {
       // Client work still under way moves on with the plan, to the next

@@ -3358,7 +3358,28 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   // client pressed Approve; a teammate marking it is their own act (Derek,
   // 2026-10-14). Its what's next still asks.
   if (/ approved \(version \d+\)$/.test(prev.outcome ?? "")) return prev.doneBy === "client" ? `${clientFirst} approved. Your turn` : null;
-  if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
+  // Claude finished only when Claude closed it: a person finishing Claude's
+  // step is not news from Claude (Derek, 2026-10-14).
+  if ((prev.doneBy ?? prev.assigneeId) === CLAUDE_ID) return "Claude finished. Your turn";
+  return null;
+}
+
+/** Why the current step is your turn, from who closed the step before it
+ *  (Derek, 2026-10-14: "Claude finished its part" though he had marked the
+ *  approval himself). Steps closed before doneBy was kept read their
+ *  assignee. Null when there is nothing more to say than "Your turn". */
+export function turnReason(prev: Pick<Subtask, "done" | "title" | "assigneeId" | "outcome" | "doneBy"> | null | undefined, meId: string | null | undefined,
+  clientFirst: string, nameOf: (id: string) => string): string | null {
+  if (!prev?.done) return null;
+  const by = prev.doneBy ?? (prev.assigneeId === CLAUDE_ID ? CLAUDE_ID : null);
+  if (/ approved \(version \d+\)$/.test(prev.outcome ?? "") || prev.outcome === `${clientFirst} approved`) {
+    if (by === "client") return `${clientFirst} approved. Your turn`;
+    if (by && by === meId) return "You marked it approved. Your turn";
+    if (by && by !== CLAUDE_ID) return `${nameOf(by)} marked it approved. Your turn`;
+    return null;
+  }
+  if (by === CLAUDE_ID) return "Claude finished its part. Your turn";
+  if (by && by !== meId && by !== "client") return `${nameOf(by)} finished "${prev.title}". Your turn`;
   return null;
 }
 

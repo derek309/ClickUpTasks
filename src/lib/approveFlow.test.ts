@@ -70,3 +70,21 @@ describe("progress", () => {
     expect(stepProgress([...list.slice(0, 1), { ...list[1], done: true }])).toMatchObject({ done: 2, total: 2 });
   });
 });
+
+import { turnReason } from "./data";
+
+describe("why it is your turn", () => {
+  const name = (id: string) => ({ u_justin: "Justin" } as Record<string, string>)[id] ?? "Someone";
+  const claudes = { title: "Build the HTML review version", done: true, assigneeId: "u_claude" };
+  it("says who closed the step before, not whose it was", () => {
+    expect(turnReason({ ...claudes, outcome: "Brian approved (version 4)", doneBy: "u_derek" }, "u_derek", "Brian", name)).toBe("You marked it approved. Your turn");
+    expect(turnReason({ ...claudes, outcome: "Brian approved (version 4)", doneBy: "u_justin" }, "u_derek", "Brian", name)).toBe("Justin marked it approved. Your turn");
+    expect(turnReason({ ...claudes, outcome: "Brian approved (version 4)", doneBy: "client" }, "u_derek", "Brian", name)).toBe("Brian approved. Your turn");
+    expect(turnReason({ ...claudes, outcome: "Done", doneBy: "u_claude" }, "u_derek", "Brian", name)).toBe("Claude finished its part. Your turn");
+    // Before doneBy was kept: Claude's step reads as Claude's.
+    expect(turnReason({ ...claudes, outcome: "Done" }, "u_derek", "Brian", name)).toBe("Claude finished its part. Your turn");
+    expect(turnReason({ ...claudes, outcome: "Done", doneBy: "u_derek" }, "u_derek", "Brian", name)).toBeNull();
+    expect(turnReason({ ...claudes, outcome: "Done", doneBy: "u_justin" }, "u_derek", "Brian", name)).toBe('Justin finished "Build the HTML review version". Your turn');
+    expect(turnReason({ ...claudes, done: false }, "u_derek", "Brian", name)).toBeNull();
+  });
+});
