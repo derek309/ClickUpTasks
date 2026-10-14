@@ -3056,6 +3056,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const nextBody = (inline: boolean) => !sentStep ? null : (() => {
     const stg = stepStage(sentStep, task.assigneeId);
     const asking = asksWhatsNext(sentStep) || !sentStep.title;
+    // A wait (the client's turn, or a check in that ends on their reply):
+    // nothing to start, so it says who we wait on and when we check in
+    // (Derek, 2026-10-14: "I don't know what Start it means, I'm waiting
+    // for her to reply").
+    const waiting = !asking && (!!sentStep.onClient || sentStep.finishWhen === "reply" || stg === "waiting");
     // The step just ticked held an HTML review not sent yet: emailing it to the
     // client for review comes first (Derek, 2026-10-14: "Create newsletter",
     // Done, then email the client to review, then a step waits on them). The
@@ -3115,9 +3120,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         ) : (<>
         {nameRow}
         <div className="mt-1 text-[17px] leading-snug">
-          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stg].dot }} />{STATUS_META[stg].label}
-          {!sentStep.onClient && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
-          , {sentNext?.approved && !sentStep.onClient ? "due" : "follow up"}{" "}
+          <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stg].dot }} />{waiting ? `Waiting on ${firstName}` : STATUS_META[stg].label}
+          {!sentStep.onClient && !waiting && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
+          , {waiting ? "check in" : sentNext?.approved && !sentStep.onClient ? "due" : "follow up"}{" "}
           <span className="inline-block">
             <InlineDate value={sentStep.due ?? null} formatValue={formatDue} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
               className={`${word} rounded hover:bg-background`}
@@ -3127,7 +3132,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </>)}
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {reviewToSend && !setupNow && <button onClick={emailForReview} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Email {firstName} to review</button>}
-          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend && !setupNow ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
+          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend && !setupNow ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : waiting ? `Wait for ${firstName}` : inline ? "Start it" : "Looks good"}</button>
           {/* Hand the next step straight to Claude and move on (Derek, 2026-10-13:
               "now the next step is for me to delegate it to Claude"). In the
               set up, Claude is a choice of Whose turn. */}
@@ -3155,7 +3160,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               // Each makes its own step and opens it, set up first.
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
             ]} />
-          <span className="ml-auto hidden text-[16px] text-muted sm:inline">{inline ? "Enter to start it" : "Enter to keep it"}</span>
+          <span className="ml-auto hidden text-[16px] text-muted sm:inline">{waiting ? "Enter to wait" : inline ? "Enter to start it" : "Enter to keep it"}</span>
         </div>
         {/* Small, at the bottom (Derek, 2026-10-14). */}
         <button onClick={() => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); }}
