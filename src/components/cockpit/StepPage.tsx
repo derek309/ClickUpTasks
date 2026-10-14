@@ -7,7 +7,7 @@
 // opens full page to work in, like a handoff. Messages to the client are
 // ordinary messages; they show here because they were sent while the step
 // ran (stepWindow), nothing is filed apart for the client.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting,
@@ -24,22 +24,55 @@ import { safeMessageHtml } from "@/lib/safeHtml";
  *  the step for next steps", asked several times): "What's next?", a line on
  *  where things stand, then each choice with what it does. Sits above the
  *  step's messages. */
-export type NextChoice = { label: string; says: string; primary?: boolean; onClick: () => void };
-export function NextChoices({ intro, choices }: { intro?: React.ReactNode; choices: NextChoice[] }) {
+export type NextChoice = {
+  label: string; says: string; primary?: boolean;
+  /** On a phone, tucked behind the moreLabel button (desktop shows it in place). */
+  more?: boolean;
+  onClick: () => void;
+};
+export function NextChoices({ intro, choices, moreLabel }: { intro?: React.ReactNode; choices: NextChoice[]; moreLabel?: string }) {
+  const id = useId();
+  const [showMore, setShowMore] = useState(false);
+  const look = (c: NextChoice) => (c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background");
+  const extra = moreLabel ? choices.filter((c) => c.more) : [];
+  const main = extra.length ? choices.filter((c) => !c.more) : choices;
+  // On a phone each choice is its button alone (Derek, 2026-10-13: simpler);
+  // what it does stays on it as its title and, for a screen reader, its
+  // description.
+  const phoneButton = (c: NextChoice, n: string) => (
+    <Fragment key={c.label}>
+      <button onClick={c.onClick} title={c.says} aria-describedby={`${id}-${n}`}
+        className={`h-10 w-full rounded-[5px] px-4 text-left text-[16px] font-semibold ${look(c)}`}>{c.label}</button>
+      <span id={`${id}-${n}`} className="sr-only">{c.says}</span>
+    </Fragment>
+  );
   return (
     <section aria-label="What's next" className="flex flex-col gap-2">
       <h3 className="text-[18px] font-bold">What&apos;s next?</h3>
       {intro && <p className="text-[16px] text-muted">{intro}</p>}
-      <div className="flex flex-col divide-y rounded-[5px] border bg-surface">
-        {choices.map((c) => (
-          // On a phone the button gets its own line and what it does sits
-          // under it, full width (Derek, 2026-10-13: each choice ran three
-          // lines tall in a narrow column); from sm up, side by side as before.
-          <div key={c.label} className="flex flex-col gap-1.5 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1">
-            <button onClick={c.onClick} className={`h-10 w-full rounded-[5px] px-4 text-left text-[16px] font-semibold sm:w-auto sm:min-w-[12rem] ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
-            <span className="min-w-0 text-[16px] text-muted sm:flex-1">{c.says}</span>
+      {/* From sm up: each choice with what it does beside it. */}
+      <div className="hidden flex-col divide-y rounded-[5px] border bg-surface sm:flex">
+        {choices.map((c, i) => (
+          <div key={c.label} className="flex flex-row flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+            <button onClick={c.onClick} aria-describedby={`${id}-d${i}`} className={`h-10 min-w-[12rem] rounded-[5px] px-4 text-left text-[16px] font-semibold ${look(c)}`}>{c.label}</button>
+            <span id={`${id}-d${i}`} className="min-w-0 flex-1 text-[16px] text-muted">{c.says}</span>
           </div>
         ))}
+      </div>
+      {/* On a phone: buttons only, full width; the more ones open in place. */}
+      <div className="flex flex-col gap-1.5 sm:hidden">
+        {main.map((c, i) => phoneButton(c, `p${i}`))}
+        {extra.length > 0 && (
+          <button onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={`${id}-more`}
+            className="flex h-10 w-full items-center justify-between rounded-[5px] border bg-surface px-4 text-left text-[16px] font-semibold text-accent hover:bg-background">
+            {moreLabel}<I.chevron className={`h-4 w-4 shrink-0 transition-transform ${showMore ? "rotate-90" : "-rotate-90"}`} />
+          </button>
+        )}
+        {extra.length > 0 && (
+          <div id={`${id}-more`} className={showMore ? "flex flex-col gap-1.5" : "hidden"}>
+            {extra.map((c, i) => phoneButton(c, `m${i}`))}
+          </div>
+        )}
       </div>
     </section>
   );
