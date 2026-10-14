@@ -3010,48 +3010,38 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     key === "brief" ? "Project instructions"
     : key === "email" ? (task.draftEmail?.subject?.trim() || "Draft email")
     : reviews[key]?.title?.trim() || (key === "doc" ? "Client document" : REVIEW_LINES.find((l) => l.kind === key)?.label ?? key);
-  // Client work lives here, all of it, wherever its step is (Derek,
-  // 2026-10-11: "bring it down below so we can get to it easily"). Each block
-  // is drawn once, here; a step's page lists what is on it with Open.
-  const anyWork = DELIVERABLE_KEYS.some(deliverablePresent) || steps.some((st) => (st.holds ?? []).some((k) => !!sentMail(k)));
-  const workCount = DELIVERABLE_KEYS.filter(deliverablePresent).length + steps.reduce((n, st) => n + (st.holds ?? []).filter((k) => !!sentMail(k)).length, 0);
-  // Work on a step is a one line row here, the record of what was made
-  // (Derek, 2026-10-12): its box is on its step. Work on no step keeps its
-  // full box, and so does everything while deleted work is being restored.
-  // The full blocks stay mounted (hidden) since they own the windows.
+  // Client work lives here, wherever its step is (Derek, 2026-10-11: "bring
+  // it down below so we can get to it easily"). Each block is drawn once,
+  // here; a step's page lists what is on it with Open.
+  // Work on a step is a one line row here (Derek, 2026-10-12): its box is on
+  // its step. Work on no step keeps its full box, and so does everything
+  // while deleted work is being restored. The full blocks stay mounted
+  // (hidden) since they own the windows.
   const stepNumberOf = (id: string) => steps.findIndex((x) => x.id === id) + 1;
-  const workLine = (k: DeliverableKey, on: Subtask) => {
-    const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-    return (
-      <button onClick={() => openWork(k)} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
-        <span className="w-7 shrink-0 tabular-nums text-muted" title={on.title}>{stepNumberOf(on.id) || ""}</span>
-        <span aria-hidden className="shrink-0">{WORK_ICON[k]}</span>
-        <span className="min-w-0 flex-1 truncate font-medium">{deliverableName(k)}</span>
-        {r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}
-      </button>
-    );
-  };
+  // Actions is only what is left to do (Derek, 2026-10-13): a review the
+  // client approved or completed, or project instructions whose step is done,
+  // are finished. They stay on their step's page; sent emails stay in the
+  // Conversation and on their step.
+  const workFinished = (k: DeliverableKey, on: Subtask | null) =>
+    k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k]?.status === "approved" || reviews[k]?.status === "completed"
+    : k === "brief" ? !!on?.done
+    : false;
+  const workOn = (k: DeliverableKey) => (deliverablePresent(k) ? homeOf(stepHolding(steps, k)) : null);
+  const workCompact = (k: DeliverableKey) => !!workOn(k) && deletedOpen === 0;
   const workBlocks = DELIVERABLE_KEYS.map((k) => {
-    const on = deliverablePresent(k) ? homeOf(stepHolding(steps, k)) : null;
-    const compact = !!on && deletedOpen === 0;
+    const on = workOn(k);
+    const compact = workCompact(k);
     return (
       <div key={k}>
-        {compact ? workLine(k, on!) : on ? <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>
+        {compact ? null : on ? <div className="mt-3 -mb-2 text-[16px] text-muted">On <span className="font-medium text-foreground">{on.title}</span></div>
           // Said plainly, so a review on no step does not look like a mistake.
           : deliverablePresent(k) && steps.length > 0 && <div className="mt-3 -mb-2 text-[16px] text-muted">Not on a step</div>}
         <div className={compact ? "hidden" : ""}>{deliverableBlock(k, !!on && on.id === activeStep?.id)}</div>
       </div>
     );
   });
-  // Sent emails kept on steps, in the same record.
-  const sentWorkLines = steps.flatMap((st) => (st.holds ?? []).filter((k) => k.startsWith("mail:")).map((k) => ({ st, m: sentMail(k) }))).filter((x) => !!x.m).map(({ st, m }) => (
-    <button key={m!.id} onClick={() => setOpenStepPage({ taskId: task.id, id: st.id, full: false })} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
-      <span className="w-7 shrink-0 tabular-nums text-muted" title={st.title}>{stepNumberOf(st.id) || ""}</span>
-      <span aria-hidden className="shrink-0">✉</span>
-      <span className="min-w-0 flex-1 truncate font-medium">{m!.subject?.trim() || "Email"}</span>
-      <span className="shrink-0 text-muted">Sent {timeAgo(m!.at)}</span>
-    </button>
-  ));
+  // Work drawn in full (on no step, or while restoring) shows in the card.
+  const looseWork = DELIVERABLE_KEYS.some((k) => deliverablePresent(k) && !workCompact(k));
   // Opens a piece of client work's own window from anywhere (a step's page).
   const openWork = (k: DeliverableKey) => {
     if (k === "doc") setDocStartNonce((n) => n + 1);
@@ -3334,6 +3324,35 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // it is not, and nothing you do in here moves it between the two.
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
+  // What is left to do, one row each, for the Actions card (Derek,
+  // 2026-10-13): unsent drafts (the email, a step's text or chat), reviews
+  // not yet approved or completed, project instructions not done, and files
+  // an open step still needs.
+  type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; onClick: () => void };
+  const openStepFor = (id: string) => () => setOpenStepPage({ taskId: task.id, id, full: false });
+  const actionRows: ActionRow[] = [
+    ...DELIVERABLE_KEYS.filter((k) => workCompact(k) && !workFinished(k, workOn(k))).map((k): ActionRow => {
+      const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
+      return { key: k, step: workOn(k), icon: WORK_ICON[k], title: deliverableName(k), onClick: () => openWork(k),
+        state: r ? stageChip(r.status) : <span className="shrink-0 text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span> };
+    }),
+    ...steps.filter((st) => !st.done && !!st.draftMessage).map((st): ActionRow => {
+      const sms = st.draftMessage!.channel === "sms";
+      return { key: `talk:${st.id}`, step: st, icon: sms ? "📱" : "💬", title: sms ? `Text to ${firstName}` : `Chat with ${firstName}`, onClick: openStepFor(st.id),
+        state: <span className="shrink-0 text-muted">{st.draftMessage!.body.trim() ? "Ready to send" : "To write"}</span> };
+    }),
+    ...steps.filter((st) => !st.done && !st.onClient).flatMap((st) => missingNeeds(st).map((n): ActionRow => (
+      { key: `need:${st.id}:${n}`, step: st, icon: "📎", title: n, onClick: openStepFor(st.id), state: <span className="shrink-0 text-muted">Still needed</span> }))),
+  ];
+  const actionLine = (row: ActionRow) => (
+    <button key={row.key} onClick={row.onClick} className="flex w-full min-w-0 items-center gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">
+      <span className="w-7 shrink-0 tabular-nums text-muted" title={row.step?.title}>{row.step ? stepNumberOf(row.step.id) || "" : ""}</span>
+      <span aria-hidden className="shrink-0">{row.icon}</span>
+      <span className="min-w-0 flex-1 truncate font-medium">{row.title}</span>
+      {row.state}
+    </button>
+  );
+
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode, empty?: string) => (
     <section className={CARD} id={title === "Client work" ? "task-deliverables" : undefined}>
       <div className={`flex items-center justify-between gap-3 ${empty ? "" : "mb-3"}`}>
@@ -3567,17 +3586,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           folding it left "Open" doing nothing). Fixed windows are not
           clipped by the zero height. */}
       {isFolded("Client work") && <div className="h-0 overflow-hidden">{workBlocks}</div>}
-      {isFolded("Client work") ? foldedCard("Client work", workCount) : section("Client work", (
+      {isFolded("Client work") ? foldedCard("Client work", actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length) : section("Client work", (
         <>
+          {actionRows.map(actionLine)}
           {workBlocks}
-          {sentWorkLines}
           {deletedTotal > 0 && deletedOpen === 0 && (
             <button onClick={() => setDeletedOpen((n) => n + 1)} className="mt-2 px-1 text-[16px] text-muted hover:text-foreground">
               {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
             </button>
           )}
         </>
-      ), addMenu, !anyWork && !(deletedTotal > 0 && deletedOpen === 0) ? (steps.length ? "Documents, reviews and emails. Add them from a step's page." : "Documents, reviews and emails show here.") : undefined)}
+      ), addMenu, !actionRows.length && !looseWork && !(deletedTotal > 0 && deletedOpen === 0) ? (steps.length ? "Documents, reviews and emails. Add them from a step's page." : "Documents, reviews and emails show here.") : undefined)}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {isFolded("Links and files") ? foldedCard("Links and files", task.attachments.length + conversationFiles.length) : attachmentsBlock}
