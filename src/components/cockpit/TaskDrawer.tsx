@@ -1928,15 +1928,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const setADate = <span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>;
     // Each part after the first word: its words, then its picker.
     const parts: { lead: string; pick: React.ReactNode }[] = [];
-    // The client's own step: "Ryan's turn" already says who has it.
-    if (!sub.onClient) parts.push({ lead: "assigned to", pick: (
+    // "Claude's turn", "Your turn", "Justin's turn" already say who has it:
+    // the turn word is the picker, no "assigned to Claude" after it (Derek,
+    // 2026-10-14: "some duplicate information"). A later or done step still
+    // says who it is assigned to. The client's own step has no picker.
+    const turnPicks = !sub.onClient && (t.state === "mine" || t.state === "claude" || t.state === "waiting");
+    if (!sub.onClient && !turnPicks) parts.push({ lead: "assigned to", pick: (
       <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word}>{whoName}</span>}
         onChange={(a) => assignStep(sub, a, isActive)} />
     ) });
     parts.push({ lead: d ? "due" : "", pick: (
       <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)} onClear={() => onPatchSub(sub.id, { due: null })}
         emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>}
-        formatValue={(v) => `${formatDue(v)}${sub.done ? "" : `, ${dueCountdown(v)}`}`}
+        formatValue={(v) => `${formatDue(v)}${sub.done ? "" : `, ${dueCountdown(v).replace(/^due /, "")}`}`}
         className={`${dateWord} ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`} />
     ) });
     if (teammate && !sub.done) parts.push({ lead: `on ${userById(sub.assigneeId!)?.name.split(" ")[0] ?? "their"}'s list`, pick: (
@@ -1950,7 +1954,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <div className="text-[16px] leading-snug sm:text-[18px]">
         {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
-        <span className="font-semibold">{face && turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{t.word}</span>
+        <span className="font-semibold">{face && turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{turnPicks
+          ? <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word} title="Change whose turn it is">{t.word}</span>} onChange={(a) => assignStep(sub, a, isActive)} />
+          : t.word}</span>
         {/* The comma rides inside the picker's box: on a phone it wrapped onto
             the start of the next line. */}
         {parts.map((p, i) => (
@@ -2140,7 +2146,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const say = state === "claude" ? (
         sub.cloudSession ? "Claude is working"
         // Not set up is not a failure: the step is on Claude's list (Derek, 2026-10-14).
-        : sub.cloudError === "not_set_up" ? "On Claude's list"
+        // Not set up: nothing more to say, "Claude's turn" already does
+        // (Derek, 2026-10-14: "some duplicate information").
+        : sub.cloudError === "not_set_up" ? null
         : sub.cloudError ? `Claude has not started: ${sub.cloudError}`
         : sub.toClaudeAt ? `Claude's turn since ${sub.toClaudeAt.slice(0, 10) === TODAY ? "" : `${formatDue(sub.toClaudeAt.slice(0, 10))}, `}${new Date(sub.toClaudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`
         : "Claude's turn")

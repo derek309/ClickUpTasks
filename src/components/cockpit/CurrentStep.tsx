@@ -23,7 +23,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false, waitDates }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -165,12 +165,6 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
             <span>{reason}</span>
             {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
           </div>
-        )}
-        {sub.cloudError === "not_set_up" && !sub.done && (
-          <p className="text-[16px] text-foreground">
-            Claude in the cloud isn&apos;t set up yet, so it starts when someone opens Claude and says: work your ClickUpTasks list.
-            {onCopyForClaude && <> Or use <button onClick={onCopyForClaude} className="font-semibold text-accent underline-offset-4 hover:underline">✳ Copy for Claude</button>.</>}
-          </p>
         )}
         {picked && (
           <p className="text-[16px] text-foreground">{picked.says}{" · "}
