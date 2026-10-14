@@ -3323,6 +3323,22 @@ export function clearedFromNeedsYou(task: Pick<Task, "status" | "subtasks" | "as
   return cur ? task.subtasks.map((x) => (x.id === cur.id ? { ...x, seenAt: now } : x)) : null;
 }
 
+/** What else, besides the ×, takes a task out of Needs you for this person
+ *  (Settings, Account, Needs you; Derek, 2026-10-13). "open": opening the
+ *  task (the default). "x": only the ×. "step": ticking a step on it. Saved
+ *  with the person's Inbox settings so it follows them to every device. */
+export type NeedsYouClears = "open" | "x" | "step";
+export function needsYouClearsOn(setting: unknown, event: "open" | "tick"): boolean {
+  const s: NeedsYouClears = setting === "x" || setting === "step" ? setting : "open";
+  return event === "open" ? s === "open" : s === "step";
+}
+
+/** Something on the task went from not done to done (a step or a to do). */
+export function tickedAStep(before: Subtask[], after: Subtask[]): boolean {
+  const was = new Map(before.map((x) => [x.id, x.done]));
+  return after.some((x) => x.done && was.get(x.id) === false);
+}
+
 /** Step templates are off (Derek, 2026-10-13: "use it naturally as we work
  *  through it ... trying to pre-design it before we use it causes more
  *  confusion"). Saved templates are kept; true brings back Save as template,

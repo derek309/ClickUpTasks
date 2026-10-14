@@ -6,6 +6,7 @@
 // fallback before that table exists. The email signature lives on the profile.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, authedFetch } from "@/lib/supabase";
+import type { NeedsYouClears } from "@/lib/data";
 
 export type InboxPrefs = {
   byDay: boolean;
@@ -58,6 +59,10 @@ export type InboxPrefs = {
    *  "sms", "social", "call"). Still readable on the task (Derek, 2026-10-05:
    *  Michaella only needs team and client chats). */
   hideKinds?: string[];
+  /** What takes a task out of the red Needs you group besides the × (data.ts
+   *  needsYouClearsOn): opening it (unset), ticking a step on it, or nothing.
+   *  Kept here so it follows the person (Derek, 2026-10-13). */
+  needsYouClears?: NeedsYouClears;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

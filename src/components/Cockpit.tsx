@@ -1,6 +1,6 @@
 "use client";
 
-import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou } from "@/lib/data";
+import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, tickedAStep } from "@/lib/data";
 import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -2194,6 +2194,32 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   }, [selectedTaskIds.size, openTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
   const { toggleSub, addSub, deleteSub, renameSub, patchSub, toggleLabel, delegateTask, bulkDelegate } = useChecklist({ tasks, update, me, setTasks, notify, setConfirmDialog, pushToast, tasksRef, selectedTaskIds, setBulkDelegateOpen, clearSelection });
   useEffect(() => { toggleSubRef.current = toggleSub; });
+  // Needs you clears by itself the way this person chose in Settings
+  // (Derek, 2026-10-13): on opening the task (the default), or on ticking a
+  // step on it, or only with the ×. Silent, and only ever the step that
+  // needs this person (clearedFromNeedsYou); it comes back when something
+  // new happens. Opening: once per open, once the task itself is here (a
+  // link to a task the start load left out waits for it to be fetched).
+  const needsYouClears = inboxPrefs.needsYouClears;
+  const seenOnOpen = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openTaskId) { seenOnOpen.current = null; return; }
+    if (loading || !openTask || seenOnOpen.current === openTaskId) return;
+    seenOnOpen.current = openTaskId;
+    if (needsYouClearsOn(needsYouClears, "open")) clearNeedsYou(openTaskId, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTaskId, openTask, loading]);
+  // Ticking: whatever this person ticked on the task, then the step that
+  // needs them (if one still does) is marked seen.
+  const seenOnTick = <T,>(taskId: string, act: () => T): T => {
+    if (!needsYouClearsOn(needsYouClears, "tick")) return act();
+    const before = tasksRef.current.find((x) => x.id === taskId)?.subtasks ?? [];
+    const out = act();
+    const after = tasksRef.current.find((x) => x.id === taskId)?.subtasks ?? [];
+    if (tickedAStep(before, after)) clearNeedsYou(taskId, { silent: true });
+    return out;
+  };
+  const toggleSubSeen = (taskId: string, subId: string) => seenOnTick(taskId, () => toggleSub(taskId, subId));
   const lastUsedClientId = (): string | null => {
     const recent = Object.entries(clientUsed).sort((a, b) => b[1] - a[1]).map(([id]) => id);
     return recent.find((id) => id.startsWith("cl_") && clientById(id)) ?? null;
@@ -3074,6 +3100,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {settingsView ? (
           <SettingsHub
             initialTab={settingsInitialTab}
+            needsYouClears={inboxPrefs.needsYouClears} onSetNeedsYouClears={(v) => setInboxPrefs({ needsYouClears: v })}
             me={me} canAdmin={canAdmin}
             subAccounts={subAccounts}
             onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
@@ -3175,7 +3202,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : showCompletedLog ? (
           // Now an All Tasks mode rather than a My Work tab — day-grouped feed
           // of what finished and when. The header's scope answers WHOSE work,
@@ -3263,7 +3290,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSub} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>
@@ -3417,8 +3444,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           openEmail={openTaskEmail === openTask.id}
           // Closed, the next task opens as the panel again, not full page.
-          onClose={() => { setOpenTaskId(null); setOpenTaskEmail(null); setDrawerFull(false); }} onPatch={(patch) => patchTask(openTask.id, patch)} onClearNeedsYou={() => clearNeedsYou(openTask.id)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
-          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSub(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid, after) => deleteSub(openTask.id, sid, after)} onPatchSub={(sid, patch) => patchSub(openTask.id, sid, patch)} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} onStepToTask={(sid) => stepToTask(openTask.id, sid)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onSaveTemplate={canAdmin ? (spec) => saveTemplate(undefined, spec) : undefined} onUploadCommentImage={(file) => uploadOneImage(`${openTask.id}/comments`, file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={openTaskMessages} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => {
+          onClose={() => { setOpenTaskId(null); setOpenTaskEmail(null); setDrawerFull(false); }} onPatch={(patch) => seenOnTick(openTask.id, () => patchTask(openTask.id, patch))} onClearNeedsYou={() => clearNeedsYou(openTask.id)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
+          onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSubSeen(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid, after) => deleteSub(openTask.id, sid, after)} onPatchSub={(sid, patch) => seenOnTick(openTask.id, () => patchSub(openTask.id, sid, patch))} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} onStepToTask={(sid) => stepToTask(openTask.id, sid)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onSaveTemplate={canAdmin ? (spec) => saveTemplate(undefined, spec) : undefined} onUploadCommentImage={(file) => uploadOneImage(`${openTask.id}/comments`, file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={openTaskMessages} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => {
             // The client's portal, opened straight on this task (Derek, 2026-10-12).
             const url = getClientShareUrl(openTask.clientId, { taskId: openTask.id });
             if (url) navigator.clipboard?.writeText(url).then(() => pushToast("Client portal link copied, opens on this task"), () => pushToast(`Share this link: ${url}`));

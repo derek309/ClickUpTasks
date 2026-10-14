@@ -14,7 +14,7 @@
 // close button — you navigate away the same way you leave any other page,
 // by clicking somewhere else in the sidebar.
 import { useState } from "react";
-import { type Me, type Client, type TaskTemplate, type Project } from "@/lib/data";
+import { type Me, type Client, type TaskTemplate, type Project, type NeedsYouClears } from "@/lib/data";
 import { I } from "./cockpit/ui";
 import SettingsPanel from "./SettingsPanel";
 import TeamPanel from "./TeamPanel";
@@ -27,6 +27,14 @@ import { SettingsCard, Tile, BTN, BTN_DANGER, type Tone } from "./settings/ui";
 import TrashPanel from "./TrashPanel";
 import { TEMPLATES_ON } from "@/lib/data";
 
+// What takes a task out of the red Needs you group besides its × (data.ts
+// needsYouClearsOn). Derek's words, 2026-10-13.
+const NEEDS_YOU_CHOICES: { key: NeedsYouClears; label: string }[] = [
+  { key: "open", label: "Clears when I open the task" },
+  { key: "x", label: "Clears only when I click the ×" },
+  { key: "step", label: "Clears when I open the task and finish a step on it" },
+];
+
 export type TabKey = "account" | "integrations" | "team" | "templates" | "tokens" | "notifications" | "signature" | "granola" | "trash";
 
 export default function SettingsHub({
@@ -34,6 +42,8 @@ export default function SettingsHub({
   me,
   theme,
   onSetTheme,
+  needsYouClears,
+  onSetNeedsYouClears,
   onSignOut,
   canAdmin,
   subAccounts,
@@ -79,6 +89,9 @@ export default function SettingsHub({
   onPurgeTask: (id: string) => Promise<void> | void;
   theme: "light" | "dark" | "auto";
   onSetTheme: (t: "light" | "dark" | "auto") => void;
+  /** Per person, saved with their Inbox settings (follows them to every device). */
+  needsYouClears?: NeedsYouClears;
+  onSetNeedsYouClears: (v: NeedsYouClears) => void;
   onSignOut: () => void;
 }) {
   // Each tab says what it is for under its name, with the same coloured icon
@@ -150,6 +163,21 @@ export default function SettingsHub({
                       </button>
                     ))}
                   </div>
+                </SettingsCard>
+                <SettingsCard title="Needs you" icon={<I.bell className="h-4 w-4" />} tone="rose">
+                  <div role="radiogroup" aria-label="Needs you" className="divide-y rounded-[5px] border">
+                    {NEEDS_YOU_CHOICES.map((c) => {
+                      const on = (needsYouClears ?? "open") === c.key;
+                      return (
+                        <label key={c.key} className="flex cursor-pointer items-center gap-3 px-4 py-3 text-[16px] text-foreground hover:bg-background">
+                          <input type="radio" name="needs-you-clears" checked={on} onChange={() => onSetNeedsYouClears(c.key)}
+                            className="h-4 w-4 shrink-0 accent-[var(--accent)]" />
+                          <span className={on ? "font-semibold" : ""}>{c.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-[16px] text-muted">A task leaves the red Needs you group when you&apos;ve seen it. It comes back when something new happens.</p>
                 </SettingsCard>
                 <SettingsCard title="Session" icon={<I.logout className="h-4 w-4" />} tone="rose">
                   <button onClick={onSignOut} className={BTN_DANGER}>Sign out</button>

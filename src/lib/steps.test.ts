@@ -401,6 +401,27 @@ describe("needs you", () => {
     expect(clearedFromNeedsYou(task, "u_other", "2026-10-13T12:00:00Z")).toBeNull();
     expect(clearedFromNeedsYou({ ...task, subtasks: cleared }, "u_derek", "2026-10-13T13:00:00Z")).toBeNull();
   });
+
+  it("the Needs you setting: open clears on open, step on a tick, x on neither", async () => {
+    const { needsYouClearsOn } = await import("./data");
+    expect(needsYouClearsOn(undefined, "open")).toBe(true);
+    expect(needsYouClearsOn("open", "open")).toBe(true);
+    expect(needsYouClearsOn("open", "tick")).toBe(false);
+    expect(needsYouClearsOn("step", "open")).toBe(false);
+    expect(needsYouClearsOn("step", "tick")).toBe(true);
+    expect(needsYouClearsOn("x", "open")).toBe(false);
+    expect(needsYouClearsOn("x", "tick")).toBe(false);
+    expect(needsYouClearsOn("nonsense", "open")).toBe(true);
+  });
+
+  it("a tick is something going from not done to done", async () => {
+    const { tickedAStep } = await import("./data");
+    const before = [{ id: "a", title: "A", done: true }, { id: "b", title: "B", done: false }];
+    expect(tickedAStep(before, [before[0], { ...before[1], done: true }])).toBe(true);
+    expect(tickedAStep(before, [{ ...before[0], done: false }, before[1]])).toBe(false);
+    expect(tickedAStep(before, [...before, { id: "c", title: "C", done: true }])).toBe(false);
+    expect(tickedAStep(before, before)).toBe(false);
+  });
 });
 
 describe("following up while waiting", () => {

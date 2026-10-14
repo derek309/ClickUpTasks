@@ -292,12 +292,14 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
   // moves, so the task goes back to its own group until something new
   // happens (Derek, 2026-10-13: "sometimes we can't do it now but want to
   // clear it out").
-  const clearNeedsYou = (id: string) => {
+  // Silent when the app does it for you (opening the task, or ticking a
+  // step on it, per your Needs you setting): only the × says so.
+  const clearNeedsYou = (id: string, opts?: { silent?: boolean }) => {
     const before = tasksRef.current.find((x) => x.id === id);
     const subtasks = before ? clearedFromNeedsYou(before, me.id, new Date().toISOString()) : null;
     if (!subtasks) return;
     patchTask(id, { subtasks });
-    pushToast("Cleared from Needs you. It comes back when something new happens.");
+    if (!opts?.silent) pushToast("Cleared from Needs you. It comes back when something new happens.");
   };
 
   const toggleTaskSelection = (id: string) => setSelectedTaskIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
