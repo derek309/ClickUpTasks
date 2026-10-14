@@ -94,11 +94,14 @@ export function WorkItemRow({ icon, title, badge, meta, actions, more = [], onOp
 
 /** The full screen window. Esc or Close shuts it; onClose should land any
  *  pending save first. */
-export function WorkItemWindow({ icon, title, badge, status, actions, onClose, backTo, children }: {
+export function WorkItemWindow({ icon, title, badge, status, actions, onClose, backTo, backOnly = false, children }: {
   icon: string;
   /** The task it belongs to: a "‹ task" link back to it (Derek, 2026-10-12:
    *  "when I go into a draft email I need a way to get to the task"). */
   backTo?: string;
+  /** The back link is the only way out besides Escape: no Close button (the
+   *  email window, Derek, 2026-10-14). Ignored without a back link. */
+  backOnly?: boolean;
   /** Usually an input, so the name is edited where it is read. */
   title: React.ReactNode;
   badge?: React.ReactNode;
@@ -141,7 +144,7 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, b
         {badge}
         {status && <span className="text-[16px] text-muted">{status}</span>}
         {actions}
-        <button onClick={onClose} className="rounded-[5px] border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>
+        {!(backOnly && backTo) && <button onClick={onClose} className="rounded-[5px] border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>}
       </header>
       <div className="flex-1 px-4 pb-16 pt-6 sm:overflow-y-auto sm:px-8">
         {/* 1280px, the width every ClickUpLocal page uses (Derek, 2026-09-11: "open up the full to 1280px"). */}

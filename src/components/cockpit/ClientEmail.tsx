@@ -25,13 +25,15 @@ export type ClientEmailStart = {
   queuedId?: string;
 };
 
-export function ClientEmail({ start, clientName, meId, toEmail, messages, onClose, onSend, onSchedule, ccContacts, onUpload, onAiDraft, scheduled, onLoadScheduled, onCancelScheduled, pushToast, onDiscarded }: {
+export function ClientEmail({ start, clientName, meId, toEmail, toName, messages, onClose, onSend, onSchedule, ccContacts, onUpload, onAiDraft, scheduled, onLoadScheduled, onCancelScheduled, pushToast, onDiscarded }: {
   start: ClientEmailStart;
   /** Discard also drops where the draft came from (a Claude draft in the Inbox queue). */
   onDiscarded?: () => void;
   clientName: string;
   meId: string;
   toEmail: string | null;
+  /** The contact's name, for the window's title and To line. */
+  toName?: string | null;
   /** This client's messages, to spot a saved draft that already went out. */
   messages: Message[] | null;
   onClose: () => void;
@@ -70,7 +72,7 @@ export function ClientEmail({ start, clientName, meId, toEmail, messages, onClos
     <EmailWindow key={draft.createdAt} draft={draft} heading="Email" subheading={clientName}
       save={(next) => { setDraft(next); void saveClientEmailDraft(clientId, next, meId); }}
       onDiscard={() => { void deleteClientEmailDraft(clientId); onDiscarded?.(); }}
-      onClose={onClose} onSend={onSend} onSchedule={onSchedule} toEmail={toEmail}
+      onClose={onClose} onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} toName={toName}
       ccContacts={ccContacts} onUpload={onUpload} onAiDraft={onAiDraft}
       scheduled={scheduled} onCancelScheduled={onCancelScheduled} pushToast={pushToast} />
   );

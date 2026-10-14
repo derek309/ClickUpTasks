@@ -10,7 +10,7 @@
 // typing stops. Nothing sends on its own.
 import { useEffect, useRef, useState } from "react";
 import {
-  STATUS_META, htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDue, TODAY,
+  htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDue, TODAY,
   type Attachment, type Contact, type EmailDraft, type Message, type ScheduledMessage,
 } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
@@ -18,12 +18,13 @@ import { safeMessageHtml } from "@/lib/safeHtml";
 import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "@/lib/uploadTypes";
 import { signedUrlForFile } from "@/lib/db";
 import { placeDraftLink, draftLinkAsButton, escapeHtml } from "@/lib/draftLink";
+import { emailWindowTitle } from "@/lib/emailHeader";
 import { RichTextEditor } from "./RichTextEditor";
 import { BookingLinkMenu } from "./BookingLinkMenu";
 import { useDebouncedCommit } from "./useDebouncedCommit";
 import { SchedulePopover } from "./SchedulePopover";
 import {
-  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemBadge, WorkItemWindow,
+  FileDropLine, ImageLightbox, ImageThumbGrid, WorkItemWindow,
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 import { newId } from "./ui";
@@ -137,7 +138,7 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
 }
 
 export function EmailWindow({
-  draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, heading, subheading, subjectFallback,
+  draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, toName, heading, subheading, subjectFallback,
   ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp, sendNote,
 }: {
   /** One line under Send: the step it finishes and when it checks in. */
@@ -154,6 +155,9 @@ export function EmailWindow({
   onSend?: (email: OutgoingEmail) => void;
   onSchedule?: (email: OutgoingEmail, whenIso: string) => void;
   toEmail: string | null;
+  /** Who it goes to, for the title ("Email to Ryan: …") and the To line. */
+  toName?: string | null;
+  /** The title with nobody to send to yet. */
   heading: string;
   subheading?: string;
   /** The subject a blank one goes out with. Without it a subject is required. */
@@ -368,14 +372,16 @@ export function EmailWindow({
   const previewImages: PreviewImage[] = attachments
     .filter((a) => a.path && isPreviewableImage(a.name) && thumbs[a.path])
     .map((a) => ({ id: a.id, name: a.name, url: thumbs[a.path!] }));
-  const badge = <WorkItemBadge label="Not sent" chip={STATUS_META.todo.chip} dot={STATUS_META.todo.dot} />;
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(draft.updatedAt ?? draft.createdAt)}`;
   const cannotSend = !toEmail ? "No linked contact to send to" : !onSend ? "You don't have permission to message this client" : undefined;
 
   return (
     <>
-      <WorkItemWindow icon="✉️" badge={badge} onClose={onClose} backTo={subheading}
-        title={<p className="px-1 text-[22px] font-bold leading-tight">{heading}</p>}>
+      {/* The title is the email itself, and the back link is the way out
+          (Derek, 2026-10-14): no "Not sent" badge, no Close. Back and Escape
+          both run onClose, which lands the draft and goes where Close went. */}
+      <WorkItemWindow icon="✉️" onClose={onClose} backTo={subheading} backOnly
+        title={<p className="break-words px-1 text-[22px] font-bold leading-tight">{emailWindowTitle(toName, toEmail, subject, heading)}</p>}>
         {/* Attachments sit in a right column beside the email, like the client document. */}
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0">

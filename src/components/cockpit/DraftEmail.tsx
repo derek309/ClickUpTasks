@@ -14,7 +14,7 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
+export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, toName, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   /** Said under Send: the step it will finish and when it checks in. */
@@ -23,6 +23,8 @@ export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, onSend, o
   onSent?: (message: Message) => void;
   /** The linked contact's address, or null when there is nobody to send to yet. */
   toEmail: string | null;
+  /** Their name, for the window's title and To line. */
+  toName?: string | null;
   /** Missing when this teammate can't message this client. */
   onSend?: (email: OutgoingEmail) => void;
   onSchedule?: (email: OutgoingEmail, whenIso: string) => void;
@@ -71,7 +73,7 @@ export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, onSend, o
       {open && (
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
-          onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} ccContacts={ccContacts} onUpload={onUpload}
+          onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} toName={toName} ccContacts={ccContacts} onUpload={onUpload}
           onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp sendNote={sendNote} />
       )}
     </>

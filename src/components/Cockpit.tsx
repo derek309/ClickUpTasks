@@ -3389,7 +3389,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const allowed = canMessageClient(cid);
         return (
           <ClientEmail key={clientEmail.nonce} start={clientEmail} clientName={clientById(cid)?.name ?? "this client"} meId={me.id}
-            toEmail={contact?.email || null} messages={contact ? messages.filter((m) => m.contactId === contact.id) : null}
+            toEmail={contact?.email || null} toName={contact?.name ?? null} messages={contact ? messages.filter((m) => m.contactId === contact.id) : null}
             onClose={() => setClientEmail(null)}
             // A Claude draft from the queue goes with it, or Discard looked
             // like it did nothing (Derek, 2026-10-12).

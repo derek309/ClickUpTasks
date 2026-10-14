@@ -2973,7 +2973,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // Sending the task's draft email, from its window or from a step's "Send
   // the email" button: the same steps either way.
-  const draftTo = replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null);
+  const draftPeer = replyPeerOf(task.draftEmail?.replyTo);
+  const draftTo = draftPeer?.email ?? (messageDest?.email || null);
+  // Their name for the email window's title and To line: a reply's writer's own.
+  const draftToName = draftPeer ? draftPeer.name : messageDest?.name ?? null;
   const sendDraft = hasMessaging ? (email: OutgoingEmail) => {
     onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
     // A question about to-dos: they are marked asked, nothing else moves
@@ -3045,7 +3048,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         const on = stepHolding(list, "email");
         if (on) onPatch({ subtasks: list.map((x) => (x.id === on.id ? { ...x, holds: (x.holds ?? []).map((k) => (k === "email" ? sentEmailKey(m.id) : k)) } : x)) });
       }}
-      toEmail={draftTo} messages={messages}
+      toEmail={draftTo} toName={draftToName} messages={messages}
       onSend={sendDraft}
       onSchedule={hasMessaging && onScheduleTaskMessage ? (email, whenIso) =>
         onScheduleTaskMessage("email", email.subject, email.body, whenIso, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo) : undefined}
