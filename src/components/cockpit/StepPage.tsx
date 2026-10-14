@@ -43,7 +43,7 @@ export function NextChoices({ intro, choices }: { intro?: React.ReactNode; choic
 }
 
 export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, onFinishTask, onGiveToClaude, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -622,13 +622,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
                 <div className="border-t pt-4">{doneActions}</div>
               ) : !sub.done && !doneActions && !sub.onClient ? (
                 <div className="border-t pt-4">
-                  {/* Said as the next move, not "done" (Derek, 2026-10-13: "I still feel
-                      weird clicking it"): it ticks this step and What's next opens. */}
-                  <NextChoices choices={[
-                    { label: "Create next step →", says: "Ticks this step and asks what comes next.", primary: true, onClick: onMarkDone },
-                    ...(onGiveToClaude ? [{ label: "Give this step to Claude", says: "Claude works it, due today, and you watch it here.", onClick: onGiveToClaude }] : []),
-                    ...(onFinishTask ? [{ label: "The task is finished", says: "Marks the whole task done.", onClick: onFinishTask }] : []),
-                  ]} />
+                  {/* One button while you work (Derek, 2026-10-13: "I'm done with
+                      this step when you click it, then ask what you want to do
+                      next"). The choices (start the next step, give it to Claude,
+                      the task is finished) come after, in What's next. */}
+                  <button onClick={onMarkDone} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">I&apos;m done with this step</button>
                 </div>
               ) : null}
             </div>
