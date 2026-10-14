@@ -3679,7 +3679,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
-              onToTask={onStepToTask && !ps.onClient ? () => { setOpenStepPage(null); onStepToTask(ps.id); } : undefined}
+              // Make it its own task is off for now (Derek, 2026-10-13); stepToTask stays for when it comes back.
+              onToTask={undefined}
               onDelete={() => {
                 setOpenStepPage(null);
                 // Only once the delete is confirmed, from the list as it is then.
