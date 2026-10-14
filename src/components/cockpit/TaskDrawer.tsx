@@ -1902,14 +1902,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Client work, not on the step (Derek, 2026-10-11: "just what needs to be
     // completed").
     const holds = sub.onClient ? [] : withSentHolds(sub).holds ?? [];
+    // An open step holding an email nobody has written yet asks for it with a
+    // button in its row, where the extra "Email to write" row was (Derek,
+    // 2026-10-13). It opens the step, as that row did.
+    const writeEmail = !sub.done && holds.includes("email") && !task.draftEmail;
     // What a step holds, as small markers ("✉ 1"); the current step shows the
     // work itself under its row (Derek, 2026-10-12: "I should be working in
     // the email").
     const markers = [
       // An email held with nothing written yet is a placeholder, said apart
-      // from a draft ready to send.
+      // from a draft ready to send. On an open step it is the Write the email
+      // button instead (below).
       ...(["doc", "image", "page", "video", "brief"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
-      ...(holds.includes("email") ? [`${WORK_ICON.email} ${emailMarker}`] : []),
+      ...(holds.includes("email") && !writeEmail ? [`${WORK_ICON.email} ${emailMarker}`] : []),
       ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
@@ -1920,9 +1925,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // that it's attached and approved and ready, but they can't open it from here").
     const heldHere = isActive && !sub.onClient ? (() => {
       const lines = [
-        ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && (deliverablePresent(k) || k === "email")).map((k) => {
+        ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => {
           const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{k === "email" && !task.draftEmail ? emailMarker : deliverableName(k)}</span>{r ? stageChip(r.status) : k === "email" && !task.draftEmail ? null : <span className="text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}</span>;
+          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{deliverableName(k)}</span>{r ? stageChip(r.status) : <span className="text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}</span>;
         }),
         ...holds.filter((k) => !!sentMail(k)).map((k) => <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>✉</span><span className="min-w-0 truncate font-medium">{sentMail(k)!.subject?.trim() || "Email"}</span><span className="text-muted">Sent</span></span>),
         ...holds.filter((k) => k.startsWith("att:")).map((k) => { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>🔗</span><span className="min-w-0 truncate">{a.name}</span></span> : null; }),
@@ -1966,8 +1971,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               className="group/tick shrink-0 self-start rounded-full py-3 pl-3 hover:opacity-80 sm:pl-1">{mark}</button>
           ) : <span aria-hidden className="shrink-0 self-start py-3 pl-3 sm:pl-1">{mark}</span>;
         })()}
+        <div className="flex min-w-0 flex-1 flex-col">
         <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
-          className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4">
+          className={`flex min-w-0 flex-1 items-start gap-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4 ${writeEmail ? "pb-2 pt-3" : "py-3"}`}>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>
               {/* Numbered, so "step 2" means the same to everyone (Derek, 2026-10-12). */}
@@ -2003,6 +2009,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
           </span>
         </button>
+        {writeEmail && (
+          <div className="pb-3 pl-3 pr-3 sm:pr-4">
+            <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })}
+              className="inline-flex min-h-9 items-center gap-2 rounded-[5px] border bg-surface px-3 py-1 text-left text-[16px] font-semibold text-accent hover:bg-background">
+              <span aria-hidden>{WORK_ICON.email}</span>Write the email to {firstName}
+            </button>
+          </div>
+        )}
+        </div>
       </li>
       {heldHere && <li key={`${sub.id}-work`} className={`px-3 pb-3 sm:pl-12 sm:pr-4 ${isActive ? "bg-[color-mix(in_srgb,var(--accent)_5%,var(--surface))]" : ""}`}>{heldHere}</li>}
       </Fragment>
