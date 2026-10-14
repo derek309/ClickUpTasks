@@ -4013,13 +4013,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const sentShown = sentOpen ? (messages ?? []).find((m) => m.id === sentOpen) : null;
   // Where a link or file added from this card goes, beside Link and Attach:
   // the current step until another is picked (Derek, 2026-10-14).
+  // Each says its step's name, cut to fit, the whole of it in the tooltip
+  // (Derek, 2026-10-14: "On step 4" alone said nothing).
   const openForAdd = steps.filter((x) => !x.done);
+  const onStepFull = (x: Subtask) => `On step ${stepNumberOf(x.id)}${x.title.trim() ? `: ${x.title.trim()}` : ""}`;
+  const onStepShort = (x: Subtask) => {
+    const name = x.title.trim().replace(/\s+/g, " ");
+    return `On step ${stepNumberOf(x.id)}${name ? `: ${name.length > 28 ? `${name.slice(0, 27).trimEnd()}…` : name}` : ""}`;
+  };
+  const addStep = addStepId ? openForAdd.find((x) => x.id === addStepId) : null;
   const stepPicker = openForAdd.length > 0 && (
-    <label className="inline-flex items-center">
+    <label className="inline-flex min-w-0 max-w-full items-center">
       <span className="sr-only">Links and files added here go on</span>
-      <select value={addStepId ?? ""} onChange={(e) => setAddOnStep(e.target.value || null)} title="Where a link or file added here goes"
-        className="max-w-[10rem] cursor-pointer rounded-[5px] bg-transparent py-1 text-[16px] text-muted outline-none hover:text-foreground">
-        {openForAdd.map((x) => <option key={x.id} value={x.id}>On step {stepNumberOf(x.id)}</option>)}
+      <select value={addStepId ?? ""} onChange={(e) => setAddOnStep(e.target.value || null)}
+        title={addStep ? `Links and files added here go on ${onStepFull(addStep).replace(/^On /, "")}` : "Links and files added here go on no step"}
+        className="min-w-0 max-w-full cursor-pointer truncate rounded-[5px] bg-transparent py-1 text-[16px] text-muted outline-none hover:text-foreground">
+        {openForAdd.map((x) => <option key={x.id} value={x.id} title={onStepFull(x)}>{onStepShort(x)}</option>)}
         <option value="">Not on a step</option>
       </select>
     </label>
