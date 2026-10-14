@@ -1942,6 +1942,37 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     );
   };
+  // A step waiting on the client says it once (its name and face), so its
+  // dates sit under the name on their own muted line: "Checking again Oct 16 ▾"
+  // and, when it differs, "due Oct 18 ▾" (Derek, 2026-10-14). The same pickers
+  // and setters as the sentence: checking again is the task's follow up.
+  const waitDates = (sub: Subtask, isActive: boolean) => {
+    if (sub.done) return null;
+    const d = sub.due ?? null;
+    const dueTone = d ? stepDateLabel(d).tone : "later";
+    const pick = "font-semibold text-foreground text-[16px]";
+    const caret = (s: string) => `${s} ▾`;
+    const showDue = !isActive || (!!d && d.slice(0, 10) !== (followUp ?? "").slice(0, 10));
+    // Clearing is in each picker's own calendar, so no × beside them here.
+    return (
+      <div data-no-open className="flex flex-wrap items-baseline gap-x-1 text-[16px] leading-snug text-muted">
+        {isActive && <>
+          <span>Checking again</span>
+          <span className="inline-flex items-baseline">
+            <InlineDate value={followUp} onChange={(v) => moveStepDate(v)}
+              emptyLabel={<span className="font-semibold text-accent">set a date ▾</span>} formatValue={(v) => caret(formatDue(v))} className={pick} />
+            {showDue && <span className="-ml-1">,</span>}
+          </span>
+        </>}
+        {showDue && <>
+          <span>{isActive ? "due" : "Due"}</span>
+          <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)}
+            emptyLabel={<span className="font-semibold text-accent">no due date ▾</span>} formatValue={(v) => caret(formatDue(v))}
+            className={dueTone === "late" ? "font-semibold text-danger text-[16px]" : pick} />
+        </>}
+      </div>
+    );
+  };
   // A step on the task: one line that says what is happening inside it, the
   // whole of it a click to open the step (Derek, 2026-10-11: "make the bar
   // clickable", "this is all informational").
@@ -2258,7 +2289,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
             files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
             incoming={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "came") ?? undefined}
-            sentence={stepControls(sub, true, false)} waiting={waitingStep(sub)}
+            sentence={stepControls(sub, true, false)} waiting={waitingStep(sub)} waitDates={waitDates(sub, true)}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
             onCopyForClaude={() => void copyForClaude()} face={turnFace(sub)}
@@ -4403,7 +4434,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
               incoming={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "came") ?? undefined}
-              waiting={waitingStep(ps)} face={turnFace(ps)}
+              waiting={waitingStep(ps)} waitDates={waitDates(ps, isCur)} face={turnFace(ps)}
               onAddLink={(url) => { addLinkOn(url, "", ps.id); pushToast("Link added to this step"); }}
               onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}

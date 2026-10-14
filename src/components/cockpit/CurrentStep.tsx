@@ -23,7 +23,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false, waitDates }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -56,6 +56,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   incoming?: React.ReactNode;
   /** Waiting on the client: its name says so, no sentence under it. */
   waiting?: boolean;
+  /** A waiting step's dates in place of the sentence: "Checking again Oct 16 ▾". */
+  waitDates?: React.ReactNode;
   /** The client's waiting step: the review out with them, in place of held. */
   outFor?: React.ReactNode;
   /** How a waiting, check in or "what's next?" step ends, in place of Done. */
@@ -144,7 +146,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
         )}
             {/* The step page's sentence, its pickers working here; the
                 waiting step's name says it all. */}
-            {!waiting && sentence}
+            {waiting ? waitDates : sentence}
           </div>
           <span className="flex shrink-0 items-center gap-2 pt-0.5">
             {face}
