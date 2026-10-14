@@ -1,14 +1,14 @@
 {
   "name": "WebsitePusher",
   "slug": "websitepusher-plugin",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "author": "WebsitePusher",
   "requires": "6.0",
   "tested": "7.1",
   "requires_php": "8.0",
-  "last_updated": "2026-10-13 01:48:32",
-  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.6.2.zip",
+  "last_updated": "2026-10-14 02:13:07",
+  "download_url": "https://clickuptasks.vercel.app/plugins/websitepusher-plugin-1.6.3.zip",
   "homepage": "https://websitepusher.com",
   "description": "Push your local WordPress changes to your live site safely. Automatic backups before every update, instant undo, and plain English controls built for non developers.",
-  "changelog": "* A site pulled onto a computer with a full-site pull is marked as a copy. On it, WordPress's scheduled jobs stay off and an admin notice says so, so the copy can't run the live site's queued posts and sends a second time."
+  "changelog": "* Security: files a push asks to delete must be inside the theme or plugin folder being pushed; anything else is refused.\n* Security and a fix: Undo restores a backup only into the theme or plugin folder it was made from (undoing a plugin push no longer touches the theme), never into uploads or any wider folder, and only from WebsitePusher's own backups, each file checked first.\n* Backup names can't be guessed, and the backups folder is closed to the web on newer Apache too."
 }
