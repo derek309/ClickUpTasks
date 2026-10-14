@@ -76,7 +76,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   openEmail?: boolean;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   /** Saves this task's steps as a plan (admins: templates are admin-written). */
   onSaveTemplate?: (spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => void;
@@ -127,7 +127,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const onPatch = (patch: Partial<Task>) => {
     const p = patch.subtasks ? { ...patch, subtasks: ownNewSteps(taskRef.current.subtasks, patch.subtasks, task.assigneeId ?? null) } : patch;
     taskRef.current = { ...taskRef.current, ...p };
-    onPatchTask(p);
+    return onPatchTask(p);
   };
   const onPatchSub = (sid: string, patch: Partial<Subtask>) => {
     taskRef.current = { ...taskRef.current, subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, ...patch } : x)) };
@@ -2070,13 +2070,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // starts on it in the cloud when the routine is set up (lib/claudeCloud).
   // Without it the step is still on Claude's list, as before.
   const toClaude = (stepId: string, make?: Subtask, insertBefore?: string | null) => {
+    if (!make && taskRef.current.subtasks.some((x) => x.id === stepId && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
     let list = [...taskRef.current.subtasks];
     if (make) list.splice(insertBefore ? list.findIndex((x) => x.id === insertBefore) : list.length, 0, make);
     list = list.map((x) => (x.id === stepId ? { ...x, assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined } : x));
     const step = list.find((x) => x.id === stepId)!;
     const st = statusForStep(task.status, stepStage(step, task.assigneeId));
-    onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
-    void authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) })
+    const saved = onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
+    // After the save lands: before it, the server has no such step yet (404).
+    void Promise.resolve(saved).then(() => authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }))
       .then(async (res) => {
         const j = (await res.json().catch(() => ({}))) as { url?: string | null; error?: string };
         if (res.ok) pushToast("Claude is on it", j.url ? { label: "Watch", run: () => window.open(j.url!, "_blank", "noopener") } : undefined);

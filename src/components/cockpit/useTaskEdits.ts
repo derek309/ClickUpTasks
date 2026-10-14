@@ -251,7 +251,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // Only the fields this edit changed, then each activity line appended on
     // its own (append_comment). Writing `comments` from `before` erased any
     // comment saved from another window, or by a teammate, in the meantime.
-    void (async () => {
+    // Kept, so a caller can wait for the save to land (Delegate to Claude).
+    const saved = (async () => {
       await saveTaskEdit(before, { ...before, ...synced, comments: before.comments }, me.id);
       for (const e of events) await appendCommentDb(id, e);
     })();
@@ -284,6 +285,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (patch.due !== undefined && patch.due !== before.due && before.assigneeId && before.assigneeId !== me.id) {
       notify(before.assigneeId, `${me.name} changed the due date on “${before.title}”`, id);
     }
+    return saved;
   };
 
   const toggleTaskSelection = (id: string) => setSelectedTaskIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
