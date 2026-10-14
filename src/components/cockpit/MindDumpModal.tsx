@@ -347,9 +347,12 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                     <option value="">not sized</option>
                     {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
                   </select></>},{" "}
-                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />,{" "}
-                delegate to{" "}
-                <select value={delegateTo ?? ""} onChange={(e) => setDelegateTo(e.target.value || null)} aria-label="Delegate step 1 to"
+                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
+              </p>
+              {/* Its own line under the sentence (Derek, 2026-10-13). */}
+              <p className="shrink-0 text-[16px] leading-loose text-muted">
+                Give step 1 to:{" "}
+                <select value={delegateTo ?? ""} onChange={(e) => setDelegateTo(e.target.value || null)} aria-label="Give step 1 to"
                   title="Step 1 goes to them; the task stays yours and comes back the day after it is due" className={WORD}>
                   <option value="">nobody</option>
                   {assignableUsers().map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
