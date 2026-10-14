@@ -2330,7 +2330,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <StepSetup {...props} meId={meId ?? null} lead={lead} rows={grouped.rows} more={more} search={!sheet} enterSubmits={sheet}
         onAnswer={(a) => { newAnswer.current = a; }} onDone={submitNew}
         name={sheet ? (
-          <input data-name autoFocus value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="Name the step (optional)" aria-label="Step name"
+          // No keyboard on open (Derek, 2026-10-14, iPhone: the keyboard and the
+          // AutoFill bar hid the choices). The name is optional; tap it to type.
+          <input data-name value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="Name the step (optional)" aria-label="Step name"
+            name="step-name" autoComplete="off" autoCorrect="on" enterKeyHint="done"
             className="h-11 w-full rounded-[5px] bg-background px-3 text-[16px] font-semibold outline-none ring-1 ring-inset ring-border focus:ring-accent" />
         ) : undefined} />
     );
@@ -2724,7 +2727,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       setReviewSendNonce((r) => ({ ...r, page: r.page + 1 }));
     };
     const nameRow = (
-      <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
+      <input autoFocus={typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches} value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
+        name="next-step-name" autoComplete="off" enterKeyHint="done"
         onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
         className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
     );
