@@ -458,12 +458,11 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   );
   // One Add button, not a wall of them (Derek, 2026-10-13: "this is getting
   // messy"): the same list opens from it. What the step's name suggests sits
-  // before it, and then the line explaining Add is not needed.
+  // before it. No line explaining Add (Derek, 2026-10-13: remove it).
   const quickStart = (
     <section aria-label="Add to this step" className="flex flex-wrap items-center gap-3">
       {suggestButtons(false)}
       {addMenu(false)}
-      {!suggestions.length && <span className="text-[16px] text-muted">An email, a text, a document, a checklist or directions<span className="hidden sm:inline">, or paste a link or drop a file anywhere on this page</span>.</span>}
     </section>
   );
   const todoList = !hasTodos ? null : (
