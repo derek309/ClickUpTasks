@@ -214,7 +214,10 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // Moving the date of a task that says Needs you is acting on it: it
     // leaves Needs you until something new comes in (Derek, 2026-10-13).
     if ((synced.due !== undefined && synced.due !== before.due) || (synced.followUpAt !== undefined && synced.followUpAt !== before.followUpAt)) {
-      const cur = needsYou(before, me.id) ? currentStep(synced.subtasks ?? before.subtasks) : null;
+      // The step that needed you, and only while it is still the current
+      // one: an edit that moved the plan on leaves the new step unstamped.
+      const was = needsYou(before, me.id) ? currentStep(before.subtasks) : null;
+      const cur = was && currentStep(synced.subtasks ?? before.subtasks)?.id === was.id ? was : null;
       if (cur) synced.subtasks = (synced.subtasks ?? before.subtasks).map((x) => (x.id === cur.id ? { ...x, seenAt: new Date().toISOString() } : x));
     }
     const checkBack = waitingFollowUp(before, synced);
