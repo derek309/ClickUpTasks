@@ -1943,7 +1943,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const sayTone = state === "mine" ? "text-red-700 dark:[[data-theme=dark]_&]:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
     const say = state === "claude" ? (
         sub.cloudSession ? "Claude is working"
-        : sub.cloudError ? `Claude has not started: ${sub.cloudError === "not_set_up" ? "not set up" : sub.cloudError}`
+        // Not set up is not a failure: the step is on Claude's list (Derek, 2026-10-14).
+        : sub.cloudError === "not_set_up" ? "On Claude's list"
+        : sub.cloudError ? `Claude has not started: ${sub.cloudError}`
         : sub.toClaudeAt ? `Claude's turn since ${sub.toClaudeAt.slice(0, 10) === TODAY ? "" : `${formatDue(sub.toClaudeAt.slice(0, 10))}, `}${new Date(sub.toClaudeAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`
         : "Claude's turn")
       // Whose move it is, said one way everywhere (Derek, 2026-10-14): Your
@@ -2095,6 +2097,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true) ?? undefined}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
+            onCopyForClaude={() => void copyForClaude()}
             suggestion={suggestionFor(sub)?.name ?? undefined} onAcceptSuggestion={() => acceptSuggestion(sub.id)}
             picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}

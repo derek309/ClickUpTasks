@@ -21,7 +21,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -58,6 +58,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
    *  Enter takes it. */
   suggestion?: string;
   onAcceptSuggestion?: () => void;
+  /** ✳ Copy for Claude: the way to start Claude now when its cloud start is not set up. */
+  onCopyForClaude?: () => void;
 }) {
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const dir = useStepDirections({ sub, onPatchSub, inline: true });
@@ -115,6 +117,12 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
           <span>{tone.say ?? tone.word}</span>
           {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
         </div>
+        {sub.cloudError === "not_set_up" && !sub.done && (
+          <p className="text-[16px] text-foreground">
+            Claude in the cloud isn&apos;t set up yet, so it starts when someone opens Claude and says: work your ClickUpTasks list.
+            {onCopyForClaude && <> Or use <button onClick={onCopyForClaude} className="font-semibold text-accent underline-offset-4 hover:underline">✳ Copy for Claude</button>.</>}
+          </p>
+        )}
         {picked && (
           <p className="text-[16px] text-foreground">{picked.says}{" · "}
             <button onClick={picked.onChange} title="Put the question back and pick again" className="font-semibold text-accent underline-offset-4 hover:underline">Change</button>
