@@ -3254,7 +3254,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const who = entry.who ?? preselectWho(sub, meId ?? null);
     const list = whoChoices(meId ?? null, setupTeammates(), mayContactClient && !isPersonal);
     return {
-      who: list.map((c) => ({ key: c.key, label: c.kind === "me" ? "You" : c.kind === "claude" ? "Claude" : c.kind === "client" ? firstName : c.kind === "else" ? "Someone else" : firstOf(c.key) })),
+      // The client reads "Justin (client)" when a teammate shares the first
+      // name (Derek, 2026-10-14: two "Justin" choices), else just their name.
+      who: list.map((c) => ({ key: c.key, label: c.kind === "me" ? "You" : c.kind === "claude" ? "Claude" : c.kind === "client" ? (list.some((o) => o.kind === "teammate" && firstOf(o.key).toLowerCase() === firstName.toLowerCase()) ? `${firstName} (client)` : firstName) : c.kind === "else" ? "Someone else" : firstOf(c.key) })),
       whoInitial: who,
       nameOf: firstOf,
       someoneElse: (label, pick) => <InlineAssignee value={null} noFace label={label} onChange={(id) => { if (id) pick(id); }} />,
