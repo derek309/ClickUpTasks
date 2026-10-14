@@ -3103,7 +3103,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const nextOptions: { key: string; label: string; disabled?: boolean; title?: string; onPick: () => void }[] = [
       { key: "directions", label: "Directions", onPick: toPage("directions") },
       { key: "checklist", label: "To dos", onPick: toPage("checklist") },
-      ...stepAddOptions(sentStep).map((o) => ({ key: o.key, label: o.label, disabled: o.disabled, title: o.note, onPick: o.onPick })),
+      // Work already on another step is not offered again here (Derek,
+      // 2026-10-14: the report showed as an action though step 2 holds it).
+      ...stepAddOptions(sentStep).map((o) => ({ key: o.key, label: o.label, disabled: o.disabled || (!!o.note && o.note !== "on this step"), title: o.note, onPick: o.onPick })),
     ];
     const nextSuggest = asking ? [] : suggestStepActions(sentStep.title, firstName)
       .flatMap((x) => { const o = nextOptions.find((y) => y.key === x.kind && !y.disabled); return o ? [{ ...o, label: x.label }] : []; });
@@ -3162,12 +3164,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               toClaude(sentStep.id);
             }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Give it to Claude</button>
           )}
-          {/* After an approval: tell the client, drafted to read and send. */}
-          {sentNext?.approved && hasMessaging && !!messageDest?.email && (
-            <button onClick={() => { const nm = sentNext.approved!; closeSentNext(); emailApproved(sentStep, nm); }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Email {firstName} it&apos;s approved</button>
-          )}
-          <ActionMenu sheet label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
+          {/* Only what the next step needs shows; everything else waits in
+              one quiet More (Derek, 2026-10-14: "We have to try really hard
+              to only give the things that we need to do, not all of the
+              options"). */}
+          <ActionMenu sheet label="More ▾" title="Other things to do instead" triggerClassName="h-10 px-1 text-[16px] font-semibold text-accent underline-offset-4 hover:underline"
             items={[
+              // After an approval: tell the client, drafted to read and send.
+              !!sentNext?.approved && hasMessaging && !!messageDest?.email && { label: `Email ${firstName} it's approved`, onClick: () => { const nm = sentNext!.approved!; closeSentNext(); emailApproved(sentStep, nm); } },
               // Instead of the suggestion: it comes off, the pick goes on.
               // After a tick: a new step in front of the plan's next one, named here.
               !!sentNext?.done && !asking && { label: "Put a new step first", onClick: () => {
@@ -3179,12 +3183,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               } },
               // Each makes its own step and opens it, set up first.
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
+              { label: "The task is finished", divider: true, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); } },
             ]} />
           <span className="ml-auto hidden text-[16px] text-muted sm:inline">{setupNow ? "" : waiting ? "Enter to wait" : "Enter to save"}</span>
         </div>
-        {/* Small, at the bottom (Derek, 2026-10-14). */}
-        <button onClick={() => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); }}
-          className="mt-3 text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">The task is finished</button>
       </div>
     );
   })();
