@@ -265,7 +265,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Reviews sent back and unsent drafts, for the Inbox (cockpit/useBoards),
   // and the Finished marker.
   const {
-    openReviews, pendingSends, loadPendingSends,
+    openReviews, markReviewHandled, pendingSends, loadPendingSends,
     finishedMarkerAt, openFinished, newFinishedCount,
   } = useBoards({ tasks, tasksRef, showingBoard: dirView === "inbox" ? "inbox" : null, meId: me.id });
   // All Tasks defaults to just your own — admins can flip to "all"; for VAs
@@ -3136,6 +3136,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               // 2026-10-07: Justin saw Brian's changes on Derek's tasks).
               reviewsBack={openReviews.yourMove.filter((r) => { const t = tasks.find((x) => x.id === r.taskId); return !!t && (!t.assigneeId || t.assigneeId === me.id || isOnPlateOf(t, me.id)); }).map((r) => ({ id: r.id, taskId: r.taskId, name: r.name, days: r.days,
                 taskTitle: tasks.find((t) => t.id === r.taskId)?.title ?? null, clientName: (() => { const t = tasks.find((x) => x.id === r.taskId); return t ? clientById(t.clientId)?.name ?? null : null; })() }))}
+              // Mark handled: the review goes back to draft and leaves the group (Derek, 2026-10-13).
+              onMarkReviewHandled={async (id) => {
+                const r = await markReviewHandled(id);
+                if (r) pushToast(r.ok ? `Marked handled: ${r.name}` : `Could not mark ${r.name} handled. It is back in the list.`);
+              }}
               onOpenClientDraft={(cid) => { openClientList(cid, null); setClientTab("chat"); }}
               // Delete a draft from the Drafts list (Derek, 2026-10-06), with Undo.
               onDeleteWorkDraft={async (d) => {

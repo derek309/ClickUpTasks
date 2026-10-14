@@ -70,6 +70,8 @@ export type InboxViewProps = {
   onDeleteWorkDraft?: (d: { id: string; taskId: string | null; clientId: string }) => void | Promise<void>;
   /** Reviews the client sent changes back on: ours to act on, top of the Inbox. */
   reviewsBack?: { id: string; taskId: string; name: string; days: number | null; taskTitle: string | null; clientName: string | null }[];
+  /** Mark handled on a review sent back: back to draft, off the list. */
+  onMarkReviewHandled?: (id: string) => void | Promise<void>;
   /** A draft written on a client (in its Journal), opened there. */
   onOpenClientDraft?: (clientId: string) => void;
   /** A client's lists, for the task card's List box. */
@@ -325,7 +327,10 @@ export default function InboxView(p: InboxViewProps) {
                   <div className="border-b border-l-[6px] bg-highlight-soft/50" style={{ borderLeftColor: "var(--highlight)" }}>
                     <div className="px-4 pb-1 pt-3 text-[13px] font-bold uppercase tracking-wide text-highlight">Changes sent back · {reviewsBack.length}</div>
                     {reviewsBack.map((r) => (
-                      <button key={r.id} onClick={() => p.onOpenTask(r.taskId, "Inbox")} className="flex w-full items-start gap-3 border-t px-4 py-2.5 text-left hover:bg-background">
+                      // A div with a button's role: Mark handled is a real button inside it.
+                      <div key={r.id} role="button" tabIndex={0} onClick={() => p.onOpenTask(r.taskId, "Inbox")}
+                        onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); p.onOpenTask(r.taskId, "Inbox"); } }}
+                        className="flex w-full cursor-pointer items-start gap-3 border-t px-4 py-2.5 text-left hover:bg-background">
                         <span aria-hidden className="mt-0.5 text-[18px]">↩️</span>
                         <span className="min-w-0 flex-1">
                           <b className="block truncate">{r.clientName ? `${r.clientName.split(/\s+/)[0]} sent changes back: ` : "Changes sent back: "}{r.name}</b>
@@ -333,7 +338,15 @@ export default function InboxView(p: InboxViewProps) {
                         </span>
                         {/* How long they've waited: grey, orange from 3 days, red past 7. */}
                         {r.days !== null && <span className={`shrink-0 rounded-[5px] px-2 py-0.5 text-[14px] font-semibold ${r.days > 7 ? "bg-danger text-white" : r.days >= 3 ? "bg-highlight text-white" : "bg-background text-muted"}`}>{r.days === 0 ? "Today" : `${r.days} ${r.days === 1 ? "day" : "days"}`}</span>}
-                      </button>
+                        {p.onMarkReviewHandled && (
+                          <button type="button" title="The changes are dealt with: back to draft, off this list"
+                            onClick={(e) => { e.stopPropagation(); void p.onMarkReviewHandled?.(r.id); }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            className="shrink-0 rounded-[5px] px-1.5 py-0.5 text-[16px] font-semibold text-muted hover:bg-surface hover:text-foreground">
+                            Mark handled
+                          </button>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}

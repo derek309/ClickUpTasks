@@ -133,3 +133,21 @@ export function buildOpenReviews(docs: OpenReviewDoc[], versions: ReviewVersionR
  *  is not counted: the number means "waiting on somebody", and a badge that goes
  *  up when work finishes would read as more to do rather than less. */
 export const openReviewCount = (g: OpenReviewGroups): number => g.yourMove.length + g.withClient.length;
+
+/** The board without one of the client's sent back reviews, for Mark handled:
+ *  it leaves the group at once, before the save, and `at` is where it sat so a
+ *  failed save can put it back in the same place. Null when it is not there. */
+export function withoutYourMove(g: OpenReviewGroups, id: string): { groups: OpenReviewGroups; removed: OpenReview; at: number } | null {
+  const at = g.yourMove.findIndex((r) => r.id === id);
+  if (at < 0) return null;
+  return { groups: { ...g, yourMove: g.yourMove.filter((r) => r.id !== id) }, removed: g.yourMove[at], at };
+}
+
+/** Put a review back where it was after its save failed. A board reloaded in
+ *  the meantime may already hold it again, and it is not listed twice. */
+export function putBackYourMove(g: OpenReviewGroups, review: OpenReview, at: number): OpenReviewGroups {
+  if (g.yourMove.some((r) => r.id === review.id)) return g;
+  const yourMove = [...g.yourMove];
+  yourMove.splice(Math.min(Math.max(at, 0), yourMove.length), 0, review);
+  return { ...g, yourMove };
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { APPROVED_DAYS, buildOpenReviews, openReviewCount, reviewName, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
+import { APPROVED_DAYS, buildOpenReviews, openReviewCount, putBackYourMove, reviewName, withoutYourMove, type OpenReviewDoc, type ReviewVersionRow } from "./openReviews";
 import { daysSince, waitedFor } from "./elapsed";
 
 // The board answers one question: what is out with a client, and whose move is
@@ -149,5 +149,37 @@ describe("what came back approved", () => {
     );
     expect(g.approved.find((r) => r.id === "client")!.approvedByTeam).toBeFalsy();
     expect(g.approved.find((r) => r.id === "team")!.approvedByTeam).toBe(true);
+  });
+});
+
+describe("Mark handled on a review the client sent back", () => {
+  const board = () => buildOpenReviews(
+    [doc({ id: "a", status: "client_submitted" }), doc({ id: "b", status: "client_submitted" }), doc({ id: "c", status: "client_submitted" }), doc({ id: "w" })],
+    [replied("a", 1), replied("b", 2), replied("c", 3), sent("w", 4)],
+    NOW,
+  );
+
+  it("takes it out of Your move and leaves the rest alone", () => {
+    const g = board();
+    const out = withoutYourMove(g, "b")!;
+    expect(out.groups.yourMove.map((r) => r.id)).toEqual(["a", "c"]);
+    expect(out.groups.withClient).toBe(g.withClient);
+    expect(out.removed.id).toBe("b");
+    expect(out.at).toBe(1);
+  });
+
+  it("does nothing for a review that is not in Your move", () => {
+    expect(withoutYourMove(board(), "w")).toBeNull();
+  });
+
+  it("puts it back in the same place when the save fails", () => {
+    const out = withoutYourMove(board(), "b")!;
+    expect(putBackYourMove(out.groups, out.removed, out.at).yourMove.map((r) => r.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not list it twice when the board was reloaded with it meanwhile", () => {
+    const g = board();
+    const out = withoutYourMove(g, "b")!;
+    expect(putBackYourMove(g, out.removed, out.at).yourMove.map((r) => r.id)).toEqual(["a", "b", "c"]);
   });
 });

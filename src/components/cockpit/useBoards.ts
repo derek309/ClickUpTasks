@@ -6,7 +6,8 @@ import { useEffect, useMemo, useState, type RefObject } from "react";
 import { authedFetch } from "@/lib/supabase";
 import { fetchOpenReviews, fetchVideoStorage, fetchClientEmailDrafts, fetchFeedSeen, markFeedSeenDb, rowToScheduledMessage } from "@/lib/db";
 import { finishKindOf, PERSONAL_CLIENT_ID, type ScheduledMessage, type Task } from "@/lib/data";
-import { buildOpenReviews, type OpenReviewGroups } from "@/lib/openReviews";
+import { buildOpenReviews, putBackYourMove, withoutYourMove, type OpenReviewGroups } from "@/lib/openReviews";
+import { kindQuery } from "@/lib/reviewKinds";
 import { buildPendingSends, type PendingSendGroups } from "@/lib/pendingSends";
 
 export function useBoards({ tasks, tasksRef, showingBoard, meId }: {
@@ -43,6 +44,28 @@ export function useBoards({ tasks, tasksRef, showingBoard, meId }: {
     } finally {
       setReviewsLoading(false);
     }
+  };
+
+  // Mark handled (Derek, 2026-10-13): the client's changes are dealt with, so
+  // the review goes back to draft and leaves "Changes sent back" at once. The
+  // same PATCH the task's own stage picker sends, so the server's rules and
+  // access check apply; draft moves no steps and touches no file or comment.
+  // Put back where it was if the save fails. Resolves to the review's name, or
+  // null when it did not save.
+  const markReviewHandled = async (id: string): Promise<{ ok: boolean; name: string } | null> => {
+    const out = withoutYourMove(openReviews, id);
+    if (!out) return null;
+    setOpenReviews((g) => withoutYourMove(g, id)?.groups ?? g);
+    const { removed, at } = out;
+    let ok = false;
+    try {
+      const res = await authedFetch(`/api/tasks/${encodeURIComponent(removed.taskId)}/document${kindQuery(removed.kind)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "draft" }),
+      });
+      ok = res.ok;
+    } catch { ok = false; }
+    if (!ok) setOpenReviews((g) => putBackYourMove(g, removed, at));
+    return { ok, name: removed.name };
   };
 
   // Everything written and not sent, for the Drafts tab. Task drafts are
@@ -126,7 +149,7 @@ export function useBoards({ tasks, tasksRef, showingBoard, meId }: {
   }, [tasks, finishedSeenAt]);
 
   return {
-    openReviews, reviewsLoading, videoStorage, loadOpenReviews,
+    openReviews, reviewsLoading, videoStorage, loadOpenReviews, markReviewHandled,
     pendingSends, draftsLoading, loadPendingSends,
     finishedMarkerAt, openFinished, newFinishedCount,
   };
