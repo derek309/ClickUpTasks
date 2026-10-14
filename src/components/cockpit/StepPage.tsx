@@ -19,6 +19,7 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { safeMessageHtml } from "@/lib/safeHtml";
+import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 
 /** The end of every step (Derek, 2026-10-13: "more guidance at the end of
  *  the step for next steps", asked several times): "What's next?", a line on
@@ -78,11 +79,14 @@ export function NextChoices({ intro, choices, moreLabel }: { intro?: React.React
   );
 }
 
-export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
+export function StepPage({ task, sub, client, firstName, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
   controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
+  /** What to call the client (clientFirstName): a person's first name, or a
+   *  business's whole name. */
+  firstName?: string;
   stage?: TaskStatus;
   isCurrent: boolean;
   full: boolean;
@@ -183,7 +187,8 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onPrev, onNext]);
-  const first = client.name.split(" ")[0];
+  const first = firstName ?? client.name.split(" ")[0];
+  const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const todos = sub.todos ?? [];
   const own = todoProgress(todos);
   const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
@@ -231,11 +236,25 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
+  // What the step's name says it needs, as one or two buttons before + Add
+  // (Derek, 2026-10-13): each does what picking that item from + Add does,
+  // and goes once the step holds that kind of work.
+  const holdsKind = (k: StepSuggestKind) =>
+    k === "checklist" ? todos.length > 0 || clientItems.length > 0 || showTodos
+    : k === "text" ? sub.draftMessage?.channel === "sms"
+    : (sub.holds ?? []).includes(k);
+  const optionFor = (k: StepSuggestKind) => options.find((o) => o.key === k);
+  const named = whatsNext ? [] : suggestStepActions(sub.title, first);
+  const suggestions = sub.done || sub.onClient || outFor !== undefined ? [] : named
+    .filter((x) => !holdsKind(x.kind) && optionFor(x.kind) && !optionFor(x.kind)!.disabled)
+    .map((x) => ({ ...x, onPick: optionFor(x.kind)!.onPick }));
+  const suggestButtons = (compact: boolean) => suggestions.map((x) => (
+    <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center rounded-[5px] border bg-surface text-[16px] font-semibold text-accent hover:bg-background`}>{x.label}</button>
+  ));
   const [draft, setDraft] = useState("");
   const nextRef = useRef<HTMLElement | null>(null);
   const hasNext = !!nextPanel;
   useEffect(() => { if (hasNext) nextRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [hasNext]);
-  const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
 
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
   // To-dos picked to ask the client about, in one email.
@@ -411,7 +430,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     <div className="relative">
       <button onClick={() => setAddOpen((o) => !o)} aria-haspopup="menu" aria-expanded={addOpen} title="Add to this step" aria-label="Add to this step"
         className={compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
-          : "inline-flex h-10 items-center gap-1.5 rounded-lg border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{!compact && " Add"}</button>
+          : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{!compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
       {addOpen && (<>
         <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
         <div role="menu" aria-label="Add to this step" className="absolute left-0 top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg">
@@ -428,11 +447,13 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
     </div>
   );
   // One Add button, not a wall of them (Derek, 2026-10-13: "this is getting
-  // messy"): the same list opens from it.
+  // messy"): the same list opens from it. What the step's name suggests sits
+  // before it, and then the line explaining Add is not needed.
   const quickStart = (
     <section aria-label="Add to this step" className="flex flex-wrap items-center gap-3">
+      {suggestButtons(false)}
       {addMenu(false)}
-      <span className="text-[16px] text-muted">An email, a text, a document, a checklist or directions<span className="hidden sm:inline">, or paste a link or drop a file anywhere on this page</span>.</span>
+      {!suggestions.length && <span className="text-[16px] text-muted">An email, a text, a document, a checklist or directions<span className="hidden sm:inline">, or paste a link or drop a file anywhere on this page</span>.</span>}
     </section>
   );
   const todoList = !hasTodos ? null : (
@@ -574,7 +595,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : held ? null : <div>{addMenu(false)}</div>}
+              {outFor !== undefined ? outFor : empty && !dirOpen ? quickStart : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
               {/* Saved links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
@@ -641,9 +662,9 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
               {todoList}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
-                    {outFor === undefined && addMenu(true)}
+                    {outFor === undefined && <>{suggestButtons(true)}{addMenu(true)}</>}
                   </div>
                   {held}
                   {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}

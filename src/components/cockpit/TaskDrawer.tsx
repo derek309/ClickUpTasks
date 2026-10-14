@@ -3680,7 +3680,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 toClaude(ps.id);
               }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient && sentReviews(ps).length ? outFor(ps) : undefined} doneActions={ps.onClient && sentReviews(ps).length ? reviewAnswer(ps) : asksWhatsNext(ps) ? whatsNextActions(ps.id) : !ps.done && ps.finishWhen === "reply" ? followUpBox(ps) : undefined}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
-              onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
+              onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} firstName={firstName} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
