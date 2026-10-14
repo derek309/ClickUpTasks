@@ -63,6 +63,10 @@ export type InboxPrefs = {
    *  needsYouClearsOn): opening it (unset), ticking a step on it, or nothing.
    *  Kept here so it follows the person (Derek, 2026-10-13). */
   needsYouClears?: NeedsYouClears;
+  /** Your own meeting link, Zoom personal room or Meet (Derek, 2026-10-14):
+   *  Meet now uses it when Google can't make a Meet link. Read by the server
+   *  too (api/calendar/meet-now). */
+  meetingLink?: string;
 };
 
 export const DEFAULT_PREFS: InboxPrefs = {

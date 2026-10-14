@@ -24,7 +24,7 @@ function builder(table: string) {
 }
 vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
 
-const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, releaseDraftFromSteps, stepsOnMeetingTranscript } = await import("./stepsServer");
+const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, releaseDraftFromSteps, stepsOnMeetingTranscript, stepsOnMeetNow } = await import("./stepsServer");
 
 const steps = () => (db.tasks[0].subtasks as Subtask[]);
 function setup(subtasks: Subtask[]) {
@@ -253,5 +253,15 @@ describe("steps added on the server", () => {
     expect(await stepsOnMeetingTranscript("t1", "a_2")).toBe(false);
     // The sync runs again for the same meeting: no second pair.
     expect(withMeetingSteps(steps(), "Brian", "2026-10-14", () => "y")).toBeNull();
+  });
+
+  it("a meeting started now: its two steps in front of the current one, ticked by the transcript", async () => {
+    const meeting = { url: "https://meet.google.com/abc-defg-hij", start: "2026-10-14T21:05:00.000Z", end: "2026-10-14T21:35:00.000Z", via: "meet" as const };
+    const id = await stepsOnMeetNow("t1", { first: "Brian", attachmentId: "a_9", meeting });
+    expect(steps().map((x) => [x.title, x.done])).toEqual([["Meet with Brian", false], ["Add the meeting transcript", false], ["Write the newsletter", false], ["Schedule it", false]]);
+    expect(steps()[0].id).toBe(id);
+    expect(steps()[0]).toMatchObject({ holds: ["att:a_9"], meeting, assigneeId: "u_derek" });
+    expect(await stepsOnMeetingTranscript("t1", "a_10")).toBe(true);
+    expect(steps().slice(0, 2).map((x) => [x.done, x.outcome])).toEqual([[true, "Met"], [true, "Transcript from Granola"]]);
   });
 });

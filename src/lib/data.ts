@@ -930,6 +930,12 @@ export interface Subtask {
    *  when it's due (Derek, 2026-10-12: "due in a few days, but assigned to her
    *  to follow up with it today"). */
   followUpAt?: string | null;
+  /** A meeting started now (Meet now, Derek 2026-10-14): its join link and
+   *  times, on its "Meet with" step, where Join now opens it. */
+  meeting?: { url: string; start: string; end: string; via: "meet" | "link" };
+  /** Meet now's two steps: a booked meeting's sync (withMeetingSteps) leaves
+   *  them be. */
+  meetNow?: boolean;
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
@@ -3425,15 +3431,16 @@ export function isJustThanks(text: string): boolean {
  *  task's Document, which stays free for the work. A rebooked meeting moves
  *  the open pair's dates instead of adding another pair. */
 export function withMeetingSteps(subtasks: Subtask[], name: string, due: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
-  const open = subtasks.find((x) => !x.done && x.finishWhen === "transcript");
+  // A meeting started now (Meet now) keeps its own pair and its own day.
+  const open = subtasks.find((x) => !x.done && x.finishWhen === "transcript" && !x.meetNow);
   if (open) {
     if (open.due === due) return null;
-    return subtasks.map((x) => (x.id === open.id || (!x.done && x.addedFor === "meeting") ? { ...x, due } : x));
+    return subtasks.map((x) => (x.id === open.id || (!x.done && x.addedFor === "meeting" && !x.meetNow) ? { ...x, due } : x));
   }
   // This meeting already had its steps and they are finished: the
   // appointment sync runs again for the same booking and must not add a
   // second pair (Ryan's task, 2026-10-12).
-  if (subtasks.some((x) => (x.addedFor === "meeting" || x.addedFor === "transcript") && x.due === due)) return null;
+  if (subtasks.some((x) => (x.addedFor === "meeting" || x.addedFor === "transcript") && !x.meetNow && x.due === due)) return null;
   const hasCurrent = subtasks.some((x) => !x.done && x.startedAt);
   return [...subtasks,
     { id: makeId(), title: `Meet with ${name}`, done: false, due, addedFor: "meeting", ...(hasCurrent ? {} : { startedAt: now }) },

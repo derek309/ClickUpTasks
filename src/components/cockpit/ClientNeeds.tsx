@@ -13,12 +13,13 @@ import { fetchClientEmailDraft } from "@/lib/db";
 const TZ = "America/Los_Angeles";
 
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
+const timeOnly = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** An unsent email or text for this client, picked from the Drafts button. */
 export type ClientDraftItem = { id: string; title: string; where: string; at: string; open: () => void };
 
-export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, drafts, onOpenClientDraft, composerOpen, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest, meId, pushToast, defaultCalendarId, onSetDefault }: {
+export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, onReply, onEmail, onText, drafts, onOpenClientDraft, composerOpen, waiting, oldestWaiting, onRemind, canBook, onBook, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -42,6 +43,10 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
   onBook: () => void;
   /** Ask them to pick a time, by email or text (Derek, 2026-10-05). */
   onRequest: ((channel: "email" | "sms") => void) | null;
+  /** Start a meeting now and send them the link (Derek, 2026-10-14). */
+  onMeetNow?: (() => void) | null;
+  /** A meeting started now and still on: Join now opens it. */
+  meetingNow?: { url: string; start: string } | null;
   /** For Move and Cancel on their next meeting (Derek, 2026-10-13). */
   meId: string;
   pushToast: (text: string) => void;
@@ -98,10 +103,11 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
       ? { text: `${lastIn!.unread ? "New: " : ""}${first} ${lastIn!.channel === "sms" ? "texted" : lastIn!.channel === "chat" ? "wrote in the portal" : "replied"} ${timeAgo(lastIn!.at)}`, tone: "font-semibold text-accent" }
       : { text: last ? `Last ${last.channel === "sms" ? "text" : last.channel === "chat" ? "chat" : "email"} ${shortDay(last.at)}` : "No messages yet" },
     waiting ? { text: `${waiting} waiting on ${first}`, tone: "font-semibold text-highlight" } : { text: "Ball's in our court" },
-    ...(meeting === undefined ? [] : [{ text: meeting ? `Next meeting ${when(meeting.start)}` : "No meeting booked" }]),
+    ...(meetingNow ? [{ text: `Meeting now, started ${timeOnly(meetingNow.start)}`, tone: "font-semibold text-accent" }]
+      : meeting === undefined ? [] : [{ text: meeting ? `Next meeting ${when(meeting.start)}` : "No meeting booked" }]),
   ];
   const canChange = !!meeting && meetingCanChange(meeting, contactAt);
-  const hasContact = !!(onReply || onEmail || onText || onRemind || allDrafts.length || onRequest || canBook || meeting);
+  const hasContact = !!(onReply || onEmail || onText || onRemind || allDrafts.length || onRequest || onMeetNow || canBook || meeting || meetingNow);
   const item = "block w-full rounded-[5px] px-3 py-2.5 text-left text-[16px] hover:bg-background disabled:opacity-40";
   const pick = (f: () => void) => () => { closeContact(); f(); };
   const section = "px-3 pb-1 pt-2 text-[16px] font-bold";
@@ -133,9 +139,10 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
                   </button>
                 ))}
               </>}
-              {(onRequest || canBook || meeting) && <>
+              {(onRequest || onMeetNow || canBook || meeting || meetingNow) && <>
                 <div className="my-1 border-t" />
-                <div className={section}>{meeting ? `Next meeting ${when(meeting.start)}` : "Meeting"}</div>
+                <div className={section}>{meetingNow ? `Meeting now, started ${timeOnly(meetingNow.start)}` : meeting ? `Next meeting ${when(meeting.start)}` : "Meeting"}</div>
+                {meetingNow && <a href={meetingNow.url} target="_blank" rel="noopener noreferrer" onClick={closeContact} className={`${item} font-semibold text-accent`}>Join now</a>}
                 {meeting && (confirmCancel ? (
                   <div className="flex flex-col gap-2 px-3 py-2 text-[16px]">
                     <span className="font-semibold text-danger">Cancel it? GoHighLevel tells {first}.</span>
@@ -151,7 +158,8 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
                   <button onClick={() => setConfirmCancel(true)} disabled={!canChange} className={`${item} text-danger`}>Cancel meeting…</button>
                   {!canChange && <span className="block px-3 py-1 text-[16px] text-muted">{meetingCantChangeWhy(meeting)}</span>}
                 </>)}
-                {onRequest && <>
+                {!meetingNow && onMeetNow && <button onClick={pick(onMeetNow)} className={item}><b className="block font-semibold">Start a meeting now</b><span className="text-muted">A link to join, sent now</span></button>}
+                {!meetingNow && onRequest && <>
                   <button onClick={pick(() => onRequest("email"))} className={item}><b className="block font-semibold">Request a meeting by email</b><span className="text-muted">Three open times and your link</span></button>
                   <button onClick={pick(() => onRequest("sms"))} className={item}><b className="block font-semibold">Request a meeting by text</b><span className="text-muted">The same, short enough for a text</span></button>
                 </>}
@@ -207,17 +215,27 @@ export function ClientNeeds({ clientId, ghlContactId, first, lastIn, lastOut, on
       </div>
       <div className={`${box} bg-background`}>
         <div className="min-w-0 flex-1 truncate">
+          {meetingNow ? <>
+            <b className="text-accent">Meeting now</b>
+            <span className="text-[16px] text-muted"> · started {timeOnly(meetingNow.start)}</span>
+          </> : <>
           <b>{meeting === undefined ? "Meetings" : meeting ? "Next meeting" : "No meeting booked"}</b>
           <span className="text-[16px] text-muted"> · {meeting === undefined ? "Reading the calendar…" : meeting ? `${when(meeting.start)}${meeting.calendarName ? ` · ${meeting.calendarName}` : ""}` : canBook ? "Book one or ask them to pick" : "Not in GoHighLevel yet"}</span>
+          </>}
         </div>
-        {onRequest && (
+        {meetingNow && <a href={meetingNow.url} target="_blank" rel="noopener noreferrer" title="Open the meeting" className={`${btn} inline-flex items-center text-accent ring-accent/40`}>Join now</a>}
+        {/* Meeting now: Join now in its place, nothing more to ask for. */}
+        {!meetingNow && (onRequest || onMeetNow) && (
           <span className="relative shrink-0">
             <button onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen} title="Ask them to pick a time" className={`${btn} ring-[var(--border)]`}>Request ▾</button>
             {askOpen && <>
               <div className="fixed inset-0 z-40" onClick={() => setAskOpen(false)} />
-              <div className="absolute right-0 top-11 z-50 w-56 rounded-lg bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
-                <button onClick={() => { setAskOpen(false); onRequest("email"); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Email them</b><span className="text-[14px] text-muted">Three open times and your link</span></button>
-                <button onClick={() => { setAskOpen(false); onRequest("sms"); }} className="block w-full rounded-md px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Text them</b><span className="text-[14px] text-muted">The same, short enough for a text</span></button>
+              <div className="absolute right-0 top-11 z-50 w-64 rounded-[5px] bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+                {onRequest && <>
+                  <button onClick={() => { setAskOpen(false); onRequest("email"); }} className="block w-full rounded-[5px] px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Email them</b><span className="text-[16px] text-muted">Three open times and your link</span></button>
+                  <button onClick={() => { setAskOpen(false); onRequest("sms"); }} className="block w-full rounded-[5px] px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Text them</b><span className="text-[16px] text-muted">The same, short enough for a text</span></button>
+                </>}
+                {onMeetNow && <button onClick={() => { setAskOpen(false); onMeetNow(); }} className="block w-full rounded-[5px] px-3 py-2 text-left hover:bg-background"><b className="block font-semibold">Start a meeting now</b><span className="text-[16px] text-muted">A link to join, sent now</span></button>}
               </div>
             </>}
           </span>

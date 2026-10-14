@@ -20,6 +20,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 import { ADD_ICON, ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
+import { JoinNowLine } from "./MeetNowSheet";
 
 /** The set up a step shows before anything else (StepSetup): its answers
  *  picked already, and what to do with them. The action row is the page's own
@@ -811,6 +812,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
                   </div>
                 )}
+                {sub.meeting && !sub.done && <JoinNowLine meeting={sub.meeting} />}
                 {(sub.done || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
                     {round && <span className="font-semibold text-foreground">{round}</span>}

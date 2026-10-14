@@ -23,7 +23,8 @@ import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
 import SignaturePanel from "./SignaturePanel";
 import GranolaPanel from "./GranolaPanel";
-import { SettingsCard, Tile, BTN, BTN_DANGER, type Tone } from "./settings/ui";
+import { SettingsCard, Tile, BTN, BTN_DANGER, INPUT, type Tone } from "./settings/ui";
+import { cleanMeetingLink } from "@/lib/meetNow";
 import TrashPanel from "./TrashPanel";
 import { TEMPLATES_ON } from "@/lib/data";
 
@@ -44,6 +45,8 @@ export default function SettingsHub({
   onSetTheme,
   needsYouClears,
   onSetNeedsYouClears,
+  meetingLink = "",
+  onSetMeetingLink,
   onSignOut,
   canAdmin,
   subAccounts,
@@ -92,6 +95,9 @@ export default function SettingsHub({
   /** Per person, saved with their Inbox settings (follows them to every device). */
   needsYouClears?: NeedsYouClears;
   onSetNeedsYouClears: (v: NeedsYouClears) => void;
+  /** Your own meeting link for Meet now, saved with your Inbox settings. */
+  meetingLink?: string;
+  onSetMeetingLink?: (v: string) => void;
   onSignOut: () => void;
 }) {
   // Each tab says what it is for under its name, with the same coloured icon
@@ -179,6 +185,7 @@ export default function SettingsHub({
                   </div>
                   <p className="mt-2 text-[16px] text-muted">A task leaves the red Needs you group when you&apos;ve seen it. It comes back when something new happens.</p>
                 </SettingsCard>
+                {onSetMeetingLink && <MeetingLinkCard value={meetingLink} onSave={onSetMeetingLink} />}
                 <SettingsCard title="Session" icon={<I.logout className="h-4 w-4" />} tone="rose">
                   <button onClick={onSignOut} className={BTN_DANGER}>Sign out</button>
                 </SettingsCard>
@@ -194,5 +201,27 @@ export default function SettingsHub({
         </div>
       </div>
     </div>
+  );
+}
+
+// Meet now's fallback (Derek, 2026-10-14): your Zoom personal room or a Meet
+// link you reuse, sent when Google can't make a Meet link. Saved on blur.
+function MeetingLinkCard({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (value !== seen) { setSeen(value); setDraft(value); }
+  const clean = cleanMeetingLink(draft);
+  const bad = !!draft.trim() && !clean;
+  const save = () => { if (!bad && (clean ?? "") !== value) onSave(clean ?? ""); };
+  return (
+    <SettingsCard title="Your meeting link" icon={<I.calendar className="h-4 w-4" />} tone="sky"
+      hint="Start a meeting now sends this link when Google can't make a Meet link for you.">
+      <label className="grid gap-1.5 text-[16px]">
+        <span className="font-semibold text-foreground">Your meeting link (Zoom or Meet)</span>
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          placeholder="https://zoom.us/j/1234567890" inputMode="url" autoComplete="off" autoCapitalize="off" spellCheck={false} className={INPUT} />
+        {bad && <span className="font-semibold text-danger">That isn&apos;t a link. Paste the whole address.</span>}
+      </label>
+    </SettingsCard>
   );
 }

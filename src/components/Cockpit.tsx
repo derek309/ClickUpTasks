@@ -130,6 +130,8 @@ import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/na
 import { shortcut } from "@/lib/platform";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { BookAppointment } from "./cockpit/BookAppointment";
+import { MeetNowSheet } from "./cockpit/MeetNowSheet";
+import { liveMeetingOf } from "@/lib/meetNow";
 
 
 /** Team chat as Inbox messages: each task's comments (on tasks you own, made,
@@ -1685,6 +1687,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const noteSaasUrl = useCallback((contactId: string, url: string) =>
     setContacts((cs) => cs.map((c) => (c.id === contactId ? { ...c, saasUrl: url } : c))), []);
   const [bookClient, setBookClient] = useState<string | null>(null);
+  // Meet now from the client page (Derek, 2026-10-14): the sheet that starts
+  // the meeting and sends them the link.
+  const [meetNowClient, setMeetNowClient] = useState<string | null>(null);
   const contactForClient = (clientId: string): Contact | null => {
     const c = clientById(clientId);
     if (c?.linkedContactId) return contactById(c.linkedContactId);
@@ -2596,6 +2601,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => openRemindClient(activeClient) : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(activeClient)}
                 onRequest={canMsg ? (ch) => void requestMeeting(activeClient, ch, inboxPrefs.defaultCalendarId ?? null) : null}
+                onMeetNow={canMsg && ct ? () => setMeetNowClient(activeClient) : null}
+                meetingNow={liveMeetingOf(scopedTasksByClientId.get(activeClient) ?? [], nowMs())}
                 meId={me.id} pushToast={(m) => pushToast(m)}
                 defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
           );
@@ -3145,6 +3152,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <SettingsHub
             initialTab={settingsInitialTab}
             needsYouClears={inboxPrefs.needsYouClears} onSetNeedsYouClears={(v) => setInboxPrefs({ needsYouClears: v })}
+            meetingLink={inboxPrefs.meetingLink ?? ""} onSetMeetingLink={(v) => setInboxPrefs({ meetingLink: v })}
             me={me} canAdmin={canAdmin}
             subAccounts={subAccounts}
             onSaveClient={(c) => { setClients((cs) => cs.map((x) => (x.id === c.id ? c : x))); markOwnClientWrite(c.id); upsertClient(c); }}
@@ -3519,6 +3527,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           clientPortalUrl={getClientShareUrl(openTask.clientId, { taskId: openTask.id })}
           clientLinks={openTaskClientLinks}
           clientMeetings={openTaskMeetings}
+          meetingLink={inboxPrefs.meetingLink ?? null} onSaveMeetingLink={(link) => setInboxPrefs({ meetingLink: link })}
           taskLink={() => linkTo({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} />
       )}
 
@@ -3715,6 +3724,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           meId={me.id} onClose={() => setBookClient(null)} onDone={() => {}} pushToast={(m) => pushToast(m)}
           defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
       )}
+      {meetNowClient && contactForClient(meetNowClient) && (() => {
+        const ct = contactForClient(meetNowClient)!;
+        const allowed = canMessageClient(meetNowClient);
+        return (
+          <MeetNowSheet clientId={meetNowClient} first={clientFirstName(ct, clientById(meetNowClient)?.name, "there")}
+            email={ct.email || null} phone={ct.phone || null}
+            savedLink={inboxPrefs.meetingLink ?? null} onSaveLink={(link) => setInboxPrefs({ meetingLink: link })}
+            // Sent as the client page's own email and text are, on no task:
+            // the task it is on was a Reply task a moment ago, and an answer
+            // on a Reply task closes it.
+            onSend={allowed ? (channel, subject, body) => sendMessage(meetNowClient, channel, subject, body) : null}
+            onClose={() => setMeetNowClient(null)} pushToast={(m) => pushToast(m)} />
+        );
+      })()}
       {cmdkOpen && <CommandK tasks={scopedTasks} clients={workableClients} projects={projects} contacts={contacts} addedContactIds={addedContactIds} clientById={clientById}
         pinnedClients={[...starred].map((id) => clientById(id)).filter((c): c is Client => !!c && c.id.startsWith("cl_"))}
         pinnedLists={[...starredLists].map((id) => projectById(id)).filter((p): p is Project => !!p)}

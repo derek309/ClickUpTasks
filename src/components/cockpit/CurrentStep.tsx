@@ -11,6 +11,7 @@ import type { Message, StepTodo, Subtask } from "@/lib/data";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
+import { JoinNowLine } from "./MeetNowSheet";
 
 type AddOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
 
@@ -99,6 +100,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
           {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
         </div>
       </div>
+      {/* A meeting started now: its link, one tap away (Derek, 2026-10-14). */}
+      {sub.meeting && !sub.done && <JoinNowLine meeting={sub.meeting} />}
       {setup && addRows && (
         <div className="rounded-[5px] p-3 ring-1 ring-inset ring-border">
           <StepSetup {...setup} meId={meId}

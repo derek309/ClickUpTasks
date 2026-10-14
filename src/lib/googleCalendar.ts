@@ -58,3 +58,58 @@ export function withGoogleLinks<E extends { busy: boolean; start: string; end: s
     return e;
   });
 }
+
+// ── Meet now (Derek, 2026-10-14) ─────────────────────────────────────────
+// A meeting starting now on the person's own Google Calendar, with a Google
+// Meet link and the client as a guest (so Granola knows who it was with).
+// Needs the wider scope calendar.events added to the same service account's
+// domain-wide delegation in Google Admin; until then Google refuses
+// (unauthorized_client) and the caller falls back to the person's own
+// meeting link.
+const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+export type GoogleMeetResult = { ok: true; url: string; eventId: string } | { ok: false; refused: boolean; error: string };
+
+/** Google said no to the scope (not set up in Google Admin), rather than failing. */
+export const isScopeRefusal = (msg: string) => /unauthorized_client|access_denied|insufficient|forbidden|\b403\b|not authorized/i.test(msg);
+
+/** The event Google is asked for: Meet made by Google (link null), or the
+ *  person's own link in its location and description. Sends Google's own
+ *  invitation to nobody: the app sends the link itself. */
+export function meetNowEventBody(o: { title: string; start: string; end: string; guest: { email: string; name?: string | null } | null; link: string | null; requestId: string }) {
+  return {
+    summary: o.title,
+    start: { dateTime: o.start },
+    end: { dateTime: o.end },
+    attendees: o.guest ? [{ email: o.guest.email, ...(o.guest.name ? { displayName: o.guest.name } : {}) }] : [],
+    ...(o.link
+      ? { location: o.link, description: `Join: ${o.link}` }
+      : { conferenceData: { createRequest: { requestId: o.requestId, conferenceSolutionKey: { type: "hangoutsMeet" } } } }),
+  };
+}
+
+/** Makes the event on userEmail's primary calendar. With link null, Google
+ *  makes the Meet; with a link, the event carries that link instead. */
+export async function createGoogleMeeting(userEmail: string, o: { title: string; start: string; end: string; guest: { email: string; name?: string | null } | null; link: string | null }): Promise<GoogleMeetResult> {
+  if (!calendarConfigured) return { ok: false, refused: true, error: "Google isn't set up here." };
+  try {
+    const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [WRITE_SCOPE], subject: userEmail });
+    const body = meetNowEventBody({ ...o, requestId: `meetnow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
+    const res = await jwt.request<any>({
+      url: "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none",
+      method: "POST", data: body, timeout: 15000,
+    });
+    let ev = res.data;
+    // Google can make the Meet a moment after the event: look again briefly.
+    for (let i = 0; !o.link && !meetingLinkOf(ev) && i < 3; i++) {
+      await new Promise((r) => setTimeout(r, 800));
+      ev = (await jwt.request<any>({ url: `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(ev.id)}`, timeout: 10000 })).data;
+    }
+    const url = o.link ?? meetingLinkOf(ev);
+    if (!url) return { ok: false, refused: false, error: "Google made the event without a Meet link." };
+    return { ok: true, url, eventId: String(ev.id) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, refused: isScopeRefusal(msg), error: msg.slice(0, 200) };
+  }
+}

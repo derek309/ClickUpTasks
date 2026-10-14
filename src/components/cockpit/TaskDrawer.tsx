@@ -57,6 +57,7 @@ import { type FileKind } from "@/lib/reviewKinds";
 import { QuickLinksBar } from "./ClientLinks";
 import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
+import { MeetNowSheet } from "./MeetNowSheet";
 import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
 
 // The review lines a task can add beside its client document, in order.
@@ -72,7 +73,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -128,6 +129,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   clientPortalUrl?: string | null;
   clientLinks?: ClientLink[];
   clientMeetings?: ClientNote[];
+  /** Your own meeting link for Meet now (Settings, Account), and saving it. */
+  meetingLink?: string | null;
+  onSaveMeetingLink?: (link: string) => void;
   taskLink?: () => string;
 }) {
   // Every write also updates taskRef at once, so a second write in the same
@@ -174,6 +178,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
    *  rule as the client page (Derek, 2026-10-13: "The Artist Workshop", not
    *  "Artist"). */
   const firstName = clientFirstName(messageDest, client.name);
+  // Meet now (Derek, 2026-10-14): the sheet that starts a meeting and sends
+  // the link, and the step it was picked on (null: in front of the current one).
+  const [meetNowFrom, setMeetNowFrom] = useState<{ stepId: string | null } | null>(null);
   // A reply goes to whoever wrote the email it answers, not the client's main
   // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
   // Same rule as the server's replyRecipientFor.
@@ -2271,6 +2278,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // starts the wait, and its step's Email a follow up is the reminder.
     ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
+    ...(hasMessaging ? [{ key: "meetnow", group: "talk" as const, label: "Start a meeting now", disabled: false, note: "a link to join, sent now", onPick: () => setMeetNowFrom({ stepId: null }) }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
     { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },
     { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
@@ -2316,6 +2324,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (key === "email") { emailStep(typed); return; }
     if (key === "text" || key === "chat") { talkStep(key === "text" ? "text" : "client", typed); return; }
     if (key === "askemail" || key === "asktext") { void requestMeetingStep(key === "askemail" ? "email" : "sms"); return; }
+    // The meeting's steps are made with it, in front of the current one.
+    if (key === "meetnow") { setMeetNowFrom({ stepId: null }); return; }
     const who = key === "claude" ? CLAUDE_ID : key === "toclient" ? "client" : a.who;
     // Delegate with nobody picked: its page opens on the teammate to pick.
     if (key === "delegate" && (!who || who === meId || who === CLAUDE_ID || who === "client")) { delegateStep(); return; }
@@ -2346,6 +2356,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const more: SetupAction[] = [
       ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
       ...act("asktext", "Request a meeting by text", hasMessaging && !!messageDest?.phone),
+      ...act("meetnow", "Start a meeting now: a link to join, sent now", hasMessaging),
       ...act("followup", `Wait for ${firstName}'s reply`),
       ...act("delegate", "Delegate to a teammate"),
       ...act("claude", "Delegate to Claude"),
@@ -3366,7 +3377,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging ? [{ key: "chat", label: "Chat", disabled: sub.draftMessage?.channel === "chat", note: sub.draftMessage?.channel === "chat" ? "on this step" : undefined,
       onPick: () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: "chat" as const, body: x.draftMessage?.body ?? "" } } : x)) }) }] : []),
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
-    { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }];
+    { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) },
+    // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
+    ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : [])];
   };
   // What a step holds, drawn on it: its deliverables as their own rows (the
   // current step's reviews with their open comments), then its links and files.
@@ -4125,6 +4138,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {bookOpen && messageDest?.ghlContactId && (
         <BookAppointment target={{ kind: "book", ghlContactId: messageDest.ghlContactId, name: messageDest.name || client.name }}
           meId={meId} onClose={() => setBookOpen(false)} onDone={() => {}} pushToast={(m) => pushToast(m)} />
+      )}
+      {meetNowFrom && (
+        <MeetNowSheet clientId={task.clientId} taskId={task.id} stepId={meetNowFrom.stepId} first={firstName}
+          email={messageDest?.email || null} phone={messageDest?.phone || null}
+          savedLink={meetingLink ?? null} onSaveLink={(link) => onSaveMeetingLink?.(link)}
+          onSend={onSendTaskMessage ? (channel, subject, body) => onSendTaskMessage(channel, subject, body) : null}
+          // A Reply task is the meeting's now (the server renamed it): said
+          // here at once, or sending the link would close it as answered.
+          onStarted={(r) => { if (r.title && r.title !== taskRef.current.title) onPatch({ title: r.title }); }}
+          onClose={() => setMeetNowFrom(null)} pushToast={pushToast} />
       )}
       {lightbox !== null && galleryImages[lightbox] && (
         <ImageLightbox images={galleryImages} index={lightbox} onIndex={setLightbox} onClose={() => setLightbox(null)}

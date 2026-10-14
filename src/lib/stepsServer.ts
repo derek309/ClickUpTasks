@@ -12,6 +12,7 @@ import {
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
+import { withMeetNowSteps } from "./meetNow";
 import { promoteQueueForTask } from "./queueServer";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
@@ -216,6 +217,18 @@ export async function stepWaitsOnTranscript(taskId: string, stepId: string): Pro
     if (!step || step.done || step.finishWhen === "transcript") return null;
     return list.map((x) => (x.id === stepId ? { ...x, finishWhen: "transcript" as const } : x));
   });
+}
+
+/** Meet now (Derek, 2026-10-14): the meeting's two steps, the first current
+ *  and holding the link (meetNow.withMeetNowSteps). */
+export async function stepsOnMeetNow(taskId: string, o: { first: string; attachmentId: string; meeting: NonNullable<Subtask["meeting"]>; fromStepId?: string | null }): Promise<string | null> {
+  let made: string | null = null;
+  const ok = await rewriteSteps(taskId, (row) => {
+    const next = withMeetNowSteps(row.subtasks ?? [], { ...o, due: todayPacific() }, () => newId("s_"));
+    made = next.find((x) => x.meeting?.url === o.meeting.url && x.meeting.start === o.meeting.start)?.id ?? null;
+    return next;
+  });
+  return ok ? made : null;
 }
 
 export async function ensureMeetingSteps(taskId: string): Promise<boolean> {
