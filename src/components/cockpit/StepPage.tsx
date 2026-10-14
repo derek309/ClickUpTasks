@@ -14,7 +14,7 @@ import {
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
-import { ActionMenu } from "./ActionMenu";
+import { ActionMenu, MenuSheet } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
@@ -270,9 +270,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   };
   // Closing the page right after typing still saves what was typed.
   useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
-  const [addOpen, setAddOpen] = useState(false);
-  // The menu opens leftward when it would run off the right edge.
-  const [addRight, setAddRight] = useState(false);
+  // Which Add menu is open (the + beside Actions, the rows' + More), or none.
+  const [addOpen, setAddOpen] = useState<"main" | "compact" | "more" | null>(null);
+  // Where the desktop menu sits, kept inside the window.
+  const [addPos, setAddPos] = useState({ top: 0, left: 0 });
   const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
   // Which box to put the cursor in next, set by a choice, done after drawing.
@@ -496,28 +497,44 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // (Derek, 2026-10-11: "reclaim that space").
   // "more": the + More at the end of an empty step's rows, with what the
   // rows leave out.
-  const addMenu = (compact: boolean, items = options, more = false) => (
-    <div className="relative">
-      <button onClick={(e) => { setAddRight(e.currentTarget.getBoundingClientRect().left + 316 > window.innerWidth); setAddOpen((o) => !o); }}
-        aria-haspopup="menu" aria-expanded={addOpen} title={more ? "More to add to this step" : "Add to this step"} aria-label={more ? "More to add to this step" : "Add to this step"}
-        className={more ? "inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
-          : compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
-          : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{more ? <span>More</span> : !compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
-      {addOpen && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setAddOpen(false)} />
-        <div role="menu" aria-label={more ? "More to add to this step" : "Add to this step"} className={`absolute ${addRight ? "right-0" : "left-0"} top-full z-40 mt-1 w-[min(300px,calc(100vw-32px))] rounded-lg border bg-surface p-1.5 shadow-lg`}>
-          {items.map((o) => (
-            <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(false); o.onPick(); }}
-              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-              <span className="min-w-0 truncate">{o.label}</span>
-              {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
-              {o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
-            </button>
-          ))}
-        </div>
-      </>)}
-    </div>
-  );
+  const addMenu = (compact: boolean, items = options, more = false) => {
+    const which = more ? "more" : compact ? "compact" : "main";
+    const open = addOpen === which;
+    const label = more ? "More to add to this step" : "Add to this step";
+    const item = (o: (typeof items)[number]) => (
+      <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(null); o.onPick(); }}
+        className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
+        <span className="min-w-0 truncate">{o.label}</span>
+        {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
+        {o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
+      </button>
+    );
+    return (
+      <div className="relative">
+        <button onClick={(e) => {
+          // Desktop: fixed under the button, kept inside the window both ways.
+          const r = e.currentTarget.getBoundingClientRect();
+          const w = Math.min(300, window.innerWidth - 16);
+          const h = items.length * 44 + 14;
+          setAddPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)), top: r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4 });
+          setAddOpen(open ? null : which);
+        }}
+          aria-haspopup="menu" aria-expanded={open} title={label} aria-label={label}
+          className={more ? "inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
+            : compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
+            : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{more ? <span>More</span> : !compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
+        {open && (<>
+          <div className="fixed inset-0 z-30 hidden sm:block" onClick={() => setAddOpen(null)} />
+          <div role="menu" aria-label={label} style={{ top: addPos.top, left: addPos.left }}
+            className="fixed z-40 hidden max-h-[calc(100vh-16px)] w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg sm:block">
+            {items.map(item)}
+          </div>
+          {/* A phone: a sheet at the bottom; anchored, it ran off the left edge (2026-10-14). */}
+          <MenuSheet label={label} onClose={() => setAddOpen(null)}>{items.map(item)}</MenuSheet>
+        </>)}
+      </div>
+    );
+  };
   // One Add button, not a wall of them (Derek, 2026-10-13: "this is getting
   // messy"): the same list opens from it. What the step's name suggests sits
   // before it. No line explaining Add (Derek, 2026-10-13: remove it).

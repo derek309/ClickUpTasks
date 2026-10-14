@@ -186,7 +186,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
           ))}
           {more.length > 0 && (
             <span data-choice className="self-start">
-              <ActionMenu label={<span className="inline-flex items-center gap-1.5"><I.plus className="h-4 w-4" />More</span>} title="More to add to this step"
+              <ActionMenu sheet label={<span className="inline-flex items-center gap-1.5"><I.plus className="h-4 w-4" />More</span>} title="More to add to this step"
                 triggerClassName="inline-flex h-10 items-center rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
                 items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
             </span>

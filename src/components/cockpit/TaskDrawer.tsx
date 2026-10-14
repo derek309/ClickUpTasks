@@ -2764,7 +2764,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {sentNext?.approved && hasMessaging && !!messageDest?.email && (
             <button onClick={() => { const nm = sentNext.approved!; closeSentNext(); emailApproved(sentStep, nm); }} className="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background">Email {firstName} it&apos;s approved</button>
           )}
-          <ActionMenu label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
+          <ActionMenu sheet label="Something else ▾" title="Something else instead" triggerClassName="h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background"
             items={[
               // Instead of the suggestion: it comes off, the pick goes on.
               // After a tick: a new step in front of the plan's next one, named here.
