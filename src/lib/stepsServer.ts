@@ -8,7 +8,7 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
-  isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepHolding, stepStage,
+  isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { reviewFollowUpDays } from "./reviewReminders";
@@ -318,12 +318,14 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
     let next = list.map((x) => (x.id === stepId ? { ...x, done: true, doneAt: now, outcome: "Done" } : x));
     const after = stepAfter(next, stepId);
     if (after) {
-      // Client work still under way moves on with the plan; finished work stays.
-      const moving = carryForward(s.holds, (k) => finished.has(k)).filter((k) => !after.holds?.includes(k));
+      // Client work still under way moves on with the plan, to the next
+      // review step when there is one (stepForWork); finished work stays.
+      const to = stepForWork(next, stepId, after) ?? after;
+      const moving = carryForward(s.holds, (k) => finished.has(k)).filter((k) => !to.holds?.includes(k));
       next = next.map((x) => {
         if (x.id === stepId && moving.length) { const rest = (x.holds ?? []).filter((k) => !moving.includes(k as DeliverableKey)); return { ...x, holds: rest.length ? rest : undefined }; }
-        if (x.id === after.id) return { ...x, startedAt: x.startedAt ?? now, ...(moving.length ? { holds: [...(x.holds ?? []), ...moving] } : {}) };
-        return x;
+        if (x.id !== after.id && x.id !== to.id) return x;
+        return { ...x, ...(x.id === after.id ? { startedAt: x.startedAt ?? now } : {}), ...(x.id === to.id && moving.length ? { holds: [...(x.holds ?? []), ...moving] } : {}) };
       });
       status = statusForStep(row.status, stepStage(after, row.assignee_id));
       note = `"${s.title}" done. Next step: "${after.title}".`;

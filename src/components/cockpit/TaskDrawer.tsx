@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1103,17 +1103,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }
     // When it started, so its page shows what is said from here on.
     if (!next.startedAt) onPatchSub(next.id, { startedAt: new Date().toISOString() });
-    // Client work still under way moves on to the next step; links, files
-    // and finished work stay where they were used (Derek, 2026-10-11).
+    // Client work still under way moves on, to the next review step when
+    // there is one, else the next step (stepForWork); links, files and
+    // finished work stay where they were used (Derek, 2026-10-11, 2026-10-13).
     const done = latest.find((x) => x.id === doneId);
+    const to = stepForWork(latest, doneId, next) ?? next;
     const moving = carryForward(done?.holds, (k) => {
       const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
       return !!r && (r.status === "approved" || r.status === "completed");
-    }).filter((k) => !next.holds?.includes(k));
+    }).filter((k) => !to.holds?.includes(k));
     if (done && moving.length) {
       const rest = (done.holds ?? []).filter((k) => !moving.includes(k as DeliverableKey));
       onPatchSub(doneId, { holds: rest.length ? rest : undefined });
-      onPatchSub(next.id, { holds: [...(next.holds ?? []), ...moving] });
+      onPatchSub(to.id, { holds: [...(to.holds ?? []), ...moving] });
     }
     const status = statusForStep(task.status, stepStage(next, task.assigneeId));
     // The plan reaching a teammate's step dates the task to it, as handing it over does.

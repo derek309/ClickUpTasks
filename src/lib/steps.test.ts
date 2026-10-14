@@ -430,3 +430,43 @@ describe("where Claude's work goes on a task with steps", () => {
     expect(stepForNewWork([], "doc", { claudeId: C })).toBeNull();
   });
 });
+
+import { saysReview, stepForWork } from "./data";
+
+describe("the review step wins: where unfinished work goes when a step is ticked", () => {
+  const blog = () => [
+    s("a", "Draft the blog post", { done: true, doneAt: "2026-10-13T10:00:00Z", assigneeId: "u_claude", holds: ["doc"] }),
+    s("b", "Create the stat image in ChatGPT"),
+    s("c", "Derek review"),
+    s("d", "Publish"),
+  ];
+  it("a review word in the title, any case, as a word", () => {
+    expect(["Derek review", "Review the draft", "REVIEWING it", "Derek review: newsletter email"].every(saysReview)).toBe(true);
+    expect(["Preview the page", "Create the stat image", "Publish"].some(saysReview)).toBe(false);
+  });
+  it("blog task: 1 Draft done, the work goes to 3 Derek review, not 2 the stat image", () => {
+    const list = blog();
+    expect(stepForWork(list, "a", list[1])?.id).toBe("c");
+    expect(stepForNewWork(list, "doc", { claudeId: "u_claude" })).toEqual({ holdOn: "c", madeOn: "a" });
+    // Approved work still stays where it was made.
+    expect(stepForNewWork(list, "doc", { claudeId: "u_claude", finished: true })).toEqual({ holdOn: "a", madeOn: "a" });
+  });
+  it("no review step: the next open step, as before", () => {
+    const list = [s("a", "Write it", { done: true }), s("b", "Make the image"), s("c", "Publish")];
+    expect(stepForWork(list, "a", list[1])?.id).toBe("b");
+  });
+  it("never the client's own waiting step, a portal request, a done step, or a review before the ticked one", () => {
+    const list = [
+      s("r0", "Review the brief"),
+      s("a", "Write it", { done: true }),
+      s("w", "Waiting on Brian to review it", { onClient: true }),
+      s("p", "Please review my logo", { fromClient: true }),
+      s("x", "Derek review", { done: true }),
+      s("b", "Make the image"),
+    ];
+    expect(stepForWork(list, "a", list[5])?.id).toBe("b");
+  });
+  it("nothing next and no review step: nowhere", () => {
+    expect(stepForWork([s("a", "Write it", { done: true })], "a", null)).toBeNull();
+  });
+});

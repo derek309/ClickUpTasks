@@ -1050,7 +1050,7 @@ export function createServer(opts = {}) {
   const services = opts.services;
   if (services) {
     // Which step holds the work (Derek, 2026-10-13: Claude's drafts sat "Not on a step").
-    const STEP = z.string().optional().describe("a step's id or title to put this work on; left out, it goes on your own open step, else moves on from the step you just finished to the next one, else the current step. Work a step already holds stays there unless you name one");
+    const STEP = z.string().optional().describe("a step's id or title to put this work on; left out, it goes on your own open step, else moves on from the step you just finished to the first open review step after it (else the next one), else the current step. Work a step already holds stays there unless you name one");
     const KIND = z.enum(["doc", "image", "page", "video"]).describe('"doc" the client document, "image" the image review, "page" the HTML review, "video" the video review');
     // The kinds a chat can supply the content for. A video is uploaded in the app
     // (hundreds of megabytes, straight from a Mac to storage), so add_review_version

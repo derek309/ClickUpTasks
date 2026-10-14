@@ -165,6 +165,26 @@ describe("steps added on the server", () => {
     expect(await tickStep("t1", "b", false)).toContain("reopened");
   });
 
+  it("a tick carries unfinished work to the next review step; the next step still starts", async () => {
+    setup([
+      { id: "a", title: "Draft the blog post", done: false, holds: ["doc"] },
+      { id: "b", title: "Create the stat image in ChatGPT", done: false },
+      { id: "c", title: "Derek review", done: false },
+    ]);
+    expect(await tickStep("t1", "a", true)).toContain('Next step: "Create the stat image in ChatGPT"');
+    expect(steps().find((x) => x.id === "a")!.holds).toBeUndefined();
+    expect(steps().find((x) => x.id === "b")!.holds).toBeUndefined();
+    expect(steps().find((x) => x.id === "b")!.startedAt).toBeTruthy();
+    expect(steps().find((x) => x.id === "c")).toMatchObject({ holds: ["doc"] });
+    expect(steps().find((x) => x.id === "c")!.startedAt).toBeUndefined();
+  });
+
+  it("with no review step, the work goes to the next step as before", async () => {
+    setup([{ id: "a", title: "Write it", done: false, holds: ["doc"] }, { id: "b", title: "Schedule it", done: false }]);
+    await tickStep("t1", "a", true);
+    expect(steps().find((x) => x.id === "b")).toMatchObject({ holds: ["doc"] });
+  });
+
   it("a to-do from a client comment is ticked and its comment resolved", async () => {
     setup([{ id: "a", title: "Make Brian's changes", done: false, todos: [{ id: "td1", title: "Change the headline", done: false, fromClient: true, commentId: "c1" }] }]);
     db.task_documents[0].id = "d1";

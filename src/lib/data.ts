@@ -3685,13 +3685,34 @@ export function carryForward(holds: string[] | undefined, finished: (key: Delive
   return (holds ?? []).filter((k): k is DeliverableKey => ["doc", "image", "page", "video", "brief", "email"].includes(k) && !finished(k as DeliverableKey));
 }
 
+/** A step whose title says review, as a word (case aside): "Derek review",
+ *  "Review the draft", "Reviewing". The same word match as the SQL's
+ *  `\mreview`; "Preview" is not one. */
+export const saysReview = (title: string): boolean => /\breview/i.test(title);
+
+/** The step a finished step's unfinished work goes to (carryForward):
+ *  the first open step after it whose title says review, so the work lands
+ *  where someone looks at it, never the client's own waiting step nor a
+ *  portal request; else `next`, the step that starts, as before. Which step
+ *  starts does not change, only where the work goes (Derek, 2026-10-13:
+ *  "make the review step win everywhere"; the blog's draft went to "Create
+ *  the stat image" instead of "Derek review"). Used by every path that moves
+ *  work on: the drawer's tick, tickStep and stepForNewWork. */
+export function stepForWork<T extends Pick<Subtask, "id" | "done" | "fromClient" | "onClient" | "title">>(subtasks: T[], doneId: string, next: T | null): T | null {
+  const plan = planSteps(subtasks);
+  const from = plan.findIndex((s) => s.id === doneId);
+  const review = plan.find((s, i) => i > from && !s.done && !s.onClient && s.id !== doneId && saysReview(s.title));
+  return review ?? next;
+}
+
 /** Where client work made from outside the app (Claude over the MCP) goes on
  *  a task with steps, as the step id that holds it and the step that made it
  *  (madeHere), or null when there are no open steps to hold it. In order: the
  *  step named (`stepId`, already matched); else Claude's own open step; else,
  *  when the step finished last was Claude's, the work moves on from it the
- *  way a tick carries it (carryForward: the next open step, unless the work
- *  is already finished, when it stays); else the current step. A client's
+ *  way a tick carries it (carryForward to stepForWork: the first open review
+ *  step after it, else the next open step, unless the work is already
+ *  finished, when it stays); else the current step. A client's
  *  own waiting step never holds it (its holds are not shown). (Derek,
  *  2026-10-13: the October Newsletter's page sat "Not on a step".) */
 export function stepForNewWork(subtasks: Subtask[], key: DeliverableKey, opts: { claudeId: string; stepId?: string; finished?: boolean }): { holdOn: string; madeOn: string } | null {
@@ -3706,7 +3727,7 @@ export function stepForNewWork(subtasks: Subtask[], key: DeliverableKey, opts: {
   const last = plan.filter((x) => x.done && x.doneAt).sort((a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? ""))[0];
   if (last && last.assigneeId === opts.claudeId) {
     const moving = carryForward([key], () => !!opts.finished).length > 0;
-    const after = open[0];
+    const after = stepForWork(subtasks, last.id, open[0] ?? null);
     return { holdOn: moving && after ? after.id : last.id, madeOn: last.id };
   }
   return open[0] ? { holdOn: open[0].id, madeOn: open[0].id } : null;
