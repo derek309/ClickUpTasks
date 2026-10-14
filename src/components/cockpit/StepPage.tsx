@@ -800,15 +800,16 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   {/* One button while you work (Derek, 2026-10-13: "I'm done with
                       this step when you click it, then ask what you want to do
                       next"). The choices (start the next step, give it to Claude,
-                      the task is finished) come after, in What's next. */}
+                      the task is finished) come after, in What's next; the
+                      button says so (2026-10-14: "Done · what's next?"). */}
                   {sendReady ? (
                     <div className="flex flex-col items-start gap-2">
                       <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {first}</button>
                       {/* Finishing without sending stays one click away. */}
-                      <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">I&apos;m done with this step</button>
+                      <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
                     </div>
                   ) : (
-                    <button onClick={onMarkDone} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">I&apos;m done with this step</button>
+                    <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
                   )}
                 </div>
               ) : null}
