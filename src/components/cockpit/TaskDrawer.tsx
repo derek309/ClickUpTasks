@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -1328,7 +1328,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       }
     }
     onToggleSub(sid, true);
-    onPatchSub(sid, { doneAt: new Date().toISOString(), outcome, ...(meId ? { doneBy: meId } : {}) });
+    // Work it held but never made comes off it, rather than showing on a
+    // done step ("Email to write") or moving on to the next one.
+    const cleared = sub ? withoutPlaceholders(taskRef.current.subtasks.find((x) => x.id === sid) ?? sub, deliverablePresent) : null;
+    onPatchSub(sid, { doneAt: new Date().toISOString(), outcome, ...(meId ? { doneBy: meId } : {}), ...(cleared ?? {}) });
     setAutoDone(null);
     // Ticked done: what's next is asked at once, with the plan's next step
     // or a blank to name one (Derek, 2026-10-12: "a way to create the next step").
@@ -2017,7 +2020,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // from a draft ready to send. On an open step it is the Write the email
       // button instead (below).
       ...(["doc", "image", "page", "video", "brief"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
-      ...(holds.includes("email") && !writeEmail ? [`${WORK_ICON.email} ${emailMarker}`] : []),
+      // A done step's email with nothing written is not shown at all.
+      ...(holds.includes("email") && !writeEmail && (!sub.done || !!task.draftEmail) ? [`${WORK_ICON.email} ${emailMarker}`] : []),
       ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),

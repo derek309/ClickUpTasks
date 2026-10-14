@@ -3608,6 +3608,20 @@ export function nameDoneWhatsNext(subtasks: Subtask[]): Subtask[] {
   return subtasks.map((x) => (needs(x) ? { ...x, title: x.outcome && x.outcome.trim() && x.outcome !== "Done" ? x.outcome.trim() : "Decided what's next" } : x));
 }
 
+/** A step being finished lets go of client work it held but never made: an
+ *  email with no draft, a review or document that was never started (Derek,
+ *  2026-10-14: a done step still showed "Email to write"). Links, files, sent
+ *  emails and work that exists stay. The holds and madeHere to keep, or null
+ *  when nothing changes. */
+export function withoutPlaceholders(s: Pick<Subtask, "holds" | "madeHere">, present: (key: DeliverableKey) => boolean): Pick<Subtask, "holds" | "madeHere"> | null {
+  const work = ["doc", "image", "page", "video", "brief", "email"];
+  const empty = (k: string) => work.includes(k) && !present(k as DeliverableKey);
+  const holds = (s.holds ?? []).filter((k) => !empty(k));
+  const madeHere = (s.madeHere ?? []).filter((k) => !empty(k));
+  if (holds.length === (s.holds ?? []).length && madeHere.length === (s.madeHere ?? []).length) return null;
+  return { holds: holds.length ? holds : undefined, madeHere: madeHere.length ? madeHere : undefined };
+}
+
 /** The step holding `key`, or null. */
 export function stepHolding<T extends Pick<Subtask, "holds">>(subtasks: T[], key: string): T | null {
   return subtasks.find((s) => s.holds?.includes(key)) ?? null;

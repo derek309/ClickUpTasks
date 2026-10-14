@@ -139,3 +139,15 @@ describe("a step given to Claude", () => {
     expect(statusForClaudeStep("approved", step, "u_derek", false)).toBeNull();
   });
 });
+
+import { withoutPlaceholders } from "./data";
+
+describe("a finished step lets go of work never made", () => {
+  it("drops an email with no draft and a review never started, keeps the rest", () => {
+    const present = (k: string) => k === "page";
+    expect(withoutPlaceholders({ holds: ["email", "page", "att:a1", "mail:m1"], madeHere: ["email", "page"] }, present))
+      .toEqual({ holds: ["page", "att:a1", "mail:m1"], madeHere: ["page"] });
+    expect(withoutPlaceholders({ holds: ["email"], madeHere: ["email"] }, present)).toEqual({ holds: undefined, madeHere: undefined });
+    expect(withoutPlaceholders({ holds: ["page"] }, present)).toBeNull();
+  });
+});
