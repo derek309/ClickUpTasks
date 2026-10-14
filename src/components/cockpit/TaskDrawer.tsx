@@ -40,7 +40,7 @@ import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
 import { draftLinkAsButton } from "@/lib/draftLink";
-import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
+import { EmailPreview, ReceivedEmailBox, SentEmailBox, ShowLink } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices } from "@/lib/stepSetup";
 import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
@@ -182,6 +182,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [subDraft, setSubDraft] = useState("");
   const [dragSub, setDragSub] = useState<string | null>(null);
   const [dropSub, setDropSub] = useState<string | null>(null);
+  // Emails opened in place with Show, by where they are (Derek, 2026-10-14).
+  const [shownEmail, setShownEmail] = useState<Record<string, boolean>>({});
+  const toggleShown = (k: string) => setShownEmail((o) => ({ ...o, [k]: !o[k] }));
   // Team-chat draft — lives here (not lifted to Cockpit.tsx) so typing it
   // only re-renders this drawer, not the whole app; see useDebouncedCommit's
   // comment above for the sibling title/description fix to the same root
@@ -1891,19 +1894,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The current step lists what's on it, one line each, read only: the work
     // is done inside the step, with its directions (Derek, 2026-10-12: "show
     // that it's attached and approved and ready, but they can't open it from here").
+    // An email here reads in place with Show (Derek, 2026-10-14).
+    const emailLine = (key: string, line: React.ReactNode, preview: () => React.ComponentProps<typeof EmailPreview>) => {
+      const k = `row:${sub.id}:${key}`;
+      const id = `email-row-${sub.id}-${key}`;
+      return (
+        <Fragment key={key}>
+          <span className="flex min-w-0 items-center gap-2">{line}<span aria-hidden className="text-muted">·</span><ShowLink open={!!shownEmail[k]} controls={id} onToggle={() => toggleShown(k)} /></span>
+          {shownEmail[k] && <div className="cursor-auto py-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}><EmailPreview id={id} {...preview()} /></div>}
+        </Fragment>
+      );
+    };
     const heldHere = isActive && !sub.onClient ? (() => {
       const lines = [
         ...(["doc", "image", "page", "video", "brief", "email"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => {
           const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-          return <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{deliverableName(k)}</span>{r ? stageChip(r.status) : <span className="text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}</span>;
+          const line = <><span aria-hidden>{WORK_ICON[k]}</span><span className="min-w-0 truncate font-medium">{deliverableName(k)}</span>{r ? stageChip(r.status) : <span className="text-muted">{k === "email" ? emailMarker : KIND_LABEL[k]}</span>}</>;
+          const d = task.draftEmail;
+          if (k === "email" && d) return emailLine(k, line, () => ({ toName: draftToName, toEmail: draftTo, subject: d.subject.trim() || task.title, body: d.body, attachments: d.attachments }));
+          return <span key={k} className="flex min-w-0 items-center gap-2">{line}</span>;
         }),
-        ...holds.filter((k) => !!sentMail(k)).map((k) => <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>✉</span><span className="min-w-0 truncate font-medium">{sentMail(k)!.subject?.trim() || "Email"}</span><span className="text-muted">Sent</span></span>),
+        ...holds.filter((k) => !!sentMail(k)).map((k) => {
+          const m = sentMail(k)!;
+          const peer = m.peerAddress?.includes("@") ? m.peerAddress : null;
+          return emailLine(k, <><span aria-hidden>✉</span><span className="min-w-0 truncate font-medium">{m.subject?.trim() || "Email"}</span><span className="text-muted">Sent</span></>,
+            () => ({ toName: peer ? m.peerName : messageDest?.name, toEmail: peer ?? (messageDest?.email || null), subject: m.subject ?? "", body: m.body, attachments: m.attachments }));
+        }),
         ...holds.filter((k) => k.startsWith("att:")).map((k) => { const a = task.attachments.find((x) => attachmentKey(x.id) === k); return a ? <span key={k} className="flex min-w-0 items-center gap-2"><span aria-hidden>🔗</span><span className="min-w-0 truncate">{a.name}</span></span> : null; }),
         ...(sub.fromEmails ?? []).map((e) => <span key={e.messageId} className="flex min-w-0 items-center gap-2"><span aria-hidden>📨</span><span className="min-w-0 truncate font-medium">{e.subject || "Email"}</span><span className="text-muted">from {e.from.split(" ")[0]}</span></span>),
       ].filter(Boolean);
+      const openIt = () => setOpenStepPage({ taskId: task.id, id: sub.id, full: false });
       return lines.length ? (
-        <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} title="Open the step to work on it"
-          className="flex w-full flex-col gap-1 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">{lines}</button>
+        <div role="button" tabIndex={0} onClick={openIt} onKeyDown={(e) => { if (e.key === "Enter") openIt(); }} title="Open the step to work on it"
+          className="flex w-full cursor-pointer flex-col gap-1 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background">{lines}</div>
       ) : null;
     })() : null;
     const missing = !sub.done ? missingNeeds(sub) : [];
@@ -3425,7 +3448,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               )}
               <div className="min-w-0 flex-1">
                 {mail ? (
-                  <SentEmailBox message={mail} messages={messages} firstName={firstName}
+                  <SentEmailBox message={mail} messages={messages} firstName={firstName} toName={messageDest?.name} toEmail={messageDest?.email || null}
                     onRemove={() => onPatch({ subtasks: releaseFromSteps(taskRef.current.subtasks, k) })} />
                 ) : a && a.kind === "image" && a.path && attImageUrls[a.path] ? (
                   // A picture shows as itself, a click opens it full size (Derek, 2026-10-12).
@@ -3470,19 +3493,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   // work first (Derek, 2026-10-13).
                   const withClaude = d === "email" && !sub.done && sub.assigneeId === CLAUDE_ID;
                   const toSend = d === "email" && !sub.done && !withClaude ? stepTone(sub) : null;
+                  // The draft email reads in place with Show (Derek, 2026-10-14).
+                  const showKey = `page:${sub.id}`;
+                  const shown = d === "email" && !!task.draftEmail && !!shownEmail[showKey];
+                  const previewId = `email-preview-${sub.id}`;
                   return (
-                    // The whole box opens it (Derek, 2026-10-11), not only its button.
+                    <>
+                    {/* The whole box opens it (Derek, 2026-10-11), not only its button. */}
                     <span role="button" tabIndex={0} onClick={() => openWork(d)} onKeyDown={(e) => { if (e.key === "Enter") openWork(d); }}
                       style={r ? { background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot } : undefined}
                       className={`flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border px-3 py-2 hover:border-accent ${toSend ? `${toSend.rowTone} pl-4` : "bg-surface hover:bg-background"}`}>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[16px] font-semibold">{deliverableName(d)}</span>
-                        <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : withClaude ? "Draft email · waiting on Claude" : KIND_LABEL[d]}{r && stageChip(r.status)}</span>
+                        <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : withClaude ? "Draft email · waiting on Claude" : KIND_LABEL[d]}{r && stageChip(r.status)}
+                          {d === "email" && task.draftEmail && <ShowLink open={shown} controls={previewId} onToggle={() => toggleShown(showKey)} />}</span>
                       </span>
                       <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend ? "bg-accent text-white" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Actions)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
+                    {shown && task.draftEmail && (
+                      <div className="mt-1">
+                        <EmailPreview id={previewId} toName={draftToName} toEmail={draftTo} subject={task.draftEmail.subject.trim() || task.title}
+                          body={task.draftEmail.body} attachments={task.draftEmail.attachments} />
+                      </div>
+                    )}
+                    </>
                   );
                 })()}
               </div>

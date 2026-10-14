@@ -4,9 +4,11 @@
 // client box and just show sent, so it doesn't get lost and we can click to
 // review"). It says whether the client has written back since; the whole box
 // opens the email as it went out.
-import { useState, type ReactNode } from "react";
-import { clientEmailText, htmlToText, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
+import { useId, useState, type ReactNode } from "react";
+import { clientEmailText, looksLikeHtml, timeAgo, type Message, type ReceivedEmail } from "@/lib/data";
 import { reviewTone } from "@/lib/reviewTone";
+import { safeMessageHtml } from "@/lib/safeHtml";
+import { recipientName } from "@/lib/emailHeader";
 
 const CHANNEL_WORD: Partial<Record<Message["channel"], string>> = { email: "email", sms: "text", chat: "the portal" };
 
@@ -19,20 +21,84 @@ export function replyTo(sent: Message, messages: Message[] | null | undefined): 
     .sort((a, b) => a.at.localeCompare(b.at))[0] ?? null;
 }
 
-export function SentEmailBox({ message, messages, firstName, onRemove }: {
+/** An email read in place, as it goes or went out (Derek, 2026-10-14: Show
+ *  on a step's draft and sent emails): who it is to, its subject, its body
+ *  (sanitised, as the Conversation shows emails) and its files by name. Read
+ *  only; the email window is where it changes. */
+export function EmailPreview({ id, toName, toEmail, subject, body, attachments }: {
+  id?: string;
+  toName?: string | null;
+  toEmail?: string | null;
+  subject: string;
+  body: string;
+  attachments?: { id: string; name: string }[];
+}) {
+  const name = recipientName(toName);
+  const row = "flex min-w-0 gap-3 border-b px-3 py-2";
+  const label = "w-16 shrink-0 font-semibold text-muted";
+  return (
+    <div id={id} className="overflow-hidden rounded-[5px] border bg-surface text-[16px]">
+      <div className={`${row} items-start`}>
+        <span className={label}>To</span>
+        {toEmail || name ? (
+          <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-2">
+            {name && <span className="font-semibold [overflow-wrap:anywhere]">{name}</span>}
+            {toEmail && <span className={`[overflow-wrap:anywhere] ${name ? "text-muted" : ""}`}>{toEmail}</span>}
+          </span>
+        ) : <span className="min-w-0 flex-1 text-muted">Nobody yet</span>}
+      </div>
+      <div className={row}>
+        <span className={label}>Subject</span>
+        <span className="min-w-0 flex-1 font-semibold [overflow-wrap:anywhere]">{subject.trim() || "(no subject)"}</span>
+      </div>
+      <div className="max-h-[60vh] overflow-y-auto px-3 py-2.5 [overflow-wrap:anywhere]">
+        {!body.trim() ? <span className="text-muted">(nothing written yet)</span>
+          : looksLikeHtml(body)
+            // Sanitised: an email body may hold whatever a stranger sent.
+            ? <div className="rte-content" dangerouslySetInnerHTML={{ __html: safeMessageHtml(body) }} />
+            : <div className="whitespace-pre-wrap leading-relaxed">{body.trim()}</div>}
+      </div>
+      {attachments && attachments.length > 0 && (
+        <div className={`${row} items-start border-b-0 border-t`}>
+          <span className={label}>Files</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            {attachments.map((a) => <span key={a.id} className="[overflow-wrap:anywhere]">{a.name}</span>)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Show or Hide, the small text link that opens an email in place. */
+export function ShowLink({ open, controls, onToggle }: { open: boolean; controls: string; onToggle: () => void }) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onToggle(); }} onKeyDown={(e) => e.stopPropagation()} aria-expanded={open} aria-controls={controls}
+      title={open ? "Hide the email" : "Read the email here"}
+      className="shrink-0 font-semibold text-accent underline underline-offset-4 hover:opacity-80">{open ? "Hide" : "Show"}</button>
+  );
+}
+
+export function SentEmailBox({ message, messages, firstName, toName, toEmail, onRemove }: {
   message: Message;
   messages?: Message[] | null;
   firstName: string;
+  /** Who it went to when the message does not say (the client's contact). */
+  toName?: string | null;
+  toEmail?: string | null;
   onRemove?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const previewId = useId();
   const reply = replyTo(message, messages);
   const tone = reviewTone(reply ? "approved" : "with_client");
   const toggle = () => setOpen((o) => !o);
+  // Who it went to, from the message itself when it says (an address; the
+  // GoHighLevel pull can store a phone there), else the client's contact.
+  const peer = message.peerAddress?.includes("@") ? message.peerAddress : null;
   return (
     <div className="rounded-[5px] border" style={{ background: tone.chip, borderColor: tone.dot }}>
-      <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter") toggle(); }} aria-expanded={open}
-        className="flex min-w-0 cursor-pointer items-center gap-3 px-3 py-2">
+      <div className="flex min-w-0 items-center gap-3 px-3 py-2">
         <span aria-hidden className="text-[18px]">✉️</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[16px] font-semibold">{message.subject?.trim() || "Email"}</span>
@@ -42,17 +108,19 @@ export function SentEmailBox({ message, messages, firstName, onRemove }: {
             {reply
               ? <span className="font-semibold" style={{ color: tone.text }}>{firstName} replied by {CHANNEL_WORD[reply.channel] ?? reply.channel} {timeAgo(reply.at)}</span>
               : <span>No reply yet</span>}
+            <span aria-hidden>·</span>
+            <ShowLink open={open} controls={previewId} onToggle={toggle} />
           </span>
         </span>
-        <span aria-hidden className="shrink-0 text-[16px] text-muted">{open ? "Hide" : "Read"}</span>
         {onRemove && (
-          <button onClick={(e) => { e.stopPropagation(); onRemove(); }} title="Take off this step (it stays in the conversation)" aria-label="Take this email off the step"
+          <button onClick={onRemove} title="Take off this step (it stays in the conversation)" aria-label="Take this email off the step"
             className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
         )}
       </div>
       {open && (
-        <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
-          {htmlToText(message.body).trim()}
+        <div className="border-t bg-surface p-2">
+          <EmailPreview id={previewId} toName={peer ? message.peerName : toName} toEmail={peer ?? toEmail}
+            subject={message.subject ?? ""} body={message.body} attachments={message.attachments} />
         </div>
       )}
     </div>
