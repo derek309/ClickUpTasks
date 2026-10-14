@@ -789,6 +789,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // lives on the step that sent it.
   const homeOf = (x: Subtask | null | undefined) => (x?.onClient && x.addedFor?.startsWith("sent:") ? steps.find((y) => y.id === x.addedFor!.slice(5)) ?? x : x ?? null);
   const stepTitleHolding = (key: string) => homeOf(stepHolding(steps, key))?.title ?? null;
+  // Its step's number, 0 on none: the Files card says "Step 2".
+  const stepNoHolding = (key: string) => { const on = homeOf(stepHolding(steps, key)); return on ? steps.findIndex((x) => x.id === on.id) + 1 : 0; };
 
   // Bottom of the Escape stack: anything opened over the drawer closes first.
   useEscapeToClose(onClose);
@@ -2464,11 +2466,33 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         })()}
         {asking && <li className={`px-4 py-3 ${steps.length ? "border-t" : ""}`}>{askingPanel}</li>}
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
+        {/* Work on no step (Derek, 2026-10-14): said here, muted, with a way
+            to put it on one; it is not listed in Files. */}
+        {looseKeys.map((k, i) => {
+          const open = steps.filter((x) => !x.done);
+          return (
+            <li key={`loose-${k}`} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[16px] text-muted ${steps.length || asking || clientItemsOf(null).length || i > 0 ? "border-t" : ""}`}>
+              {/* A phone: the work on one line, Put it on a step under it. */}
+              <span className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
+                <span className="shrink-0">Not on a step:</span>
+                <button onClick={() => openWork(k)} className="min-w-0 truncate text-left font-medium text-foreground hover:underline">
+                  <span aria-hidden>{WORK_ICON[k]}</span> {deliverableName(k)}
+                </button>
+              </span>
+              {steps.length > 0 && (<>
+                <span aria-hidden className="max-sm:hidden">·</span>
+                <ActionMenu sheet title={`Put ${deliverableName(k)} on a step`} triggerClassName="inline-flex items-center gap-0.5 font-semibold text-accent hover:underline"
+                  label={<>Put it on a step <I.chevron className="h-3.5 w-3.5 -rotate-90" /></>}
+                  items={(open.length ? open : steps).map((x) => ({ label: `${stepNumberOf(x.id)}. ${x.title}`, onClick: () => holdKey(x.id, k) }))} />
+              </>)}
+            </li>
+          );
+        })}
         {/* One + Add step (Derek, 2026-10-14: "one flow everywhere"): the
             name, optional, then the set up under it. A desktop types in place;
             a phone opens it as a page of its own, full screen, nothing
             focused (Derek, 2026-10-14). */}
-        <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+        <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length || looseKeys.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onFocus={() => setNewOpen("inline")}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); submitNew(newAnswer.current ?? newDefaults()); }
@@ -2481,7 +2505,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {newOpen === "inline" && (
           <li className="hidden border-t bg-background/40 px-3 py-3 sm:block">{newStepSetup(false)}</li>
         )}
-        <li className={`px-3 py-2 sm:hidden ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
+        <li className={`px-3 py-2 sm:hidden ${steps.length || asking || (openStep || followUp) || clientChanges.length || looseKeys.length ? "border-t" : ""}`}>
           <button onClick={() => setNewOpen("sheet")} className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add step</button>
         </li>
         {newOpen === "sheet" && (
@@ -2503,29 +2527,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // at a glance without boxing the page in (Derek, 2026-10-11: "it's very
   // flat", mockup A).
   const HEAD_ICONS: Record<string, [React.ReactNode, string]> = {
-    "Client work": [<I.clipboard key="i" className="h-4 w-4" />, "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"],
     List: [<I.list key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
     "In GoHighLevel": [<I.bolt key="i" className="h-4 w-4" />, "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"],
-    "Links and files": [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
+    Files: [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
     Conversation: [<I.comment key="i" className="h-4 w-4" />, "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"],
     "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
   };
-  // "Client work" reads as Actions now (Derek, 2026-10-13: "it's a lot more
-  // than that"); the name stays the key, so what was folded stays folded.
-  const SHOWN_AS: Record<string, string> = { "Client work": "Actions" };
   const headingText = (title: string, extra?: React.ReactNode) => (
     <h2 className="flex items-center gap-2 text-[16px] font-bold text-foreground">
       {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
-      {SHOWN_AS[title] ?? title}{extra}
+      {title}{extra}
     </h2>
   );
-  // Client work, Links and files and Conversation fold away (Derek,
-  // 2026-10-13: "the steps are good at containing everything"). Folded by
-  // default; each one's choice is remembered in this browser.
-  const FOLDABLE = ["Client work", "Links and files", "Conversation"];
+  // Files and Conversation fold away (Derek, 2026-10-13: "the steps are good
+  // at containing everything"). Folded by default; each one's choice is
+  // remembered in this browser. Files is the old Actions ("Client work") and
+  // Links and files cards in one (Derek, 2026-10-14): either one folded
+  // before leaves Files folded, and opening Files clears both.
+  const FOLDABLE = ["Files", "Conversation"];
   const [folded, setFolded] = usePersisted<string[]>("taskSectionsFolded", FOLDABLE, (v) => Array.isArray(v));
-  const isFolded = (title: string) => folded.includes(title);
-  const toggleFold = (title: string) => setFolded(isFolded(title) ? folded.filter((x) => x !== title) : [...folded, title]);
+  const isFolded = (title: string) => folded.includes(title) || (title === "Files" && (folded.includes("Client work") || folded.includes("Links and files")));
+  const toggleFold = (title: string) => setFolded(isFolded(title)
+    ? folded.filter((x) => x !== title && !(title === "Files" && (x === "Client work" || x === "Links and files")))
+    : [...folded, title]);
   const heading = (title: string, extra?: React.ReactNode) => FOLDABLE.includes(title) ? (
     <button onClick={() => toggleFold(title)} aria-expanded={!isFolded(title)} title={isFolded(title) ? "Show" : "Hide"} className="flex min-w-0 items-center gap-1 text-left hover:opacity-80">
       {headingText(title, extra)}
@@ -2543,29 +2567,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // consistent and make it one line, not two, if nothing is there").
   const CARD = "mt-8 rounded-[5px] border bg-surface p-4 shadow-soft";
   const emptyHint = (text: string) => <span className="hidden min-w-0 flex-1 truncate text-[16px] text-muted sm:block">{text}</span>;
-  const noFiles = task.attachments.length === 0 && conversationFiles.length === 0 && !uploadProgress && !linkOpen;
-  const attachmentsBlock = (
-    <div id="task-files"
-      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
-      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
-      className={`${CARD} transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
-      <div className={`flex items-center justify-between gap-3 ${noFiles ? "" : "mb-3"}`}>
-        {heading("Links and files", task.attachments.length + conversationFiles.length > 0 && <span className="font-normal text-muted">· {task.attachments.length + conversationFiles.length}</span>)}
-        {noFiles && emptyHint("Drop, paste or attach · max 25MB each")}
-        <span className="flex shrink-0 items-center gap-3">
-          {/* Sorting two things is not a job. It earns its place at five. */}
-          {task.attachments.length >= 5 && (
-            <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
-              <option value="added">Sort: Added</option>
-              <option value="name">Sort: Name</option>
-              <option value="type">Sort: Type</option>
-            </select>
-          )}
-          <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
-          <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
-        </span>
-      </div>
+  // The files part of the Files card: the link being added, an upload under
+  // way, pictures as a gallery, then files and links one per row.
+  const filesBody = (
+    <>
       {linkOpen && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-2">
           <input autoFocus value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addLink(); }} placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-md border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
@@ -2650,8 +2655,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       (Derek, 2026-10-13). */}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{a.name}</span>
-                    {(a.size || stepTitleHolding(attachmentKey(a.id))) && (
-                      <span className="block truncate font-normal text-muted">{[a.size, stepTitleHolding(attachmentKey(a.id)) && `on ${stepTitleHolding(attachmentKey(a.id))}`].filter(Boolean).join(" · ")}</span>
+                    {(a.size || stepNoHolding(attachmentKey(a.id)) > 0) && (
+                      <span className="block truncate font-normal text-muted" title={stepTitleHolding(attachmentKey(a.id)) ?? undefined}>{[a.size, stepNoHolding(attachmentKey(a.id)) > 0 && `Step ${stepNoHolding(attachmentKey(a.id))}`].filter(Boolean).join(" · ")}</span>
                     )}
                   </span>
                 </a>
@@ -2670,7 +2675,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           })}
         </div>
       )}
-    </div>
+    </>
   );
   // Ask the client about one or more to-dos on a step (Derek, 2026-10-12): a
   // short email with each item and a place for the question, on the step,
@@ -3141,7 +3146,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       // the second as a file and ticks it, so the Document stays free. A
       // meeting Granola already sent is filed at once.
       { label: "Transcript", onClick: () => void pullTranscript() },
-      { label: "Link", onClick: () => { setLinkOpen(true); document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }); } },
+      { label: "Link", onClick: () => { setLinkOpen(true); setTimeout(() => document.getElementById("task-files")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); } },
       { label: "File", onClick: () => fileRef.current?.click() },
     ]} />
   );
@@ -3189,8 +3194,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     );
   });
-  // Work drawn in full (on no step, or while restoring) shows in the card.
-  const looseWork = DELIVERABLE_KEYS.some((k) => deliverablePresent(k) && !workCompact(k));
+  // Work on no step: a muted row at the foot of the steps, to put on one.
+  const looseKeys = DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workOn(k));
   // Opens a piece of client work's own window from anywhere (a step's page).
   const openWork = (k: DeliverableKey) => {
     if (k === "doc") setDocStartNonce((n) => n + 1);
@@ -3523,7 +3528,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                           {d === "email" && task.draftEmail && <ShowLink open={shown} controls={previewId} onToggle={() => toggleShown(showKey)} />}</span>
                       </span>
                       <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend ? "bg-accent text-white" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
-                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays under Actions)"} aria-label={`Take ${deliverableName(d)} off this step`}
+                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays on the task, under the steps)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
                     {shown && task.draftEmail && (
@@ -3562,21 +3567,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // it is not, and nothing you do in here moves it between the two.
   const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
 
-  // What is left to do, one row each, for the Actions card (Derek,
-  // 2026-10-13): unsent drafts (the email, a step's text or chat), reviews
-  // not yet approved or completed, project instructions not done, and files
-  // an open step still needs.
+  // The work on the steps, one row each, for the Files card (Derek,
+  // 2026-10-14): every document and review on a step whatever its status,
+  // the email draft, a step's text or chat, the emails sent, and files an
+  // open step still needs. Work on no step is under the steps instead.
   // `line` is the state said in words, with a real date where there is one,
   // for the phone's second line ("Step 3 · With Ryan, viewed Oct 12"), kept
   // short so it fits one line at 375px.
   type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; line: string; onClick: () => void };
+  const [sentOpen, setSentOpen] = useState<string | null>(null);
   const openStepFor = (id: string) => () => setOpenStepPage({ taskId: task.id, id, full: false });
   const dayOf = (iso: string | null | undefined) => (iso ? formatDue(iso.slice(0, 10)) : null);
   const words = (...bits: (string | null | undefined | false)[]) => bits.filter(Boolean).join(" · ");
   const actionRows: ActionRow[] = [
-    ...DELIVERABLE_KEYS.filter((k) => workCompact(k) && !workFinished(k, workOn(k))).map((k): ActionRow => {
+    ...DELIVERABLE_KEYS.filter((k) => workCompact(k)).map((k): ActionRow => {
       const r = k === "doc" || k === "image" || k === "page" || k === "video" ? reviews[k] : null;
-      const label = k === "email" ? emailMarker : k === "brief" ? "Not done yet" : KIND_LABEL[k];
+      const label = k === "email" ? emailMarker : k === "brief" ? (workFinished(k, workOn(k)) ? "Done" : "Not done yet") : KIND_LABEL[k];
       const saved = dayOf(task.draftEmail?.updatedAt ?? task.draftEmail?.createdAt);
       const line = r ? `${REVIEW_STATUS[r.status] ?? r.status}${r.status !== "draft" && r.clientViewedAt ? `, viewed ${dayOf(r.clientViewedAt)}` : ""}`
         : k === "email" ? (saved ? `Draft from ${saved}` : "Draft, ready to send")
@@ -3592,7 +3598,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }),
     ...steps.filter((st) => !st.done && !st.onClient).flatMap((st) => missingNeeds(st).map((n): ActionRow => (
       { key: `need:${st.id}:${n}`, step: st, icon: "📎", title: n, onClick: openStepFor(st.id), line: st.due ? `Needed by ${formatDue(st.due)}` : "Still needed", state: <span className="text-muted">Still needed</span> }))),
-  ];
+    // Emails sent from this task: on their step, the step opens with the
+    // email on it; on none, a tap shows it here.
+    ...(messages ?? []).filter((m) => m.taskId === task.id && m.channel === "email" && m.direction === "outbound").map((m): ActionRow => {
+      const on = homeOf(stepHolding(steps, sentEmailKey(m.id)));
+      const sent = `Sent ${new Date(m.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+      return { key: `mail:${m.id}`, step: on, icon: "✉", title: m.subject?.trim() || "Email", line: sent, state: <span className="text-muted">{sent}</span>,
+        onClick: on ? openStepFor(on.id) : () => setSentOpen((x) => (x === m.id ? null : m.id)) };
+    }),
+  ].sort((x, y) => (x.step ? stepNumberOf(x.step.id) : 1e4) - (y.step ? stepNumberOf(y.step.id) : 1e4));
   // Readable on a phone (Derek, 2026-10-13): the title wraps, and under it
   // one muted line says the step and the state. From sm up it is one row,
   // the step spelled out in front.
@@ -3611,13 +3625,66 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     );
   };
 
-  // Nothing left to do and nothing drawn in full: the card is one line.
-  const actionsDone = !actionRows.length && !looseWork && deletedOpen === 0;
   const restoreLink = deletedTotal > 0 && deletedOpen === 0 ? (
     <button onClick={() => setDeletedOpen((n) => n + 1)} className="text-[16px] text-muted hover:text-foreground">
       {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
     </button>
   ) : null;
+  // ── Files (Derek, 2026-10-14): the Actions and Links and files cards in
+  // one. The work on the steps (documents, reviews, drafts, emails sent),
+  // then the task's files and links, each opening as it did. Folded it is
+  // one line with a count; with nothing in it, one line with its buttons.
+  // The work blocks sit in the same place in it every time, hidden at zero
+  // height (shown only while deleted work is being restored): their windows
+  // (the email, a document, a review) are what Open opens, and fixed windows
+  // are not clipped by the zero height. Moving them between parents
+  // remounted them, each mount fetched the documents again, and the fetch
+  // moved them again: a loop that froze the page (2026-10-14, cb3eec63).
+  const fileCount = actionRows.length + task.attachments.length + conversationFiles.length;
+  const filesEmpty = fileCount === 0 && !uploadProgress && !linkOpen && deletedOpen === 0;
+  const filesOpen = !filesEmpty && (!isFolded("Files") || linkOpen || !!uploadProgress || deletedOpen > 0);
+  const sentShown = sentOpen ? (messages ?? []).find((m) => m.id === sentOpen) : null;
+  const filesCard = (
+    <section id="task-files"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
+      onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setAttFileDragOver(false); onAddFiles(e.dataTransfer.files); } }}
+      className={`${CARD} transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 ${filesOpen ? "mb-3" : ""}`}>
+        {filesEmpty ? headingText("Files") : heading("Files", fileCount > 0 && <span className="font-normal text-muted">· {fileCount}</span>)}
+        {filesEmpty && emptyHint("Drop, paste or attach · max 25MB each")}
+        {(filesOpen || filesEmpty) && (
+          <span className="flex shrink-0 items-center gap-3">
+            {/* Sorting two things is not a job. It earns its place at five. */}
+            {task.attachments.length >= 5 && (
+              <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
+                <option value="added">Sort: Added</option>
+                <option value="name">Sort: Name</option>
+                <option value="type">Sort: Type</option>
+              </select>
+            )}
+            {addMenu}
+            <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
+            <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
+          </span>
+        )}
+      </div>
+      {filesOpen && actionRows.map((row) => (
+        <Fragment key={row.key}>
+          {actionLine(row)}
+          {sentShown && row.key === `mail:${sentShown.id}` && (
+            <div className="mb-2 ml-2 max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-[5px] border bg-background px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
+              {htmlToText(sentShown.body).trim()}
+            </div>
+          )}
+        </Fragment>
+      ))}
+      {filesOpen && filesBody}
+      <div className={deletedOpen > 0 ? "" : "h-0 overflow-hidden"}>{workBlocks}</div>
+      {filesOpen && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
+      {filesEmpty && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
+    </section>
+  );
 
 
   // The task in reading order: what it is, when we follow up, what has been
@@ -3858,43 +3925,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
       {renderPlan()}
       {clientResponseBlock}
-      {/* Deliverables on no step (Derek: they may sit outside a step). With
-          steps and nothing loose, there is no section, but the blocks stay
-          mounted so they can say whether they exist. */}
-      {/* One card, whatever it shows: folded, "Actions · Nothing to do" with
-          + Add (Derek, 2026-10-13; no fold arrow then, the remembered fold
-          applies again once there is something to do), or open. The work
-          blocks sit in the same place in it every time, hidden at zero
-          height while folded or done: their windows (the email, a document,
-          a review) are what Open on a step opens, and fixed windows are not
-          clipped by the zero height. Moving them between parents remounted
-          them, each mount fetched the documents again, and the fetch flipped
-          Nothing to do, which moved them again: a loop that froze the page
-          and hit the database every second (2026-10-14). */}
-      <section className={CARD} id="task-deliverables">
-        {actionsDone ? (
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-            {headingText("Client work", <span className="font-normal text-muted">· Nothing to do</span>)}
-            <span className="flex shrink-0 items-center gap-3">{restoreLink}{addMenu}</span>
-          </div>
-        ) : isFolded("Client work") ? (
-          heading("Client work", (() => {
-            const n = actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length;
-            return n ? <span className="font-normal text-muted">· {n}</span> : undefined;
-          })())
-        ) : (
-          <div className="mb-3 flex items-center justify-between gap-3">
-            {heading("Client work")}
-            {addMenu}
-          </div>
-        )}
-        {!actionsDone && !isFolded("Client work") && actionRows.map(actionLine)}
-        <div className={actionsDone || isFolded("Client work") ? "h-0 overflow-hidden" : ""}>{workBlocks}</div>
-        {!actionsDone && !isFolded("Client work") && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
-      </section>
-      {/* Links and files under the checklist, for every task: the client
-          column that held them is gone (task detail redesign, 2026-10-11). */}
-      {isFolded("Links and files") ? foldedCard("Links and files", task.attachments.length + conversationFiles.length) : attachmentsBlock}
+      {filesCard}
       {/* The composer the floating dock opens for a text, chat or note. */}
       {composerFooter}
       {isFolded("Conversation") ? foldedCard("Conversation", (messages ?? []).filter((m) => m.taskId === task.id).length || undefined) : (
