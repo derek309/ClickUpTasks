@@ -5,7 +5,7 @@ import { reviewTone } from "@/lib/reviewTone";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
+  users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID, WORKSPACE_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
@@ -194,6 +194,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
    *  rule as the client page (Derek, 2026-10-13: "The Artist Workshop", not
    *  "Artist"). */
   const firstName = clientFirstName(messageDest, client.name);
+  // No client behind it (Derek, 2026-10-14: "make sure Projects and Personal
+  // are up to date"): a Personal to do, or a list in Projects, the
+  // workspace's own work. Nothing on it talks to a client, waits on one or
+  // opens a portal. A Personal to do is private to you, so it has no
+  // teammate's turn either: You or Claude.
+  const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
+  const noClient = isPersonal || task.clientId === WORKSPACE_CLIENT_ID;
   // Meet now (Derek, 2026-10-14): the sheet that starts a meeting and sends
   // the link, and the step it was picked on (null: in front of the current one).
   const [meetNowFrom, setMeetNowFrom] = useState<{ stepId: string | null } | null>(null);
@@ -793,7 +800,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Open in GHL link and the Call link. Cockpit only passes onSendTaskMessage
   // when canMessageClient says yes, so this is that permission arriving by
   // the back door; naming it keeps the three places from drifting.
-  const mayContactClient = !!onSendTaskMessage;
+  const mayContactClient = !!onSendTaskMessage && !noClient;
   // A delegation is stored as an assigned checklist item, but reading it as
   // one buried it: a truncated row inside Checklist, under a "0/1 · 0%"
   // counter, saying nothing about who has it (Derek: "move the delegate out
@@ -985,7 +992,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Only a custom repeat needs more room than a word: its own line below.
   // Kept off the client's portal and reminder emails (Derek, 2026-10-12). A
   // task in a private list is hidden with it, so there is nothing to switch.
-  const hideItem = !task.private && !project?.hiddenFromClient && {
+  const hideItem = !task.private && !noClient && !project?.hiddenFromClient && {
     label: task.hiddenFromClient ? "🔒 Show to client again" : "🔒 Hide from client",
     onClick: () => onPatch({ hiddenFromClient: !task.hiddenFromClient }),
   };
@@ -1693,7 +1700,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // drawer — sends via the same GHL Conversations API path as the Chat
   // tab's Messages composer, so it shows up there too (a message isn't
   // tied to one task in the data model, just the contact/client).
-  const hasMessaging = !!(linkedContact && onSendTaskMessage);
+  const hasMessaging = !!(linkedContact && onSendTaskMessage) && !noClient;
   // Everything below (merged feed, filter chips, search, inline reply, CTA
   // compose row, AI summary slide-over, draft-email persistence) lives in
   // TaskMessaging.tsx — see its own comment for why it's a hook rather than
@@ -2410,7 +2417,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   type QuickOption = { key: string; label: string; group: "talk" | "make" | "handoff"; disabled: boolean; note?: string; onPick: () => void };
   const quickPeopleOptions = (): QuickOption[] => [
     ...(hasMessaging ? [{ key: "email", group: "talk" as const, label: `Email ${firstName}`, disabled: false, note: deliverablePresent("email") ? "uses the draft" : undefined, onPick: () => emailStep() }] : []),
-    ...(messageDest?.phone ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
+    ...(messageDest?.phone && !noClient ? [{ key: "text", group: "talk" as const, label: `Text ${firstName}`, disabled: false, onPick: () => talkStep("text") }] : []),
     ...(hasMessaging ? [{ key: "chat", group: "talk" as const, label: `Chat in ${firstName}'s portal`, disabled: false, onPick: () => talkStep("client") }] : []),
     // Booking lives on the client page and the calendar button; a step asks
     // them to meet (Derek, 2026-10-13).
@@ -2420,10 +2427,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
     ...(hasMessaging ? [{ key: "meetnow", group: "talk" as const, label: "Start a meeting now", disabled: false, note: "a link to join, sent now", onPick: () => setMeetNowFrom({ stepId: null }) }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
-    { key: "delegate", group: "handoff", label: "Delegate to a teammate", disabled: false, onPick: delegateStep },
+    ...(isPersonal ? [] : [{ key: "delegate", group: "handoff" as const, label: "Delegate to a teammate", disabled: false, onPick: delegateStep }]),
     { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
     ...(mayContactClient ? [{ key: "toclient", group: "handoff" as const, label: `Delegate to ${firstName} (client)`, disabled: false, note: "emails them what you need", onPick: clientStep }] : []),
-    { key: "followup", group: "handoff", label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep },
+    ...(noClient ? [] : [{ key: "followup", group: "handoff" as const, label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep }]),
   ];
   const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "HTML review", video: "Video" };
   const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
@@ -2497,8 +2504,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
       ...act("asktext", "Request a meeting by text", hasMessaging && !!messageDest?.phone),
       ...act("meetnow", "Start a meeting now: a link to join, sent now", hasMessaging),
-      ...act("followup", `Wait for ${firstName}'s reply`),
-      ...act("delegate", "Delegate to a teammate"),
+      ...act("followup", `Wait for ${firstName}'s reply`, !noClient),
+      ...act("delegate", "Delegate to a teammate", !isPersonal),
       ...act("claude", "Delegate to Claude"),
       ...act("toclient", `Delegate to ${firstName} (client)`, mayContactClient),
       ...(TEMPLATES_ON ? offeredTemplates.map((t) => ({ key: `tpl:${t.id}`, label: `From a template: ${t.name} (${templateSteps(t).length} steps)`, onPick: pick(`tpl:${t.id}`) })) : []),
@@ -2542,7 +2549,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   className="w-full rounded-md border bg-background px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
                 <p className="text-[16px] text-muted">Saves each step with its stage, what it makes and what it holds as what it needs. Rounds of changes are left out.</p>
                 <div className="flex flex-wrap gap-2">
-                  {!isPersonal && <button onClick={() => savePlanAs(task.clientId)} disabled={!savePlan.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">For {firstName}</button>}
+                  {!noClient && <button onClick={() => savePlanAs(task.clientId)} disabled={!savePlan.trim()} className="rounded-md bg-accent px-3 py-1.5 text-[16px] font-medium text-white disabled:opacity-40">For {firstName}</button>}
                   <button onClick={() => savePlanAs(null)} disabled={!savePlan.trim()} className="rounded-md border px-3 py-1.5 text-[16px] font-medium hover:bg-background disabled:opacity-40">For everyone</button>
                 </div>
               </div>
@@ -3404,6 +3411,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Teammates most used first: this task's steps, and the picks made here.
   const SETUP_PICKS = "cut.setup.whoPicks";
   const setupTeammates = () => {
+    if (isPersonal) return [];
     const counts: Record<string, number> = {};
     try { Object.assign(counts, JSON.parse(localStorage.getItem(SETUP_PICKS) ?? "{}")); } catch { /* none kept */ }
     for (const x of taskRef.current.subtasks) if (x.assigneeId) counts[x.assigneeId] = (counts[x.assigneeId] ?? 0) + 1;
@@ -3453,7 +3461,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const setupOf = (sub: Subtask, entry: SetupEntry | undefined): StepSetupProps | null => {
     if (!entry || sub.done || (!entry.force && setupSkipped(sub))) return null;
     const who = entry.who ?? preselectWho(sub, meId ?? null);
-    const list = whoChoices(meId ?? null, setupTeammates(), mayContactClient && !isPersonal);
+    const list = whoChoices(meId ?? null, setupTeammates(), mayContactClient);
     return {
       // The client reads "Justin (client)" when a teammate shares the first
       // name (Derek, 2026-10-14: two "Justin" choices), else just their name.
@@ -3516,12 +3524,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         note: here ? "on this step" : on ? `on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : undefined };
     }),
     // A text or a portal chat drafted on the step, read and sent from it (2026-10-13).
-    ...(messageDest?.phone ? [{ key: "text", label: "Text", disabled: sub.draftMessage?.channel === "sms", note: sub.draftMessage?.channel === "sms" ? "on this step" : undefined,
+    ...(messageDest?.phone && !noClient ? [{ key: "text", label: "Text", disabled: sub.draftMessage?.channel === "sms", note: sub.draftMessage?.channel === "sms" ? "on this step" : undefined,
       onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("text", firstName), { draftMessage: { channel: "sms" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
     ...(hasMessaging ? [{ key: "chat", label: "Chat", disabled: sub.draftMessage?.channel === "chat", note: sub.draftMessage?.channel === "chat" ? "on this step" : undefined,
       onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("chat", firstName), { draftMessage: { channel: "chat" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
-    { key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) },
+    ...(isPersonal ? [] : [{ key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }]),
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
     ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : [])];
   };
@@ -3768,8 +3776,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // is no client behind it, so the rail came out empty (Derek, 2026-09-20: "the
   // rail is empty on personal tasks"). It keeps the single column, and unlike
   // the old rule this one cannot change while you work: a task is personal or
-  // it is not, and nothing you do in here moves it between the two.
-  const isPersonal = task.clientId === PERSONAL_CLIENT_ID;
+  // it is not, and nothing you do in here moves it between the two
+  // (isPersonal, beside the client above).
 
   // The work on the steps, one row each, for the Files card (Derek,
   // 2026-10-14): every document and review on a step whatever its status,
@@ -4006,7 +4014,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the ⋮ menu now, named, with the same handlers. One line on a phone: the
   // client and list names shorten to fit.
   const [meetingNonce, setMeetingNonce] = useState(0);
-  const reach = !isPersonal && hasMessaging;
+  const reach = hasMessaging;
   const nextStepForClaude = activeStep && activeStep.assigneeId !== CLAUDE_ID ? activeStep : null;
   const menuItems: (ActionMenuItem | false | null | undefined)[] = [
     // Reaching the client.
@@ -4019,10 +4027,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       : reach && canBook && { label: "Book a meeting", onClick: () => setBookOpen(true) },
     // Links and where the client lives.
     { label: "Copy link to task", onClick: onCopyLink, divider: true },
-    !isPersonal && onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
-    !isPersonal && !!clientPortalUrl && { label: "Open client portal", onClick: () => window.open(clientPortalUrl!, "_blank", "noopener,noreferrer") },
-    !isPersonal && !!ghlContactUrl && mayContactClient && { label: "Open in GoHighLevel", onClick: () => window.open(ghlContactUrl!, "_blank", "noopener,noreferrer") },
-    !isPersonal && { label: `About ${client.name}`, onClick: () => setTopPanel("client") },
+    !noClient && onCopyClientLink && { label: "Copy client portal link", onClick: onCopyClientLink },
+    !noClient && !!clientPortalUrl && { label: "Open client portal", onClick: () => window.open(clientPortalUrl!, "_blank", "noopener,noreferrer") },
+    !noClient && !!ghlContactUrl && mayContactClient && { label: "Open in GoHighLevel", onClick: () => window.open(ghlContactUrl!, "_blank", "noopener,noreferrer") },
+    !noClient && { label: `About ${client.name}`, onClick: () => setTopPanel("client") },
     // The task itself.
     nextStepForClaude && { label: "Give to Claude", onClick: () => toClaude(nextStepForClaude.id), divider: true },
     { label: "Labels", onClick: () => setLabelOpen(true), divider: !nextStepForClaude },
@@ -4035,17 +4043,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     { label: full ? "Back to the side panel" : "Open full page", onClick: onToggleFull },
     { label: "Delete task", onClick: onDelete, danger: true, divider: true },
   ];
+  const sameCrumb = client.name.trim().toLowerCase() === project.name.trim().toLowerCase();
   const barButton = "inline-flex h-9 w-8 sm:w-9 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-background hover:text-foreground disabled:opacity-30";
   const taskBar = (
     <div className="flex min-w-0 items-center gap-0.5 border-b px-2 py-1.5 text-[16px] text-muted sm:gap-1 sm:px-4 sm:py-2">
       <nav aria-label="Where this task lives" className="relative flex min-w-0 flex-1 items-center">
         <button onClick={onClose} title={`Back to ${slideBackLabel || client.name} (Esc)`}
-          className="flex min-w-[4.5rem] shrink items-center gap-1.5 rounded-lg px-1 py-1.5 font-semibold text-foreground hover:bg-background sm:px-1.5">
+          className={`flex ${sameCrumb ? "" : "min-w-[4.5rem]"} shrink items-center gap-1.5 rounded-lg px-1 py-1.5 font-semibold text-foreground hover:bg-background sm:px-1.5`}>
           <span aria-hidden className="shrink-0">←</span>
-          <span aria-hidden className="hidden h-2.5 w-2.5 shrink-0 rounded-full sm:block" style={{ background: client.color }} />
-          <span className="min-w-0 truncate">{client.name}</span>
+          {/* "Personal / Personal" said it twice: the list's name is enough. */}
+          {!sameCrumb && <>
+            <span aria-hidden className="hidden h-2.5 w-2.5 shrink-0 rounded-full sm:block" style={{ background: client.color }} />
+            <span className="min-w-0 truncate">{client.name}</span>
+          </>}
+          {sameCrumb && <span className="sr-only">Back</span>}
         </button>
-        <span aria-hidden className="shrink-0">/</span>
+        {!sameCrumb && <span aria-hidden className="shrink-0">/</span>}
         <span className="flex min-w-[3.5rem] shrink-[3]">
           <button onClick={() => setTopPanel((t) => (t === "move" ? null : "move"))} aria-expanded={topPanel === "move"} title="Move to another client or list"
             className="flex min-w-0 items-center gap-0.5 rounded-lg px-1 py-1.5 hover:bg-background hover:text-foreground sm:px-1.5">
@@ -4229,9 +4242,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               setup={setupOf(ps, setupFor[ps.id])}
               addOptions={stepAddOptions(ps)}
               onSendHeldEmail={heldEmailSendFor(ps)}
-              canText={!!messageDest?.phone && !!onSendTaskMessage}
+              canText={!!messageDest?.phone && mayContactClient}
               onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
-              canEmail={!!messageDest?.email && !!onSendTaskMessage}
+              canEmail={!!messageDest?.email && mayContactClient}
               onFullEmail={(subject, body) => {
                 // What was typed in the step goes into the email window; with
                 // nothing typed, the task's draft (if any) opens as it is.
@@ -4246,7 +4259,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
-              onCopyPortalLink={onCopyClientLink}
+              onCopyPortalLink={noClient ? undefined : onCopyClientLink}
               savedLinks={(clientLinks ?? []).map((l) => {
                 const att = task.attachments.find((a) => a.url === l.url);
                 return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)) };

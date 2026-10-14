@@ -10,7 +10,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting,
+  htmlToText, timeAgo, userById, initialsOf, inWindow, stepWindow, todoProgress, todoWaiting, PERSONAL_CLIENT_ID,
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, newId } from "./ui";
@@ -439,6 +439,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     return () => window.removeEventListener("keydown", onKey);
   }, [onPrev, onNext]);
   const first = firstName ?? client.name.split(" ")[0];
+  // A Personal to do is yours alone: its note is your own, not the team's.
+  const own = task.clientId === PERSONAL_CLIENT_ID;
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const dir = useStepDirections({ sub, onPatchSub, startEditing: startWithDirections });
   const todo = useStepTodos({ sub, onPatchSub, messages, first, clientItems, onToggleClientItem, onTodoDone, onAskTodos, startOpen: startWithChecklist });
@@ -559,7 +561,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           <span className="order-last min-w-0 basis-full text-[16px] text-muted sm:order-none sm:basis-auto sm:truncate">{saidSummary}</span>
           <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />
         </button>}
-        <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : "Note to the team"}</button>
+        <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : own ? "Add a note" : "Note to the team"}</button>
       </div>
       {/* The chat from when this step was a handoff, kept to read (Derek,
           2026-10-12: handoffs are steps now). */}
@@ -634,17 +636,17 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           <input value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" placeholder="Subject"
             className="mb-1 w-full border-b bg-transparent px-2 py-1 text-[16px] font-semibold outline-none" />
         )}
-        <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? "Note for the team" : `Message ${first}`}</label>
+        <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? (own ? "Note" : "Note for the team") : `Message ${first}`}</label>
         <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)}
           // An email is written in lines: Enter is a new line there, ⌘ Enter sends.
           // Enter adds a team note; anything to the client takes the Send
           // button or ⌘ Enter, so one keypress never reaches them by mistake.
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && (talk === "team" || e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
           rows={talk === "email" ? 5 : 2}
-          placeholder={talk === "team" ? "Note for the team, about this step" : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
+          placeholder={talk === "team" ? (own ? "A note about this step" : "Note for the team, about this step") : talk === "text" ? `Text ${first} about this step` : talk === "email" ? `Email ${first} about this step` : `Chat with ${first} about this step`}
           className="w-full resize-none bg-transparent px-2 py-1 text-[16px] outline-none" />
         <div className="flex items-center justify-between gap-2 px-1">
-          <span className="text-[16px] text-muted">{talk === "team" ? "Only your team sees this." : <span className="hidden sm:inline">Sent when you press Send. Shows below, newest first.</span>}
+          <span className="text-[16px] text-muted">{talk === "team" ? (own ? "Only you see this." : "Only your team sees this.") : <span className="hidden sm:inline">Sent when you press Send. Shows below, newest first.</span>}
             {talk === "email" && onFullEmail && <> <button onClick={() => { onFullEmail(subject, draft); setDraft(""); }} className="font-semibold text-accent underline decoration-dotted underline-offset-4">Full email</button></>}
           </span>
           <button onClick={send} disabled={!draft.trim()} className="h-9 rounded-lg bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-40">Send</button>

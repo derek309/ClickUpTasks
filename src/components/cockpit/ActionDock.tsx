@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Attachment, Contact, Message, Task, TaskAction, TaskActionKind, TaskStatus, htmlToText,
   TASK_ACTION_META, TASK_ACTION_ORDER, CLIENT_FACING_ACTIONS, STATUS_META, pickableStatuses, linkSpans, prettyLinkName,
-  User, TODAY, addBusinessDaysIso, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById, SIZING_ON,
+  User, TODAY, PERSONAL_CLIENT_ID, addBusinessDaysIso, whenOptions, formatDue, TaskSize, SIZE_META, SIZE_ORDER, sizeLabel, userById, SIZING_ON,
   Priority, type DelegateSpec,
 } from "@/lib/data";
 import { I, newId, DateChip } from "./ui";
@@ -682,7 +682,9 @@ export function ActionDock({
   // Log meeting and Delegate task are gone (task detail redesign, 2026-10-11):
   // a meeting is pasted in as a note, and a step is handed off by giving it
   // an owner in the checklist. Book is the real booking window.
-  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k) && k !== "delegate" && k !== "met");
+  // A Personal to do is yours alone: no message to the team from it.
+  const own = task.clientId === PERSONAL_CLIENT_ID;
+  const INTERNAL_ACTIONS = TASK_ACTION_ORDER.filter((k) => !CLIENT_FACING_ACTIONS.has(k) && k !== "delegate" && k !== "met" && !(own && k === "team"));
   const CLIENT_ACTIONS = TASK_ACTION_ORDER.filter((k) => CLIENT_FACING_ACTIONS.has(k) && (k !== "meeting" || !!onBook));
   const menuGroups: { label: string; kinds: TaskActionKind[] }[] = [
     { label: "Just record it", kinds: INTERNAL_ACTIONS },
@@ -784,7 +786,7 @@ export function ActionDock({
                       {/* Text shows as a tab only while it is the box's channel. */}
                       {channel === "sms" && <button onClick={() => setBarOpen(false)} aria-pressed className={`${tabBtn} ${CHANNEL_TONE.sms.tab}`}>Text</button>}
                       <span aria-hidden className="hidden h-4 w-px bg-border sm:inline-block" />
-                      <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message team</button>
+                      {!own && <button onClick={() => openPanel("team")} className={`${tabBtn} ${tabOff} hidden sm:inline`}>Message team</button>}
                       {canMessageClient && (canText || onBook) && (
                         <span className="hidden sm:inline">
                           <ActionMenu title="More ways to reach the client" triggerClassName={`${tabBtn} ${tabOff} inline-flex items-center gap-1`}
@@ -806,7 +808,7 @@ export function ActionDock({
                   <div className="flex flex-col sm:flex-row sm:items-end sm:gap-1">
                     <textarea ref={quickRef} rows={1} value={quickNote} onChange={(e) => setQuickNote(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendQuick(); } }}
-                      placeholder={noting ? "Private note, your team only" : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
+                      placeholder={noting ? (own ? "Private note, only you see it" : "Private note, your team only") : `Message ${firstName} by ${channel === "sms" ? "text" : "chat"}`}
                       aria-label={noting ? "Note for your team" : `Message ${firstName}`}
                       title="Enter sends, Shift+Enter for a new line"
                       className="block max-h-40 min-h-[36px] min-w-0 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-[16px] sm:min-h-[40px] sm:py-2 leading-snug outline-none [field-sizing:content] placeholder:text-muted" />
