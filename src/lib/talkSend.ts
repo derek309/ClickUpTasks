@@ -1,0 +1,59 @@
+// What sending an email, text or chat to the client does to a task's steps,
+// worked out without the task page open: the task page (TaskDrawer's
+// finishTalkStep) and the client page's Conversation feed send through the
+// same two functions, so a draft sent from either place moves the steps the
+// same way (Derek, 2026-10-14, client header).
+import { addBusinessDaysIso, addCheckInStep, currentStep, isHandoffStep, recordFollowUp, statusForStep, type Subtask, type Task } from "./data";
+
+/** An emailing step, by its name: "Email Pam", "Let Pam know…", "Tell", "Send", "Reply". */
+export const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
+
+export type TalkPlan = { kind: "reminder" | "wait" | "finish"; cur: Subtask; due: string; holder?: Subtask };
+
+/** Which step a send finishes or follows up on, and the check in's date.
+ *  Sent from a step's own page: that step. An email from the task's email
+ *  window: the open step holding that email, else the current one. */
+export function talkStepPlan(subtasks: Subtask[], taskOwnerId: string | null, channel: "email" | "sms" | "chat", today: string, followUpDate?: string | null, stepId?: string): TalkPlan | null {
+  const holder = !stepId && channel === "email" ? subtasks.find((x) => !x.done && x.holds?.includes("email")) : undefined;
+  const cur = stepId ? subtasks.find((x) => x.id === stepId && !x.done) : holder ?? currentStep(subtasks);
+  // A reminder held on a review out with the client: a follow up on that
+  // wait, and the email comes off the step.
+  if (cur?.onClient && channel === "email" && cur.holds?.includes("email")) return { kind: "reminder", cur, due: followUpDate || addBusinessDaysIso(today, 2) };
+  if (!cur || cur.onClient || isHandoffStep(cur, taskOwnerId)) return null;
+  const name = cur.title.trim();
+  // The "Follow up in" picked beside Send: the check in, the task's follow
+  // up, and a due date already earlier all move to it. Three business days
+  // when none was picked.
+  const due = followUpDate || addBusinessDaysIso(today, 3);
+  // Sent while waiting on them (a check in is current): a follow up on that
+  // wait, its date moved, not a step done.
+  if (cur.finishWhen === "reply") return { kind: "wait", cur, due };
+  const fits = channel === "email" ? cur.holds?.includes("email") || EMAILING.test(name)
+    : cur.draftMessage?.channel === channel || (channel === "sms" ? /^text\b/i.test(name) : /^chat\b/i.test(name));
+  return fits ? { kind: "finish", cur, due, holder } : null;
+}
+
+/** The change to the task a send makes, by its plan: null when the step
+ *  can't take a check in. alsoDone is an emailing step above it that this
+ *  email answered too ("Reply to media" above "Email Brian"). */
+export function talkSendPatch(task: Pick<Task, "subtasks" | "status" | "due" | "assigneeId">, plan: TalkPlan, channel: "email" | "sms" | "chat", firstName: string, makeId: () => string, now = new Date().toISOString()): { patch: Partial<Task>; alsoDone?: Subtask } | null {
+  const { cur, due, holder } = plan;
+  if (plan.kind === "reminder") {
+    const list = recordFollowUp(task.subtasks, cur.id, "email", due, now).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
+    return { patch: { subtasks: list, followUpAt: due } };
+  }
+  if (plan.kind === "wait") {
+    const list = recordFollowUp(task.subtasks, cur.id, channel, due, now).map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
+    return { patch: { subtasks: list, followUpAt: due } };
+  }
+  const made0 = addCheckInStep(task.subtasks, cur.id, firstName, due, makeId, now, channel);
+  if (!made0) return null;
+  const before = holder ? currentStep(task.subtasks) : undefined;
+  const alsoDone = before && before.id !== cur.id && !before.onClient && !isHandoffStep(before, task.assigneeId) && EMAILING.test(before.title.trim())
+    && task.subtasks.findIndex((x) => x.id === before.id) < task.subtasks.findIndex((x) => x.id === cur.id) ? before : undefined;
+  const made = alsoDone ? made0.map((x) => (x.id === alsoDone.id ? { ...x, done: true, doneAt: now, outcome: `Email sent to ${firstName}` } : x)) : made0;
+  // A sent text or chat leaves no draft behind on its step.
+  const list = channel === "email" ? made : made.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x));
+  const status = statusForStep(task.status, "waiting");
+  return { patch: { subtasks: list, followUpAt: due, ...(task.due && task.due < due ? { due } : {}), ...(status ? { status } : {}) }, alsoDone };
+}
