@@ -1177,7 +1177,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ]} />
     );
   };
-  const completeStep = (sid: string) => {
+  const completeStep = (sid: string, outcome = "Done") => {
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
     const sub = task.subtasks.find((x) => x.id === sid);
@@ -1215,7 +1215,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       }
     }
     onToggleSub(sid);
-    onPatchSub(sid, { doneAt: new Date().toISOString(), outcome: "Done" });
+    onPatchSub(sid, { doneAt: new Date().toISOString(), outcome });
     setAutoDone(null);
     // Ticked done: what's next is asked at once, with the plan's next step
     // or a blank to name one (Derek, 2026-10-12: "a way to create the next step").
@@ -2744,7 +2744,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           pushToast(`Call noted. Checking again ${formatDue(due)}.`);
         } },
         ...(hasMessaging ? [{ label: "Task chat", says: `A message in ${firstName}'s portal. It keeps waiting.`, onClick: () => draftOn("chat") }] : []),
-        { label: `${firstName} answered`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => setNextStepDone(ps.id, true) },
+        { label: `${firstName} answered`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => completeStep(ps.id, `${firstName} replied`) },
       ]} />
     );
   };
