@@ -120,14 +120,21 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, b
   return createPortal(
     <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex flex-col bg-background">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 sm:px-8">
+        {/* On a phone the back link has a line of its own, then the icon and
+            the name a full line under it, so a long name wraps instead of
+            running off the screen (Derek, 2026-10-14). */}
         {backTo && (
-          <button onClick={onClose} title={`Back to ${backTo}`} className="flex max-w-[260px] shrink-0 items-center gap-1 rounded-[5px] px-2 py-1.5 text-[16px] font-semibold text-muted hover:bg-background hover:text-foreground">
-            <span aria-hidden>‹</span><span className="truncate">{backTo}</span>
-          </button>
+          <div className="flex min-w-0 basis-full sm:shrink-0 sm:basis-auto">
+            <button onClick={onClose} title={`Back to ${backTo}`} className="flex min-w-0 max-w-full items-center gap-1 rounded-[5px] px-2 py-1.5 text-[16px] font-semibold text-muted hover:bg-background hover:text-foreground sm:max-w-[260px]">
+              <span aria-hidden>‹</span><span className="truncate">{backTo}</span>
+            </button>
+          </div>
         )}
-        {backTo && <span aria-hidden className="h-6 w-px bg-[var(--border)]" />}
-        <span aria-hidden className="text-[24px]">{icon}</span>
-        <div className="min-w-0 flex-1">{title}</div>
+        {backTo && <span aria-hidden className="hidden h-6 w-px bg-[var(--border)] sm:block" />}
+        <div className="flex min-w-0 basis-full items-start gap-3 sm:flex-1 sm:basis-0 sm:items-center">
+          <span aria-hidden className="text-[24px]">{icon}</span>
+          <div className="min-w-0 flex-1">{title}</div>
+        </div>
         {badge}
         {status && <span className="text-[16px] text-muted">{status}</span>}
         {actions}

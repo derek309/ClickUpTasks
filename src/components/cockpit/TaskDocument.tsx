@@ -1131,13 +1131,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     if (previous?.pageFile) void loadPageText(previous.pageFile);
   };
 
+  // A box that grows, so on a phone a long name wraps onto more lines instead of
+  // running off the screen; from sm up it stays one line, as before.
   const titleInput = (
-    <input value={titleDraft}
-      onChange={(e) => { const value = e.target.value; setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
+    <textarea value={titleDraft} rows={1}
+      onChange={(e) => { const value = e.target.value.replace(/\s*\n\s*/g, " "); setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
       onBlur={() => titleCommit.flush()}
-      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
       placeholder={kindNewName(kind)} aria-label={`${title} name`} maxLength={200}
-      className="w-full rounded-[5px] bg-transparent px-1 py-0.5 text-[22px] font-bold outline-none placeholder:text-foreground hover:bg-background focus:bg-background" />
+      className="block w-full resize-none rounded-[5px] bg-transparent px-1 py-0.5 text-[22px] font-bold leading-tight outline-none [field-sizing:content] placeholder:text-foreground hover:bg-background focus:bg-background sm:overflow-hidden sm:leading-normal sm:[white-space:pre]" />
   );
 
   const pasteSlotLabel = pasteOpen && pasteSlot !== null && shownItems[pasteSlot] ? itemLabel(shownItems, pasteSlot) : null;
@@ -1188,7 +1190,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     ];
     if (!(shownItems.length > 1 || editingSet || page)) return null;
     return (
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         {editingSet ? (
           <input key={`${doc.body}:${i}`} defaultValue={item.label} maxLength={40} aria-label={`Name of ${label}`} title="Rename"
             placeholder={itemLabel(shownItems.map((x, n) => (n === i ? { ...x, label: "" } : x)), i)}
@@ -1432,7 +1434,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     <>
     {reviewBar}
     {versioned && historyPanel && <div className="-mt-3 mb-6">{historyPanel}</div>}
-    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0">
       {!image && clientCrossed && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
@@ -1443,7 +1445,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       )}
       {locked && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] px-4 py-3 text-[16px]" style={{ background: STATUS_META.approved.chip, color: STATUS_META.approved.dot }}>
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 basis-full sm:basis-0">
             {completed
               ? `This ${what} is completed. Reopen it to make changes.`
               // Who approved it: this view has no roster, and "You" against "The team"
@@ -1507,7 +1509,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       {/* Files and Comments stay beside the writing as it scrolls (Derek, 2026-09-11). */}
       {/* Stays beside the writing as it scrolls, except on a version with several
           images, where each image's comments line up beside that image instead. */}
-      <div className={`space-y-3 ${shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
+      <div className={`min-w-0 space-y-3 ${shownItems.length > 1 ? "" : "lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"}`}>
         {/* Image and page reviews have no Files box: the version uploads on the left
             and a file rides on a comment (Derek, 2026-09-12: "we don't need upload
             files here since we can do it on the left"). */}
