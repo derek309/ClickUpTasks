@@ -2866,7 +2866,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}
-        <header className="relative z-10 flex shrink-0 flex-col gap-2 overflow-x-hidden border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
+        {/* overflow-x-clip, not hidden: hidden turned the other axis to auto,
+            so the bell, filter and ⋮ menus opening under the header were cut
+            off and a tap seemed to do nothing (2026-10-14). */}
+        <header className="relative z-10 flex shrink-0 flex-col gap-2 overflow-x-clip border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
           <div className="flex items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
             <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold">{headerTitleText}</h1>

@@ -3395,16 +3395,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </button>
   ) : null;
 
-  const section = (title: string, children: React.ReactNode, right?: React.ReactNode, empty?: string) => (
-    <section className={CARD} id={title === "Client work" ? "task-deliverables" : undefined}>
-      <div className={`flex items-center justify-between gap-3 ${empty ? "" : "mb-3"}`}>
-        {heading(title)}
-        {empty && emptyHint(empty)}
-        {right}
-      </div>
-      {children}
-    </section>
-  );
 
   // The task in reading order: what it is, when we follow up, what has been
   // made for it, then everything said and done about it. The description is
@@ -3623,28 +3613,37 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {/* Deliverables on no step (Derek: they may sit outside a step). With
           steps and nothing loose, there is no section, but the blocks stay
           mounted so they can say whether they exist. */}
-      {/* Folded, the work stays mounted out of sight: its windows (the email,
-          a document, a review) are what Open on a step opens (2026-10-13:
-          folding it left "Open" doing nothing). Fixed windows are not
-          clipped by the zero height. */}
-      {(isFolded("Client work") || actionsDone) && <div className="h-0 overflow-hidden">{workBlocks}</div>}
-      {/* Nothing left: one line, "Actions · Nothing to do" and + Add (Derek,
-          2026-10-13). No fold arrow then; the remembered fold applies again
-          once there is something to do. */}
-      {actionsDone ? (
-        <section className={CARD} id="task-deliverables">
+      {/* One card, whatever it shows: folded, "Actions · Nothing to do" with
+          + Add (Derek, 2026-10-13; no fold arrow then, the remembered fold
+          applies again once there is something to do), or open. The work
+          blocks sit in the same place in it every time, hidden at zero
+          height while folded or done: their windows (the email, a document,
+          a review) are what Open on a step opens, and fixed windows are not
+          clipped by the zero height. Moving them between parents remounted
+          them, each mount fetched the documents again, and the fetch flipped
+          Nothing to do, which moved them again: a loop that froze the page
+          and hit the database every second (2026-10-14). */}
+      <section className={CARD} id="task-deliverables">
+        {actionsDone ? (
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
             {headingText("Client work", <span className="font-normal text-muted">· Nothing to do</span>)}
             <span className="flex shrink-0 items-center gap-3">{restoreLink}{addMenu}</span>
           </div>
-        </section>
-      ) : isFolded("Client work") ? foldedCard("Client work", actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length) : section("Client work", (
-        <>
-          {actionRows.map(actionLine)}
-          {workBlocks}
-          {restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
-        </>
-      ), addMenu)}
+        ) : isFolded("Client work") ? (
+          heading("Client work", (() => {
+            const n = actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length;
+            return n ? <span className="font-normal text-muted">· {n}</span> : undefined;
+          })())
+        ) : (
+          <div className="mb-3 flex items-center justify-between gap-3">
+            {heading("Client work")}
+            {addMenu}
+          </div>
+        )}
+        {!actionsDone && !isFolded("Client work") && actionRows.map(actionLine)}
+        <div className={actionsDone || isFolded("Client work") ? "h-0 overflow-hidden" : ""}>{workBlocks}</div>
+        {!actionsDone && !isFolded("Client work") && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
+      </section>
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {isFolded("Links and files") ? foldedCard("Links and files", task.attachments.length + conversationFiles.length) : attachmentsBlock}
