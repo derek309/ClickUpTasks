@@ -3726,6 +3726,20 @@ export function holdOnStep(subtasks: Subtask[], stepId: string, key: string): Su
     return unname({ ...s, holds: holds.length ? holds : undefined }, key);
   });
 }
+/** What a new due date on a step does to its task's dates (Derek,
+ *  2026-10-14). The current step on the task's owner (assigned to them, or to
+ *  nobody) carries the task: the task is due that day too, earlier or later.
+ *  A teammate's or Claude's current step keeps the task due that day with a
+ *  follow up the business day after (the handoff dates). A step on the client,
+ *  a later step, a cleared date, or a task in a queue's Up next (no dates
+ *  there) leave the task alone. Null: nothing to change. */
+export function taskDatesForStepDue(o: { due: string | null; isCurrent: boolean; stepAssignee?: string | null; taskOwner: string | null; onClient?: boolean; upNext?: boolean }): { due: string; followUpAt?: string } | null {
+  if (!o.due || !o.isCurrent || o.onClient) return null;
+  const who = o.stepAssignee ?? null;
+  if (!who || who === o.taskOwner) return o.upNext ? null : { due: o.due };
+  return { due: o.due, followUpAt: addBusinessDaysIso(o.due, 1) };
+}
+
 /** Where a link or file added now goes (Derek, 2026-10-14: a link added while
  *  working a step landed on the task, not the step). A step's own page puts it
  *  on that step; on the task page it goes on the step picked beside Link and

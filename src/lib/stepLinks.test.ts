@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addTargetStep, chatLinkName, linkDisplayName, looksLikeIdName, prettyLinkName } from "./data";
+import { addTargetStep, chatLinkName, linkDisplayName, looksLikeIdName, prettyLinkName, taskDatesForStepDue } from "./data";
 
 const steps = [
   { id: "s1", done: true },
@@ -52,5 +52,22 @@ describe("a link's name", () => {
     expect(linkDisplayName({ name: "6acfa6f6 ceb4 83e8 b663 27b6fbf564d9", url: "https://chatgpt.com/c/6acfa6f6-ceb4-83e8-b663-27b6fbf564d9" })).toBe("ChatGPT chat");
     expect(linkDisplayName({ name: "Brief", url: "https://chatgpt.com/c/x1" })).toBe("Brief");
     expect(linkDisplayName({ name: "a1b2c3d4e5f6a7b8c9" })).toBe("a1b2c3d4e5f6a7b8c9");
+  });
+});
+
+describe("a step's new due date and its task", () => {
+  const base = { isCurrent: true, taskOwner: "u_derek" };
+  it("the owner's current step moves the task's due, earlier or later", () => {
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-20", stepAssignee: "u_derek" })).toEqual({ due: "2026-10-20" });
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-01", stepAssignee: null })).toEqual({ due: "2026-10-01" });
+  });
+  it("a teammate's or Claude's current step keeps the handoff dates", () => {
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-16", stepAssignee: "u_justin" })).toEqual({ due: "2026-10-16", followUpAt: "2026-10-19" });
+  });
+  it("leaves the task alone otherwise", () => {
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-20", stepAssignee: "u_derek", upNext: true })).toBeNull();
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-20", onClient: true })).toBeNull();
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-20", isCurrent: false })).toBeNull();
+    expect(taskDatesForStepDue({ ...base, due: null })).toBeNull();
   });
 });
