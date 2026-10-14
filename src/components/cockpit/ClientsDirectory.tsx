@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { formatDue, isOverdue, type Client, type Task, type User } from "@/lib/data";
 import { I, DIR_ROW } from "./ui";
+import { clientHref, isPlainLeftClick } from "@/lib/navState";
 
 import type { ClientSort } from "./usePins";
 type GroupBy = "flat" | "team";
@@ -74,24 +75,28 @@ export function ClientsDirectory({
     const openTasks = tasksByClient?.get(c.id) ?? [];
     const nextDue = openTasks.reduce<string | null>((soonest, t) => (t.due && (!soonest || t.due < soonest) ? t.due : soonest), null);
     return (
-      <div key={c.id} onClick={() => onOpen(c.id)}
+      // A link to the client's list (Derek, 2026-10-14), so right click, ⌘ or
+      // Ctrl click, Shift click and middle click open it in a new tab like the
+      // sidebar's rows. A plain click stays here. The star, pencil and bin
+      // inside it stop the link as well as the row.
+      <a key={c.id} href={clientHref(c.id)} onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpen(c.id); }}
         className={DIR_ROW}>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 truncate text-[15px] font-medium leading-tight">{c.name}
           </span>
           {company && <span className="block truncate text-[13px] leading-tight text-muted">{company}</span>}
         </span>
-        <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onToggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star"}
+        <span role="button" tabIndex={-1} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleStar(c.id); }} title={starred.has(c.id) ? "Unstar" : "Star"}
           className={`shrink-0 rounded p-1 hover:bg-background ${starred.has(c.id) ? "text-amber-400" : "text-muted opacity-0 group-hover:opacity-100"}`}><I.star filled={starred.has(c.id)} /></span>
         {canAdmin && (<>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onRename(c.id); }} title="Rename client" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover:opacity-100"><I.pencil /></span>
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onDelete(c.id); }} title="Remove client" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-danger group-hover:opacity-100"><I.trash /></span>
+          <span role="button" tabIndex={-1} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRename(c.id); }} title="Rename client" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-foreground group-hover:opacity-100"><I.pencil /></span>
+          <span role="button" tabIndex={-1} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(c.id); }} title="Remove client" className="shrink-0 rounded p-1 text-muted opacity-0 hover:bg-background hover:text-danger group-hover:opacity-100"><I.trash /></span>
         </>)}
         <span className="w-28 shrink-0 text-right text-[13px] text-muted">
           {count > 0 ? <span className="tabular-nums">{count} open</span> : <span className="text-muted/50">—</span>}
           {nextDue && <span className={`ml-1 ${isOverdue(nextDue) ? "font-medium text-danger" : ""}`}>{formatDue(nextDue)}</span>}
         </span>
-      </div>
+      </a>
     );
   };
 

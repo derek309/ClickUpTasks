@@ -8,7 +8,21 @@
 // within each tier, not split into separate sections — a project qualifies
 // (and sorts) exactly the same way a client does.
 import { dueOneLine, effectiveDueDate, isOverdue, isSnoozed, type Client, type Project, type Task } from "@/lib/data";
+import type { ReactNode } from "react";
 import { I } from "./ui";
+import { clientHref, isPlainLeftClick, listHref, taskHref } from "@/lib/navState";
+
+// Each row is a link to where it opens (Derek, 2026-10-14), so right click,
+// ⌘ or Ctrl click, Shift click and middle click open it in a new tab the way
+// the sidebar's rows do. A plain click stays in the app, as it always did.
+function RowLink({ href, onOpen, children }: { href: string; onOpen: () => void; children: ReactNode }) {
+  return (
+    <a href={href} onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpen(); }}
+      className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+      {children}
+    </a>
+  );
+}
 
 // A personal to-do isn't a client or project — it's its own thing, so it
 // gets its own row in the tier it earns rather than being folded into one
@@ -67,7 +81,7 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
   // field, same as the sidebar/header use via clientCompany).
   const business = client.id.startsWith("cl_") ? (client.ghlLocationId ?? "") : "";
   return (
-    <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+    <RowLink href={clientHref(client.id)} onOpen={onOpen}>
       <span className="h-8 w-8 shrink-0 rounded-full text-center text-[13px] font-semibold leading-8 text-white" style={{ background: client.color }}>
         {client.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
       </span>
@@ -79,7 +93,7 @@ function ClientRow({ client, taskCount, unread, onOpen }: {
         {business && <span className="truncate text-[14px] font-medium text-muted" title={business}>{business}</span>}
       </span>
       <span className="w-16 shrink-0 text-right text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
-    </button>
+    </RowLink>
   );
 }
 
@@ -89,7 +103,7 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
   // the original due date is one you have already renegotiated with yourself.
   const late = isOverdue(dueDate) && !isSnoozed(task);
   return (
-    <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+    <RowLink href={taskHref(task)} onOpen={onOpen}>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-muted"><I.check /></span>
       <span className="min-w-0 flex-1 truncate text-[17px] font-medium leading-snug">{task.title}</span>
       {/* The same date the rest of the app shows: the follow-up date when
@@ -98,7 +112,7 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: () => void }) {
           only the label that still read the raw due date, so a task sorted
           into Today could sit there displaying "Sep 18". */}
       {dueDate && <span className={`shrink-0 text-[13px] ${late ? "font-medium text-danger" : "text-muted"}`}>{dueOneLine(dueDate)}</span>}
-    </button>
+    </RowLink>
   );
 }
 
@@ -106,13 +120,13 @@ function ProjectRow({ project, clientName, taskCount, onOpen }: {
   project: Project; clientName: string; taskCount: number; onOpen: () => void;
 }) {
   return (
-    <button onClick={onOpen} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent-soft/50">
+    <RowLink href={listHref(project.clientId, project.id)} onOpen={onOpen}>
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-background text-muted"><I.folder /></span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[17px] font-medium leading-snug">{project.name}</span>
         <span className="truncate text-[13px] text-muted">{clientName}</span>
       </span>
       <span className="w-16 shrink-0 text-right text-[13px] text-muted">{taskCount} task{taskCount === 1 ? "" : "s"}</span>
-    </button>
+    </RowLink>
   );
 }

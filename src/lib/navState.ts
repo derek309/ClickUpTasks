@@ -4,6 +4,8 @@
 // it can be read on its own and tested without mounting five thousand lines
 // of app around it. Everything below is exactly as it was.
 
+import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
+
 // --- Deep-link URL state ----------------------------------------------------
 // The whole app lives on "/", so we encode what you're looking at into the
 // query string: shareable links, refresh-safe, and back/forward navigation.
@@ -90,6 +92,31 @@ export const ALL_TASKS_HREF = "/?assignee=mine";
 // a plain left click is the app's, moving in place without a reload.
 export function isPlainLeftClick(e: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
   return e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+}
+
+// Links for rows on a page (client cards, list rows, task rows), so they open
+// in a new tab the same way the sidebar's do (Derek, 2026-10-14). Each is the
+// address that view lives at, built by buildSearch so it reads back exactly.
+const NO_NAV: NavState = { view: null, client: "all", project: null, task: null, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null };
+const href = (s: Partial<NavState>) => `/${buildSearch({ ...NO_NAV, ...s })}`;
+
+/** A client's task list. */
+export function clientHref(clientId: string): string {
+  return href({ client: clientId });
+}
+
+/** One list inside a client. The Personal list is its own view. */
+export function listHref(clientId: string, projectId: string): string {
+  if (projectId === PERSONAL_PROJECT_ID) return href({ view: "personal" });
+  return href({ client: clientId, project: projectId });
+}
+
+/** A task, open over its client's list, the way the app writes it when a task
+ *  opens there. A personal to-do opens over Personal; a task with no client
+ *  opens over All Tasks. */
+export function taskHref(task: { id: string; clientId?: string | null }): string {
+  if (task.clientId === PERSONAL_CLIENT_ID) return href({ view: "personal", task: task.id });
+  return href({ client: task.clientId || "all", task: task.id });
 }
 
 // Number-key shortcuts for the top-level views, in sidebar order. Shown as

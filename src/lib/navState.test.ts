@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildSearch, parseSearch, ALL_TASKS_HREF, isPlainLeftClick, type NavState } from "./navState";
+import { buildSearch, parseSearch, ALL_TASKS_HREF, isPlainLeftClick, clientHref, listHref, taskHref, type NavState } from "./navState";
+import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
 
 // The URL is the app's shareable state: paste a link and land where the sender
 // was. Round-tripping is the property that matters — a link that does not
@@ -129,5 +130,40 @@ describe("the sidebar's links", () => {
     expect(isPlainLeftClick({ ...click, ctrlKey: true })).toBe(false);
     expect(isPlainLeftClick({ ...click, shiftKey: true })).toBe(false);
     expect(isPlainLeftClick({ ...click, altKey: true })).toBe(false);
+  });
+});
+
+// Rows on a page are links too: a client card, a list, a task row. Each one,
+// opened in a new tab, has to land on the view a click on it lands on.
+describe("the links on rows", () => {
+  it("opens a client on its task list", () => {
+    expect(clientHref("cl_abc")).toBe("/?client=cl_abc");
+    expect(parseSearch(clientHref("cl_abc").slice(1))).toMatchObject({ view: null, client: "cl_abc", project: null, task: null });
+  });
+
+  it("opens a list inside its client, and the Personal list as Personal", () => {
+    expect(parseSearch(listHref("cl_abc", "p_1").slice(1))).toMatchObject({ view: null, client: "cl_abc", project: "p_1" });
+    expect(listHref(PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID)).toBe("/?view=personal");
+  });
+
+  it("opens a task over its client's list", () => {
+    expect(taskHref({ id: "t_9", clientId: "cl_abc" })).toBe("/?client=cl_abc&task=t_9");
+    expect(parseSearch(taskHref({ id: "t_9", clientId: "cl_abc" }).slice(1))).toMatchObject({ view: null, client: "cl_abc", task: "t_9" });
+  });
+
+  it("opens a personal to-do over Personal, and a task with no client over All Tasks", () => {
+    expect(parseSearch(taskHref({ id: "t_1", clientId: PERSONAL_CLIENT_ID }).slice(1))).toMatchObject({ view: "personal", task: "t_1" });
+    expect(taskHref({ id: "t_2", clientId: "" })).toBe("/?task=t_2");
+    expect(taskHref({ id: "t_3" })).toBe("/?task=t_3");
+  });
+
+  it("escapes ids that would otherwise break the address", () => {
+    const s = parseSearch(taskHref({ id: "t a&b", clientId: "c/1?x" }).slice(1));
+    expect([s.client, s.task]).toEqual(["c/1?x", "t a&b"]);
+  });
+
+  it("says the same address the app writes once that view is open", () => {
+    for (const h of [clientHref("cl_abc"), listHref("cl_abc", "p_1"), taskHref({ id: "t_9", clientId: "cl_abc" }), taskHref({ id: "t_1", clientId: PERSONAL_CLIENT_ID })])
+      expect(`/${buildSearch(parseSearch(h.slice(1)))}`).toBe(h);
   });
 });

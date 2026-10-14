@@ -13,6 +13,7 @@ import {
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, LIST_COLUMNS, MENU_MAX, menuPos, menuStyle } from "./ui";
+import { isPlainLeftClick, taskHref } from "@/lib/navState";
 
 // --- grouped list view (ClickUp-style: group, quick-add, expandable subtasks) --
 
@@ -419,8 +420,8 @@ function TaskRow({ task, preview, meId, ownList, colCount, cols, showClient, sho
               most people aren't going to know about that"). It was briefly
               hover-only, then replaced entirely by shift/⌘-click — which
               works but is invisible, so nobody who wasn't told would ever
-              find it. Modifier-clicking a row still selects, as a shortcut
-              for people who know it, but this is the discoverable way. */}
+              find it. It is the only way now: ⌘ and Shift on the row
+              open the task in a new tab (Derek, 2026-10-14). */}
           {onToggleSelect && (
             <button onClick={(e) => { e.stopPropagation(); onToggleSelect(e); }} title="Select — shift-click to select a range"
               className={`mr-1 hidden h-4 w-4 shrink-0 items-center justify-center rounded border transition sm:flex ${selected ? "border-accent bg-accent text-white" : "border-border"}`}>
@@ -447,19 +448,15 @@ function TaskRow({ task, preview, meId, ownList, colCount, cols, showClient, sho
               <Avatar id={delegatedTo} size={20} />
             </span>
           )}
-          {/* Multi-select lives on the row itself now (Derek, 2026-08-26:
-              "remove the multiple checkboxes and just make it shift and
-              select multi"). Shift-click extends a range from the last row
-              you touched, ⌘/Ctrl-click toggles one row on its own, and a
-              plain click still opens the task — so the common action keeps
-              the bare click and selection costs a modifier instead of a
-              permanent column of checkboxes. */}
-          <div role="button" tabIndex={0}
-            onClick={(e) => {
-              if (onToggleSelect && (e.shiftKey || e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); onToggleSelect(e); return; }
-              onOpen();
-            }}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+          {/* The task's own link (Derek, 2026-10-14): right click, ⌘ or Ctrl
+              click, Shift click and middle click open it in a new tab, open
+              over its client's list. A plain click opens it here, as it
+              always did. Selecting is the checkbox's job now, Shift click on
+              it for a range; ⌘ and Shift on the row went to the browser.
+              Not draggable itself when the row is, so the row still drags. */}
+          <a href={taskHref(task)} draggable={draggable ? false : undefined}
+            onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpen(); }}
+            onKeyDown={(e) => { if (e.key === " ") { e.preventDefault(); onOpen(); } }}
             className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center pl-1 text-left">
             {/* Badges live below the title, never inline with it: a narrow
                 Name column used to squeeze the title to "Crea te..." while a
@@ -482,10 +479,11 @@ function TaskRow({ task, preview, meId, ownList, colCount, cols, showClient, sho
                 does not open. */}
             {need ? <span className="flex min-w-0 items-start gap-2">
                 <span className="min-w-0 text-[16px] font-semibold leading-snug text-red-700 dark:text-red-300">{need}</span>
-                {onClearNeedsYou && <button type="button" aria-label="Clear from Needs you" title="Clear from Needs you"
-                  onClick={(e) => { e.stopPropagation(); onClearNeedsYou(); }}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  className="shrink-0 rounded-[5px] px-1.5 text-[16px] font-semibold leading-snug text-red-700 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-500/20">×</button>}
+                {/* Not a <button>: it sits inside the row's link. */}
+                {onClearNeedsYou && <span role="button" tabIndex={0} aria-label="Clear from Needs you" title="Clear from Needs you"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClearNeedsYou(); }}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClearNeedsYou(); } }}
+                  className="shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[16px] font-semibold leading-snug text-red-700 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-500/20">×</span>}
               </span>
               : preview && !isDone && <span className="line-clamp-2 min-w-0 break-words text-[16px] leading-snug text-muted sm:line-clamp-1 sm:text-[13px]" title={preview}>{preview}</span>}
             {/* No icon row (Derek, 2026-09-01: "remove the icons not needed
@@ -518,7 +516,7 @@ function TaskRow({ task, preview, meId, ownList, colCount, cols, showClient, sho
                 {subline && <span className="min-w-0 truncate text-[16px] leading-tight text-muted sm:text-[11px]">{subline}</span>}
               </span>
             )}
-          </div>
+          </a>
         </div>
         </td>
           {/* The client name is the obvious way to say "show me everything

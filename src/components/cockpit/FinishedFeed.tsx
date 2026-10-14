@@ -17,6 +17,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { timeAgo, type FinishKind } from "@/lib/data";
 import { I } from "./ui";
+import { isPlainLeftClick, taskHref } from "@/lib/navState";
 
 export type CompletionRow = {
   id: string; taskId: string; taskTitle: string; clientId: string; clientName: string;
@@ -129,7 +130,9 @@ export function FinishedFeed({ rows, ownerId = null, seenAt = null, onOpenTask }
                     <span className="h-px flex-1 bg-accent/40" />
                   </div>
                 )}
-                <div onClick={() => onOpenTask?.(r.clientId, r.taskId)}
+                {/* A link to the task (Derek, 2026-10-14), so it opens in a new
+                    tab like the sidebar's rows; a plain click stays here. */}
+                <a href={taskHref({ id: r.taskId, clientId: r.clientId })} onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpenTask?.(r.clientId, r.taskId); }}
                   className="flex cursor-pointer items-center gap-3 border-b px-4 py-2.5 transition-colors last:border-0 hover:bg-accent-soft/50">
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[16px] font-bold text-white" style={{ background: r.authorColor }} title={r.authorName}>{r.authorInitials}</span>
                   <span className="min-w-0 flex-1">
@@ -140,7 +143,7 @@ export function FinishedFeed({ rows, ownerId = null, seenAt = null, onOpenTask }
                   <span className="shrink-0 text-[16px] text-muted" title={timeAgo(r.at)}>
                     {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
                   </span>
-                </div>
+                </a>
                 </Fragment>
               ))}
             </div>

@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { TODAY, PRIORITY_META, type Task, type Stage } from "@/lib/data";
 import { I, Avatar } from "./ui";
+import { isPlainLeftClick, taskHref } from "@/lib/navState";
 
 export default function StageBoard({ stages, tasks, canAdmin, onOpenTask, onSetTaskStage, onQuickAdd, onCreateStage, onRenameStage, onToggleStageIsDone, onDeleteStage, onReorderStages }: {
   stages: Stage[]; // already sorted by position, scoped to this project
@@ -99,9 +100,13 @@ export default function StageBoard({ stages, tasks, canAdmin, onOpenTask, onSetT
                 const pmeta = PRIORITY_META[t.priority];
                 const overdue = !!t.due && t.due < TODAY && t.status !== "done";
                 return (
-                  <div key={t.id} draggable onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverCol(null); }}
-                    onClick={() => onOpenTask(t.id)}
-                    className="cursor-grab rounded-lg border bg-background px-2.5 py-2 text-[11px] shadow-sm transition hover:border-accent active:cursor-grabbing">
+                  // A link to the task (Derek, 2026-10-14): it opens in a new
+                  // tab like the sidebar's rows; a plain click stays here, and
+                  // the card still drags between stages. Its drag stops here so
+                  // the stage around it does not take it for a stage drag.
+                  <a key={t.id} href={taskHref(t)} draggable onDragStart={(e) => { e.stopPropagation(); setDragTaskId(t.id); }} onDragEnd={() => { setDragTaskId(null); setDragOverCol(null); }}
+                    onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpenTask(t.id); }}
+                    className="block cursor-grab rounded-lg border bg-background px-2.5 py-2 text-[11px] shadow-sm transition hover:border-accent active:cursor-grabbing">
                     <div className="flex items-start gap-1.5">
                       <span title={pmeta.label} className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: pmeta.color }} />
                       <span className="min-w-0 flex-1">{t.title}</span>
@@ -112,7 +117,7 @@ export default function StageBoard({ stages, tasks, canAdmin, onOpenTask, onSetT
                         {t.assigneeId && <Avatar id={t.assigneeId} size={18} />}
                       </div>
                     )}
-                  </div>
+                  </a>
                 );
               })}
               {col.id && (addingIn === col.id ? (

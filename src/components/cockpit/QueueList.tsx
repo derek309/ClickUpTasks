@@ -10,6 +10,7 @@ import * as React from "react";
 import { CLAUDE_ID, currentStep, formatDue, needsYou, stepStage, userById, type Task } from "@/lib/data";
 import { deadlineWarnings, groupQueue, isQueueWaiting, type QueueSettings } from "../../../mcp/queue.mjs";
 import { Avatar } from "./ui";
+import { isPlainLeftClick, taskHref } from "@/lib/navState";
 
 type Pending = { id: string; beforeId: string | null; up: boolean; moveUp?: boolean };
 
@@ -93,11 +94,14 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
         <button type="button" onClick={() => (picked && picked !== t.id ? ask(picked, t.id) : setPicked(picked === t.id ? null : t.id))}
           aria-label={picked && picked !== t.id ? `Put it before ${t.title}` : `Move ${t.title}`} title="Drag to move, or tap here and then the row it goes before"
           className="flex h-11 w-7 cursor-grab items-center justify-center rounded-[5px] text-[16px] font-bold tracking-[-2px] text-muted hover:text-foreground active:cursor-grabbing">⋮⋮</button>
-        <button type="button" onClick={() => (picked && picked !== t.id ? ask(picked, t.id) : onOpen(t.id))} className="min-w-0 text-left">
+        {/* The task's own link, so it opens in a new tab like the sidebar's
+            rows (Derek, 2026-10-14); a plain click stays here. Not draggable
+            itself, so a drag from the title still moves the row. */}
+        <a href={taskHref(t)} draggable={false} onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); if (picked && picked !== t.id) ask(picked, t.id); else onOpen(t.id); }} className="min-w-0 text-left">
           <span className="block break-words text-[16px] font-semibold">{t.title}</span>
           {tn && <span className={`block text-[16px] font-semibold ${TONE[tn.tone]}`}>{tn.text}</span>}
           {need && <span className="block text-[16px] font-semibold text-red-700">{need}</span>}
-        </button>
+        </a>
         {/* Who it's on, at a glance, Up next included (Derek, 2026-10-14). */}
         <span className="col-start-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] sm:col-start-3 sm:justify-end">
           {(() => { const who = currentStep(t.subtasks)?.assigneeId ?? t.assigneeId; return who
@@ -183,9 +187,9 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
         </>)}
 
         {finished.map((t) => (
-          <button key={t.id} type="button" onClick={() => onOpen(t.id)} className="block py-1 text-left text-[16px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
+          <a key={t.id} href={taskHref(t)} onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); onOpen(t.id); }} className="block w-fit max-w-full py-1 text-left text-[16px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
             ✓ {t.title}{doneAt(t) ? ` · done ${formatDue(doneAt(t).slice(0, 10))}` : ""}
-          </button>
+          </a>
         ))}
       </div>
     </div>
