@@ -1,7 +1,9 @@
 // The client page's Conversation (Derek, 2026-10-14, client header mockup):
 // the newest thing said, the drafts not sent yet, and where a new message
 // goes. Pure, so the strip, the feed and the tests read the same answers.
-import { htmlToText, isMessageConversationTask, looksLikeHtml, timeAgo, type EmailDraft, type Message, type Task } from "./data";
+import { htmlToText, isMessageConversationTask, looksLikeHtml, timeAgo, type Attachment, type EmailDraft, type Message, type Task } from "./data";
+import { isSignatureImage } from "./emailFiles";
+import { isPicture } from "./pictures";
 
 /** The channels the Conversation shows: emails, texts and portal chats. */
 export type TalkChannel = "email" | "sms" | "chat";
@@ -299,4 +301,42 @@ export function taskChoices(tasks: Pick<Task, "id" | "title" | "status" | "creat
   for (const m of messages) if (m.taskId && timeOf(newest.get(m.taskId)) < timeOf(m.at)) newest.set(m.taskId, m.at);
   const when = (t: (typeof tasks)[number]) => Math.max(timeOf(newest.get(t.id)), timeOf(t.lastActivityAt), timeOf(t.createdAt));
   return tasks.filter((t) => t.status !== "done").sort((a, b) => when(b) - when(a) || a.title.localeCompare(b.title)).map((t) => ({ id: t.id, title: t.title }));
+}
+
+// ---------------------------------------------------------------------------
+// A message's files in the feed (Derek, 2026-10-14: "Also can't see images",
+// James's "Trinity Branding Update" showed its pictures as name chips). A
+// picture shows as itself and opens in the full size viewer; any other file is
+// a chip that opens or downloads. A file is read from where it is kept: the
+// app's private storage by a signed link, Gmail through /api/inbox/attachment
+// (the Inbox and the task page read them the same way), or its own address.
+
+/** Where one of a message's files is read from; null when it can't be. */
+export type FeedFileSource =
+  | { from: "storage"; path: string }
+  | { from: "gmail"; href: string }
+  | { from: "link"; url: string }
+  | null;
+
+/** The address /api/inbox/attachment serves one email file at. */
+export const gmailFileHref = (messageId: string, attId: string, download = false) =>
+  `/api/inbox/attachment?message=${encodeURIComponent(messageId)}&att=${encodeURIComponent(attId)}${download ? "&download=1" : ""}`;
+
+export function feedFileSource(m: Pick<Message, "id" | "gmailMessageId">, a: Attachment, download = false): FeedFileSource {
+  if (a.path) return { from: "storage", path: a.path };
+  if (a.gmailAttachmentId && m.gmailMessageId) return { from: "gmail", href: gmailFileHref(m.id, a.id, download) };
+  if (a.url) return { from: "link", url: a.url };
+  return null;
+}
+
+/** The key a file's viewable address is kept under: its storage path, else its id. */
+export const feedFileKey = (a: Pick<Attachment, "id" | "path">) => a.path ?? a.id;
+
+/** A message's files as the feed shows them: the pictures that can be read
+ *  (shown as themselves) and every other file (chips), with an email
+ *  signature's little logo left out. */
+export function feedFiles(m: Pick<Message, "id" | "gmailMessageId" | "attachments">): { pictures: Attachment[]; files: Attachment[] } {
+  const all = (m.attachments ?? []).filter((a) => !isSignatureImage(a));
+  const pictures = all.filter((a) => isPicture(a) && !!feedFileSource(m, a));
+  return { pictures, files: all.filter((a) => !pictures.includes(a)) };
 }

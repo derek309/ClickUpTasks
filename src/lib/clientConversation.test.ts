@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { automaticKind, byTime, collectClientDrafts, dayLabel, defaultChannel, emailBeingAnswered, feedRows, firstWords, messageStamp, newestLine, sinceShort, taskChoices, timeOf, waitingLine, waitingOnReply, whereNewMessageGoes } from "./clientConversation";
-import type { EmailDraft, Message, Task } from "./data";
+import { automaticKind, byTime, collectClientDrafts, dayLabel, defaultChannel, emailBeingAnswered, feedFileKey, feedFileSource, feedFiles, feedRows, firstWords, gmailFileHref, messageStamp, newestLine, sinceShort, taskChoices, timeOf, waitingLine, waitingOnReply, whereNewMessageGoes } from "./clientConversation";
+import type { Attachment, EmailDraft, Message, Task } from "./data";
 
 const msg = (p: Partial<Message> & Pick<Message, "id" | "at" | "direction" | "channel">): Message => ({
   contactId: "ct_1", clientId: "cl_1", taskId: null, subject: null, body: "", ghlMessageId: null, createdBy: null, read: true, attachments: [], cc: [], bcc: [], ...p,
@@ -311,5 +311,40 @@ describe("waitingOnReply", () => {
     expect(sinceShort("2026-10-14T22:05:00Z", now)).toBe("2m");
     expect(sinceShort("2026-10-13T12:00:00Z", now)).toBe("34h");
     expect(sinceShort("2026-10-10T12:00:00Z", now)).toBe("4d");
+  });
+});
+
+describe("a message's files in the feed", () => {
+  // James's "Trinity Branding Update" (Oct 5): three pictures kept in Gmail.
+  const gm = (id: string, name: string, size: string, kind: Attachment["kind"] = "image"): Attachment => ({ id, name, size, kind, mimeType: "image/png", gmailAttachmentId: `g_${id}` });
+  const james = msg({ id: "msg_e7", at: "2026-10-06T05:09:34Z", direction: "inbound", channel: "email", gmailMessageId: "1a10f9", attachments: [
+    gm("at_1", "image.png", "265 KB"), gm("at_2", "image.png", "669 KB"), gm("at_3", "image.png", "106 KB"),
+  ] });
+  it("shows a picture kept in Gmail as a picture, read through the attachment route", () => {
+    expect(feedFiles(james).pictures.map((a) => a.id)).toEqual(["at_1", "at_2", "at_3"]);
+    expect(feedFiles(james).files).toEqual([]);
+    expect(feedFileSource(james, james.attachments[0])).toEqual({ from: "gmail", href: "/api/inbox/attachment?message=msg_e7&att=at_1" });
+    expect(feedFileSource(james, james.attachments[0], true)).toEqual({ from: "gmail", href: "/api/inbox/attachment?message=msg_e7&att=at_1&download=1" });
+  });
+  it("reads a stored file by its path, and a link by its address", () => {
+    const stored: Attachment = { id: "a1", name: "logo.png", size: "40 KB", kind: "image", path: "messages/cl_1/f_1-logo.png" };
+    const pdf: Attachment = { id: "a2", name: "plan.pdf", size: "1 MB", kind: "pdf", path: "messages/cl_1/f_2-plan.pdf" };
+    const link: Attachment = { id: "a3", name: "Drive folder", size: "", kind: "link", url: "https://drive.google.com/x" };
+    const m = msg({ id: "m1", at: "2026-10-06T05:09:34Z", direction: "outbound", channel: "email", attachments: [stored, pdf, link] });
+    expect(feedFileSource(m, stored)).toEqual({ from: "storage", path: stored.path });
+    expect(feedFileSource(m, link)).toEqual({ from: "link", url: link.url });
+    expect(feedFiles(m)).toEqual({ pictures: [stored], files: [pdf, link] });
+    expect(feedFileKey(stored)).toBe(stored.path);
+    expect(feedFileKey(james.attachments[0])).toBe("at_1");
+  });
+  it("keeps a file that can't be read as a chip, and leaves a signature's logo out", () => {
+    const noGmail = msg({ id: "m2", at: "2026-10-06T05:09:34Z", direction: "inbound", channel: "email", attachments: [gm("at_9", "photo.jpg", "300 KB")] });
+    expect(feedFileSource(noGmail, noGmail.attachments[0])).toBeNull();
+    expect(feedFiles(noGmail)).toEqual({ pictures: [], files: noGmail.attachments });
+    const sig = msg({ id: "m3", at: "2026-10-06T05:09:34Z", direction: "inbound", channel: "email", gmailMessageId: "x", attachments: [gm("at_s", "image001.png", "8 KB")] });
+    expect(feedFiles(sig)).toEqual({ pictures: [], files: [] });
+  });
+  it("escapes the ids in the attachment address", () => {
+    expect(gmailFileHref("msg a&b", "at/1", true)).toBe("/api/inbox/attachment?message=msg%20a%26b&att=at%2F1&download=1");
   });
 });

@@ -12,14 +12,17 @@
 // answers the way the client wrote last, on the task they wrote on, and can
 // draft the reply with AI. Beside the task list on a
 // desktop, a panel over it on a tablet, the whole screen on a phone. The
-// messages are the ones already in memory (the Journal's), nothing is
-// fetched here.
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+// messages are the ones already in memory (the Journal's), whole; only a
+// message's files are fetched, as its card comes into view.
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { looksLikeHtml, type Attachment, type Message } from "@/lib/data";
 import { safeMessageHtml } from "@/lib/safeHtml";
-import { automaticKind, byTime, defaultChannel, feedRows, isTalk, messageStamp, plainLine, shortDay, timeOf, waitingLine, waitingOnReply, type ConversationDraft, type TalkChannel } from "@/lib/clientConversation";
-import { CollapsibleText, I } from "./ui";
-import { AttachmentThumbs } from "./AttachmentThumbs";
+import { authedFetch } from "@/lib/supabase";
+import { downloadUrlForFile, signedUrlForFile } from "@/lib/db";
+import { automaticKind, byTime, defaultChannel, feedFileKey, feedFileSource, feedFiles, feedRows, isTalk, messageStamp, plainLine, shortDay, timeOf, waitingLine, waitingOnReply, type ConversationDraft, type TalkChannel } from "@/lib/clientConversation";
+import { I, renderRichText } from "./ui";
+import { EmailFiles } from "./SentEmail";
+import { ImageLightbox } from "./TaskWorkItem";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { buildFeedDrafts, type FeedDraftDeps } from "./clientFeedDrafts";
@@ -85,7 +88,6 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   useEscapeToClose(onClose);
   const drafts = buildFeedDrafts(draftDeps);
   const [filter, setFilter] = useState<"all" | TalkChannel>("all");
-  const [open, setOpen] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Answer the way they wrote: the channel of their newest message, until
@@ -234,9 +236,6 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
             <p className="mt-1 self-start text-[16px] font-semibold text-danger">{waitingLine(first, m.at)}</p>
           ) : null;
           const mine = m.direction === "outbound";
-          const html = m.channel === "email" && looksLikeHtml(m.body);
-          const full = open.has(m.id);
-          const words = plainLine(m.body);
           const bubble = (
             <div key={r.key} className={`max-w-[88%] rounded-[5px] px-3 py-2 ${mine ? "self-end bg-accent-soft" : "self-start bg-surface ring-1 ring-[var(--border)]"} ${auto ? "opacity-80" : ""}`}>
               <div className="text-[16px] text-muted">
@@ -245,14 +244,8 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
                 {r.kind === "auto" && <button onClick={() => setOpenAuto((s) => { const n = new Set(s); n.delete(m.id); return n; })} className="ml-1.5 font-semibold text-accent hover:underline">Fold</button>}
               </div>
               {m.channel === "email" && m.subject && <b className="block break-words">{m.subject}</b>}
-              {m.channel === "email" ? (full
-                ? (html ? <div className="rte-content break-words text-[16px]" dangerouslySetInnerHTML={{ __html: safeMessageHtml(m.body) }} /> : <p className="whitespace-pre-wrap break-words">{m.body}</p>)
-                : <p className="line-clamp-3 break-words">{words}</p>)
-                : <CollapsibleText text={m.body} className="whitespace-pre-wrap break-words text-[16px]" />}
-              {m.channel === "email" && words.length > 160 && (
-                <button onClick={() => setOpen((s) => { const n = new Set(s); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); return n; })} className={`${link} text-[16px]`}>{full ? "Show less" : "Show all"}</button>
-              )}
-              {(m.attachments?.length ?? 0) > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments as Attachment[]} onOpen={onOpenFile} /></div>}
+              <FeedBody m={m} link={link} />
+              {(m.attachments?.length ?? 0) > 0 && <FeedFiles m={m} onOpenFile={onOpenFile} pushToast={draftDeps.pushToast} />}
             </div>
           );
           return unanswered ? <Fragment key={r.key}>{unanswered}{bubble}</Fragment> : bubble;
@@ -338,5 +331,127 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
       </div>
       {editingDraft?.editEmail?.(() => setEditing(null))}
     </aside>
+  );
+}
+
+/** A message's words, cut to a few lines with Show all whenever anything is
+ *  cut, ours or theirs, email, text or chat (Derek, 2026-10-14: "I need to be
+ *  able to open to read all the email": Justin's reminder was cut at three
+ *  lines, but Show all only came past 160 characters, so it never did). Cut
+ *  is measured, not guessed from a length. Show all is the whole message as
+ *  it is kept, an email with its own formatting. */
+function FeedBody({ m, link }: { m: Message; link: string }) {
+  const [full, setFull] = useState(false);
+  const [cut, setCut] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const email = m.channel === "email";
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || full) return;
+    const check = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    check();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [full, m.body]);
+  const whole = !email ? <div className="whitespace-pre-wrap break-words">{renderRichText(m.body)}</div>
+    : looksLikeHtml(m.body) ? <div className="rte-content break-words text-[16px]" dangerouslySetInnerHTML={{ __html: safeMessageHtml(m.body) }} />
+    : <p className="whitespace-pre-wrap break-words">{renderRichText(m.body)}</p>;
+  return (
+    <>
+      {full ? whole : email
+        ? <div ref={box} className="line-clamp-3 break-words">{plainLine(m.body)}</div>
+        : <div ref={box} className="line-clamp-6 whitespace-pre-wrap break-words">{renderRichText(m.body)}</div>}
+      {(cut || full) && (
+        <button onClick={() => setFull((f) => !f)} aria-expanded={full} className={`${link} text-[16px]`}>{full ? "Show less" : "Show all"}</button>
+      )}
+    </>
+  );
+}
+
+/** A message's files (Derek, 2026-10-14: "Also can't see images"): each
+ *  picture as itself, read when the card comes into view, a click opening the
+ *  full size viewer with Download; any other file a chip that opens or
+ *  downloads it. Stored files by a signed link, Gmail's through
+ *  /api/inbox/attachment with the person's token, as the Inbox reads them. */
+function FeedFiles({ m, onOpenFile, pushToast }: { m: Message; onOpenFile?: (path: string) => void; pushToast: (text: string) => void }) {
+  const { pictures, files } = useMemo(() => feedFiles(m), [m]);
+  // Read again only when its pictures change, not each time the feed's
+  // messages are refreshed.
+  const sig = `${m.id}:${pictures.map(feedFileKey).join("|")}`;
+  const latest = useRef({ m, pictures });
+  useEffect(() => { latest.current = { m, pictures }; });
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [big, setBig] = useState<number | null>(null);
+  // Read as the card comes into view (at once where that can't be told).
+  const [seen, setSeen] = useState(() => typeof IntersectionObserver === "undefined");
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || seen) return;
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) setSeen(true); }, { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [seen]);
+  useEffect(() => {
+    const { m, pictures } = latest.current;
+    if (!seen || !pictures.length) return;
+    let live = true;
+    const made: string[] = [];
+    void Promise.all(pictures.map(async (a): Promise<[string, string] | null> => {
+      const src = feedFileSource(m, a);
+      try {
+        if (src?.from === "storage") { const u = await signedUrlForFile(src.path); return u ? [feedFileKey(a), u] : null; }
+        if (src?.from === "gmail") {
+          const res = await authedFetch(src.href);
+          if (!res.ok) return null;
+          const u = URL.createObjectURL(await res.blob());
+          made.push(u);
+          return [feedFileKey(a), u];
+        }
+      } catch { /* left as a chip */ }
+      return null;
+    })).then((got) => { if (live) setUrls(Object.fromEntries(got.filter((x): x is [string, string] => !!x))); });
+    return () => { live = false; made.forEach((u) => URL.revokeObjectURL(u)); };
+  }, [seen, sig]);
+  const shown = pictures.filter((a) => urls[feedFileKey(a)]);
+  const saveAs = (href: string, name: string) => {
+    const el = document.createElement("a");
+    el.href = href; el.download = name || "file"; el.rel = "noopener noreferrer";
+    document.body.appendChild(el); el.click(); el.remove();
+  };
+  // Another file: opened (stored, or a link) or saved under its own name (Gmail's).
+  const openFile = async (a: Attachment) => {
+    const src = feedFileSource(m, a, true);
+    if (src?.from === "storage") { if (onOpenFile) onOpenFile(src.path); else { const u = await signedUrlForFile(src.path); if (u) window.open(u, "_blank", "noopener"); else pushToast(`Couldn't open ${a.name}`); } return; }
+    if (src?.from === "link") { window.open(src.url, "_blank", "noopener,noreferrer"); return; }
+    if (src?.from === "gmail") {
+      const res = await authedFetch(src.href).catch(() => null);
+      if (!res?.ok) { pushToast(`Couldn't download ${a.name}`); return; }
+      const u = URL.createObjectURL(await res.blob());
+      saveAs(u, a.name);
+      setTimeout(() => URL.revokeObjectURL(u), 10_000);
+      return;
+    }
+    pushToast(`${a.name} isn't kept anywhere the app can open it`);
+  };
+  const download = async (a: Attachment) => {
+    const src = feedFileSource(m, a);
+    if (src?.from === "storage") { const u = await downloadUrlForFile(src.path, a.name); if (u) window.open(u, "_blank", "noopener"); else pushToast(`Couldn't download ${a.name}`); return; }
+    const u = urls[feedFileKey(a)];
+    if (u) saveAs(u, a.name);
+  };
+  if (!pictures.length && !files.length) return null;
+  return (
+    <div ref={wrap} className="mt-1.5">
+      <EmailFiles small files={[...pictures, ...files]} urls={urls}
+        onOpenPicture={(a) => { const i = shown.indexOf(a); if (i >= 0) setBig(i); }}
+        onOpenFile={(a) => void openFile(a)} />
+      {big !== null && shown[big] && (
+        <ImageLightbox images={shown.map((a) => ({ id: feedFileKey(a), name: a.name, url: urls[feedFileKey(a)] }))} index={big} onIndex={setBig} onClose={() => setBig(null)}
+          onDownload={(img) => { const a = shown.find((x) => feedFileKey(x) === img.id); if (a) void download(a); }} />
+      )}
+    </div>
   );
 }

@@ -189,25 +189,29 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
 /** An email's files (Derek, 2026-10-14): a picture as a thumbnail with its
  *  name under it, a click opening the full size viewer (Download, Close and
  *  arrows there); anything else a chip with its name and size. */
-export function EmailFiles({ files, urls, onOpenPicture, onOpenFile }: {
+export function EmailFiles({ files, urls, onOpenPicture, onOpenFile, small }: {
   files: Attachment[];
-  /** Each stored file's viewable address, by its path. */
+  /** Each file's viewable address, by its path (a file kept in Gmail, by its
+   *  id, as the client page's Conversation reads them). */
   urls: Record<string, string>;
   onOpenPicture: (a: Attachment) => void;
   onOpenFile: (a: Attachment) => void;
+  /** Smaller thumbnails, for a message card in the Conversation. */
+  small?: boolean;
 }) {
-  const pics = files.filter((a) => isPicture(a) && !!a.path && !!urls[a.path]);
+  const urlOf = (a: Attachment) => urls[a.path ?? a.id];
+  const pics = files.filter((a) => isPicture(a) && !!urlOf(a));
   const rest = files.filter((a) => !pics.includes(a));
   return (
     <div className="flex flex-col gap-2">
       {pics.length > 0 && (
-        <div className="flex flex-wrap items-start gap-3">
+        <div className={`flex flex-wrap items-start ${small ? "gap-2" : "gap-3"}`}>
           {pics.map((a) => (
             <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenPicture(a); }} title={`View ${a.name}`} aria-label={`View ${a.name}`}
-              className="group flex max-w-[240px] flex-col items-start gap-1 text-left">
-              <span className="block overflow-hidden rounded-[5px] border bg-background group-hover:border-accent">
+              className={`group flex ${small ? "max-w-[124px]" : "max-w-[240px]"} min-w-0 flex-col items-start gap-1 text-left`}>
+              <span className="block max-w-full overflow-hidden rounded-[5px] border bg-background group-hover:border-accent">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={urls[a.path!]} alt={a.name} className="block h-auto max-h-[160px] w-auto max-w-full object-contain" />
+                <img src={urlOf(a)} alt={a.name} className={`block h-auto ${small ? "max-h-[88px]" : "max-h-[160px]"} w-auto max-w-full object-contain`} />
               </span>
               <span className="block w-full truncate text-[16px] font-medium text-accent">{a.name}</span>
             </button>
