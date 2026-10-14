@@ -12,6 +12,8 @@ import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/l
 import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
+import { ActionMenu } from "./ActionMenu";
+import { I } from "./ui";
 
 type AddOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
 
@@ -21,7 +23,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, onCopyForClaude, files, face, sentence, incoming, waiting = false }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -44,8 +46,16 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   /** Whose turn, as a face before the words: the person's avatar, Claude's
    *  icon, the client's initials. */
   face?: React.ReactNode;
-  /** Its links and files, their own row under the work. */
+  /** Its links and files, under what came in. */
   files?: React.ReactNode;
+  /** The step page's own sentence ("● Your turn, assigned to Derek, due
+   *  today, follow up Oct 15"), its pickers working here too (Derek,
+   *  2026-10-14: the two read the same). */
+  sentence?: React.ReactNode;
+  /** What came in: the client's email, open, or the email a waiting step waits on. */
+  incoming?: React.ReactNode;
+  /** Waiting on the client: its name says so, no sentence under it. */
+  waiting?: boolean;
   /** The client's waiting step: the review out with them, in place of held. */
   outFor?: React.ReactNode;
   /** How a waiting, check in or "what's next?" step ends, in place of Done. */
@@ -95,6 +105,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
     && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
   const addRows = setup ? addRowsOf(options, firstName, new Set(quick ? named.map((x) => x.kind) : [])) : null;
   const link = "font-semibold text-accent underline-offset-4 hover:underline";
+  // The longer reason, when the sentence's first word does not say it all.
+  const reason = tone.say && !sub.done && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
   // A "what's next?" step's context (why it is asking, the original ask): the
   // easiest thing on the card to read, in ink, right under its heading (Derek,
   // 2026-10-14: it was pale grey under a red line).
@@ -112,6 +124,10 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   return (
     <div onClick={openFromCard} className="flex min-w-0 cursor-pointer flex-col gap-3">
       <div className="flex flex-col gap-1">
+        {/* The name, then whose turn as a face and the › to its page in the
+            top right corner, where the folded rows have them (Derek, 2026-10-14). */}
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
         {whatsNext || naming ? (
           <input value={whatsNext ? (typed ? "" : suggestion ?? "") : sub.title} aria-label="Name the next step" placeholder="What's next? Name the next step"
             onChange={(e) => { setNaming(true); setTyped(true); if (!whatsNext || e.target.value.trim()) onRename(e.target.value); }}
@@ -126,11 +142,22 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
             <span className="mr-1.5 tabular-nums text-muted">{number}.</span>{sub.title}
           </div>
         )}
-        {/* Whose move it is, strong red for yours, the step's own colour otherwise. */}
-        <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold leading-snug ${tone.sayTone}`}>
-          <span className="inline-flex items-center gap-2">{face}<span>{tone.say ?? tone.word}</span></span>
-          {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
+            {/* The step page's sentence, its pickers working here; the
+                waiting step's name says it all. */}
+            {!waiting && sentence}
+          </div>
+          <span className="flex shrink-0 items-center gap-2 pt-0.5">
+            {face}
+            <button onClick={onOpenStep} title="Open the step" aria-label="Open the step" className="rounded-[5px] p-1 text-muted hover:bg-background hover:text-foreground"><I.chevron className="h-4 w-4 -rotate-180" /></button>
+          </span>
         </div>
+        {/* Why it is whose move, its own coloured line, as on the step page. */}
+        {!waiting && reason && (
+          <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold leading-snug ${tone.sayTone}`}>
+            <span>{reason}</span>
+            {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
+          </div>
+        )}
         {sub.cloudError === "not_set_up" && !sub.done && (
           <p className="text-[16px] text-foreground">
             Claude in the cloud isn&apos;t set up yet, so it starts when someone opens Claude and says: work your ClickUpTasks list.
@@ -155,20 +182,39 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
             onDone={(a, run) => setup.onDone(a, run)} />
         </div>
       )}
+      {/* What came in (Derek, 2026-10-14): directions, the client's email
+          open with its files (or the review out with them and the email that
+          took it), then the links and files on the step. */}
       {!context && dir.node}
-      {followBox}
-      {planBits}
-      {outFor ?? held}
+      {outFor ?? incoming}
       {!outFor && files && (
         <section aria-label="Links and files" className="flex flex-col gap-1.5">
           <h4 className="text-[16px] font-semibold text-muted">Links and files</h4>
           {files}
         </section>
       )}
-      {/* A wait on the client gets no to do box until one is added. */}
-      {/* Nor a step with no name yet, or still asking what's next: a to do
-          there has nothing to belong to (Derek, 2026-10-14). */}
-      {!sub.onClient && !whatsNext && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0) && todo.node}
+      {/* What I'm going to do: the work, the + to add one, the to dos. A wait
+          on the client gets no to do box until one is added; nor a step with
+          no name yet, or still asking what's next (Derek, 2026-10-14). */}
+      {!outFor && !whatsNext && !setup && (() => {
+        const todos = !sub.onClient && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0);
+        const addable = !sub.done && !sub.onClient && sub.finishWhen !== "reply";
+        if (!held && !planBits && !followBox && !todos && !addable) return null;
+        return (
+          <section aria-label="Actions" className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h4 className="text-[16px] font-semibold text-muted">Actions</h4>
+              {addable && <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this step"
+                triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline"
+                items={options.map((o) => !o.disabled && { label: o.note ? `${o.label} (${o.note})` : o.label, onClick: o.onPick })} />}
+            </div>
+            {followBox}
+            {planBits}
+            {held}
+            {todos && todo.node}
+          </section>
+        );
+      })()}
       {/* How it ends: Done, then What's next; a waiting, check in or "what's
           next?" step has its own choices. The only dark button on the page. */}
       {!sub.done && doneActions && <div className="border-t pt-3">{doneActions}</div>}

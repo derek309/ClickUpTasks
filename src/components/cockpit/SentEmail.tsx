@@ -152,7 +152,9 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
    *  marks that version approved (Derek, 2026-10-14). */
   approve?: { label: string; onClick: () => void };
 }) {
-  const [open, setOpen] = useState(false);
+  // Open until answered, so what the client wrote reads without a click
+  // (Derek, 2026-10-14); it still folds.
+  const [open, setOpen] = useState(!answered);
   const tone = reviewTone(answered ? "approved" : "with_client");
   const toggle = () => setOpen((o) => !o);
   return (

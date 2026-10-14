@@ -21,7 +21,8 @@ import { nextStepFromContext, taskForAsk, whatsNextContext } from "@/lib/nextSte
 import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu, PhonePage, type ActionMenuItem } from "./ActionMenu";
-import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
+import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, fetchTaskDocumentFiles, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
+import { setFiles as filesOfSet } from "@/lib/imageSet";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
 import { ImageLightbox } from "./TaskWorkItem";
@@ -1102,6 +1103,41 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Ticking asks what happens next right in the card.
   const stepDate = stepDateLabel(followUp);
   const reviews = reviewStates.taskId === task.id ? reviewStates.reviews : {};
+  // A review's own files, as it stands now (Derek, 2026-10-14): an image
+  // review's first picture for its card, and every file of the version to
+  // download once approved. Read again when its version or stage changes.
+  const [reviewMedia, setReviewMedia] = useState<Partial<Record<"doc" | "image" | "page" | "video", { key: string; files: { name: string; path: string }[]; thumb?: string }>>>({});
+  const mediaKey = (["image", "page", "video"] as const).map((k) => (reviews[k] ? `${k}:${reviews[k]!.id}:${reviews[k]!.version}:${reviews[k]!.status}` : "")).join("|");
+  useEffect(() => {
+    let live = true;
+    for (const k of ["image", "page", "video"] as const) {
+      const r = reviews[k];
+      if (!r) continue;
+      const key = `${r.id}:${r.version}:${r.status}`;
+      if (reviewMedia[k]?.key === key) continue;
+      void (async () => {
+        const [doc, files] = await Promise.all([fetchTaskDocument(task.id, k), fetchTaskDocumentFiles(r.id)]);
+        if (!doc) return;
+        const ids = filesOfSet(doc.body);
+        const shown = ids.map((id) => files.find((f) => f.id === id && !f.removedAt && !f.clearedAt)).filter((f): f is NonNullable<typeof f> => !!f).map((f) => ({ name: f.name, path: f.path }));
+        const thumb = k === "image" && shown[0] ? await onGetSignedUrl(shown[0].path) : null;
+        if (live) setReviewMedia((m) => ({ ...m, [k]: { key, files: shown, ...(thumb ? { thumb } : {}) } }));
+      })();
+    }
+    return () => { live = false; };
+  }, [mediaKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Download on an approved review (Derek, 2026-10-14): its file under its own
+  // name, every image of a set. A document has no export, so none there.
+  const reviewDownload = (k: "doc" | "image" | "page" | "video") => {
+    const r = reviews[k];
+    const files = reviewMedia[k]?.files ?? [];
+    if (!r || (r.status !== "approved" && r.status !== "completed") || !files.length) return null;
+    return (
+      <button onClick={(e) => { e.stopPropagation(); files.forEach((f) => onDownloadFileAs(f.path, f.name)); }}
+        title={files.length > 1 ? `Download its ${files.length} files` : `Download ${files[0].name}`}
+        className="inline-flex h-9 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"><I.download className="h-4 w-4" /> Download</button>
+    );
+  };
   const nameOf = (id: string) => userById(id)?.name ?? "Someone";
   const watch = parseStepWatch(openStep?.nextStepWatch);
   const watchState = watch && openStep ? stepWatchState(watch, { since: openStep.at, clientName: client.name, messages: messages ?? [], subtasks: task.subtasks, reviews, nameOf }) : null;
@@ -1856,7 +1892,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // "● Your turn, assigned to Derek, due Oct 14, 1 day left, follow up set a
   // date", the name and each date a word to change. It holds what the Due ·
   // Assign · Follow up row did, with the same pickers doing the same things.
-  const stepControls = (sub: Subtask, isActive: boolean) => {
+  // face: false on the task page, where the face sits top right as on the rows.
+  const stepControls = (sub: Subtask, isActive: boolean, face = true) => {
     const t = stepTone(sub);
     const stage = stepStage(sub, task.assigneeId);
     const d = sub.due ?? null;
@@ -1896,7 +1933,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <div className="text-[16px] leading-snug sm:text-[18px]">
         {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
-        <span className="font-semibold">{turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{t.word}</span>
+        <span className="font-semibold">{face && turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{t.word}</span>
         {/* The comma rides inside the picker's box: on a phone it wrapped onto
             the start of the next line. */}
         {parts.map((p, i) => (
@@ -1962,28 +1999,42 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     reportStage(k)({ id: String(d.id), title: String(d.title ?? ""), status: String(d.status), version: Number(d.version ?? 0), approvedAt: (d.approved_at as string | null) ?? null, clientViewedAt: (d.client_viewed_at as string | null) ?? null });
     setDocNonce((n) => n + 1);
   };
+  // The client's waiting step (Derek, 2026-10-14: say it once): the review
+  // out with them as its card, with its picture, then the email that took it.
   const outFor = (sub: Subtask) => {
     const ks = sentReviews(sub);
     if (!ks.length && !sub.emailedAt) return null;
+    const came = stepHeld(withSentHolds(sub), true, "came");
     return (
-      <section aria-labelledby="step-out" className="flex flex-col gap-2">
-        <h3 id="step-out" className="text-[17px] font-bold">Out with {firstName} for review</h3>
-        {ks.map((k) => {
-          const r = reviews[k]!;
-          return (
-            <div key={k} role="button" tabIndex={0} onClick={() => openWork(k)} onKeyDown={(e) => { if (e.key === "Enter") openWork(k); }}
-              style={{ background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot }}
-              className="flex cursor-pointer flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5 hover:border-accent hover:bg-background">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[16px] font-semibold">{r.title.trim() || deliverableName(k)}</div>
-                <div className="flex flex-wrap items-center gap-2 text-[16px] text-muted">{stageChip(r.status)}<span>{[r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</span></div>
-              </div>
-              <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold leading-9">Open</span>
-            </div>
-          );
-        })}
-        {sub.emailedAt && <p className="text-[16px] text-muted">The review email went to {firstName} {formatDue(sub.emailedAt.slice(0, 10))}; it is in the conversation below.</p>}
+      <section aria-label={`Out with ${firstName}`} className="flex flex-col gap-2">
+        {ks.map((k) => reviewCard(k))}
+        {came ?? (sub.emailedAt ? <p className="text-[16px] text-muted">The review email went to {firstName} {formatDue(sub.emailedAt.slice(0, 10))}.</p> : null)}
       </section>
+    );
+  };
+  // A review as a card: its picture (an image review's first image, else its
+  // kind's icon), name, stage, version, viewed, Open, and Download once it is
+  // approved (Derek, 2026-10-14).
+  const reviewCard = (k: "doc" | "image" | "page" | "video") => {
+    const r = reviews[k]!;
+    const thumb = reviewMedia[k]?.thumb;
+    return (
+      <div key={k} role="button" tabIndex={0} onClick={() => openWork(k)} onKeyDown={(e) => { if (e.key === "Enter") openWork(k); }}
+        style={{ background: reviewTone(r.status).chip, borderColor: reviewTone(r.status).dot }}
+        className="flex cursor-pointer flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-3 py-2.5 hover:border-accent">
+        {thumb
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={thumb} alt="" className="h-14 w-14 shrink-0 rounded-[5px] bg-background object-cover ring-1 ring-[var(--border)]" />
+          : <span aria-hidden className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[5px] bg-surface text-[26px] ring-1 ring-[var(--border)]">{WORK_ICON[k]}</span>}
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[16px] font-semibold">{r.title.trim() || deliverableName(k)}</div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[16px] text-muted">{stageChip(r.status)}<span>{[r.version > 0 ? `Version ${r.version}` : null, viewedLine(k)].filter(Boolean).join(" · ")}</span></div>
+        </div>
+        <span className="flex shrink-0 items-center gap-2">
+          {reviewDownload(k)}
+          <span aria-hidden className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold leading-9">Open</span>
+        </span>
+      </div>
     );
   };
   // The end of a step waiting on the client's review: what can happen next,
@@ -1997,7 +2048,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // with the follow ups sent so far (Derek, 2026-10-13).
     return (
       <div className="flex flex-col gap-2">
-        <NextChoices intro={`Heard back by phone or email? Mark what ${firstName} said.`} choices={[
+        <NextChoices row choices={[
           { label: `${firstName} approved`, says: "The review is approved and the next step starts.", primary: true, onClick: () => void markReview(k, "approved") },
           { label: `${firstName} sent changes`, says: "Starts a changes round; their notes become to dos.", onClick: () => void markReview(k, "client_submitted") },
         ]} />
@@ -2206,6 +2257,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             addOptions={stepAddOptions(sub)}
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
             files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
+            incoming={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "came") ?? undefined}
+            sentence={stepControls(sub, true, false)} waiting={waitingStep(sub)}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
             onCopyForClaude={() => void copyForClaude()} face={turnFace(sub)}
@@ -3147,7 +3200,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // link, the same on a phone and a desktop; what each does is its title
   // (Derek, 2026-10-14). Task chat stays under the step's + Add.
   const followUpBox = (ps: Subtask) => {
-    const since = ps.startedAt ? formatDue(ps.startedAt.slice(0, 10)) : null;
     // A follow up email already written and held here sends as the draft
     // box's Open and send does; with none, one is started.
     const heldDraft = !!task.draftEmail && (ps.holds ?? []).includes("email");
@@ -3155,11 +3207,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const startText = () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id
       ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.channel === "sms" && x.draftMessage.body.trim() ? x.draftMessage.body : textStarted } } : x)) });
     return (
-      <NextChoices row intro={<>
-        <b className="font-bold text-foreground">Waiting on {firstName}{since ? ` since ${since}` : ""}</b>
-        {task.followUpAt ? ` · checking again ${formatDue(task.followUpAt.slice(0, 10))}` : ""}
-        {` · ends when ${firstName} replies`}
-      </>} choices={[
+      // Said once (Derek, 2026-10-14): the title says it waits, the email it
+      // waits on sits above; when it checks again is each choice's tooltip.
+      <NextChoices row choices={[
         ...(hasMessaging && messageDest?.email ? [heldDraft
           ? { label: "Send the follow up", says: "Opens the follow up email held on this step, to read and send. It keeps waiting.", onClick: () => openWork("email") }
           : { label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }] : []),
@@ -3631,6 +3681,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
     );
   };
+  // A step waiting on the client (a review out with them, or checking in
+  // until they reply): it says so once, the email it waits on at its top.
+  const waitingStep = (sub: Subtask) => !sub.done && ((sub.onClient && sentReviews(sub).length > 0) || sub.finishWhen === "reply");
+  // The email a waiting step waits on: the one sent when the review went
+  // out, else the last email to the client before the step began.
+  const waitedEmail = (sub: Subtask): Message | null => {
+    const out = (messages ?? []).filter((m) => m.direction === "outbound" && m.channel === "email" && (m.taskId === task.id || !m.taskId));
+    if (sub.emailedAt) {
+      const at = Date.parse(sub.emailedAt);
+      const near = out.filter((m) => Math.abs(Date.parse(m.at) - at) < 15 * 60_000).sort((a, b) => Math.abs(Date.parse(a.at) - at) - Math.abs(Date.parse(b.at) - at))[0];
+      if (near) return near;
+    }
+    const before = sub.startedAt ? Date.parse(sub.startedAt) + 5 * 60_000 : Date.now();
+    return out.filter((m) => Date.parse(m.at) <= before).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+  };
   // Client work on a step sorts by dragging its grip (Derek, 2026-10-11):
   // the order is the step's own list, documents, reviews, links and files.
   const [dragHeld, setDragHeld] = useState<{ stepId: string; key: string; grabbed: boolean } | null>(null);
@@ -3648,12 +3713,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // part: "work" is what does something (client work, messages, emails),
   // "files" the links and files it holds, each its own row (Derek,
   // 2026-10-14: a link read as an action beside Email Brian).
-  const stepHeld = (sub: Subtask, light = false, part: "work" | "files" | "all" = "all") => {
+  // "came": what came in (the client's emails; on a step waiting on the
+  // client, the email it waits on), the top of the step (Derek, 2026-10-14:
+  // what came in, what I'm going to do, done).
+  const stepHeld = (sub: Subtask, light = false, part: "work" | "files" | "all" | "came" = "all") => {
+    const waits = waitingStep(sub);
     const keys = (sub.holds ?? []).filter((k) =>
-      (part !== "files" && ((DELIVERABLE_KEYS as string[]).includes(k) || !!sentMail(k)))
-      || (part !== "work" && k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
-    const emails = part === "files" ? [] : sub.fromEmails ?? [];
-    const dm = part === "files" ? undefined : sub.draftMessage;
+      (part !== "files" && part !== "came" && (DELIVERABLE_KEYS as string[]).includes(k))
+      || (part !== "files" && !!sentMail(k) && (part === "all" || (part === "came") === waits))
+      || ((part === "files" || part === "all") && k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
+    const emails = part === "came" || part === "all" ? sub.fromEmails ?? [] : [];
+    const dm = part === "work" || part === "all" ? sub.draftMessage : undefined;
+    // A waiting step that holds no email of its own: the one it waits on.
+    const waited = part === "came" && waits && !keys.length ? waitedEmail(sub) : null;
+    if (waited) return (
+      <SentEmailBox message={waited} messages={messages} firstName={firstName} toName={messageDest?.name} toEmail={messageDest?.email || null}
+        files={waited.attachments?.length ? <EmailFiles files={waited.attachments} urls={attImageUrls} onOpenPicture={(f) => void openPreview(f)} onOpenFile={openEmailFile} /> : undefined} />
+    );
     if (!keys.length && !emails.length && !dm) return null;
     const sortable = keys.length > 1;
     return (
@@ -3675,7 +3751,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // anything else by name and size (Derek, 2026-10-13).
           const files = filesOfEmail(e, task.attachments, messages?.find((m) => m.id === e.messageId));
           return (
-            <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done} light={light}
+            <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done} light
               approve={(() => {
                 // "approved" by email, with a review still open: mark it here.
                 if (!readsAsApproval(clientEmailText(e.body, e.from))) return undefined;
@@ -3767,6 +3843,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                         <span className={`flex flex-wrap items-center gap-2 text-[16px] ${toSend ? `font-semibold ${toSend.sayTone}` : "text-muted"}`}>{toSend ? "Draft email, ready to read and send" : withClaude ? "Draft email · waiting on Claude" : KIND_LABEL[d]}{r && stageChip(r.status)}
                           {d === "email" && task.draftEmail && <ShowLink open={shown} controls={previewId} onToggle={() => toggleShown(showKey)} />}</span>
                       </span>
+                      {(d === "image" || d === "page" || d === "video") && reviewDownload(d)}
                       <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend && !light ? "bg-accent text-white" : toSend ? "border bg-surface text-accent" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays on the task, under the steps)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
@@ -3830,7 +3907,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // `line` is the state said in words, with a real date where there is one,
   // for the phone's second line ("Step 3 · With Ryan, viewed Oct 12"), kept
   // short so it fits one line at 375px.
-  type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; line: string; onClick: () => void };
+  type ActionRow = { key: string; step: Subtask | null; icon: string; title: string; state: React.ReactNode; line: string; onClick: () => void; extra?: React.ReactNode };
   const [sentOpen, setSentOpen] = useState<string | null>(null);
   const openStepFor = (id: string) => () => setOpenStepPage({ taskId: task.id, id, full: false });
   const dayOf = (iso: string | null | undefined) => (iso ? formatDue(iso.slice(0, 10)) : null);
@@ -3844,7 +3921,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         : k === "email" ? (saved ? `Draft from ${saved}` : "Draft, ready to send")
         : label;
       return { key: k, step: workOn(k), icon: WORK_ICON[k], title: deliverableName(k), onClick: () => openWork(k), line,
-        state: r ? stageChip(r.status) : <span className="text-muted">{label}</span> };
+        state: r ? stageChip(r.status) : <span className="text-muted">{label}</span>,
+        extra: k === "image" || k === "page" || k === "video" ? reviewDownload(k) : null };
     }),
     ...steps.filter((st) => !st.done && !!st.draftMessage).map((st): ActionRow => {
       const sms = st.draftMessage!.channel === "sms";
@@ -3868,7 +3946,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the step spelled out in front.
   const actionLine = (row: ActionRow) => {
     const n = row.step ? stepNumberOf(row.step.id) : 0;
-    return (
+    const line = (
       <button key={row.key} onClick={row.onClick} className="flex w-full min-w-0 items-start gap-3 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background sm:items-center">
         <span className="hidden w-16 shrink-0 whitespace-nowrap tabular-nums text-muted sm:block" title={row.step?.title}>{n ? `Step ${n}` : ""}</span>
         <span aria-hidden className="w-5 shrink-0 text-center">{row.icon}</span>
@@ -3879,6 +3957,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <span className="hidden shrink-0 sm:inline-flex">{row.state}</span>
       </button>
     );
+    // An approved review's Download sits beside its row, not inside it.
+    return row.extra ? <div key={row.key} className="flex min-w-0 items-center gap-2"><div className="min-w-0 flex-1">{line}</div>{row.extra}</div> : line;
   };
 
   const restoreLink = deletedTotal > 0 && deletedOpen === 0 ? (
@@ -4322,6 +4402,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
+              incoming={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "came") ?? undefined}
+              waiting={waitingStep(ps)} face={turnFace(ps)}
               onAddLink={(url) => { addLinkOn(url, "", ps.id); pushToast("Link added to this step"); }}
               onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}

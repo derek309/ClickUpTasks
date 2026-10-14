@@ -80,13 +80,14 @@ export function NextChoices({ intro, choices, row, link, heading = true }: {
       {heading && <h3 className="text-[18px] font-bold">What&apos;s next?</h3>}
       {intro && <p className="text-[16px] text-muted">{intro}</p>}
       {row ? (
-        // One row, every button light; on a narrow phone a long name wraps
+        // One row, light but for a primary one (the one dark button, Derek
+        // 2026-10-14: Brian approved); on a narrow phone a long name wraps
         // inside its button rather than pushing one onto a second row.
         <div className="flex gap-2">
           {choices.map((c, i) => (
             <Fragment key={c.label}>
               <button onClick={c.onClick} title={c.says} aria-describedby={`${id}-r${i}`}
-                className="min-h-10 min-w-0 flex-1 rounded-[5px] border bg-surface px-3 py-1.5 text-center text-[16px] font-semibold leading-snug text-balance hover:bg-background sm:flex-none sm:px-4">{c.label}</button>
+                className={`min-h-10 min-w-0 flex-1 rounded-[5px] px-3 py-1.5 text-center text-[16px] font-semibold leading-snug text-balance sm:flex-none sm:px-4 ${c.primary ? "bg-accent text-white hover:opacity-90" : "border bg-surface hover:bg-background"}`}>{c.label}</button>
               <span id={`${id}-r${i}`} className="sr-only">{c.says}</span>
             </Fragment>
           ))}
@@ -326,7 +327,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -386,6 +387,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   doneActions?: React.ReactNode;
   /** The links and files the step holds: their own row, apart from Actions. */
   files?: React.ReactNode;
+  /** What came in: the client's emails on the step (open, with their files),
+   *  or on a step waiting on them, the email it waits on. The top of the step
+   *  (Derek, 2026-10-14: what came in, what I'm going to do, done). */
+  incoming?: React.ReactNode;
+  /** Waiting on the client (a review out, or checking in): its name says so,
+   *  with whose turn as a face beside it, and no sentence under it. */
+  waiting?: boolean;
+  face?: React.ReactNode;
   /** A link typed in the row onto this step (Derek, 2026-10-14). */
   onAddLink?: (url: string) => void;
   /** Picks files to add to this step. */
@@ -671,7 +680,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     </section>
   );
 
-  const empty = !held && !todo.show;
+  const empty = !held && !todo.show && !incoming;
   // The one way to add to a step (Derek, 2026-10-11): a quick list to start
   // with while it is empty, then a button.
   // Once the step holds client work, the + sits beside its heading instead
@@ -819,6 +828,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     placeholder={whatsNext ? "What's next? Name the next step" : undefined}
                     onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                     className="-mx-1 min-w-0 flex-1 resize-none rounded-md bg-transparent px-1 text-[20px] font-bold leading-tight outline-none [field-sizing:content] focus:bg-background sm:text-[24px]" />
+                  {waiting && face && !sub.done && <span className="shrink-0">{face}</span>}
                 </div>
                 {whatsNext && <div className="truncate text-[16px] text-muted" title={sub.title.replace(/: what's next\?$/, "")}>After: {sub.title.replace(/: what's next\?$/, "")}</div>}
                 {/* Read like the task's header (Derek, 2026-10-13): the name,
@@ -833,12 +843,12 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                       more={addRest.map((o) => ({ key: o.key, label: o.label, disabled: o.disabled, onPick: o.onPick }))}
                       onDone={(a, run) => setup.onDone(a, run)} />
                   </div>
-                ) : controls}
+                ) : waiting && !sub.done ? null : controls}
                 {/* Why it is whose move, when the sentence's first word doesn't
                     say it all ("Claude finished its part. Your turn", "Ryan
                     wrote", "Claude is working"): a line, no box, strong red
                     for your move, the step's own colour otherwise. */}
-                {reason && (
+                {reason && !waiting && (
                   <div className={`flex flex-wrap items-center gap-x-3 text-[16px] font-semibold leading-snug ${tone!.sayTone}`}>
                     <span>{reason}</span>
                     {/* The cloud session working it (lib/claudeCloud). */}
@@ -855,9 +865,45 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 )}
                 {directions}
               </div>
-              {followBox}
-              {planBits}
-              {setup ? null : outFor !== undefined ? outFor : empty && !files && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : null}
+              {/* What came in (Derek, 2026-10-14): the client's email, open,
+                  with its files, or the review out with them and the email that
+                  took it; then the links and files on the step. */}
+              {outFor !== undefined ? outFor : incoming}
+              {/* Links and files, apart from what does something (Derek,
+                  2026-10-14); they come in by paste or drag (2026-10-11). */}
+              {(files || held || ((onAddLink || onAttachFiles) && !sub.onClient && !setup && !(empty && !dir.open))) && (
+                <section aria-labelledby="step-files" className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>
+                    {/* Added here, they go on this step (Derek, 2026-10-14). */}
+                    {onAddLink && <button onClick={() => setLinkDraft((d) => (d === null ? "" : null))} aria-expanded={linkDraft !== null} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.link /> Link</button>}
+                    {onAttachFiles && <button onClick={onAttachFiles} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.plus /> Attach</button>}
+                  </div>
+                  {linkDraft !== null && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
+                        onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
+                        placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                      <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
+                      <button onClick={() => setLinkDraft(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
+                    </div>
+                  )}
+                  {files}
+                  <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
+                </section>
+              )}
+              {/* What I'm going to do: the work, the + to add more, the to dos. */}
+              {setup || outFor !== undefined ? null : empty && !files && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : (
+                <section aria-labelledby="step-works" className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
+                    {suggestButtons(true)}{addMenu(true)}
+                  </div>
+                  {followBox}
+                  {planBits}
+                  {held}
+                </section>
+              )}
               {/* Saved files and links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved files and links" className="flex flex-col gap-2 rounded-[5px] border p-3">
@@ -896,40 +942,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 </section>
               )}
               {todo.node}
-              {/* Actions right under the to dos, even with no work on it yet. */}
-              {!setup && outFor === undefined && !held && !(empty && !files && !dir.open) && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
-              {held && (
-                <section aria-labelledby="step-works" className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
-                    {outFor === undefined && !setup && <>{suggestButtons(true)}{addMenu(true)}</>}
-                  </div>
-                  {held}
-                </section>
-              )}
-              {/* Links and files, apart from what does something (Derek,
-                  2026-10-14); they come in by paste or drag (2026-10-11). */}
-              {(files || held || ((onAddLink || onAttachFiles) && !sub.onClient && !setup && !(empty && !dir.open))) && (
-                <section aria-labelledby="step-files" className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>
-                    {/* Added here, they go on this step (Derek, 2026-10-14). */}
-                    {onAddLink && <button onClick={() => setLinkDraft((d) => (d === null ? "" : null))} aria-expanded={linkDraft !== null} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.link /> Link</button>}
-                    {onAttachFiles && <button onClick={onAttachFiles} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.plus /> Attach</button>}
-                  </div>
-                  {linkDraft !== null && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
-                        onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
-                        placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-                      <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
-                      <button onClick={() => setLinkDraft(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
-                    </div>
-                  )}
-                  {files}
-                  <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
-                </section>
-              )}
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
