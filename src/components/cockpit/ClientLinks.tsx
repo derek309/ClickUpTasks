@@ -3,7 +3,7 @@
 // Quick-access links bar on a client's page — grouped, orderable buttons to
 // the live site, WP admin, GHL contact, etc. Ported from the "Dispatch" app's
 // client-hub concept.
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { type ClientLink, prettyLinkName } from "@/lib/data";
 import { I } from "./ui";
 
@@ -29,8 +29,13 @@ function groupLinks(links: ClientLink[]) {
   return order.map((key) => ({ key, links: map.get(key)! }));
 }
 
-export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder, onAdd, inline = false }: {
+export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder, onAdd, inline = false, fit = false, lead }: {
   links: ClientLink[];
+  /** One line, never wrapping: the chips that fit, the rest under "+ More"
+   *  (Derek, 2026-10-14, client header). */
+  fit?: boolean;
+  /** A chip before the links that is not one of them (their SaaS account). */
+  lead?: { label: string; url: string; title?: string } | null;
   /** Paste a link to add it, named from the site; the + at the end of the row. */
   onAdd?: (v: { label: string; url: string }) => void;
   /** In the client's name row instead of a row of its own (Derek, 2026-10-06, header G). */
@@ -64,6 +69,7 @@ export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder, onA
   // so this bar is purely optional — no reason to reserve a permanent row of
   // chrome for a client that hasn't added any quick links yet.
   const canAdd = canEdit && !!onAdd;
+  if (fit) return <FitLinks links={links} lead={lead ?? null} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} onAdd={canAdd ? onAdd! : null} />;
   if (links.length === 0 && !canAdd) return null;
 
   return (
@@ -106,6 +112,133 @@ export function QuickLinksBar({ links, canEdit, onEdit, onDelete, onReorder, onA
           {adding && (<>
             <div className="fixed inset-0 z-30" onClick={() => setAdding(false)} />
             <form onSubmit={(e) => { e.preventDefault(); addLink(); }} className="absolute left-0 top-10 z-40 flex w-80 gap-2 rounded-[5px] bg-surface p-2 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setAdding(false); }}
+                placeholder="Paste the link" aria-label="Link to add" className="min-w-0 flex-1 rounded-[5px] border bg-background px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+              <button type="submit" disabled={!draft.trim()} className="rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white disabled:opacity-40">Add</button>
+            </form>
+          </>)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// The client header's links on one line (Derek, 2026-10-14): as many chips as
+// the row has room for, then "+ More" with the rest. The row's width comes
+// from the header, never from the chips (flex-1, min-w-0), so hiding a chip
+// can't change the room it is measured against: no resize loop.
+function FitLinks({ links, lead, canEdit, onEdit, onDelete, onAdd }: {
+  links: ClientLink[];
+  lead: { label: string; url: string; title?: string } | null;
+  canEdit: boolean;
+  onEdit: (link: ClientLink) => void;
+  onDelete: (link: ClientLink) => void;
+  onAdd: ((v: { label: string; url: string }) => void) | null;
+}) {
+  const items: { id: string; label: string; url: string; title: string; link: ClientLink | null }[] = [
+    ...(lead ? [{ id: "lead", label: lead.label, url: lead.url, title: lead.title ?? lead.url, link: null }] : []),
+    ...links.map((l) => ({ id: l.id, label: l.label, url: l.url, title: l.url, link: l })),
+  ];
+  const row = useRef<HTMLDivElement>(null);
+  const measure = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(items.length);
+  // How wide + More is: the row never gets narrower than + More and +, so
+  // the name beside it gives way instead of the row running under the bell.
+  const [moreW, setMoreW] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const key = items.map((i) => `${i.id}:${i.label}`).join("|");
+  useLayoutEffect(() => {
+    const r = row.current, m = measure.current;
+    if (!r || !m) return;
+    const calc = () => {
+      const kids = [...m.children] as HTMLElement[];
+      const more = kids.pop()?.offsetWidth ?? 90;
+      setMoreW(more);
+      const add = onAdd ? 40 : 0;
+      const widths = kids.map((k) => k.offsetWidth);
+      const gap = 8;
+      const avail = r.clientWidth - add;
+      const total = widths.reduce((a, w, i) => a + w + (i ? gap : 0), 0);
+      if (total <= avail) { setShown(widths.length); return; }
+      let used = more, n = 0;
+      for (const w of widths) { if (used + gap + w > avail) break; used += gap + w; n++; }
+      setShown(n);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(r);
+    return () => ro.disconnect();
+  }, [key, !!onAdd]); // eslint-disable-line react-hooks/exhaustive-deps
+  const addLink = () => {
+    const raw = draft.trim();
+    if (!raw || !onAdd) return;
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    onAdd({ label: prettyLinkName(url).slice(0, 40), url });
+    setDraft(""); setAdding(false);
+  };
+  const chip = (i: (typeof items)[number]) => i.link
+    ? "inline-flex h-8 max-w-[200px] items-center gap-2 rounded-[5px] bg-surface px-2.5 text-[16px] font-medium text-foreground ring-1 ring-[var(--border)] hover:bg-background"
+    : "inline-flex h-8 max-w-[200px] items-center gap-2 rounded-[5px] bg-accent-soft px-2.5 text-[16px] font-bold text-accent ring-1 ring-accent/30 hover:ring-accent";
+  const hidden = items.slice(shown);
+  return (
+    <div ref={row} style={{ minWidth: (shown < items.length ? moreW + 8 : 0) + (onAdd ? 40 : 0) }} className="relative flex min-w-0 flex-1 flex-nowrap items-center gap-2 text-[16px] font-normal">
+      {/* The same chips, unseen, to know how wide each is. */}
+      <div ref={measure} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 flex h-0 w-max gap-2 overflow-hidden">
+        {items.map((i) => <span key={i.id} className={chip(i)}>{i.link && <SiteIcon url={i.url} />}<span className="truncate">{i.label}</span></span>)}
+        <span className="inline-flex h-8 items-center rounded-[5px] px-2.5 text-[16px] font-semibold ring-1 ring-[var(--border)]">+ More ({items.length})</span>
+      </div>
+      {items.slice(0, shown).map((i) => (
+        <span key={i.id} className="group/link relative inline-flex min-w-0 shrink-0 items-center">
+          <a href={i.url} target="_blank" rel="noopener noreferrer" title={i.title} className={chip(i)}>
+            {i.link && <SiteIcon url={i.url} />}<span className="truncate">{i.label}</span>
+          </a>
+          {canEdit && i.link && (
+            <div className="absolute -right-2 -top-2">
+              <button onClick={(e) => { e.stopPropagation(); setMenuId(menuId === i.id ? null : i.id); }} title="Edit or delete" aria-label={`Edit ${i.label}`}
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-surface text-muted opacity-0 shadow ring-1 ring-[var(--border)] hover:text-foreground focus:opacity-100 group-hover/link:opacity-100">
+                <I.dots />
+              </button>
+              {menuId === i.id && (<>
+                <div className="fixed inset-0 z-30" onClick={() => setMenuId(null)} />
+                <div className="absolute left-0 top-full z-40 mt-1 w-36 rounded-[5px] border bg-surface p-1 shadow-xl">
+                  <button onClick={() => { setMenuId(null); onEdit(i.link!); }} className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[16px] hover:bg-background"><I.pencil /> Edit</button>
+                  <button onClick={() => { setMenuId(null); onDelete(i.link!); }} className="flex w-full items-center gap-2 rounded-[5px] px-2 py-1.5 text-left text-[16px] text-danger hover:bg-background"><I.trash /> Delete</button>
+                </div>
+              </>)}
+            </div>
+          )}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <span className="relative inline-flex shrink-0">
+          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} title="The rest of their links"
+            className="inline-flex h-8 items-center rounded-[5px] bg-surface px-2.5 text-[16px] font-semibold text-foreground ring-1 ring-[var(--border)] hover:bg-background">+ More ({hidden.length})</button>
+          {moreOpen && (<>
+            <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+            <div className="absolute left-0 top-10 z-40 max-h-[60vh] w-72 overflow-y-auto rounded-[5px] bg-surface p-1.5 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+              {hidden.map((i) => (
+                <span key={i.id} className="flex items-center gap-1">
+                  <a href={i.url} target="_blank" rel="noopener noreferrer" onClick={() => setMoreOpen(false)} title={i.title}
+                    className={`flex min-w-0 flex-1 items-center gap-2 rounded-[5px] px-2.5 py-2 text-[16px] hover:bg-background ${i.link ? "" : "font-bold text-accent"}`}>
+                    {i.link && <SiteIcon url={i.url} />}<span className="truncate">{i.label}</span>
+                  </a>
+                  {canEdit && i.link && <button onClick={() => { setMoreOpen(false); onEdit(i.link!); }} title="Edit" aria-label={`Edit ${i.label}`} className="rounded-[5px] p-2 text-muted hover:bg-background hover:text-foreground"><I.pencil /></button>}
+                </span>
+              ))}
+            </div>
+          </>)}
+        </span>
+      )}
+      {onAdd && (
+        <span className="relative inline-flex shrink-0">
+          <button onClick={() => setAdding((v) => !v)} title="Add a quick link" aria-label="Add a quick link"
+            className="flex h-8 w-8 items-center justify-center rounded-[5px] text-[18px] font-bold text-muted ring-1 ring-dashed ring-[var(--border)] hover:bg-background hover:text-foreground">+</button>
+          {adding && (<>
+            <div className="fixed inset-0 z-30" onClick={() => setAdding(false)} />
+            <form onSubmit={(e) => { e.preventDefault(); addLink(); }} className="absolute right-0 top-10 z-40 flex w-80 max-w-[80vw] gap-2 rounded-[5px] bg-surface p-2 shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
               <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setAdding(false); }}
                 placeholder="Paste the link" aria-label="Link to add" className="min-w-0 flex-1 rounded-[5px] border bg-background px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
               <button type="submit" disabled={!draft.trim()} className="rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white disabled:opacity-40">Add</button>
