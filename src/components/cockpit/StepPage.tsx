@@ -80,7 +80,7 @@ export function NextChoices({ intro, choices, moreLabel }: { intro?: React.React
 }
 
 export function StepPage({ task, sub, client, firstName, isCurrent, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -132,6 +132,9 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   outFor?: React.ReactNode;
   /** In place of Mark done: how it ended, like "Derek approved" or "sent changes". */
   doneActions?: React.ReactNode;
+  /** Sends the unsent email to the client held on this step, the way its
+   *  window's Send does. Missing when there is none to send. */
+  onSendHeldEmail?: () => void;
   /** What "Add client work" offers, besides a checklist and a text: a
    *  document, a review, an email (Derek, 2026-10-11). */
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
@@ -248,6 +251,10 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
   const suggestions = sub.done || sub.onClient || outFor !== undefined ? [] : named
     .filter((x) => !holdsKind(x.kind) && optionFor(x.kind) && !optionFor(x.kind)!.disabled)
     .map((x) => ({ ...x, onPick: optionFor(x.kind)!.onPick }));
+  // The step's email is written and everything else its name asks for is on
+  // it: finishing is sending (Derek, 2026-10-13: "Send the email to Ryan").
+  const sendReady = !!onSendHeldEmail && holdsKind("email")
+    && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
   const suggestButtons = (compact: boolean) => suggestions.map((x) => (
     <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center rounded-[5px] border bg-surface text-[16px] font-semibold text-accent hover:bg-background`}>{x.label}</button>
   ));
@@ -692,7 +699,15 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
                       this step when you click it, then ask what you want to do
                       next"). The choices (start the next step, give it to Claude,
                       the task is finished) come after, in What's next. */}
-                  <button onClick={onMarkDone} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">I&apos;m done with this step</button>
+                  {sendReady ? (
+                    <div className="flex flex-col items-start gap-2">
+                      <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {first}</button>
+                      {/* Finishing without sending stays one click away. */}
+                      <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">I&apos;m done with this step</button>
+                    </div>
+                  ) : (
+                    <button onClick={onMarkDone} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">I&apos;m done with this step</button>
+                  )}
                 </div>
               ) : null}
             </div>

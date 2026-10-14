@@ -63,6 +63,15 @@ export function followUpPicks(today = TODAY): FollowUpPick[] {
 const readFollowUpPick = (): string => {
   try { return localStorage.getItem(FOLLOW_UP_KEY) ?? "d2"; } catch { return "d2"; }
 };
+/** The follow up day Send picks when the window is not opened (a step's
+ *  "Send the email" button): the last one picked here, read the same way the
+ *  window reads it on opening. */
+export function rememberedFollowUpDate(today = TODAY): string | null {
+  const pick = readFollowUpPick();
+  if (pick === "none" || pick === "custom") return null;
+  const picks = followUpPicks(today);
+  return (picks.find((p) => p.value === pick) ?? picks.find((p) => p.value === "nextmonday"))?.date ?? null;
+}
 
 const normalize = (s: string) => htmlToText(s).replace(/\s+/g, " ").trim().toLowerCase();
 

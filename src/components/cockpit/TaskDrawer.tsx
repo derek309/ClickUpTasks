@@ -39,6 +39,8 @@ import { NextChoices, StepPage } from "./StepPage";
 let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
+import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
+import { draftLinkAsButton } from "@/lib/draftLink";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { filesOfEmail } from "@/lib/emailFiles";
@@ -2850,6 +2852,73 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (plan.kind === "finish") return `Finishes: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
     return `A follow up on: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
   };
+  // Sending the task's draft email, from its window or from a step's "Send
+  // the email" button: the same steps either way.
+  const draftTo = replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null);
+  const sendDraft = hasMessaging ? (email: OutgoingEmail) => {
+    onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
+    // A question about to-dos: they are marked asked, nothing else moves
+    // (Derek, 2026-10-12: "without blowing up the whole steps situation").
+    const asks = taskRef.current.draftEmail?.asks;
+    if (asks) {
+      const at = new Date().toISOString();
+      onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === asks.stepId ? { ...x, todos: (x.todos ?? []).map((t) => (asks.todoIds.includes(t.id) ? { ...t, askedAt: at } : t)) } : x)) });
+      pushToast(`Asked ${firstName}. ${asks.todoIds.length === 1 ? "That to do shows" : "Those to dos show"} it until ${firstName} answers.`);
+      return;
+    }
+    // Sent from the step that holds it: that step is done, and checking in
+    // waits three business days, finished by the client's reply.
+    // The email to the client finishes the step working on the document:
+    // the client's waiting step starts with the document and this email
+    // on it (Derek, 2026-10-11: "the email and the document can live in
+    // here").
+    const reviewKind = sendReviewKind();
+    if (activeStep && reviewKind) {
+      const name = reviews[reviewKind]?.title?.trim() || (reviewKind === "doc" ? "the document" : "the review");
+      const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
+      const made = addClientReviewStep(task.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
+      // The email that started it shows on the waiting step itself.
+      const sentAt = new Date().toISOString();
+      const list = made?.map((x) => (x.addedFor === `sent:${activeStep.id}` ? { ...x, emailedAt: sentAt } : x));
+      if (list) {
+        onPatch({ subtasks: list, status: "waiting", followUpAt: due });
+        const made2 = list.find((x) => x.addedFor === `sent:${activeStep.id}`);
+        if (made2) setSentNext({ taskId: task.id, stepId: made2.id });
+        return;
+      }
+    }
+    // A reminder held on the review out with them: a follow up on that
+    // wait (finishTalkStep). The review email's own emailedAt stays as it was.
+    if (activeStep?.onClient && activeStep.holds?.includes("email") && finishTalkStep("email", email.followUpDate)) return;
+    // The client's step is current: the email went to them for it.
+    if (activeStep?.onClient) {
+      const list = addEmailSentRecord(task.subtasks, activeStep.id, firstName, () => newId("s_"));
+      if (list) onPatch({ subtasks: list });
+      return;
+    }
+    if (finishTalkStep("email", email.followUpDate)) return;
+    pushToast("Email sent");
+    // Sent and waiting on them: the follow up date is when they get a
+    // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
+    // A due date inside that window already brings it back: no follow up then.
+    if (email.followUpDate && task.status !== "done") {
+      const checkBack = email.followUpDate;
+      // The follow up is that day, and a due date before it moves with it.
+      onPatch({ status: "waiting", followUpAt: checkBack, ...(task.due && task.due < checkBack ? { due: checkBack } : {}) });
+    }
+    if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
+  } : undefined;
+  // A step's "Send the email to Ryan" (Derek, 2026-10-13): the draft as it is,
+  // sent the way the window's Send sends it, with the last follow up day picked.
+  const sendDraftNow = () => {
+    const d = taskRef.current.draftEmail;
+    if (!d || !sendDraft || !draftTo) return;
+    const body = draftLinkAsButton(d.body, d.link);
+    if (!htmlToText(body).trim() && !(d.attachments?.length)) { pushToast("Write the email before sending it."); return; }
+    const subject = d.subject.trim() || task.title.trim();
+    if (!subject) { pushToast("Add a subject before sending."); return; }
+    sendDraft({ subject, body, attachments: d.attachments ?? [], cc: d.cc ?? [], bcc: d.bcc ?? [], replyTo: d.replyTo ?? null, followUpDate: rememberedFollowUpDate() });
+  };
   const draftEmailBlock = (
     <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} sendNote={hasMessaging ? sendNote : undefined}
       onSent={(m) => {
@@ -2857,60 +2926,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         const on = stepHolding(list, "email");
         if (on) onPatch({ subtasks: list.map((x) => (x.id === on.id ? { ...x, holds: (x.holds ?? []).map((k) => (k === "email" ? sentEmailKey(m.id) : k)) } : x)) });
       }}
-      toEmail={replyPeerOf(task.draftEmail?.replyTo)?.email ?? (messageDest?.email || null)} messages={messages}
-      onSend={hasMessaging ? (email) => {
-        onSendTaskMessage!("email", email.subject, email.body, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo);
-        // A question about to-dos: they are marked asked, nothing else moves
-        // (Derek, 2026-10-12: "without blowing up the whole steps situation").
-        const asks = taskRef.current.draftEmail?.asks;
-        if (asks) {
-          const at = new Date().toISOString();
-          onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === asks.stepId ? { ...x, todos: (x.todos ?? []).map((t) => (asks.todoIds.includes(t.id) ? { ...t, askedAt: at } : t)) } : x)) });
-          pushToast(`Asked ${firstName}. ${asks.todoIds.length === 1 ? "That to do shows" : "Those to dos show"} it until ${firstName} answers.`);
-          return;
-        }
-        // Sent from the step that holds it: that step is done, and checking in
-        // waits three business days, finished by the client's reply.
-        // The email to the client finishes the step working on the document:
-        // the client's waiting step starts with the document and this email
-        // on it (Derek, 2026-10-11: "the email and the document can live in
-        // here").
-        const reviewKind = sendReviewKind();
-        if (activeStep && reviewKind) {
-          const name = reviews[reviewKind]?.title?.trim() || (reviewKind === "doc" ? "the document" : "the review");
-          const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
-          const made = addClientReviewStep(task.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
-          // The email that started it shows on the waiting step itself.
-          const sentAt = new Date().toISOString();
-          const list = made?.map((x) => (x.addedFor === `sent:${activeStep.id}` ? { ...x, emailedAt: sentAt } : x));
-          if (list) {
-            onPatch({ subtasks: list, status: "waiting", followUpAt: due });
-            const made2 = list.find((x) => x.addedFor === `sent:${activeStep.id}`);
-            if (made2) setSentNext({ taskId: task.id, stepId: made2.id });
-            return;
-          }
-        }
-        // A reminder held on the review out with them: a follow up on that
-        // wait (finishTalkStep). The review email's own emailedAt stays as it was.
-        if (activeStep?.onClient && activeStep.holds?.includes("email") && finishTalkStep("email", email.followUpDate)) return;
-        // The client's step is current: the email went to them for it.
-        if (activeStep?.onClient) {
-          const list = addEmailSentRecord(task.subtasks, activeStep.id, firstName, () => newId("s_"));
-          if (list) onPatch({ subtasks: list });
-          return;
-        }
-        if (finishTalkStep("email", email.followUpDate)) return;
-        pushToast("Email sent");
-        // Sent and waiting on them: the follow up date is when they get a
-        // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
-        // A due date inside that window already brings it back: no follow up then.
-        if (email.followUpDate && task.status !== "done") {
-          const checkBack = email.followUpDate;
-          // The follow up is that day, and a due date before it moves with it.
-          onPatch({ status: "waiting", followUpAt: checkBack, ...(task.due && task.due < checkBack ? { due: checkBack } : {}) });
-        }
-        if (!planSteps(taskRef.current.subtasks).length) setPendingNextStep({ kind: "email", body: htmlToText(email.body).trim() });
-      } : undefined}
+      toEmail={draftTo} messages={messages}
+      onSend={sendDraft}
       onSchedule={hasMessaging && onScheduleTaskMessage ? (email, whenIso) =>
         onScheduleTaskMessage("email", email.subject, email.body, whenIso, email.attachments.length ? email.attachments : undefined, email.cc, email.bcc, email.replyTo) : undefined}
       onUpload={onUploadMessageImage} ccContacts={ccContacts}
@@ -3702,6 +3719,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               }}
               controls={stepControls(ps, isCur)}
               addOptions={stepAddOptions(ps)}
+              // The email to the client held here, written and ready: the
+              // step's finish button sends it (Derek, 2026-10-13).
+              onSendHeldEmail={sendDraft && draftTo && task.draftEmail && !ps.done && (ps.holds ?? []).includes("email")
+                && (htmlToText(task.draftEmail.body).trim() || task.draftEmail.attachments?.length) ? sendDraftNow : undefined}
               canText={!!messageDest?.phone && !!onSendTaskMessage}
               onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
               canEmail={!!messageDest?.email && !!onSendTaskMessage}
