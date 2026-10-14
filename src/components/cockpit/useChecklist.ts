@@ -10,7 +10,7 @@ import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
 import { bulkDelegateSummary, bulkDelegations, type BulkDelegateSpec } from "@/lib/bulkDelegate";
-import { delegateeOf, delegationTitle, handoffDoneEvent, plainTextToHtml, type Me, type NotificationKind, type Priority, type Subtask, type Task, type TaskSize, userById, users } from "@/lib/data";
+import { delegateeOf, delegationTitle, handoffDoneEvent, plainTextToHtml, tickedSteps, type Me, type NotificationKind, type Priority, type Subtask, type Task, type TaskSize, userById, users } from "@/lib/data";
 import { appendCommentDb, finishHandoffWatchDb, insertTaskAction } from "@/lib/db";
 
 export type UseChecklistDeps = {
@@ -28,12 +28,15 @@ export type UseChecklistDeps = {
 };
 
 export function useChecklist({ tasks, update, me, setTasks, notify, setConfirmDialog, pushToast, tasksRef, selectedTaskIds, setBulkDelegateOpen, clearSelection }: UseChecklistDeps) {
-  const toggleSub = (taskId: string, subId: string) => {
+  // `want`: true to finish, false to reopen. A finish on a step already done
+  // (a stale page, another window, Claude got there first) changes nothing.
+  const toggleSub = (taskId: string, subId: string, want?: boolean) => {
     const t = (tasksRef.current ?? tasks).find((x) => x.id === taskId);
     if (!t) return;
     const s = t.subtasks.find((x) => x.id === subId);
+    const subtasks = tickedSteps(t.subtasks, subId, want);
+    if (!subtasks) return;
     const nowDone = s ? !s.done : false;
-    const subtasks = t.subtasks.map((x) => (x.id === subId ? { ...x, done: !x.done } : x));
     const patch: Partial<Task> = { subtasks };
     // A finished handoff has to leave the Delegated stage, or the task sits
     // there for good claiming it is with someone who is done with it. Taking

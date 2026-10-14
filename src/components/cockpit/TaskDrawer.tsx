@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, tickedSteps, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -89,7 +89,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   start?: { stepId: string; open: "checklist" | "directions" | "email" | "text" | "chat" | "ask"; when: string | null };
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; /** The × on the red Needs you line. */ onClearNeedsYou?: () => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; /** The × on the red Needs you line. */ onClearNeedsYou?: () => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string, want?: boolean) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   /** Saves this task's steps as a plan (admins: templates are admin-written). */
   onSaveTemplate?: (spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => void;
@@ -147,9 +147,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     taskRef.current = { ...taskRef.current, subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, ...patch } : x)) };
     onPatchSubProp(sid, patch);
   };
-  const onToggleSub = (sid: string) => {
-    taskRef.current = { ...taskRef.current, subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, done: !x.done } : x)) };
-    onToggleSubProp(sid);
+  // `want`: true to finish, false to reopen; nothing when it already is.
+  const onToggleSub = (sid: string, want?: boolean) => {
+    const next = tickedSteps(taskRef.current.subtasks, sid, want);
+    if (!next) return;
+    taskRef.current = { ...taskRef.current, subtasks: next };
+    onToggleSubProp(sid, want);
   };
   // Never asserted. Delegation is exactly the case where these are missing:
   // a delegatee can see a task through tasks.delegated_to while RLS still
@@ -1205,6 +1208,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     );
   };
   const completeStep = (sid: string, outcome = "Done") => {
+    // Already done, by Claude, another window or the server, while this page
+    // still showed it open: Done changes nothing. It used to flip it back open
+    // (t_mv01d2mnx, 2026-10-13).
+    if (taskRef.current.subtasks.find((x) => x.id === sid)?.done) { pushToast("That step is already done."); return; }
     // A step from a plan says what it needs; missing any, it asks first but
     // never blocks (Derek, 2026-10-11: "warn only").
     const sub = task.subtasks.find((x) => x.id === sid);
@@ -1241,7 +1248,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         return;
       }
     }
-    onToggleSub(sid);
+    onToggleSub(sid, true);
     onPatchSub(sid, { doneAt: new Date().toISOString(), outcome });
     setAutoDone(null);
     // Ticked done: what's next is asked at once, with the plan's next step
@@ -1942,7 +1949,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <span className="flex h-6 w-6 items-center justify-center rounded-full text-accent ring-2 ring-inset ring-accent/60 group-hover/tick:bg-accent group-hover/tick:text-white"><I.check className="h-3.5 w-3.5 opacity-30 group-hover/tick:opacity-100" /></span>
           );
           return tickable ? (
-            <button onClick={() => (sub.done ? onToggleSub(sub.id) : completeStep(sub.id))} aria-pressed={sub.done}
+            <button onClick={() => (sub.done ? onToggleSub(sub.id, false) : completeStep(sub.id))} aria-pressed={sub.done}
               title={sub.done ? "Done. Click to reopen" : "Mark this step done"} aria-label={sub.done ? `Reopen ${sub.title}` : `Mark ${sub.title} done`}
               className="group/tick shrink-0 self-start rounded-full py-3 pl-3 hover:opacity-80 sm:pl-1">{mark}</button>
           ) : <span aria-hidden className="shrink-0 self-start py-3 pl-3 sm:pl-1">{mark}</span>;
@@ -4059,7 +4066,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} firstName={firstName} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
               onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
-              onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id)}
+              onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id, false)}
               // Make it its own task is off for now (Derek, 2026-10-13); stepToTask stays for when it comes back.
               onToTask={undefined}
               onDelete={() => {

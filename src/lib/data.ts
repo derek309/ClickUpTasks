@@ -3057,6 +3057,18 @@ export function stepAfter<T extends Pick<Subtask, "id" | "done" | "fromClient">>
   return planSteps(subtasks).find((s) => !s.done && s.id !== doneId) ?? null;
 }
 
+/** A step ticked in the app: its done flipped, or set to `want` when the
+ *  caller means finish (true) or reopen (false). Null when the step is not
+ *  there, or is already `want`: finishing a step never reopens one that is
+ *  already done (t_mv01d2mnx, 2026-10-13: Claude finished "Build the HTML
+ *  review version", Derek's page still showed it open, and his Done flipped
+ *  it back open with its outcome still set). */
+export function tickedSteps<T extends Pick<Subtask, "id" | "done">>(subtasks: T[], id: string, want?: boolean): T[] | null {
+  const s = subtasks.find((x) => x.id === id);
+  if (!s || (want !== undefined && s.done === want)) return null;
+  return subtasks.map((x) => (x.id === id ? { ...x, done: want ?? !x.done } : x));
+}
+
 /** Done and total steps. Handoffs count both ways: they used to count in the
  *  total but never as finished. */
 export function stepProgress(subtasks: Pick<Subtask, "done" | "fromClient">[]): { done: number; total: number; pct: number } {
