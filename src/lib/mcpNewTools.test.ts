@@ -116,3 +116,93 @@ describe("draft_message", () => {
     expect(writes).toHaveLength(0);
   });
 });
+
+// Steps set up the way the app sets one up (Derek, 2026-10-14): who, when,
+// what it holds and its directions, on each step add_checklist_items adds.
+describe("add_checklist_items set up", () => {
+  const people = { table: "profiles", rows: [{ member_id: "u_derek", name: "Derek Fox" }, { member_id: "u_justin", name: "Justin Lee" }] };
+  const added = () => writes.find((w) => w.url.includes("rpc/append_subtasks"))!.body.items;
+
+  it("writes who, when, what it holds, to-dos and directions on each step", async () => {
+    fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task()] }]);
+    const text = await call(await connect(), "add_checklist_items", { id: "t_1", items: [
+      { title: "Design the flyer", assignee: "u_justin", due: "2026-10-20", directions: "Use the **brand** colors", holds: "image" },
+      { title: "Check the copy", assignee: "claude" },
+      { title: "Approve", assignee: "me", due: "2026-10-22", holds: "checklist", todos: ["Read it", " ", "Sign off"] },
+      { title: "Text the client", holds: "text", due: "2026-10-23" },
+      "Plain one",
+    ] });
+    const [flyer, copy, approve, textStep, plain] = added();
+    expect(flyer).toMatchObject({ title: "Design the flyer", assigneeId: "u_justin", due: "2026-10-20", notes: "<p>Use the <strong>brand</strong> colors</p>", holds: ["image"], madeHere: ["image"], followUpAt: expect.any(String) });
+    expect(copy).toMatchObject({ assigneeId: "u_claude", due: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+    expect(copy.followUpAt).toBeUndefined();
+    expect(approve).toMatchObject({ assigneeId: "u_derek", due: "2026-10-22", todos: [{ title: "Read it", done: false }, { title: "Sign off", done: false }] });
+    expect(approve.holds).toBeUndefined();
+    expect(textStep).toMatchObject({ draftMessage: { channel: "sms", body: "" }, assigneeId: "u_derek" });
+    expect(plain).toMatchObject({ title: "Plain one", done: false, assigneeId: "u_derek" });
+    expect(plain.due).toBeUndefined();
+    expect(text).toContain("Design the flyer");
+    expect(text).toContain("Justin Lee · due 2026-10-20 · holds the image review");
+    expect(text).toContain("Not set up: \"Plain one\" (when)");
+  });
+
+  it("a client step is an ask holding the email, and the email comes off the step that held it", async () => {
+    const holding = { id: "s_e", title: "Email Pam", done: false, holds: ["email", "doc"], namedFrom: { title: "Draft", key: "email", as: "Email Pam" } };
+    fake([people, { table: "clients", rows: [{ name: "Pam Macias" }] }, { table: "tasks", rows: [task({ client_id: "cl_1", subtasks: [holding], draft_email: null })] }]);
+    const text = await call(await connect(), "add_checklist_items", { id: "t_1", items: [{ title: "Send the logo", assignee: "client", due: "2026-10-21" }] });
+    expect(added()[0]).toMatchObject({ title: "Ask Pam: Send the logo", holds: ["email"], madeHere: ["email"], assigneeId: "u_derek", due: "2026-10-21" });
+    const release = writes.find((w) => w.url.includes("rpc/patch_subtask"))!.body;
+    expect(release).toEqual({ task_id: "t_1", subtask_id: "s_e", patch: { holds: ["doc"], namedFrom: null, title: "Draft" }, author: null });
+    expect(text).toContain("draft_email");
+  });
+
+  it("answers an open what's next step: it goes, and the first new step starts", async () => {
+    const subsNext = [{ id: "s_1", title: "Draft", done: true }, { id: "s_n", title: "Draft: what's next?", done: false, addedFor: "next:s_1" }];
+    fake([people, { table: "tasks", rows: [task({ subtasks: subsNext })] }]);
+    await call(await connect(), "add_checklist_items", { id: "t_1", items: [{ title: "Send it", assignee: "me", due: "2026-10-21" }] });
+    expect(added()[0].startedAt).toBeTruthy();
+    expect(writes.find((w) => w.url.includes("rpc/remove_subtask"))?.body).toMatchObject({ subtask_id: "s_n" });
+  });
+
+  it("refuses, writing nothing: a checklist with no to-dos, an unknown person, two steps holding one review, a client step on a private task", async () => {
+    for (const [items, said, over] of [
+      [[{ title: "List", holds: "checklist" }], "give its todos", {}],
+      [[{ title: "X", assignee: "u_nobody" }], "Unknown member", {}],
+      [[{ title: "A", holds: "page" }, { title: "B", holds: "page" }], "Only one step", {}],
+      [[{ title: "Ask", assignee: "client" }], "no client to ask", { is_private: true, assignee_id: ME }],
+    ] as [unknown[], string, Record<string, unknown>][]) {
+      fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task(over)] }]);
+      expect(await call(await connect(), "add_checklist_items", { id: "t_1", items })).toContain(said);
+      expect(writes).toHaveLength(0);
+    }
+  });
+});
+
+describe("the server's instructions", () => {
+  it("teach the turns, the queue and the working rules", async () => {
+    const rules = (await connect()).getInstructions() ?? "";
+    for (const bit of [
+      "chain of TURNS", "one person's turn", "it is a to-do inside that step", "One thing per step", "Directions are context",
+      "who (assignee", "when (due)", "what it holds", "work Now first", "Never give an Up next task a due date", "joins the line by its priority",
+      "move_in_queue", "Needs you means only two things: the client wrote, or Claude finished its step",
+      "Started:", "Done:", "check_item", "check_todo", "draft_email with step", "resolve_comments",
+    ]) expect(rules).toContain(bit);
+  });
+});
+
+describe("get_task steps", () => {
+  it("show each open step's who, due and what it holds, even work not made yet", async () => {
+    const steps = [
+      { id: "s_1", title: "Design", done: false, assigneeId: "u_justin", due: "2026-10-20", holds: ["image"] },
+      { id: "s_2", title: "Ask Pam: logo", done: false, holds: ["email"] },
+      { id: "s_3", title: "Text Pam", done: false, draftMessage: { channel: "sms", body: "" } },
+    ];
+    fake([{ table: "clients", rows: [] }, { table: "projects", rows: [] }, { table: "task_briefs", rows: [] }, { table: "profiles", rows: [{ member_id: "u_derek", name: "Derek Fox" }, { member_id: "u_justin", name: "Justin Lee" }] }, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task({ subtasks: steps, draft_email: null })] }]);
+    const text = await call(await connect(), "get_task", { id: "t_1" });
+    expect(text).toContain("1. [CURRENT] Design [s_1] · Justin Lee · due 2026-10-20");
+    expect(text).toContain("Holds: image review (not made yet)");
+    expect(text).toContain("2. [ ] Ask Pam: logo [s_2] · Derek Fox (the task's owner) · no due date");
+    expect(text).toContain("Holds: an email (not written yet: draft_email with this step)");
+    expect(text).toContain("Holds: a text to send (not written yet)");
+  });
+});
