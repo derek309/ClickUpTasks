@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
-import { QUEUE_TASK_COLS, promoteQueueStore, queuePatchRow, queueTaskFromRow } from "./queue.mjs";
+import { QUEUE_TASK_COLS, groupQueue, promoteQueueStore, queuePatchRow, queueSettings, queueTaskFromRow } from "./queue.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -349,7 +349,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("list_client_tasks",
-    "List ALL open tasks under a client (optionally narrowed to one project/list) — not just tasks assigned to you. Use this when working through an entire client's or project's task list end-to-end (e.g. the desktop helper's client/project-level \"Work with Claude\" hand-off), rather than just your own queue. Get ids from list_clients/list_projects.",
+    "List ALL open tasks under a client (optionally narrowed to one project/list) — not just tasks assigned to you. Use this when working through an entire client's or project's task list end-to-end (e.g. the desktop helper's client/project-level \"Work with Claude\" hand-off), rather than just your own queue. Get ids from list_clients/list_projects. For a list that is a queue (pass its project_id), the tasks come back in queue order: Now, Waiting, then Up next with each one's place.",
     {
       client_id: z.string(),
       project_id: z.string().optional().describe("omit to include every project under this client"),
@@ -368,6 +368,26 @@ export function createServer(opts = {}) {
       q += `&limit=${limit || 200}`;
       const rows = (await sb(q)).filter(maySee);
       if (!rows.length) return { content: [{ type: "text", text: "No matching tasks." }] };
+      // A queue list reads in its order, the way the app shows it: Now,
+      // Waiting, then Up next with each one's place (Derek, 2026-10-14).
+      if (project_id) {
+        const [list] = await sb(`projects?select=queue&id=eq.${enc(project_id)}&limit=1`).catch(() => []);
+        if (list?.queue) {
+          const settings = queueSettings(list.queue);
+          const open = rows.filter((t) => t.status !== "done");
+          const g = groupQueue(open.map(queueTaskFromRow), settings);
+          const byId = new Map(rows.map((t) => [t.id, t]));
+          const part = (label, items) => (items.length ? `${label}:\n\n${items.map(([t, tag]) => `${tag} ${brief(byId.get(t.id))}`).join("\n\n")}` : "");
+          const text = [
+            `A queue list: ${settings.now} at a time; the next one comes up ${settings.spacing} business days out when a Now task is done or handed off. Work Now first; the order is the team's, don't reorder it.`,
+            part("Now", g.now.map((t) => [t, "[Now]"])),
+            part("Waiting (the client's or a teammate's turn)", g.waiting.map((t) => [t, "[Waiting]"])),
+            part("Up next, in order (no dates until their turn)", g.upNext.map((u) => [u.task, `[Up next · ${u.label}]`])),
+            include_done ? part("Done", rows.filter((t) => t.status === "done").map((t) => [t, "[Done]"])) : "",
+          ].filter(Boolean).join("\n\n");
+          return { content: [{ type: "text", text }] };
+        }
+      }
       return { content: [{ type: "text", text: `${rows.length} task(s):\n\n${rows.map(brief).join("\n\n")}` }] };
     });
 
