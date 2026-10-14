@@ -8,6 +8,30 @@ export type TalkChannel = "email" | "sms" | "chat";
 export const isTalk = (m: Pick<Message, "channel">): m is Message & { channel: TalkChannel } =>
   m.channel === "email" || m.channel === "sms" || m.channel === "chat";
 
+// ---------------------------------------------------------------------------
+// Time order (Derek, 2026-10-14, feed round 3: "the whole feed must be
+// strictly chronological"). A message's `at` comes as Postgres wrote it
+// ("2026-10-07 16:15:06.49+00"), as PostgREST and Realtime send it
+// ("2026-10-07T16:15:06.490076+00:00"), as the app stamps a send
+// ("2026-10-07T16:15:06.490Z"), or with a local offset. Compared as strings
+// those disagree (a space sorts before a "T", "09:15-07:00" before
+// "15:00Z"), so every order here reads the instant instead.
+
+/** The instant an `at` names, in milliseconds; 0 when it can't be read. */
+export function timeOf(at: string | null | undefined): number {
+  if (!at) return 0;
+  const direct = Date.parse(at);
+  if (!Number.isNaN(direct) && /(?:[zZ]|[+-]\d\d:?\d\d)$/.test(at.trim())) return direct;
+  // Postgres's own text: a space for the "T" and "+00" for the offset.
+  const iso = at.trim().replace(/^(\d{4}-\d\d-\d\d) /, "$1T").replace(/([+-]\d\d)$/, "$1:00");
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? (Number.isNaN(direct) ? 0 : direct) : t;
+}
+
+/** Oldest first, by the instant; the same instant keeps a steady order. */
+export const byTime = (a: Pick<Message, "at" | "id">, b: Pick<Message, "at" | "id">) =>
+  timeOf(a.at) - timeOf(b.at) || a.id.localeCompare(b.id);
+
 /** A message's words as one plain line. */
 export function plainLine(body: string): string {
   return (looksLikeHtml(body) ? htmlToText(body) : body).replace(/\s+/g, " ").trim();
@@ -25,13 +49,45 @@ export function firstWords(text: string, max = 60): string {
 /** The newest email, text or chat, as the Conversation's one line:
  *  Pamela, 2h ago: "Use this one for…", or You, 2h ago: "…". */
 export function newestLine(messages: Message[], opts: { first: string; meId: string; nameOf: (memberId: string) => string | null; ago?: (at: string) => string }): { text: string; theirs: boolean; unread: boolean; at: string } | null {
-  const newest = messages.filter((m) => isTalk(m) && !automaticKind(m)).reduce<Message | null>((a, m) => (!a || m.at > a.at ? m : a), null);
+  const newest = newestSaid(messages);
   if (!newest) return null;
   const theirs = newest.direction === "inbound";
   const who = theirs ? opts.first : !newest.createdBy || newest.createdBy === opts.meId ? "You" : (opts.nameOf(newest.createdBy) ?? "").trim().split(/\s+/)[0] || "We";
   const words = firstWords(plainLine(newest.body)) || (newest.subject ?? "").trim();
   const ago = (opts.ago ?? timeAgo)(newest.at);
   return { text: `${who}, ${ago}${words ? `: "${words}"` : ""}`, theirs, unread: theirs && !newest.read, at: newest.at };
+}
+
+/** The newest email, text or chat a person wrote (automatic ones left out). */
+export function newestSaid(messages: Message[]): Message | null {
+  return messages.filter((m) => isTalk(m) && !automaticKind(m)).reduce<Message | null>((a, m) => (!a || byTime(m, a) > 0 ? m : a), null);
+}
+
+/** The client wrote last and nobody has answered yet: their newest message
+ *  (Derek, 2026-10-14: a red "Carol's waiting on a reply" line). Null when
+ *  the newest thing said is ours. */
+export function waitingOnReply(messages: Message[]): { id: string; at: string } | null {
+  const newest = newestSaid(messages);
+  return newest && newest.direction === "inbound" ? { id: newest.id, at: newest.at } : null;
+}
+
+/** How long, short: "5m", "2h", "3d". */
+export function sinceShort(at: string, now: number = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - timeOf(at)) / 1000));
+  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m`;
+  if (s < 48 * 3600) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+/** "Carol's waiting on a reply · since 2h". */
+export const waitingLine = (first: string, at: string, now?: number) => `${first}'s waiting on a reply · since ${sinceShort(at, now)}`;
+
+/** Answer the way they wrote (Derek, 2026-10-14): the channel of their
+ *  newest message when we can send that way, else the first we can. */
+export function defaultChannel(messages: Message[], channels: TalkChannel[]): TalkChannel | null {
+  const theirs = messages.filter((m) => isTalk(m) && m.direction === "inbound" && !automaticKind(m)).sort(byTime).pop();
+  if (theirs && channels.includes(theirs.channel as TalkChannel)) return theirs.channel as TalkChannel;
+  return channels[0] ?? null;
 }
 
 /** One draft not sent yet, wherever it is kept. */
@@ -90,14 +146,16 @@ export function collectClientDrafts(input: {
     out.push({ id: `client:${input.clientDraft!.clientId}`, kind: "email", source: "client", taskId: null, taskTitle: null, stepId: null, queuedId: null,
       subject: own.subject.trim() || null, text: plainLine(own.body), body: own.body, at: own.updatedAt || own.createdAt, by: null });
   }
-  return out.sort((a, b) => a.at.localeCompare(b.at));
+  return out.sort((a, b) => timeOf(a.at) - timeOf(b.at) || a.id.localeCompare(b.id));
 }
 
-/** Where a new message from the Conversation goes, by the rule a teammate's
- *  own sent email follows (ingestOutboundMessage): the task of what it
- *  answers, else the client's open Conversation task, else no task (the
- *  client's conversation, as the Journal's Email and Text send). A portal
- *  chat only shows on a task, so it needs one. */
+/** Where a new message from the Conversation goes (Derek, 2026-10-14, feed
+ *  round 3: it said "No task" while the newest messages were on tasks): the
+ *  task of the client's newest message, else the task of the newest message
+ *  at all, else the client's open Conversation task, else no task (the
+ *  client's conversation, as the Journal's Email and Text send). A task that
+ *  is done or gone is passed over. A portal chat only shows on a task, so it
+ *  needs one. */
 export function whereNewMessageGoes(input: {
   channel: TalkChannel;
   tasks: Pick<Task, "id" | "title" | "status" | "priority" | "contactId">[];
@@ -106,11 +164,11 @@ export function whereNewMessageGoes(input: {
   first: string;
 }): { taskId: string | null; taskTitle: string | null; says: string } {
   const open = (id: string | null | undefined) => (id ? input.tasks.find((t) => t.id === id && t.status !== "done") ?? null : null);
-  const theirs = input.messages.filter((m) => isTalk(m) && m.direction === "inbound" && !automaticKind(m)).sort((a, b) => b.at.localeCompare(a.at));
-  // What it answers: their newest on this channel, else their newest at all.
-  const answering = theirs.find((m) => m.channel === input.channel) ?? theirs[0];
-  const answered = open(answering?.taskId);
-  if (answered) return { taskId: answered.id, taskTitle: answered.title, says: `Goes on "${answered.title}", the task it answers` };
+  const said = input.messages.filter((m) => isTalk(m) && !automaticKind(m)).sort(byTime).reverse();
+  const theirs = open(said.find((m) => m.direction === "inbound")?.taskId);
+  if (theirs) return { taskId: theirs.id, taskTitle: theirs.title, says: `Goes on "${theirs.title}", the task ${input.first} wrote on last` };
+  const newest = open(said[0]?.taskId);
+  if (newest) return { taskId: newest.id, taskTitle: newest.title, says: `Goes on "${newest.title}", the task of the newest message` };
   const convo = input.tasks.find((t) => t.status !== "done" && t.priority === "conversation" && isMessageConversationTask(t.title)
     && (!input.contactId || !t.contactId || t.contactId === input.contactId));
   if (convo) return { taskId: convo.id, taskTitle: convo.title, says: `Goes on "${convo.title}"` };
@@ -121,11 +179,11 @@ export function whereNewMessageGoes(input: {
 /** The email being answered from the Conversation: their newest email, when
  *  it is newer than ours. The subject follows it as "Re: …". */
 export function emailBeingAnswered(messages: Message[]): { id: string; subject: string; taskId: string | null } | null {
-  const emails = messages.filter((m) => m.channel === "email" && !automaticKind(m)).sort((a, b) => b.at.localeCompare(a.at));
+  const emails = messages.filter((m) => m.channel === "email" && !automaticKind(m)).sort(byTime).reverse();
   const theirs = emails.find((m) => m.direction === "inbound");
   if (!theirs) return null;
   const ours = emails.find((m) => m.direction === "outbound");
-  if (ours && ours.at > theirs.at) return null;
+  if (ours && byTime(ours, theirs) > 0) return null;
   const subj = (theirs.subject ?? "").trim();
   return { id: theirs.id, subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", taskId: theirs.taskId ?? null };
 }
@@ -183,7 +241,7 @@ export function automaticKind(m: Pick<Message, "direction" | "channel" | "subjec
 // are shown.
 
 const TZ = "America/Los_Angeles";
-const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
+const dayKey = (iso: string) => new Date(timeOf(iso)).toLocaleDateString("en-CA", { timeZone: TZ });
 
 /** "Today", "Yesterday", else "Tue, Oct 13" (Pacific). */
 export function dayLabel(iso: string, now: Date = new Date()): string {
@@ -191,13 +249,18 @@ export function dayLabel(iso: string, now: Date = new Date()): string {
   const today = dayKey(now.toISOString());
   if (k === today) return "Today";
   if (k === dayKey(new Date(now.getTime() - 86_400_000).toISOString())) return "Yesterday";
-  return new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
+  return new Date(timeOf(iso)).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" });
 }
 
 /** "Oct 13" (Pacific). */
-export const shortDay = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
+export const shortDay = (iso: string) => new Date(timeOf(iso)).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" });
 /** "2:14 PM" (Pacific). */
-export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+export const clockTime = (iso: string) => new Date(timeOf(iso)).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+/** A message's own time: "2:14 PM" today, "Oct 7, 9:15 AM" on an older day,
+ *  so a message whose day divider has scrolled away never reads as today's
+ *  (Derek, 2026-10-14: Oct 7's 9:15, 9:22 and 9:32 AM looked like today). */
+export const messageStamp = (iso: string, now: Date = new Date()) =>
+  dayKey(iso) === dayKey(now.toISOString()) ? clockTime(iso) : `${shortDay(iso)}, ${clockTime(iso)}`;
 
 export type FeedRow =
   | { kind: "day"; key: string; label: string }
@@ -208,7 +271,7 @@ export type FeedRow =
 
 /** The feed in time order, oldest first, with its dividers. */
 export function feedRows(messages: Message[], opts: { showAutomatic: boolean; seenAt: string | null; now?: Date }): FeedRow[] {
-  const talk = messages.filter(isTalk).sort((a, b) => a.at.localeCompare(b.at));
+  const talk = messages.filter(isTalk).sort(byTime);
   const out: FeedRow[] = [];
   let day: string | null = null;
   let task: string | null | undefined;
@@ -217,7 +280,7 @@ export function feedRows(messages: Message[], opts: { showAutomatic: boolean; se
     const auto = automaticKind(m);
     const k = dayKey(m.at);
     if (k !== day) { day = k; out.push({ kind: "day", key: `day:${k}`, label: dayLabel(m.at, opts.now) }); }
-    if (!newShown && opts.seenAt && m.direction === "inbound" && !auto && m.at > opts.seenAt) {
+    if (!newShown && opts.seenAt && m.direction === "inbound" && !auto && timeOf(m.at) > timeOf(opts.seenAt)) {
       newShown = true;
       out.push({ kind: "new", key: "new" });
     }
@@ -233,7 +296,7 @@ export function feedRows(messages: Message[], opts: { showAutomatic: boolean; se
  *  talked on most lately first (its newest message, else its last touch). */
 export function taskChoices(tasks: Pick<Task, "id" | "title" | "status" | "createdAt" | "lastActivityAt">[], messages: Pick<Message, "taskId" | "at">[]): { id: string; title: string }[] {
   const newest = new Map<string, string>();
-  for (const m of messages) if (m.taskId && (newest.get(m.taskId) ?? "") < m.at) newest.set(m.taskId, m.at);
-  const when = (t: (typeof tasks)[number]) => [newest.get(t.id), t.lastActivityAt, t.createdAt].filter(Boolean).sort().pop() ?? "";
-  return tasks.filter((t) => t.status !== "done").sort((a, b) => when(b).localeCompare(when(a)) || a.title.localeCompare(b.title)).map((t) => ({ id: t.id, title: t.title }));
+  for (const m of messages) if (m.taskId && timeOf(newest.get(m.taskId)) < timeOf(m.at)) newest.set(m.taskId, m.at);
+  const when = (t: (typeof tasks)[number]) => Math.max(timeOf(newest.get(t.id)), timeOf(t.lastActivityAt), timeOf(t.createdAt));
+  return tasks.filter((t) => t.status !== "done").sort((a, b) => when(b) - when(a) || a.title.localeCompare(b.title)).map((t) => ({ id: t.id, title: t.title }));
 }

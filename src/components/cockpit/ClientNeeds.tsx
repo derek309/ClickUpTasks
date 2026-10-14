@@ -30,13 +30,15 @@ function Answer({ title, line, tone }: { title: string; line: string; tone?: str
   );
 }
 
-export function ClientNeeds({ clientId, ghlContactId, first, newest, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onRemind, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
+export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered = null, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onRemind, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
   first: string;
   /** The newest email, text or chat, as one line (lib/clientConversation newestLine). */
   newest: { text: string; theirs: boolean; unread: boolean } | null;
+  /** "Carol's waiting on a reply · since 2h" when they wrote last (lib/clientConversation waitingLine). */
+  unanswered?: string | null;
   /** Drafts not sent yet, in the feed. */
   draftCount: number;
   feedOpen: boolean;
@@ -100,9 +102,12 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, draftCount,
       {/* What was said: the newest message, and the feed beside the list. */}
       <button onClick={onToggleFeed} aria-expanded={feedOpen} title={feedOpen ? "Close the conversation" : `Emails, texts and chats with ${first}`}
         className={`${cell} text-left ${newest?.unread ? "bg-accent-soft" : "bg-background"} ${feedOpen ? "ring-2 ring-accent" : "hover:ring-1 hover:ring-[var(--border)]"}`}>
-        <Answer title={`Conversation${draftCount ? ` · ${draftCount} draft${draftCount === 1 ? "" : "s"}` : ""}`}
-          line={newest ? `${newest.unread ? "New: " : ""}${newest.text}` : `Nothing yet. Say hello to ${first}`}
-          tone={newest?.unread ? "text-accent" : undefined} />
+        <span className="block min-w-0 flex-1">
+          <Answer title={`Conversation${draftCount ? ` · ${draftCount} draft${draftCount === 1 ? "" : "s"}` : ""}`}
+            line={newest ? `${newest.unread ? "New: " : ""}${newest.text}` : `Nothing yet. Say hello to ${first}`}
+            tone={newest?.unread ? "text-accent" : undefined} />
+          {unanswered && <span className="block truncate text-[16px] font-semibold text-danger">{unanswered}</span>}
+        </span>
         <span className="shrink-0 text-[16px] font-semibold text-accent">{feedOpen ? "Close ›" : "Open ›"}</span>
       </button>
 

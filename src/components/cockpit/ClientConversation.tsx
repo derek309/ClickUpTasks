@@ -7,14 +7,17 @@
 // to one muted line each, and "New since you last looked" above what came in
 // since you last opened it; the drafts not sent yet at the bottom, dashed, to
 // edit and send right here; and one box to write a new message by email,
-// text or chat, on the task picked under it. Beside the task list on a
+// text or chat, on the task picked under it. The box is one line until you
+// click it (Derek, 2026-10-14: "I don't like the email box always open"),
+// answers the way the client wrote last, on the task they wrote on, and can
+// draft the reply with AI. Beside the task list on a
 // desktop, a panel over it on a tablet, the whole screen on a phone. The
 // messages are the ones already in memory (the Journal's), nothing is
 // fetched here.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { looksLikeHtml, type Attachment, type Message } from "@/lib/data";
 import { safeMessageHtml } from "@/lib/safeHtml";
-import { automaticKind, clockTime, feedRows, isTalk, plainLine, shortDay, type ConversationDraft, type TalkChannel } from "@/lib/clientConversation";
+import { automaticKind, byTime, defaultChannel, feedRows, isTalk, messageStamp, plainLine, shortDay, timeOf, waitingLine, waitingOnReply, type ConversationDraft, type TalkChannel } from "@/lib/clientConversation";
 import { CollapsibleText, I } from "./ui";
 import { AttachmentThumbs } from "./AttachmentThumbs";
 import { DraftMessageBox } from "./DraftMessageBox";
@@ -22,7 +25,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { buildFeedDrafts, type FeedDraftDeps } from "./clientFeedDrafts";
 
 const TZ = "America/Los_Angeles";
-const dayTime = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const dayTime = (iso: string) => new Date(timeOf(iso)).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const WORD: Record<TalkChannel, string> = { email: "email", sms: "text", chat: "chat" };
 
 /** One draft in the feed, with what Edit and Send do for it. */
@@ -42,7 +45,7 @@ export type FeedDraft = {
   onTask?: () => void;
 };
 
-export function ClientConversation({ first, meId, nameOf, messages, taskTitle, onOpenTask, onOpenFile, draftDeps, channels, whereFor, taskOptions, answering, onSend, onFullEmail, showAutomatic, onShowAutomatic, seenAt, onSeen, onClose }: {
+export function ClientConversation({ first, meId, nameOf, messages, taskTitle, onOpenTask, onOpenFile, draftDeps, channels, whereFor, taskOptions, answering, onSend, onFullEmail, onAiDraft, showAutomatic, onShowAutomatic, seenAt, onSeen, onClose }: {
   first: string;
   meId: string;
   nameOf: (memberId: string) => string | null;
@@ -66,6 +69,10 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   onSend: (channel: TalkChannel, subject: string, text: string, replyTo: string | null, taskId: string | null) => Promise<boolean>;
   /** The full email window (files, copies, AI), started with what is typed. */
   onFullEmail?: (subject: string, text: string) => void;
+  /** Drafts a reply to what they said last, from the conversation and the
+   *  task's directions and steps, in the channel's length (on the server,
+   *  /api/ai/draft-message). Never sends. */
+  onAiDraft?: (channel: TalkChannel, taskId: string | null) => Promise<{ subject?: string; body: string } | null>;
   /** Automatic messages whole, or one muted line each (kept per person). */
   showAutomatic: boolean;
   onShowAutomatic: (show: boolean) => void;
@@ -81,11 +88,21 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [channel, setChannel] = useState<TalkChannel | null>(channels[0] ?? null);
-  const ch = channel && channels.includes(channel) ? channel : channels[0] ?? null;
+  // Answer the way they wrote: the channel of their newest message, until
+  // another is picked (Derek, 2026-10-14).
+  const [channel, setChannel] = useState<TalkChannel | null>(null);
+  const answerBy = useMemo(() => defaultChannel(messages, channels), [messages, channels]);
+  const ch = channel && channels.includes(channel) ? channel : answerBy;
   const [subject, setSubject] = useState<string | null>(null);
   const [text, setText] = useState("");
-  const talk = useMemo(() => messages.filter(isTalk).sort((a, b) => a.at.localeCompare(b.at)), [messages]);
+  // The box is one line until it is clicked or focused.
+  const [writing, setWriting] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (writing) box.current?.focus(); }, [writing]);
+  const talk = useMemo(() => messages.filter(isTalk).sort(byTime), [messages]);
+  // They wrote last and nobody answered yet: a red line above that message.
+  const waiting = useMemo(() => waitingOnReply(messages), [messages]);
   const has = new Set(talk.map((m) => m.channel));
   const shown = useMemo(() => (filter === "all" ? talk : talk.filter((m) => m.channel === filter)), [talk, filter]);
   const shownDrafts = filter === "all" ? drafts : drafts.filter((x) => x.d.kind === filter);
@@ -107,10 +124,21 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   const canSendHere = !!ch && (ch !== "chat" || !!onTask);
   const emailSubject = subject ?? answering?.subject ?? "";
 
-  // The newest at the bottom, in view, as it opens and as messages come in.
+  // The newest at the bottom, in view, as it opens, as messages come in and
+  // as the box opens or folds (it takes room from the feed).
   const scroller = useRef<HTMLDivElement>(null);
   const count = rows.length + shownDrafts.length;
-  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, [count]);
+  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, [count, writing]);
+  // When the box grows (Email's subject, a bigger box, a draft from the AI),
+  // the feed keeps what was at its bottom in view.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let h = el.clientHeight;
+    const ro = new ResizeObserver(() => { const now = el.clientHeight; if (now < h) el.scrollTop += h - now; h = now; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const run = async (key: string, f: () => Promise<unknown>) => {
     setBusy(key);
@@ -120,13 +148,36 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
     if (!ch || !canSendHere || !text.trim()) return;
     void run("compose", async () => {
       const ok = await onSend(ch, ch === "email" ? emailSubject.trim() : "", text.trim(), ch === "email" ? answering?.id ?? null : null, onTask);
-      if (ok) { setText(""); setSubject(null); }
+      if (ok) { setText(""); setSubject(null); setWriting(false); }
     });
+  };
+  const draftWithAi = async () => {
+    if (!ch || !onAiDraft || aiBusy) return;
+    setAiBusy(true);
+    try {
+      const d = await onAiDraft(ch, onTask);
+      if (d?.body.trim()) {
+        setText(d.body.trim());
+        if (ch === "email" && d.subject && !emailSubject.trim()) setSubject(d.subject);
+        box.current?.focus();
+      }
+    } finally { setAiBusy(false); }
   };
   const whoOf = (m: Message) => (m.direction === "inbound" ? first : !m.createdBy || m.createdBy === meId ? "You" : (nameOf(m.createdBy) ?? "").split(/\s+/)[0] || "We");
   const divider = "flex items-center gap-2 text-[16px] font-semibold";
   const link = "font-semibold text-accent hover:underline disabled:opacity-40";
   const editingDraft = drafts.find((x) => x.d.id === editing) ?? null;
+  // The task a new message goes on, as small text under the box.
+  const onPicker = (
+    <label className="mt-1 flex min-w-0 items-center gap-1 text-[16px] text-muted">
+      <span className="shrink-0">On:</span>
+      <select value={onTask ?? ""} onChange={(e) => setPicked(e.target.value)} aria-label="The task this message goes on"
+        className="h-8 min-w-0 flex-1 truncate rounded-[5px] bg-transparent px-1 text-[16px] font-semibold text-accent outline-none hover:bg-background">
+        {options.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+        <option value="" disabled={ch === "chat"}>No task (the conversation)</option>
+      </select>
+    </label>
+  );
 
   return (
     <aside aria-label={`Conversation with ${first}`}
@@ -179,14 +230,17 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
           );
           const m = r.m;
           const auto = r.kind === "auto" ? r.label : r.auto;
+          const unanswered = waiting?.id === m.id ? (
+            <p className="mt-1 self-start text-[16px] font-semibold text-danger">{waitingLine(first, m.at)}</p>
+          ) : null;
           const mine = m.direction === "outbound";
           const html = m.channel === "email" && looksLikeHtml(m.body);
           const full = open.has(m.id);
           const words = plainLine(m.body);
-          return (
+          const bubble = (
             <div key={r.key} className={`max-w-[88%] rounded-[5px] px-3 py-2 ${mine ? "self-end bg-accent-soft" : "self-start bg-surface ring-1 ring-[var(--border)]"} ${auto ? "opacity-80" : ""}`}>
               <div className="text-[16px] text-muted">
-                {auto ? (mine ? "Automatic" : `${whoOf(m)}, automatic`) : whoOf(m)} · {WORD[m.channel as TalkChannel]} · <span title={dayTime(m.at)}>{clockTime(m.at)}</span>
+                {auto ? (mine ? "Automatic" : `${whoOf(m)}, automatic`) : whoOf(m)} · {WORD[m.channel as TalkChannel]} · <span title={dayTime(m.at)}>{messageStamp(m.at)}</span>
                 {!mine && !m.read && <b className="ml-1.5 text-accent">New</b>}
                 {r.kind === "auto" && <button onClick={() => setOpenAuto((s) => { const n = new Set(s); n.delete(m.id); return n; })} className="ml-1.5 font-semibold text-accent hover:underline">Fold</button>}
               </div>
@@ -201,6 +255,7 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
               {(m.attachments?.length ?? 0) > 0 && <div className="mt-1.5"><AttachmentThumbs items={m.attachments as Attachment[]} onOpen={onOpenFile} /></div>}
             </div>
           );
+          return unanswered ? <Fragment key={r.key}>{unanswered}{bubble}</Fragment> : bubble;
         })}
 
         {shownDrafts.map((x) => {
@@ -233,9 +288,24 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
         })}
       </div>
 
-      {/* A new message: Email, Text or Chat (only the ways they have), and one Send. */}
-      <div className="shrink-0 border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3">
-        {!ch ? <p className="text-muted">Messages are off for {first}, or there is no way to reach them yet.</p> : <>
+      {/* A new message. One line until clicked; open, it has Email, Text or
+          Chat (only the ways they have), the subject for an email, the box,
+          Send (the one dark button here), Draft a reply with AI, and the
+          task it goes on. Escape on an empty box folds it again. */}
+      <div className="shrink-0 border-t px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] pt-3"
+        onKeyDown={(e) => {
+          if (e.key !== "Escape" || !writing) return;
+          e.stopPropagation();
+          if (!text.trim()) { setWriting(false); (document.activeElement as HTMLElement | null)?.blur?.(); }
+        }}>
+        {!ch ? <p className="text-muted">Messages are off for {first}, or there is no way to reach them yet.</p> : !writing ? <>
+          <button onClick={() => setWriting(true)} onFocus={() => setWriting(true)} aria-label={`Write to ${first}`}
+            className="flex h-11 w-full items-center rounded-[5px] border bg-surface px-3 text-left text-[16px] text-muted hover:border-accent">
+            <span className="min-w-0 flex-1 truncate">{text.trim() ? text.trim() : `Write to ${first}…`}</span>
+            <span className="shrink-0 pl-2">{ch === "email" ? "Email" : ch === "sms" ? "Text" : "Chat"}</span>
+          </button>
+          {onPicker}
+        </> : <>
           {channels.length > 1 && (
             <div className="mb-2 flex gap-1.5" role="group" aria-label="Send by">
               {channels.map((c) => (
@@ -248,25 +318,22 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
             <input value={emailSubject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Subject"
               className="mb-2 h-10 w-full rounded-[5px] border bg-surface px-2.5 text-[16px] outline-none focus:border-accent" />
           )}
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} aria-label={`Write to ${first}`}
+          <textarea ref={box} value={text} onChange={(e) => setText(e.target.value)} rows={ch === "email" ? 5 : 3} aria-label={`Write to ${first}`}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
             placeholder={`Write to ${first}…`} className="w-full resize-y rounded-[5px] border bg-surface px-2.5 py-2 text-[16px] outline-none focus:border-accent" />
-          <div className="mt-2 flex items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             <button onClick={send} disabled={!canSendHere || !text.trim() || busy === "compose" || (ch === "email" && !emailSubject.trim())}
-              className="h-10 shrink-0 rounded-[5px] border border-accent bg-surface px-4 text-[16px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40">{busy === "compose" ? "Sending…" : "Send"}</button>
-            <label className="flex min-w-0 flex-1 items-center gap-1 text-[16px] text-muted">
-              <span className="shrink-0">On:</span>
-              <select value={onTask ?? ""} onChange={(e) => setPicked(e.target.value)} aria-label="The task this message goes on"
-                className="h-10 min-w-0 flex-1 truncate rounded-[5px] bg-surface px-1 text-[16px] font-semibold text-accent outline-none hover:bg-background">
-                {options.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-                <option value="" disabled={ch === "chat"}>No task (the conversation)</option>
-              </select>
-            </label>
+              className="h-10 shrink-0 rounded-[5px] bg-accent px-5 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-40">{busy === "compose" ? "Sending…" : "Send"}</button>
+            {onAiDraft && (
+              <button onClick={() => void draftWithAi()} disabled={aiBusy} title={`Reads the last messages and the task, and writes a ${WORD[ch]} to edit. Nothing sends by itself.`}
+                className={`${link} text-[16px]`}>{aiBusy ? "Drafting…" : "Draft a reply with AI"}</button>
+            )}
+            {ch === "email" && onFullEmail && (
+              <button onClick={() => onFullEmail(emailSubject, text)} className="text-[16px] text-muted hover:text-accent hover:underline">Open the full email window</button>
+            )}
           </div>
+          {onPicker}
           {ch === "chat" && !onTask && <p className="mt-1 text-[16px] text-muted">A portal chat shows on a task, so pick one.</p>}
-          {ch === "email" && onFullEmail && (
-            <button onClick={() => onFullEmail(emailSubject, text)} className={`${link} mt-1.5 text-[16px]`}>Open the full email window</button>
-          )}
         </>}
       </div>
       {editingDraft?.editEmail?.(() => setEditing(null))}

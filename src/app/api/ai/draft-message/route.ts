@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
 import { isCompletionEvent } from "@/lib/data";
 import { aiRateLimit, GEMINI_URL, geminiHeaders } from "@/lib/ai";
+import { conversationLines, feedReplyPrompt, loadFeedReply } from "@/lib/feedReplyServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "AI drafting isn't configured yet (missing GEMINI_API_KEY)." }, { status: 501 });
 
-  const { clientId, projectId, channel, prompt: userPrompt, context: rawContext } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms"; prompt?: string; context?: string };
+  const { clientId, projectId, channel, prompt: userPrompt, context: rawContext, reply, taskId } = (await req.json().catch(() => ({}))) as { clientId?: string; projectId?: string; channel?: "email" | "sms" | "chat"; prompt?: string; context?: string; reply?: boolean; taskId?: string | null };
   // What this one message is about, when the caller knows more than the client's
   // task list: the client review document being sent for review (Derek,
   // 2026-09-11: "draft an email to the client to review it and use AI").
@@ -36,6 +37,17 @@ export async function POST(req: NextRequest) {
   // only proves who is calling) isn't sufficient on its own.
   if (!(await isClientVisible(caller, clientId))) return NextResponse.json({ error: "Unknown or inaccessible client." }, { status: 403 });
   const instruction = (userPrompt ?? "").trim();
+
+  // "Draft a reply with AI" in the client's Conversation (Derek, 2026-10-14):
+  // answers what the client said last, from the last messages and the task
+  // the reply goes on, in the channel's length. The prompt is built here.
+  if (reply) {
+    if (channel !== "email" && channel !== "sms" && channel !== "chat") return NextResponse.json({ error: "Pick email, text or chat." }, { status: 400 });
+    const { messages, task, first } = await loadFeedReply(clientId, typeof taskId === "string" && taskId ? taskId : null);
+    const { data: me } = await supabaseAdmin.from("profiles").select("name").eq("id", caller.id).maybeSingle();
+    const prompt = feedReplyPrompt({ channel, me: ((me?.name as string | null) ?? "").trim().split(/\s+/)[0] || null, first, conversation: conversationLines(messages, first), task });
+    return ask(apiKey, prompt, channel);
+  }
 
   const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", clientId).maybeSingle();
   if (!client) return NextResponse.json({ error: "Client not found." }, { status: 404 });
@@ -107,6 +119,11 @@ export async function POST(req: NextRequest) {
     projectId ? projectNoteLines : null,
   ].filter((l) => l !== null).join("\n");
 
+  return ask(apiKey, prompt, channel);
+}
+
+/** Asks the AI and splits its SUBJECT: and BODY: lines. Nothing is sent. */
+async function ask(apiKey: string, prompt: string, channel: "email" | "sms" | "chat") {
   try {
     const res = await fetch(GEMINI_URL, {
       method: "POST", headers: geminiHeaders(apiKey),

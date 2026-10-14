@@ -109,7 +109,7 @@ import { orderLists } from "@/lib/listOrder";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { ClientConversation } from "./cockpit/ClientConversation";
 import { sendFromFeed, useClientSavedDraft } from "./cockpit/clientFeedDrafts";
-import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
+import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, waitingLine, waitingOnReply, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
 import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
 import { pickThreeTimes } from "@/lib/improveText";
@@ -2305,7 +2305,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { addNote, deleteLink, reorderLinks, saveClientFile, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   const { createTasksFromDump, targetProjectId } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles,
     tasksRef, applyQueuePatches, today: todayIso(), openTaskWith: (start) => { setOpenTaskStart(start); setOpenTaskId(start.taskId); } });
-  const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
+  const { draftMessage, draftingMessage, draftFeedReply, refreshContact, refreshingContact, regenerateAiSummary } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
   const { getClientShareUrl, copyClientShareLink, copyProjectShareLink } = useShareLinks({ clientById, pushToast, canAdmin, setClients, markOwnClientWrite, projectById, setProjects });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
   if (dbError) return (
@@ -2633,9 +2633,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const needsStrip = talk ? (() => {
           const { cid, ct, first, canMsg, said, draftCount } = talk;
           const waiting = waitingTasksFor(cid).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
+          const unanswered = waitingOnReply(said);
           return (
               <ClientNeeds clientId={cid} ghlContactId={ct?.ghlContactId ?? null} first={first}
                 newest={newestLine(said, { first, meId: me.id, nameOf: (id) => userById(id)?.name ?? null })}
+                unanswered={unanswered ? waitingLine(first, unanswered.at) : null}
                 draftCount={draftCount} feedOpen={feedFor === cid} onToggleFeed={() => setFeedClient(feedFor === cid ? null : cid)}
                 waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(cid)}
@@ -2669,6 +2671,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       onSend={(channel, subject, text, replyTo, taskId) => sendFromFeed({ clientId: talk.cid, first: talk.first, tasksNow: tasksRef, sendMessage, patchTask, pushToast: (m) => pushToast(m) },
         channel, subject, channel === "email" ? plainTextToHtml(text) : text, replyTo, taskId)}
       onFullEmail={(subject, text) => openClientEmail(talk.cid, { subject, body: text.trim() ? plainTextToHtml(text) : "", replyTo: emailBeingAnswered(talk.said)?.id ?? null })}
+      onAiDraft={(channel, taskId) => draftFeedReply(talk.cid, channel, taskId)}
       showAutomatic={!!inboxPrefs.feedShowAutomatic} onShowAutomatic={(v) => setInboxPrefs({ feedShowAutomatic: v })}
       seenAt={inboxPrefs.feedSeen?.[talk.cid] ?? null}
       onSeen={() => { const cid = talk.cid; setInboxPrefs((p) => ({ feedSeen: { ...(p.feedSeen ?? {}), [cid]: new Date().toISOString() } })); }}

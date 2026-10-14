@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { automaticKind, collectClientDrafts, dayLabel, emailBeingAnswered, feedRows, firstWords, newestLine, taskChoices, whereNewMessageGoes } from "./clientConversation";
+import { automaticKind, byTime, collectClientDrafts, dayLabel, defaultChannel, emailBeingAnswered, feedRows, firstWords, messageStamp, newestLine, sinceShort, taskChoices, timeOf, waitingLine, waitingOnReply, whereNewMessageGoes } from "./clientConversation";
 import type { EmailDraft, Message, Task } from "./data";
 
 const msg = (p: Partial<Message> & Pick<Message, "id" | "at" | "direction" | "channel">): Message => ({
@@ -77,7 +77,7 @@ describe("whereNewMessageGoes", () => {
   ];
   it("goes on the task their newest message is on", () => {
     const messages = [msg({ id: "a", at: "2026-10-13T10:00:00Z", direction: "inbound", channel: "email", taskId: "t_ads" })];
-    expect(whereNewMessageGoes({ channel: "email", tasks, messages, contactId: "ct_1", first: "Pamela" })).toEqual({ taskId: "t_ads", taskTitle: "Confirm the Medicare disclaimer", says: 'Goes on "Confirm the Medicare disclaimer", the task it answers' });
+    expect(whereNewMessageGoes({ channel: "email", tasks, messages, contactId: "ct_1", first: "Pamela" })).toEqual({ taskId: "t_ads", taskTitle: "Confirm the Medicare disclaimer", says: 'Goes on "Confirm the Medicare disclaimer", the task Pamela wrote on last' });
   });
   it("else on their open Conversation task, never a meeting's", () => {
     const messages = [msg({ id: "a", at: "2026-10-13T10:00:00Z", direction: "inbound", channel: "sms", taskId: null })];
@@ -197,5 +197,119 @@ describe("taskChoices", () => {
     ];
     const messages = [{ taskId: "t_talk", at: "2026-10-13T10:00:00Z" }];
     expect(taskChoices(tasks, messages).map((t) => t.id)).toEqual(["t_talk", "t_new", "t_old"]);
+  });
+});
+
+// Feed round 3 (Derek, 2026-10-14, Carol Lindenmuth's feed).
+describe("time order", () => {
+  it("reads every way an `at` arrives as the same instant", () => {
+    const t = Date.parse("2026-10-07T16:15:06.490Z");
+    expect(timeOf("2026-10-07 16:15:06.49+00")).toBe(t);
+    expect(timeOf("2026-10-07T16:15:06.490076+00:00")).toBe(t);
+    expect(timeOf("2026-10-07T16:15:06.490Z")).toBe(t);
+    expect(timeOf("2026-10-07T09:15:06.490-07:00")).toBe(t);
+    expect(timeOf("")).toBe(0);
+  });
+  it("lays a feed with mixed date formats out oldest first, the days in order", () => {
+    const now = new Date("2026-10-14T21:30:00Z");
+    const ms = [
+      // Today, as the app stamps a send and with a local offset.
+      msg({ id: "today2", at: "2026-10-14T21:19:49.872Z", direction: "outbound", channel: "email", subject: "Pet care page", createdBy: "u_derek", taskId: "t_pet" }),
+      msg({ id: "today1", at: "2026-10-14T13:07:40-07:00", direction: "inbound", channel: "chat", body: "Am I able to?", taskId: "t_pet" }),
+      // Oct 12, as Postgres writes it (a space, "+00").
+      msg({ id: "oct12", at: "2026-10-12 20:43:58.192+00", direction: "inbound", channel: "sms", body: "Busy week", taskId: "t_web" }),
+      // Oct 7, 9:15, 9:22 and 9:32 AM Pacific, as PostgREST sends it.
+      msg({ id: "oct7c", at: "2026-10-07T16:32:08.305479+00:00", direction: "outbound", channel: "sms", body: "Awesome thank you.", createdBy: "u_derek" }),
+      msg({ id: "oct7a", at: "2026-10-07T16:15:06.490076+00:00", direction: "outbound", channel: "email", subject: "Re: A first look", createdBy: "u_derek" }),
+      msg({ id: "oct7b", at: "2026-10-07 16:22:56.822+00", direction: "inbound", channel: "sms", body: "Looks beautiful" }),
+      // Oct 8.
+      msg({ id: "oct8", at: "2026-10-08T21:32:36.692398+00:00", direction: "outbound", channel: "email", subject: "Ready for review", createdBy: "u_derek", taskId: "t_web" }),
+    ];
+    const rows = feedRows(ms, { showAutomatic: false, seenAt: null, now });
+    expect(rows.filter((r) => r.kind === "message").map((r) => (r as { m: Message }).m.id)).toEqual(["oct7a", "oct7b", "oct7c", "oct8", "oct12", "today1", "today2"]);
+    expect(rows.filter((r) => r.kind === "day").map((r) => (r as { label: string }).label)).toEqual(["Wed, Oct 7", "Thu, Oct 8", "Mon, Oct 12", "Today"]);
+    // A string sort put the Postgres-written 9:22 ahead of 9:15; by the instant it is not.
+    expect([...ms].sort((a, b) => a.at.localeCompare(b.at))[0].id).toBe("oct7b");
+    expect([...ms].sort(byTime)[0].id).toBe("oct7a");
+  });
+  it("puts the date on a message's time unless it is today's", () => {
+    const now = new Date("2026-10-14T21:30:00Z");
+    expect(messageStamp("2026-10-07T16:15:06Z", now)).toBe("Oct 7, 9:15 AM");
+    expect(messageStamp("2026-10-14T20:07:40Z", now)).toBe("1:07 PM");
+  });
+});
+
+describe("whereNewMessageGoes, round 3", () => {
+  // Carol: her newest email is on a task that's done, her newest chat (today) on an open one.
+  const tasks = [
+    task({ id: "t_email", title: "Update Carol email on the website", status: "done" }),
+    task({ id: "t_pet", title: "Pet care page and payment setup", status: "waiting" as Task["status"] }),
+    task({ id: "t_web", title: "Website Upgrade 2026", status: "waiting" as Task["status"] }),
+    task({ id: "t_convo", title: "Reply to Carol", priority: "conversation" }),
+  ];
+  const carol = [
+    msg({ id: "e", at: "2026-10-13T14:06:19+00:00", direction: "inbound", channel: "email", subject: "Re: This week", taskId: "t_email" }),
+    msg({ id: "c", at: "2026-10-14 20:07:40.55723+00", direction: "inbound", channel: "chat", body: "Am I able to?", taskId: "t_pet" }),
+  ];
+  it("goes on the task of the client's newest message, whatever the channel", () => {
+    for (const channel of ["email", "sms", "chat"] as const) {
+      expect(whereNewMessageGoes({ channel, tasks, messages: carol, contactId: "ct_1", first: "Carol" }).taskId).toBe("t_pet");
+    }
+  });
+  it("else the newest message's task, when the client's is done or on none", () => {
+    const messages = [
+      msg({ id: "e", at: "2026-10-13T14:06:19Z", direction: "inbound", channel: "email", taskId: "t_email" }),
+      msg({ id: "o", at: "2026-10-14T21:19:49Z", direction: "outbound", channel: "email", taskId: "t_web", createdBy: "u_derek" }),
+    ];
+    expect(whereNewMessageGoes({ channel: "email", tasks, messages, contactId: "ct_1", first: "Carol" })).toMatchObject({ taskId: "t_web", says: 'Goes on "Website Upgrade 2026", the task of the newest message' });
+  });
+  it("else the open Conversation task, else no task", () => {
+    const messages = [msg({ id: "e", at: "2026-10-13T14:06:19Z", direction: "inbound", channel: "email", taskId: "t_email" })];
+    expect(whereNewMessageGoes({ channel: "email", tasks, messages, contactId: "ct_1", first: "Carol" }).taskId).toBe("t_convo");
+    expect(whereNewMessageGoes({ channel: "email", tasks: tasks.filter((t) => t.id !== "t_convo"), messages, contactId: "ct_1", first: "Carol" }).taskId).toBeNull();
+  });
+  it("passes over automatic messages", () => {
+    const messages = [...carol, msg({ id: "r", at: "2026-10-14T22:00:00Z", direction: "outbound", channel: "sms", body: "[Reminder] Our appointment is starting shortly", taskId: "t_web" })];
+    expect(whereNewMessageGoes({ channel: "sms", tasks, messages, contactId: "ct_1", first: "Carol" }).taskId).toBe("t_pet");
+  });
+});
+
+describe("defaultChannel", () => {
+  const ms = [
+    msg({ id: "e", at: "2026-10-13T14:06:19Z", direction: "inbound", channel: "email" }),
+    msg({ id: "c", at: "2026-10-14T20:07:40Z", direction: "inbound", channel: "chat" }),
+    msg({ id: "o", at: "2026-10-14T21:00:00Z", direction: "outbound", channel: "sms", createdBy: "u_derek" }),
+  ];
+  it("answers the way they wrote last", () => {
+    expect(defaultChannel(ms, ["email", "sms", "chat"])).toBe("chat");
+    expect(defaultChannel(ms.slice(0, 1), ["email", "sms"])).toBe("email");
+  });
+  it("falls back to the first way we can send", () => {
+    expect(defaultChannel(ms, ["email", "sms"])).toBe("email");
+    expect(defaultChannel([], ["sms"])).toBe("sms");
+    expect(defaultChannel(ms, [])).toBeNull();
+  });
+});
+
+describe("waitingOnReply", () => {
+  const now = Date.parse("2026-10-14T22:07:40Z");
+  it("is their newest message when they wrote last", () => {
+    const ms = [
+      msg({ id: "o", at: "2026-10-14T18:00:00Z", direction: "outbound", channel: "email", createdBy: "u_derek" }),
+      msg({ id: "c", at: "2026-10-14 20:07:40+00", direction: "inbound", channel: "chat" }),
+    ];
+    expect(waitingOnReply(ms)).toEqual({ id: "c", at: "2026-10-14 20:07:40+00" });
+    expect(waitingLine("Carol", "2026-10-14 20:07:40+00", now)).toBe("Carol's waiting on a reply · since 2h");
+  });
+  it("is null once we answered, and an automatic message is no answer", () => {
+    const inbound = msg({ id: "c", at: "2026-10-14T20:07:40Z", direction: "inbound", channel: "chat" });
+    expect(waitingOnReply([inbound, msg({ id: "o", at: "2026-10-14T21:00:00Z", direction: "outbound", channel: "sms", createdBy: "u_derek" })])).toBeNull();
+    expect(waitingOnReply([inbound, msg({ id: "r", at: "2026-10-14T21:00:00Z", direction: "outbound", channel: "sms", body: "[Reminder] Our appointment is starting shortly" })])?.id).toBe("c");
+    expect(waitingOnReply([])).toBeNull();
+  });
+  it("says how long, short", () => {
+    expect(sinceShort("2026-10-14T22:05:00Z", now)).toBe("2m");
+    expect(sinceShort("2026-10-13T12:00:00Z", now)).toBe("34h");
+    expect(sinceShort("2026-10-10T12:00:00Z", now)).toBe("4d");
   });
 });

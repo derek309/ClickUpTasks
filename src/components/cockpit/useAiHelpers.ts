@@ -54,6 +54,21 @@ export function useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToas
       setDraftingMessage(false);
     }
   };
+  // "Draft a reply with AI" in the client's Conversation (Derek, 2026-10-14):
+  // the same route, asked for a reply to what the client said last, from the
+  // last messages and the task picked under the box. The prompt is built on
+  // the server. Fills the box, never sends.
+  const draftFeedReply = async (clientId: string, channel: "email" | "sms" | "chat", taskId: string | null): Promise<{ subject?: string; body: string } | null> => {
+    try {
+      const res = await authedFetch("/api/ai/draft-message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId, channel, reply: true, taskId }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error || !j.body) { pushToast(j.error || "Couldn't draft a reply. Try again."); return null; }
+      return { subject: j.subject, body: j.body };
+    } catch {
+      pushToast("Couldn't draft a reply. Try again.");
+      return null;
+    }
+  };
   // Same pattern for the task description — Gemini drafts, never saves.
   const [draftingDescription, setDraftingDescription] = useState(false);
   const draftDescription = async (title: string, description: string, prompt?: string): Promise<string | null> => {
@@ -94,5 +109,5 @@ export function useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToas
       setRefreshingContact(false);
     }
   };
-  return { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary, draftDescription, draftingDescription };
+  return { draftMessage, draftingMessage, draftFeedReply, refreshContact, refreshingContact, regenerateAiSummary, draftDescription, draftingDescription };
 }
