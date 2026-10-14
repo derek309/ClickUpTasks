@@ -5,8 +5,10 @@
 // list to that folder's lists (grouped by list); selecting a standalone list
 // scopes to just it. Admin chips carry a ⋮ menu (rename/delete/move).
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { type Folder, type Project } from "@/lib/data";
 import { I } from "./ui";
+import { MenuSheet } from "./ActionMenu";
 
 // Folders are off (Derek, 2026-10-06: "no one has used folders"; there were
 // none). Only the New folder button goes: folders that exist still show, so
@@ -56,6 +58,10 @@ export function FolderRail({
   onCopyAllForClaude?: () => void;
 }) {
   const [menu, setMenu] = useState<string | null>(null); // "folder:<id>" | "list:<id>"
+  // Where the ⋮ menu opens, fixed to the screen off its chip (2026-10-14): the
+  // rail scrolls sideways below lg, which clipped a menu hung under the chip.
+  const [menuAt, setMenuAt] = useState({ top: 0, left: 0 });
+  const MENU_W = 272;
   const [dragFolder, setDragFolder] = useState<string | null>(null);
   const [dragList, setDragList] = useState<string | null>(null);
   // A to Z (Derek, 2026-10-08), and one line: past VISIBLE the rest sit under
@@ -91,19 +97,29 @@ export function FolderRail({
         className={`group/chip inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[16px] font-medium ${active ? "is-active border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
         {label}
         {canAdmin && menuKey && (
-          <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setMenu((m) => (m === menuKey ? null : menuKey)); }}
-            className="-mr-1 hidden rounded p-0.5 opacity-60 hover:opacity-100 sm:group-hover/chip:inline-block sm:group-[.is-active]/chip:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
+          // On the open chip at every size (a phone has no hover), on hover too from sm.
+          <span role="button" tabIndex={-1} aria-label="More actions" onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenuAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left - 8, window.innerWidth - MENU_W - 8)) });
+            setMenu((m) => (m === menuKey ? null : menuKey));
+          }}
+            className="-mr-1 hidden rounded p-1 opacity-60 hover:opacity-100 group-[.is-active]/chip:inline-block sm:p-0.5 sm:group-hover/chip:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
         )}
       </button>
-      {menu === menuKey && menuKey && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setMenu(null)} />
-        <div className="absolute left-0 top-full z-40 mt-1 w-44 rounded-lg border bg-surface p-1 shadow-soft-md">{menuBody}</div>
-      </>)}
+      {/* A sheet at the bottom on a phone, a menu under the chip from sm up. */}
+      {/* On the page's body, so nothing it sits in can clip or move it. */}
+      {menu === menuKey && menuKey && createPortal(<>
+        <div className="fixed inset-0 z-30 hidden sm:block" onClick={() => setMenu(null)} />
+        <div role="menu" style={{ position: "fixed", top: menuAt.top, left: menuAt.left, width: MENU_W }}
+          className="z-40 hidden max-h-[70vh] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-soft-md sm:block">{menuBody}</div>
+        <MenuSheet label="List actions" onClose={() => setMenu(null)}>{menuBody}</MenuSheet>
+      </>, document.body)}
     </span>
   );
 
   const item = (label: string, onClick: () => void, danger?: boolean, key?: string) => (
-    <button key={key} onClick={() => { setMenu(null); onClick(); }} className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background ${danger ? "text-danger" : ""}`}>{label}</button>
+    <button key={key} onClick={() => { setMenu(null); onClick(); }} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[16px] hover:bg-background ${danger ? "text-danger" : ""}`}>{label}</button>
   );
 
   return (
@@ -149,9 +165,9 @@ export function FolderRail({
         () => onSelectList(l.id),
         `list:${l.id}`,
         <>
-          {folders.length > 0 && <div className="px-2 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Move to</div>}
+          {folders.length > 0 && <div className="px-3 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">Move to</div>}
           {folders.map((f) => item(f.name, () => onMoveList(l.id, f.id), false, f.id))}
-          <div className="my-0.5 border-t" />
+          {folders.length > 0 && <div className="my-1 border-t" />}
           {item(starredLists.has(l.id) ? "☆ Unpin from sidebar" : "★ Pin to sidebar", () => onToggleStarList(l.id))}
           {item("Rename list", () => onRenameList(l.id))}
           {onToggleListHidden && item(l.hiddenFromClient ? "👁 Show in client portal" : "🔒 Private to the team (hide from client)", () => onToggleListHidden(l.id))}
@@ -159,7 +175,7 @@ export function FolderRail({
             // A switch, not a command: one task at a time, the rest in line.
             <button role="switch" aria-checked={!!l.queue} onClick={() => { setMenu(null); onToggleListQueue(l.id); }}
               title={l.queue ? "Turn the queue off: every date it saved comes back" : "One at a time: the rest wait in line with no date"}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[16px] hover:bg-background">
               <span aria-hidden className={`relative inline-block h-4 w-7 shrink-0 rounded-full transition ${l.queue ? "bg-accent" : "bg-border"}`}>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${l.queue ? "left-3.5" : "left-0.5"}`} />
               </span>
