@@ -159,14 +159,15 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   };
   // Each row: its question, then its choices. On a phone the question is a
   // short word above them and they wrap onto new lines, never scrolling
-  // sideways (Derek, 2026-10-14); a desktop keeps them on one line.
+  // sideways (Derek, 2026-10-14). A desktop wraps them too: the task panel
+  // can be narrow, and "Pick a date" ran past its edge.
   const Row = ({ i, label, short, children }: { i: number; label: string; short: string; children: React.ReactNode }) => (
     <div className={`flex min-w-0 flex-col gap-1.5 sm:flex-row sm:gap-3 ${i === 2 ? "sm:items-start" : "sm:items-center"}`}>
       <span id={`${uid}-q${i}`} className={`shrink-0 text-[16px] font-semibold text-muted sm:w-[9.5rem] ${i === 2 ? "sm:pt-2.5" : ""}`}>
         <span className="sm:hidden">{short}</span><span className="max-sm:hidden">{label}</span>
       </span>
       <div id={`${uid}-row${i}`} role="group" aria-labelledby={`${uid}-q${i}`}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-0.5 sm:flex-nowrap">{children}</div>
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-0.5">{children}</div>
     </div>
   );
   const whoLabel = (c: SetupWho) => c.key === "else" ? <>{!known && whoPick ? nameOf?.(whoPick) ?? "Someone else" : "Someone else"}<I.chevron className="h-3.5 w-3.5 -rotate-90" /></> : c.label;
@@ -241,8 +242,11 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
             </div>
           )}
           {rows.map((r) => (
-            <div key={r.label} className="flex flex-wrap items-center gap-x-1">
-              <span className="mr-1 shrink-0 text-[16px] text-muted">{r.label}</span>
+            // The row's word in its own column and its choices wrapping beside
+            // it, so a narrow panel never leaves a choice hanging under the word.
+            <div key={r.label} className="flex min-w-0 items-start gap-x-2">
+              <span className="w-[7.5rem] shrink-0 pt-2 text-[16px] text-muted">{r.label}</span>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
               {r.items.map((a) => {
                 const Icon = ADD_ICON[a.key];
                 const on = preset === a.key;
@@ -253,6 +257,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
                   </button>
                 );
               })}
+              </div>
             </div>
           ))}
           {more.length > 0 && (
