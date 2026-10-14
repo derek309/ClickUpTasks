@@ -292,9 +292,9 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
-  // What the step's name says it needs, as one or two buttons before + Add
-  // (Derek, 2026-10-13): each does what picking that item from + Add does,
-  // and goes once the step holds that kind of work.
+  // What the step's name says it needs, as one button before + Add (Derek,
+  // 2026-10-13; one thing per step, 2026-10-14): it does what picking that
+  // item from + Add does, and goes once the step holds that kind of work.
   const holdsKind = (k: StepSuggestKind) =>
     k === "checklist" ? todos.length > 0 || clientItems.length > 0 || showTodos
     : k === "text" ? sub.draftMessage?.channel === "sms"

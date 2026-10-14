@@ -5,9 +5,10 @@ const kinds = (title: string) => suggestStepActions(title, "Ryan").map((s) => s.
 const labels = (title: string) => suggestStepActions(title, "Ryan").map((s) => s.label);
 
 describe("suggestStepActions", () => {
-  it("reads a plan and a send as the document then the email, in the name's order", () => {
-    expect(labels("Create plan and send to Ryan")).toEqual(["Write the plan", "Email Ryan"]);
-    expect(labels("Send Ryan the proposal")).toEqual(["Email Ryan", "Write the proposal"]);
+  it("offers one thing only, the first the name points to", () => {
+    expect(labels("Create plan and send to Ryan")).toEqual(["Write the plan"]);
+    expect(labels("Send Ryan the proposal")).toEqual(["Email Ryan"]);
+    expect(kinds("Write the plan, make the image, then email Ryan")).toEqual(["doc"]);
   });
   it("names the document by the title's noun when it has one", () => {
     expect(labels("Write the brief")).toEqual(["Write the brief"]);
@@ -28,15 +29,19 @@ describe("suggestStepActions", () => {
   });
   it("a text wins over send, but email said outright stays", () => {
     expect(labels("Send Ryan a text")).toEqual(["Text Ryan"]);
-    expect(kinds("Text Ryan and email the plan")).toEqual(["text", "email"]);
+    expect(kinds("Text Ryan and email the plan")).toEqual(["text"]);
+    expect(kinds("Email the plan, then text Ryan")).toEqual(["email"]);
   });
-  it("reads images, pages, videos and checklists", () => {
-    expect(labels("Make the thumbnail")).toEqual(["Make the image"]);
-    expect(labels("New graphic for Facebook")).toEqual(["Make the image"]);
-    expect(labels("Design the logo")).toEqual(["Make the image"]);
-    expect(labels("Design the landing page")).toEqual(["Make the web page"]);
-    expect(labels("Update the website")).toEqual(["Make the web page"]);
+  it("names an image or a video by the word the name uses", () => {
+    expect(labels("Make the thumbnail")).toEqual(["Make the thumbnail"]);
+    expect(labels("New graphic for Facebook")).toEqual(["Make the graphic"]);
+    expect(labels("Design the logo")).toEqual(["Make the design"]);
     expect(labels("Edit the video")).toEqual(["Make the video"]);
+    expect(labels("New images for the gallery")).toEqual(["Make the image"]);
+  });
+  it("reads a page as the HTML review to build, and a checklist", () => {
+    expect(labels("Design the landing page")).toEqual(["Build the HTML review"]);
+    expect(labels("Update the website")).toEqual(["Build the HTML review"]);
     expect(labels("Launch checklist")).toEqual(["Add a checklist"]);
   });
   it("suggests nothing new for a call, or for a name with no hint", () => {
@@ -44,14 +49,14 @@ describe("suggestStepActions", () => {
     expect(kinds("Look into it")).toEqual([]);
     expect(kinds("")).toEqual([]);
   });
-  it("never more than two, and whole words only", () => {
-    expect(kinds("Write the plan, make the image, then email Ryan")).toEqual(["doc", "image"]);
+  it("whole words only", () => {
     expect(kinds("Check the context of the listing")).toEqual([]);
     expect(kinds("Copy the files over")).toEqual([]);
   });
-  it("reads a newsletter as the email and the web page it links to", () => {
-    expect(labels("Newsletter for October")).toEqual(["Email Ryan", "Make the web page"]);
-    expect(kinds("Send the October newsletter")).toEqual(["email", "page"]);
+  it("reads a newsletter as the HTML review only, never an email to the client", () => {
+    expect(labels("Newsletter for October")).toEqual(["Build the HTML review"]);
+    expect(labels("Create newsletter")).toEqual(["Build the HTML review"]);
+    expect(labels("Send the October newsletter")).toEqual(["Build the HTML review"]);
   });
   it("reads a blast or a campaign as an email, unless it is a text", () => {
     expect(kinds("Spring blast")).toEqual(["email"]);
@@ -63,30 +68,31 @@ describe("suggestStepActions", () => {
     expect(kinds("Facebook post")).toEqual(["doc"]);
     expect(kinds("Article on spring cleanups")).toEqual(["doc"]);
   });
-  it("reads a flyer, a postcard, a banner and an ad as an image", () => {
-    expect(labels("Open house flyer")).toEqual(["Make the image"]);
-    expect(kinds("Postcard for the mailer")).toEqual(["image"]);
-    expect(kinds("Banner for the event")).toEqual(["image"]);
-    expect(kinds("Facebook ad")).toEqual(["image"]);
+  it("reads a flyer, a postcard, a banner and an ad as that image", () => {
+    expect(labels("Open house flyer")).toEqual(["Make the flyer"]);
+    expect(labels("Postcard for the mailer")).toEqual(["Make the postcard"]);
+    expect(labels("Banner for the event")).toEqual(["Make the banner"]);
+    expect(labels("Facebook ad")).toEqual(["Make the ad"]);
+    expect(labels("Facebook ads for spring")).toEqual(["Make the ad"]);
     expect(kinds("Add the address")).toEqual([]);
   });
-  it("reads a landing, a site and a website as a web page", () => {
-    expect(labels("Landing for the offer")).toEqual(["Make the web page"]);
+  it("reads a landing, a site and a website as the HTML review", () => {
+    expect(labels("Landing for the offer")).toEqual(["Build the HTML review"]);
     expect(kinds("Fix the site")).toEqual(["page"]);
     expect(kinds("New website")).toEqual(["page"]);
   });
-  it("reads a reel and a clip as a video", () => {
-    expect(labels("Instagram reel")).toEqual(["Make the video"]);
-    expect(kinds("Cut a clip from the interview")).toEqual(["video"]);
+  it("reads a reel and a clip as that video", () => {
+    expect(labels("Instagram reel")).toEqual(["Make the reel"]);
+    expect(labels("Cut a clip from the interview")).toEqual(["Make the clip"]);
   });
   it("reads follow up and remind as an email", () => {
     expect(labels("Follow up with Ryan")).toEqual(["Email Ryan"]);
     expect(kinds("Remind Ryan about the photos")).toEqual(["email"]);
   });
-  it("orders the new words by where they sit, still two at most", () => {
-    expect(kinds("Flyer and a reel for the open house")).toEqual(["image", "video"]);
-    expect(kinds("Reel, then the flyer, then a blog post")).toEqual(["video", "image"]);
-    expect(kinds("Blog post, then follow up")).toEqual(["doc", "email"]);
+  it("takes whichever the name says first", () => {
+    expect(kinds("Flyer and a reel for the open house")).toEqual(["image"]);
+    expect(kinds("Reel, then the flyer, then a blog post")).toEqual(["video"]);
+    expect(kinds("Blog post, then follow up")).toEqual(["doc"]);
   });
   it("uses the name it is given for the client", () => {
     expect(suggestStepActions("Send to them", "The Artist Workshop")).toEqual([{ kind: "email", label: "Email The Artist Workshop" }]);

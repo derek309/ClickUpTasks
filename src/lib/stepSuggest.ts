@@ -1,11 +1,14 @@
-/** What a step's name says it needs, read as one or two of the step's Add
- *  menu items (Derek, 2026-10-13: an empty "Create plan and send to Ryan"
- *  should offer "Write the plan" and "Email Ryan", not a bare + Add).
+/** What a step's name says it needs, read as one of the step's Add menu items
+ *  (Derek, 2026-10-13: an empty "Create plan and send to Ryan" should offer
+ *  "Write the plan", not a bare + Add).
  *
- *  Pure: words in the title only. The step page shows each one as a button
- *  that does what picking the same item from + Add does, and hides it once the
- *  step holds that kind of work. A call needs nothing made, so it suggests
- *  nothing. */
+ *  One thing per step (Derek, 2026-10-14): only the first thing the name
+ *  points to. "Create newsletter" builds the HTML review; emailing it to the
+ *  client is picked from What's next once the step is done.
+ *
+ *  Pure: words in the title only. The step page shows it as a button that does
+ *  what picking the same item from + Add does, and hides it once the step
+ *  holds that kind of work. A call needs nothing made, so it suggests nothing. */
 export type StepSuggestKind = "email" | "text" | "doc" | "image" | "page" | "video" | "checklist";
 export type StepSuggestion = { kind: StepSuggestKind; label: string };
 
@@ -13,24 +16,30 @@ export type StepSuggestion = { kind: StepSuggestKind; label: string };
 const MESSAGE_WRITING = /\b(?:write|draft)\s+(?:(?:an?|the|a quick)\s+)?(?:email|e-mail|text|reply|message|note)s?\b/gi;
 const WRITE_TO = /\bwrite\s+(?:to|back)\b/gi;
 
-// A newsletter is an email and the web page it links to (Derek, 2026-10-14).
-const EMAIL_WORD = /\b(?:email|e-mail|emails|newsletter|newsletters)\b/i;
+const EMAIL_WORD = /\b(?:email|e-mail|emails)\b/i;
+// A newsletter goes to subscribers from GoHighLevel, not to the client, so it
+// is the HTML review only: "Send the newsletter" is not an email to them
+// (Derek, 2026-10-14).
+const NEWSLETTER = /\bnewsletters?\b/i;
 // Soft: these give way to a text ("Text blast" is the text, not an email).
 const EMAIL_SOFT = /\b(?:send|reply|tell|write\s+(?:to|back)|blast|blasts|campaign|campaigns|follow[\s-]?up|follow[\s-]?ups|remind|reminder|reminders)\b|\blet\b.{0,40}?\bknow\b/i;
 const TEXT_WORD = /\b(?:text|texts|sms)\b/i;
 const DOC_NOUN = /\b(plan|proposal|brief|copy)\b/i;
 const DOC_WORD = /\b(?:write|draft|document|doc|post|posts|blog|blogs|article|articles)\b/i;
 // "ad" only as a word: "add" and "address" stay out.
-const IMAGE_WORD = /\b(?:image|images|graphic|graphics|thumbnail|thumbnails|flyer|flyers|flier|fliers|postcard|postcards|banner|banners|ad|ads)\b/i;
-const DESIGN_WORD = /\bdesign\b/i;
+const IMAGE_WORD = /\b(image|images|graphic|graphics|thumbnail|thumbnails|flyer|flyers|flier|fliers|postcard|postcards|banner|banners|ad|ads)\b/i;
+const DESIGN_WORD = /\b(design)\b/i;
 const PAGE_WORD = /\b(?:page|pages|landing|site|sites|website|websites|webpage|newsletter|newsletters)\b/i;
-const VIDEO_WORD = /\b(?:video|videos|reel|reels|clip|clips)\b/i;
+const VIDEO_WORD = /\b(video|videos|reel|reels|clip|clips)\b/i;
 const CHECKLIST_WORD = /\b(?:checklist|list)\b/i;
 
 const at = (re: RegExp, s: string) => { const m = re.exec(s); return m ? m.index : -1; };
 
-/** Up to two of the Add menu's items the step's name points to, in the order
- *  the name says them. firstName is the client's, as clientFirstName gives it. */
+// "Make the flyers" reads as the one flyer; "ads" is "ad".
+const singular = (w: string) => w.toLowerCase().replace(/s$/, "");
+
+/** The one Add menu item the step's name points to first, or none.
+ *  firstName is the client's, as clientFirstName gives it. */
 export function suggestStepActions(title: string, firstName: string): StepSuggestion[] {
   const raw = (title ?? "").replace(/\s+/g, " ").trim();
   if (!raw) return [];
@@ -43,7 +52,8 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
 
   const textAt = at(TEXT_WORD, raw);
   const emailWordAt = at(EMAIL_WORD, raw);
-  const emailSoftAt = at(EMAIL_SOFT, raw);
+  // "Send the newsletter" sends nothing to the client: no soft email then.
+  const emailSoftAt = NEWSLETTER.test(raw) ? -1 : at(EMAIL_SOFT, raw);
   // "Send Ryan a text" is the text; only "email" itself adds the email then.
   const emailAt = emailWordAt >= 0 ? emailWordAt : textAt >= 0 ? -1 : emailSoftAt;
   add("email", emailAt, `Email ${firstName}`);
@@ -55,14 +65,13 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
   add("doc", docAt, noun ? `Write the ${noun[1].toLowerCase()}` : "Write the document");
 
   const pageAt = at(PAGE_WORD, raw);
-  const videoAt = at(VIDEO_WORD, raw);
+  const video = VIDEO_WORD.exec(raw);
   // "Design the landing page" is the page; "design" alone is an image.
-  const imageAt = at(IMAGE_WORD, raw);
-  const designAt = pageAt < 0 && videoAt < 0 ? at(DESIGN_WORD, raw) : -1;
-  add("image", imageAt >= 0 ? imageAt : designAt, "Make the image");
-  add("page", pageAt, "Make the web page");
-  add("video", videoAt, "Make the video");
+  const image = IMAGE_WORD.exec(raw) ?? (pageAt < 0 && !video ? DESIGN_WORD.exec(raw) : null);
+  if (image) add("image", image.index, `Make the ${singular(image[1])}`);
+  add("page", pageAt, "Build the HTML review");
+  if (video) add("video", video.index, `Make the ${singular(video[1])}`);
   add("checklist", at(CHECKLIST_WORD, raw), "Add a checklist");
 
-  return found.sort((a, b) => a.at - b.at).slice(0, 2).map(({ kind, label }) => ({ kind, label }));
+  return found.sort((a, b) => a.at - b.at).slice(0, 1).map(({ kind, label }) => ({ kind, label }));
 }
