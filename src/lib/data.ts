@@ -823,6 +823,11 @@ export interface Subtask {
   /** A change the client sent from their portal: shown to them, ticked off
    *  here (Derek, 2026-10-07: "see each one get checked off"). */
   fromClient?: boolean;
+  /** On a client's own item (fromClient, a subtask or a step's to-do): when
+   *  it was written onto the task, so a new request after the step was
+   *  cleared from Needs you brings it back (Derek, 2026-10-13). Older items
+   *  have none and keep the old rule. */
+  at?: string;
   assigneeId?: string | null;
   due?: string | null; // ISO yyyy-mm-dd
   /** Delegation instructions — what the assignee is being asked to do. Only
@@ -923,6 +928,8 @@ export interface Subtask {
 }
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
+  /** On a client's to-do: when it was written onto the step (see Subtask.at). */
+  at?: string;
   /** When we asked the client about this one to-do (Derek, 2026-10-12: a
    *  question on one item of a long checklist, without a new step). */
   askedAt?: string };
@@ -3305,13 +3312,20 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
 }
 
 /** When the current step last turned to you: the newest email on it, the
- *  step before it finishing (the client's reply, or Claude), or the step
- *  starting (a changes step from the portal or a review sent back). */
+ *  step before it finishing (the client's reply, or Claude), the step
+ *  starting (a changes step from the portal or a review sent back), or the
+ *  newest open request the client added to it since (a portal request or a
+ *  review comment, Derek 2026-10-13: a new one brings a cleared task back).
+ *  Client items written before they carried a time count for nothing here. */
 export function needsYouSince(subtasks: Subtask[], cur: Subtask): string {
   const plan = planSteps(subtasks);
   const at = plan.findIndex((x) => x.id === cur.id);
   const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
-  return [cur.startedAt, prev?.doneAt, ...(cur.fromEmails ?? []).map((e) => e.at)].filter((x): x is string => !!x).sort().pop() ?? "";
+  const requests = [
+    ...subtasks.filter((x) => x.fromClient && !x.done && x.stepId === cur.id).map((x) => x.at),
+    ...(cur.todos ?? []).filter((t) => t.fromClient && !t.done).map((t) => t.at),
+  ];
+  return [cur.startedAt, prev?.doneAt, ...(cur.fromEmails ?? []).map((e) => e.at), ...requests].filter((x): x is string => !!x).sort().pop() ?? "";
 }
 
 /** The × on a Needs you line (Derek, 2026-10-13: "sometimes we can't do it

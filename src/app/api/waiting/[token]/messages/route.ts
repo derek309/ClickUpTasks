@@ -67,7 +67,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     // changed the task since it was read, so a teammate's checklist edit at
     // the same moment is never lost (audit 2026-10-07). A few tries, then
     // left: the message itself is already saved. At most 50 of theirs.
-    const item = { id: "s_" + randomUUID().replace(/-/g, "").slice(0, 12), title: firstLine.slice(0, 200), done: false, fromClient: true };
+    // Its time (at) lets a new request bring a task already cleared from
+    // Needs you back there (Derek, 2026-10-13).
+    const item = { id: "s_" + randomUUID().replace(/-/g, "").slice(0, 12), title: firstLine.slice(0, 200), done: false, fromClient: true, at: new Date().toISOString() };
     for (let tries = 0; tries < 4; tries++) {
       const { data: cur } = await supabaseAdmin.from("tasks").select("subtasks, updated_at").eq("id", taskId).maybeSingle();
       const list = Array.isArray(cur?.subtasks) ? (cur!.subtasks as { fromClient?: boolean }[]) : [];

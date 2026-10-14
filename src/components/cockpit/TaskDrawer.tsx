@@ -1333,8 +1333,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // once, which threw this round away (audit 2026-10-11). addChangesRound is
     // keyed, so running twice adds it once.
     void fetchTaskDocumentComments(docId).then((comments) => {
+      const at = new Date().toISOString();
       const todos = comments.filter((c) => c.fromClient && !c.completedAt && c.body.trim())
-        .map((c) => ({ id: newId("td_"), title: c.body.trim().slice(0, 300), done: false, fromClient: true, commentId: c.id }));
+        .map((c) => ({ id: newId("td_"), title: c.body.trim().slice(0, 300), done: false, fromClient: true, commentId: c.id, at }));
       const list = addChangesRound(taskRef.current.subtasks, stepId, firstName, key, () => newId("s_"), { review: k, todos });
       if (!list) return;
       if (openStep) setNextStepDone(openStep.id, true);

@@ -67,9 +67,12 @@ export async function stepsOnReviewSent(taskId: string, kind: ReviewKindKey, rem
 export async function stepsOnReviewChanges(taskId: string, kind: ReviewKindKey, documentId: string, version: number): Promise<boolean> {
   const { data: comments } = await supabaseAdmin.from("task_document_comments")
     .select("id, body, author_id, completed_at").eq("document_id", documentId);
+  // Each stamped with when it was written here, so a new round after the
+  // step was cleared from Needs you brings it back (Derek, 2026-10-13).
+  const now = new Date().toISOString();
   const todos: StepTodo[] = ((comments ?? []) as { id: string; body: string | null; author_id: string | null; completed_at: string | null }[])
     .filter((c) => c.author_id === null && !c.completed_at && (c.body ?? "").trim())
-    .map((c) => ({ id: newId("td_"), title: (c.body ?? "").trim().slice(0, 300), done: false, fromClient: true, commentId: c.id }));
+    .map((c) => ({ id: newId("td_"), title: (c.body ?? "").trim().slice(0, 300), done: false, fromClient: true, commentId: c.id, at: now }));
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
     // A changes round already open for this review (a comment opened it, then
@@ -263,7 +266,7 @@ export async function stepsOnCommentAfterApproval(taskId: string, kind: ReviewKi
     if (list.some((x) => x.todos?.some((t) => t.commentId === comment.id))) return null;
     const { list: withStep, stepId } = changesStepFor(list, first, () => newId("s_"));
     const held = holdOnStep(withStep, stepId, kind);
-    const todo: StepTodo = { id: newId("td_"), title: text.slice(0, 300), done: false, fromClient: true, commentId: comment.id };
+    const todo: StepTodo = { id: newId("td_"), title: text.slice(0, 300), done: false, fromClient: true, commentId: comment.id, at: new Date().toISOString() };
     return held.map((x) => (x.id === stepId ? { ...x, todos: [...(x.todos ?? []), todo] } : x));
   }, true);
 }

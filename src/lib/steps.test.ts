@@ -395,6 +395,40 @@ describe("needs you", () => {
     expect(needsYou(again, "u_derek", "Pam")).toBe("Pam wrote. Reply");
   });
 
+  it("a new portal request after the changes step was cleared brings it back; older requests without a time do not", async () => {
+    const { needsYou, needsYouSince } = await import("./data");
+    const base = { status: "in_progress" as const, assigneeId: "u_derek" };
+    const step = { id: "c", title: "Changes from Pam", done: false, addedFor: "changes", startedAt: "2026-10-13T10:00:00Z", seenAt: "2026-10-13T12:00:00Z" };
+    const old = { id: "r1", title: "Bigger logo", done: false, fromClient: true, stepId: "c" };
+    // Cleared, and the only request has no time (written before at existed): stays cleared.
+    expect(needsYou({ ...base, subtasks: [step, old] }, "u_derek", "Pam")).toBeNull();
+    // A request written before the clear: stays cleared.
+    const before = { id: "r2", title: "New photo", done: false, fromClient: true, stepId: "c", at: "2026-10-13T11:00:00Z" };
+    expect(needsYou({ ...base, subtasks: [step, old, before] }, "u_derek", "Pam")).toBeNull();
+    // A new one after the clear: back in Needs you, with the count.
+    const fresh = { id: "r3", title: "Change the hours", done: false, fromClient: true, stepId: "c", at: "2026-10-13T15:00:00Z" };
+    expect(needsYou({ ...base, subtasks: [step, old, before, fresh] }, "u_derek", "Pam")).toBe("Pam sent changes: 3 to do");
+    expect(needsYouSince([step, old, before, fresh], step)).toBe("2026-10-13T15:00:00Z");
+    // Already ticked off, or on another step: does not count.
+    expect(needsYou({ ...base, subtasks: [step, { ...fresh, done: true }] }, "u_derek", "Pam")).toBeNull();
+    expect(needsYou({ ...base, subtasks: [step, { ...fresh, stepId: "other" }] }, "u_derek", "Pam")).toBeNull();
+    // Cleared again after it: gone until the next one.
+    expect(needsYou({ ...base, subtasks: [{ ...step, seenAt: "2026-10-13T16:00:00Z" }, old, before, fresh] }, "u_derek", "Pam")).toBeNull();
+  });
+
+  it("a new client comment on a cleared changes round brings it back", async () => {
+    const { needsYou } = await import("./data");
+    const base = { status: "in_progress" as const, assigneeId: "u_derek" };
+    const round = { id: "m", title: "Make Pam's changes", done: false, addedFor: "page:2", startedAt: "2026-10-13T10:00:00Z", seenAt: "2026-10-13T12:00:00Z",
+      todos: [{ id: "t1", title: "Fix the typo", done: false, fromClient: true, commentId: "k1" }] };
+    expect(needsYou({ ...base, subtasks: [round] }, "u_derek", "Pam")).toBeNull();
+    const more = { ...round, todos: [...round.todos, { id: "t2", title: "Swap the photo", done: false, fromClient: true, commentId: "k2", at: "2026-10-13T14:00:00Z" }] };
+    expect(needsYou({ ...base, subtasks: [more] }, "u_derek", "Pam")).toBe("Pam asked for changes");
+    // Our own to-do with a time is not the client's.
+    const ours = { ...round, todos: [...round.todos, { id: "t3", title: "Check mobile", done: false, at: "2026-10-13T14:00:00Z" }] };
+    expect(needsYou({ ...base, subtasks: [ours] }, "u_derek", "Pam")).toBeNull();
+  });
+
   it("the × clears only the step that needs you, and nothing when nothing does", async () => {
     const { needsYou, clearedFromNeedsYou } = await import("./data");
     const base = { status: "in_progress" as const, assigneeId: "u_derek" };
