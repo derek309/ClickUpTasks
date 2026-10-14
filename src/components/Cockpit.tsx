@@ -1884,9 +1884,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // filtering by `me.id` here is correct regardless of who's being viewed.
   // Memoized — filters + sorts the full ~28k-row tasks table every render.
   const myPersonalTasks = useMemo(
-    () => sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private)),
+    // A private task waiting in line on a queue list stays on that list, as
+    // on All tasks and My work (Derek, 2026-10-14).
+    () => sortTasks(tasks.filter((t) => t.assigneeId === me.id && t.private && !inLineOnly(t))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tasks, me.id, sortBy, sortDir, notifications]
+    [tasks, me.id, sortBy, sortDir, notifications, queuedUpNext]
   );
 
   // Memoized — a linear scan of the full tasks table every render, even
@@ -3267,7 +3269,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList ownList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : showCompletedLog ? (
           // Now an All Tasks mode rather than a My Work tab — day-grouped feed
           // of what finished and when. The header's scope answers WHOSE work,

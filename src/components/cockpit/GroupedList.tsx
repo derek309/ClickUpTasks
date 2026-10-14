@@ -9,7 +9,7 @@ import {
   users, assignableUsers, formatDue, isOverdue, TODAY, COLLAPSED_DUE_BUCKETS, effectivePriority, effectiveStatus, clientInitials, dueOneLine, isSnoozed,
   PRIORITY_META, manualPriorityOptions,
   STATUS_META, pickableStatuses, delegateeOf, delegatedItemFor, userById, RECURRENCE_LABEL, RECURRENCE_ORDER, describeRecurrence,
-  addDaysIso, dateQuickPicks, stepDateLabel, needsYou,
+  addDaysIso, dateQuickPicks, stepDateLabel, needsYou, PERSONAL_PROJECT_ID,
   type Task, type Priority, type Recurrence, type Client, type Project, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, LabelChips, LIST_COLUMNS, MENU_MAX, menuPos, menuStyle } from "./ui";
@@ -24,10 +24,13 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, onClearNeedsYou, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, onClearNeedsYou, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor, ownList }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
+  /** Your own Personal list (Derek, 2026-10-14): every row is yours, so no
+   *  face on it, and the Personal list's name is not said under each title. */
+  ownList?: boolean;
   groups: { key: string; label: string; color: string; tasks: Task[] }[];
   // The signed-in user — the row's assignee avatar only renders when the
   // task is assigned to someone else; seeing your own face on every one of
@@ -175,6 +178,9 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // only earns its line when the list actually spans more than one.
   const projectIds = new Set(groups.flatMap((g) => g.tasks.map((t) => t.projectId)));
   const showCrumb = projectIds.size > 1;
+  // On your own list the crumb names only a list that is not Personal (a
+  // private task on a client's list).
+  const ownListId = ownList ? PERSONAL_PROJECT_ID : null;
   // A real table, so every column is exactly as wide as its own widest value
   // and every row matches by construction. The old fixed pixel widths meant
   // the widest value in the list had no say: tighten one number and "Get
@@ -253,7 +259,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
               {!collapsedG.has(g.key) && (
                 <>
                   {g.tasks.map((t) => (
-                    <TaskRow key={t.id} task={t} meId={meId} colCount={colCount} cols={cols} showClient={showClient} showCrumb={showCrumb} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} listsFor={listsFor} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onClearNeedsYou={onClearNeedsYou ? () => onClearNeedsYou(t.id) : undefined} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
+                    <TaskRow key={t.id} task={t} meId={meId} ownList={ownList} showCrumbFor={showCrumb && t.projectId !== ownListId} colCount={colCount} cols={cols} showClient={showClient} onOpenClient={onOpenClient} clientById={clientById} projectById={projectById} listsFor={listsFor} folderById={folderById} contactById={contactById} onOpen={() => onOpen(t.id)} onPatch={onPatch} onClearNeedsYou={onClearNeedsYou ? () => onClearNeedsYou(t.id) : undefined} lensId={lensId} delegatedTo={delegateeOf(t)} preview={previewByTask?.get(t.id)}
                       selected={!!selectedIds?.has(t.id)} onToggleSelect={onToggleSelect ? (e) => handleSelectClick(t.id, e) : undefined}
                       draggable={!!onDropInGroup || !!onMergeTasks} onDragStart={() => setDragTaskId(t.id)} onDragEnd={() => { setDragTaskId(null); setDragOverKey(null); setDragOverTaskId(null); }}
                       isMergeDropTarget={dragOverTaskId === t.id}
@@ -275,8 +281,8 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   );
 }
 
-function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, onOpenClient, clientById, projectById, listsFor, folderById, contactById, onOpen, onPatch, onClearNeedsYou, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
-  task: Task; preview?: string; meId?: string; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumb: boolean; onOpenClient?: (clientId: string) => void;
+function TaskRow({ task, preview, meId, ownList, colCount, cols, showClient, showCrumbFor: showCrumb, onOpenClient, clientById, projectById, listsFor, folderById, contactById, onOpen, onPatch, onClearNeedsYou, delegatedTo, lensId, selected, onToggleSelect, draggable, onDragStart, onDragEnd, isMergeDropTarget, onRowDragOver, onRowDragLeave, onRowDrop, expanded, onToggleExpand, onToggleSub, onAddSub, onDeleteSub, subDraft, setSubDraft }: {
+  task: Task; preview?: string; meId?: string; ownList?: boolean; colCount: number; cols: { key: string; label: string; sortable: boolean }[]; showClient: boolean; showCrumbFor: boolean; onOpenClient?: (clientId: string) => void;
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; listsFor?: (clientId: string) => Project[]; folderById?: (id: string | null | undefined) => { name: string } | null; contactById: (id: string | null) => { name: string } | null; onOpen: () => void; onPatch: (taskId: string, patch: Partial<Task>) => void; onClearNeedsYou?: () => void; delegatedTo?: string | null; lensId?: string;
   selected?: boolean; onToggleSelect?: (e: React.MouseEvent) => void;
   draggable?: boolean; onDragStart?: () => void; onDragEnd?: () => void;
@@ -349,7 +355,8 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
   // Only a face that says something: yours on your own list does not, and it
   // was appearing on every row.
   const phoneWho = (mineByDelegation ? delegatedTo : delegatedTo ?? (task.assigneeId !== meId ? task.assigneeId : null)) || null;
-  const phoneMeta = [showClient && client?.name, crumb].filter(Boolean).join(" · ");
+  // Not "Personal" under every row of your own Personal list.
+  const phoneMeta = [showClient && client?.name, !(ownList && task.projectId === PERSONAL_PROJECT_ID) && crumb].filter(Boolean).join(" · ");
   // 16px sentences on a phone, dense uppercase tags on a desktop row.
   const badgeClass = (tone: string) =>
     `shrink-0 rounded px-1.5 py-0.5 text-[16px] font-semibold leading-tight sm:text-[11px] sm:uppercase sm:tracking-wide ${tone}`;
@@ -426,7 +433,7 @@ function TaskRow({ task, preview, meId, colCount, cols, showClient, showCrumb, o
               assignee shown at all, since most tasks are assigned to the
               admin viewing the list. */}
           {mineByDelegation && <span className="hidden sm:block"><Avatar id={delegatedTo!} size={20} /></span>}
-          <span className="hidden sm:block"><InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} size={30} /></span>
+          {!ownList && <span className="hidden sm:block"><InlineAssignee value={task.assigneeId} waiting={task.waitingOnClient} client={client} onChange={(a) => onPatch(task.id, { assigneeId: a })} onSetWaiting={(v) => onPatch(task.id, { waitingOnClient: v })} size={30} /></span>}
           {/* Owner first, then who it is with. One avatar said "Derek" on a
               task sitting on Michaella's list, which reads as hers being his
               (Derek: "it's assigning to me... make it clear it's
