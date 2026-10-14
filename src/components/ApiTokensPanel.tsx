@@ -184,10 +184,14 @@ export default function ApiTokensPanel() {
           {claudeToken ? (<>
             <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[16px] text-muted">
               <li>Copy your Claude link.</li>
-              <li>In the Claude app: Settings, Connectors, Add custom connector. Paste it and click Add.</li>
+              <li>In the Claude app: Settings, Connectors, Add custom connector. Paste it and click Add. If it asks how people sign in, pick No sign-in.</li>
               <li>That&apos;s it. ClickUpTasks works in Claude and in Claude Code, as you. Keep the link to yourself.</li>
             </ol>
             <button onClick={() => void copyClaude("link")} className="mt-3 h-10 rounded-[5px] bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90">{claudeCopied && claudeCopiedKind === "link" ? "Copied. Paste it in Claude's Connectors" : "Copy my Claude link"}</button>
+            {/* The Claude app can still decide a link wants a sign in and stop
+                with "Couldn't register with ClickUpTasks's sign-in service"
+                (Justin, 2026-10-14). The Terminal way never asks. */}
+            <p className="mt-2 text-[16px] text-muted">If Claude asks you to sign in, use the Terminal way below.</p>
             {claudeError && <p className="mt-2 text-[16px] text-danger">{claudeError}</p>}
             {claudeShown && (
               <div className="mt-3">

@@ -13,3 +13,4 @@ export const maxDuration = 60;
 export async function GET(req: NextRequest) { return handleMcp(req); }
 export async function POST(req: NextRequest) { return handleMcp(req); }
 export async function DELETE(req: NextRequest) { return handleMcp(req); }
+export async function HEAD(req: NextRequest) { return handleMcp(req); }

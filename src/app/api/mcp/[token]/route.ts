@@ -13,3 +13,4 @@ type Ctx = { params: Promise<{ token: string }> };
 export async function GET(req: NextRequest, ctx: Ctx) { return handleMcp(req, (await ctx.params).token); }
 export async function POST(req: NextRequest, ctx: Ctx) { return handleMcp(req, (await ctx.params).token); }
 export async function DELETE(req: NextRequest, ctx: Ctx) { return handleMcp(req, (await ctx.params).token); }
+export async function HEAD(req: NextRequest, ctx: Ctx) { return handleMcp(req, (await ctx.params).token); }
