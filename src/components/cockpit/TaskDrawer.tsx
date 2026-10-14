@@ -42,6 +42,10 @@ import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
 import { draftLinkAsButton } from "@/lib/draftLink";
 import { ReceivedEmailBox, SentEmailBox } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
+import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices } from "@/lib/stepSetup";
+import { StepSetup, addRowsOf, type SetupAnswer } from "./StepSetup";
+import { suggestStepActions } from "@/lib/stepSuggest";
+import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
 import { ClientWebsite } from "./ClientWebsite";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
@@ -1233,7 +1237,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // A new step answers "what happens next?".
     if (asking) setAskNext(null);
     // On whoever added it (Derek, 2026-10-11: "auto assign it to the creator").
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id: newId("s_"), title: t, done: false, ...stepOwnerFields() }] });
+    const id = newId("s_");
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: t, done: false, ...stepOwnerFields() }] });
+    // Its page opens on the set up: whose turn, by when, what (2026-10-14).
+    openSetup(id);
   };
   // A client sent changes on a review while its review step is current: that
   // step is done, and "Make the changes" and a new client review follow it
@@ -1652,6 +1659,31 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </ul>
     </div>
   );
+  // Whose turn a step is: the step's own person picker and the set up both
+  // give it this way (StepSetup).
+  const assignStep = (sub: Subtask, a: string | null, isActive: boolean) => {
+    // Claude: due today, no follow up, started in the cloud (2026-10-13).
+    if (a === CLAUDE_ID) { toClaude(sub.id); return; }
+    // Given to a teammate: on their list today unless a follow up is already set.
+    onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
+    // The current step's owner decides the status: a teammate makes it
+    // Delegated, back to the owner returns it to the step's own stage.
+    if (isActive) {
+      const status = statusForStep(task.status, stepStage({ ...sub, assigneeId: a ?? undefined }, task.assigneeId));
+      const toTeammate = !!a && a !== task.assigneeId;
+      onPatch({ ...(status ? { status } : {}), ...(toTeammate ? handoffDates(sub.due) : {}) });
+    }
+    // Giving the current step to a teammate: the follow up finishes
+    // when they mark it done (brief, section 6).
+    if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
+  };
+  // A step's due date, from its sentence or the set up: a teammate's current
+  // step moves the task's dates with it.
+  const setStepDue = (sub: Subtask, v: string | null, isActive: boolean) => {
+    onPatchSub(sub.id, { due: v });
+    const who = taskRef.current.subtasks.find((x) => x.id === sub.id)?.assigneeId ?? sub.assigneeId;
+    if (isActive && v && who && who !== task.assigneeId) onPatch(handoffDates(v));
+  };
   // A step's header on its page reads like the task's (Derek, 2026-10-13):
   // "● Your turn, assigned to Derek, due Oct 14, 1 day left, follow up set a
   // date", the name and each date a word to change. It holds what the Due ·
@@ -1677,25 +1709,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The client's own step: "Ryan's turn" already says who has it.
     if (!sub.onClient) parts.push({ lead: "assigned to", pick: (
       <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word}>{whoName}</span>}
-        onChange={(a) => {
-          // Claude: due today, no follow up, started in the cloud (2026-10-13).
-          if (a === CLAUDE_ID) { toClaude(sub.id); return; }
-          // Given to a teammate: on their list today unless a follow up is already set.
-          onPatchSub(sub.id, { assigneeId: a, ...(a && a !== task.assigneeId && !sub.followUpAt ? { followUpAt: TODAY } : {}) });
-          // The current step's owner decides the status: a teammate makes it
-          // Delegated, back to the owner returns it to the step's own stage.
-          if (isActive) {
-            const status = statusForStep(task.status, stepStage({ ...sub, assigneeId: a ?? undefined }, task.assigneeId));
-            const toTeammate = !!a && a !== task.assigneeId;
-            onPatch({ ...(status ? { status } : {}), ...(toTeammate ? handoffDates(sub.due) : {}) });
-          }
-          // Giving the current step to a teammate: the follow up finishes
-          // when they mark it done (brief, section 6).
-          if (isActive && openStep && a && a !== task.assigneeId && !openStep.nextStepWatch) patchStep({ nextStepWatch: `handoff:${sub.id}` });
-        }} />
+        onChange={(a) => assignStep(sub, a, isActive)} />
     ) });
     parts.push({ lead: d ? "due" : "", pick: (
-      <InlineDate value={d} onChange={(v) => { onPatchSub(sub.id, { due: v }); if (isActive && v && sub.assigneeId && sub.assigneeId !== task.assigneeId) onPatch(handoffDates(v)); }} onClear={() => onPatchSub(sub.id, { due: null })}
+      <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)} onClear={() => onPatchSub(sub.id, { due: null })}
         emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>}
         formatValue={(v) => `${formatDue(v)}${sub.done ? "" : `, ${dueCountdown(v)}`}`}
         className={`${dateWord} ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`} />
@@ -2009,7 +2026,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const list = holdOnStep([...taskRef.current.subtasks, { id, title: quickStepName(key) ?? KIND_LABEL[key], done: false, ...(deliverablePresent(key) ? {} : { madeHere: [key] }), ...stepOwnerFields() }], id, key);
     if (asking) setAskNext(null);
     onPatch({ subtasks: list });
-    if (!deliverablePresent(key)) setPendingStart(key);
+    // The step first, set up, the work shown on it; a tap on it opens the
+    // editor (Derek, 2026-10-14: "set the step up first before we start
+    // taking action").
+    openSetup(id, { preset: key });
   };
   // Who a new step is on: whoever added it, when that is the task's owner (or
   // it has none). A teammate's step on someone else's task is noted as theirs
@@ -2021,7 +2041,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const id = newId("s_");
     if (asking) setAskNext(null);
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: `Follow up with ${firstName}`, done: false, due: addBusinessDaysIso(TODAY, 3), finishWhen: "reply" as const, ...stepOwnerFields() }] });
-    setOpenStepPage({ taskId: task.id, id, full: false });
+    openSetup(id, { force: true });
   };
   // Delegate to the client (Derek and Justin, 2026-10-13: "a task that is for
   // the client but no way to assign it to the client"). Like handing a step
@@ -2029,24 +2049,34 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // the current step the task is waiting on them (their page lists it, the
   // reminders run), and their answer, from their page, an email or a text,
   // ticks it and the next step starts. The email asking for it opens on it.
+  // Set up first (Derek, 2026-10-14): the step opens with the client's turn
+  // picked; the action tap writes the ask (askClientOn).
   const clientStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    const draft = taskRef.current.draftEmail;
-    if (draft && htmlToText(draft.body).trim() && !window.confirm(`Replace the draft email "${draft.subject || "(no subject)"}" with one asking ${firstName} for this?`)) return;
-    // The ask is the step; sending it is done, and the wait on their reply
-    // comes after it as the check in, like any email (Derek, 2026-10-13: "the
-    // natural next step is for me to wait for the response").
     const step: Subtask = { id, title: `Ask ${firstName}: ${task.title}`.slice(0, 120), done: false, ...stepOwnerFields() };
-    const list = holdOnStep([...taskRef.current.subtasks, step], id, "email");
+    onPatch({ subtasks: [...taskRef.current.subtasks, step] });
+    openSetup(id, { who: "client", when: TODAY });
+  };
+  // The client's turn on a step: the ask is the step; sending it is done, and
+  // the wait on their reply comes after it as the check in, like any email
+  // (Derek, 2026-10-13: "the natural next step is for me to wait for the
+  // response"). The email asking for it opens on it.
+  const askClientOn = (stepId: string, due?: string | null): boolean => {
+    const draft = taskRef.current.draftEmail;
+    if (draft && htmlToText(draft.body).trim() && !window.confirm(`Replace the draft email "${draft.subject || "(no subject)"}" with one asking ${firstName} for this?`)) return false;
+    const st = taskRef.current.subtasks.find((x) => x.id === stepId);
+    if (!st) return false;
+    const title = /^ask\b/i.test(st.title) ? st.title : `Ask ${firstName}: ${st.title || task.title}`.slice(0, 120);
+    const list = holdOnStep(taskRef.current.subtasks, stepId, "email").map((x) => (x.id === stepId ? { ...x, title, ...(due ? { due } : {}) } : x));
     const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const now = new Date().toISOString();
     onPatch({
       subtasks: list,
       ...(hasMessaging && messageDest?.email ? { draftEmail: { subject: task.title.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>To keep <strong>${esc(task.title)}</strong> moving, we need this from you:</p><p></p>${clientPortalUrl ? `<p>You can reply to this email or answer on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>"}`, replyTo: null, createdAt: now, updatedAt: now } } : {}),
     });
-    setOpenStepPage({ taskId: task.id, id, full: false });
     if (hasMessaging && messageDest?.email) setEmailOpenNonce((n) => n + 1);
+    return true;
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
   // A checklist as a step of its own: its page opens with the to-do box ready.
@@ -2054,7 +2084,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const id = newId("s_");
     if (asking) setAskNext(null);
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: "Checklist", done: false, ...stepOwnerFields() }] });
-    setOpenStepPage({ taskId: task.id, id, full: false, checklist: true });
+    // Set up first; To dos is the action picked, and its tap opens the box.
+    openSetup(id, { preset: "checklist" });
   };
   // Delegate this Task: a step for someone else, due in three business days.
   // Its page opens to pick who, name it and write the directions (Derek,
@@ -2068,7 +2099,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const cur = currentStep(list);
     list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, { id, title: "Hand off", done: false, due: addBusinessDaysIso(TODAY, 3), startedAt: new Date().toISOString() });
     onPatch({ subtasks: list });
-    setOpenStepPage({ taskId: task.id, id, full: false });
+    // Set up first, the most used teammate picked; the action tap hands it
+    // to them the way the step's own picker does (assignStep).
+    openSetup(id, { who: setupTeammates()[0] });
   };
   // Delegate to Claude (Derek, 2026-10-13): the same, already given to Claude,
   // so it is on Claude's list (MCP list_my_tasks for_claude). Nothing opens:
@@ -2103,7 +2136,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (taskRef.current.subtasks.some((x) => !x.done && x.assigneeId === CLAUDE_ID)) { pushToast("Already with Claude"); return; }
     const id = newId("s_");
     const cur = currentStep(taskRef.current.subtasks);
-    toClaude(id, { id, title: "For Claude", done: false, startedAt: new Date().toISOString() }, cur?.id ?? null);
+    // Set up first, Claude's turn today picked; the action tap gives it to
+    // Claude (toClaude) with that action on it.
+    const list = [...taskRef.current.subtasks];
+    list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, { id, title: "For Claude", done: false, startedAt: new Date().toISOString() });
+    onPatch({ subtasks: list });
+    openSetup(id, { who: CLAUDE_ID, when: TODAY });
   };
   // A teammate has the current step: the task is theirs until that date, and
   // comes back to its owner the business day after (Derek, 2026-10-12: "check
@@ -2115,7 +2153,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const emailStep = () => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, ...stepOwnerFields() }], id, "email") });
+    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: `Email ${firstName}`, done: false, due: TODAY, ...stepOwnerFields() }], id, "email") });
+    // No set up: the email is the work, written now (Derek, 2026-10-14). Its
+    // page sits under the window: closing without sending lands there,
+    // sending goes back to the task (finishTalkStep).
+    talkReturn.current = id;
+    setOpenStepPage({ taskId: task.id, id, full: false });
     if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail(undefined, true);
   };
   // A text or a portal chat as a step of its own, like Email (2026-10-13): its
@@ -2123,7 +2166,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const talkStep = (kind: "text" | "client") => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`, done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
+    talkReturn.current = id;
     setOpenStepPage({ taskId: task.id, id, full: false });
   };
   // Remind the client (Derek, 2026-10-13: "a reminder email, individual for
@@ -2181,13 +2225,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const title = `Request a meeting with ${firstName}`;
     if (channel === "sms") {
       const body = [`Hi ${firstName}, do you have time to meet this week about ${task.title}?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", link ? `Or pick any time here: ${link.url}` : ""].filter(Boolean).join(" ");
-      onPatch({ subtasks: [...taskRef.current.subtasks, { id, title, done: false, draftMessage: { channel: "sms", body }, ...stepOwnerFields() }] });
+      onPatch({ subtasks: [...taskRef.current.subtasks, { id, title, done: false, due: TODAY, draftMessage: { channel: "sms", body }, ...stepOwnerFields() }] });
+      talkReturn.current = id;
       setOpenStepPage({ taskId: task.id, id, full: false });
     } else {
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
       const now = new Date().toISOString();
       onPatch({
-        subtasks: holdOnStep([...taskRef.current.subtasks, { id, title, done: false, ...stepOwnerFields() }], id, "email"),
+        subtasks: holdOnStep([...taskRef.current.subtasks, { id, title, done: false, due: TODAY, ...stepOwnerFields() }], id, "email"),
         draftEmail: {
           subject: `Time to meet about ${task.title}?`.slice(0, 120),
           body: `${greetingHtml(messageDest?.name)}<p>Do you have time to meet this week about <strong>${esc(task.title)}</strong>?${times.length ? " Here are a few times that work for me (Pacific):" : ""}</p>`
@@ -2196,6 +2241,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           replyTo: null, createdAt: now, updatedAt: now,
         },
       });
+      talkReturn.current = id;
+      setOpenStepPage({ taskId: task.id, id, full: false });
       setEmailOpenNonce((n) => n + 1);
     }
     if (!link) pushToast("No booking page found for you, so there are no open times in it.");
@@ -2614,8 +2661,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // A function, read when drawn: openStepPage is declared further down, and
   // reading it here crashed the page before (the 2026-10-12 TDZ crash).
   const stepPageOpen = () => !!openStepPage && openStepPage.taskId === task.id;
+  // What's next's set up, answered or skipped for this step (it folds into
+  // the sentence).
+  const [nextSetupDone, setNextSetupDone] = useState<string | null>(null);
   const startNext = () => {
     const next = sentStep;
+    // Not answered yet: the set up goes along to the step's own page.
+    if (next && nextSetupDone !== next.id && !setupSkipped(next) && !asksWhatsNext(next)) setSetupFor((m) => ({ ...m, [next.id]: {} }));
     closeSentNext();
     if (stepPageOpen() && next && !asksWhatsNext(next)) setOpenStepPage({ taskId: task.id, id: next.id, full: openStepPage!.full });
   };
@@ -2642,6 +2694,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       reviewSendFrom.current = sentFrom!.id;
       setReviewSendNonce((r) => ({ ...r, page: r.page + 1 }));
     };
+    const nameRow = (
+      <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
+        onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
+        className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
+    );
+    // Set up the next step here, unless it came set up (a template's, Claude's)
+    // or is a wait on the client.
+    const setupNow = nextSetupDone === sentStep.id || sentNext?.via ? null : setupOf(sentStep, {});
+    // Its action row: the step's own Add items. Directions and To dos open
+    // on its page once it is set up.
+    const toPage = (flag: "directions" | "checklist") => () => { closeSentNext(); setOpenStepPage({ taskId: task.id, id: sentStep.id, full: openStepPage?.full ?? false, [flag]: true }); };
+    const nextOptions: { key: string; label: string; disabled?: boolean; title?: string; onPick: () => void }[] = [
+      { key: "directions", label: "Directions", onPick: toPage("directions") },
+      { key: "checklist", label: "To dos", onPick: toPage("checklist") },
+      ...stepAddOptions(sentStep).map((o) => ({ key: o.key, label: o.label, disabled: o.disabled, title: o.note, onPick: o.onPick })),
+    ];
+    const nextSuggest = asking ? [] : suggestStepActions(sentStep.title, firstName)
+      .flatMap((x) => { const o = nextOptions.find((y) => y.key === x.kind && !y.disabled); return o ? [{ ...o, label: x.label }] : []; });
+    const nextRows = addRowsOf(nextOptions, firstName, new Set(nextSuggest.map((x) => x.key)));
     return (
       <div className="relative" onKeyDown={inline ? (e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); startNext(); } } : undefined}>
         {/* Close and change nothing (Derek, 2026-10-13: "an X in the corner to just do nothing"). */}
@@ -2651,9 +2722,21 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // Says what went (Derek, 2026-10-13: "Text message sent, waiting for Ryan to reply").
           : `✓ ${sentNext?.via === "sms" ? "Text" : sentNext?.via === "chat" ? "Chat" : "Email"} sent to ${firstName}. Waiting for ${firstName} to reply.`}</div>
         <div className="mt-3 text-[16px] font-bold">What&apos;s next?</div>
-        <input autoFocus value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
-          onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
-          className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
+        {setupNow ? (
+          // Set up (Derek, 2026-10-14): the next step's name, then whose turn,
+          // by when and what, one line each; an action tap folds it into the
+          // sentence below.
+          <div className="mt-0.5">
+            <StepSetup key={sentStep.id} name={nameRow} {...setupNow} meId={meId ?? null}
+              lead={[
+                ...(reviewToSend ? [{ key: "reviewemail", label: `Email ${firstName} to review`, onPick: emailForReview }] : []),
+                ...nextSuggest,
+              ]}
+              rows={nextRows.rows.map((r) => ({ label: r.label, items: r.items }))} more={nextRows.rest}
+              onDone={(a, run) => { setNextSetupDone(sentStep.id); applySetup(sentStep.id, a, run); }} />
+          </div>
+        ) : (<>
+        {nameRow}
         <div className="mt-1 text-[17px] leading-snug">
           <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stg].dot }} />{STATUS_META[stg].label}
           {!sentStep.onClient && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
@@ -2664,12 +2747,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onChange={(d) => { if (!d) return; onPatchSub(sentStep.id, { due: d }); onPatch({ followUpAt: d, ...(task.due && task.due < d ? { due: d } : {}) }); }} />
           </span>.
         </div>
+        </>)}
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {reviewToSend && <button onClick={emailForReview} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Email {firstName} to review</button>}
-          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
+          {reviewToSend && !setupNow && <button onClick={emailForReview} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Email {firstName} to review</button>}
+          <button onClick={inline ? startNext : closeSentNext} className={reviewToSend && !setupNow ? "h-10 rounded-[5px] border px-3 text-[16px] font-semibold hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{asking ? "Decide later" : inline ? "Start it" : "Looks good"}</button>
           {/* Hand the next step straight to Claude and move on (Derek, 2026-10-13:
-              "now the next step is for me to delegate it to Claude"). */}
-          {!asking && !sentStep.onClient && sentStep.assigneeId !== CLAUDE_ID && (
+              "now the next step is for me to delegate it to Claude"). In the
+              set up, Claude is a choice of Whose turn. */}
+          {!setupNow && !asking && !sentStep.onClient && sentStep.assigneeId !== CLAUDE_ID && (
             <button onClick={() => {
               closeSentNext();
               toClaude(sentStep.id);
@@ -2690,11 +2775,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 onPatch({ subtasks: list.map((x) => (x.id === sentStep.id ? { ...x, startedAt: undefined } : x)) });
                 setSentNext((n) => (n ? { ...n, stepId: id } : n));
               } },
+              // Each makes its own step and opens it, set up first.
               ...[...quickStepOptions(), ...quickPeopleOptions()].filter((o) => !o.disabled).map((o) => ({ label: o.label, onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep) }); closeSentNext(); o.onPick(); } })),
-              { label: "The task is finished", onClick: () => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); } },
             ]} />
-          <span className="ml-auto text-[16px] text-muted">{inline ? "Enter to start it" : "Enter to keep it"}</span>
+          <span className="ml-auto hidden text-[16px] text-muted sm:inline">{inline ? "Enter to start it" : "Enter to keep it"}</span>
         </div>
+        {/* Small, at the bottom (Derek, 2026-10-14). */}
+        <button onClick={() => { onPatch({ subtasks: dropSuggestion(sentStep), status: "done" }); closeSentNext(); pushToast("Task done"); }}
+          className="mt-3 text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">The task is finished</button>
       </div>
     );
   })();
@@ -2737,6 +2825,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const plan = talkStepPlan(channel, followUpDate, stepId);
     if (!plan) return false;
     const { cur, due, holder } = plan;
+    // Sent from a message step made from Quick step: back to the task, where
+    // its check in shows in the steps (Derek, 2026-10-14).
+    if (talkReturn.current === cur.id) { talkReturn.current = null; setOpenStepPage(null); }
     if (plan.kind === "reminder") {
       const list = recordFollowUp(taskRef.current.subtasks, cur.id, "email", due).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
       onPatch({ subtasks: list, followUpAt: due });
@@ -2977,9 +3068,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this task"
       // Plain like Link and + Attach beside it, no box (Derek, 2026-10-13).
       triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline" items={[
-      canHaveDocument && !showDocument && { label: "Client document", onClick: () => setDocStartNonce((n) => n + 1) },
-      canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => setBriefStartNonce((n) => n + 1) },
-      ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => setReviewStartNonce((s) => ({ ...s, [l.kind]: s[l.kind] + 1 })) })) : []),
+      // Each makes a step holding it and opens that step, set up first; a
+      // tap on the work there opens its editor (Derek, 2026-10-14).
+      canHaveDocument && !showDocument && { label: "Client document", onClick: () => quickStep("doc") },
+      canHaveDocument && !showBrief && { label: "Project instructions", onClick: () => quickStep("brief") },
+      ...(canHaveDocument ? REVIEW_LINES.filter((l) => !hasReview(l.kind)).map((l) => ({ label: l.label, onClick: () => quickStep(l.kind) })) : []),
       hasMessaging && !task.draftEmail && { label: "Draft email", onClick: () => startDraftEmail() },
       // The meeting's steps (Derek, 2026-10-12): Granola's transcript lands on
       // the second as a file and ticks it, so the Document stays free. A
@@ -3078,7 +3171,66 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step whose own page is open, and whether full page (Derek: a slide
   // out to look quickly, full page to work in, like a handoff).
-  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean; talk?: "client" | "text" } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
+  const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean; directions?: boolean; talk?: "client" | "text" } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
+  // ── Setting a step up (Derek, 2026-10-14; StepSetup): a step just made
+  // opens its page asking whose turn, by when and what, the likely answers
+  // picked. Kept by step id, so it is still there after stepping away and
+  // back, and gone once answered or skipped. who/when: picked answers a path
+  // knows better (Delegate to Claude is Claude's, today); preset: the work
+  // already on it (Quick step's Document); force: asks even on a wait.
+  type SetupEntry = { preset?: string; who?: string; when?: string; force?: boolean };
+  const [setupFor, setSetupFor] = useState<Record<string, SetupEntry>>({});
+  const openSetup = (id: string, entry: SetupEntry = {}) => {
+    setSetupFor((m) => ({ ...m, [id]: entry }));
+    setOpenStepPage({ taskId: task.id, id, full: false });
+  };
+  const endSetup = (id: string) => setSetupFor((m) => { if (!(id in m)) return m; const n = { ...m }; delete n[id]; return n; });
+  // A message step made from Quick step: its page sits under the compose
+  // window; once sent, back to the task, where its check in shows.
+  const talkReturn = useRef<string | null>(null);
+  // Teammates most used first: this task's steps, and the picks made here.
+  const SETUP_PICKS = "cut.setup.whoPicks";
+  const setupTeammates = () => {
+    const counts: Record<string, number> = {};
+    try { Object.assign(counts, JSON.parse(localStorage.getItem(SETUP_PICKS) ?? "{}")); } catch { /* none kept */ }
+    for (const x of taskRef.current.subtasks) if (x.assigneeId) counts[x.assigneeId] = (counts[x.assigneeId] ?? 0) + 1;
+    return rankTeammates(users.map((u) => u.id), counts, meId ?? null);
+  };
+  const rememberPick = (id: string) => {
+    try { const c = JSON.parse(localStorage.getItem(SETUP_PICKS) ?? "{}") as Record<string, number>; c[id] = (c[id] ?? 0) + 1; localStorage.setItem(SETUP_PICKS, JSON.stringify(c)); } catch { /* fine */ }
+  };
+  const firstOf = (id: string) => userById(id)?.name.split(" ")[0] ?? "Someone";
+  // The answers, through the paths each already has: Claude (toClaude), the
+  // client (the ask, as Delegate to the client), a teammate or you (the
+  // step's own picker and due date). The action goes on first.
+  const applySetup = (stepId: string, a: SetupAnswer, run?: () => void) => {
+    endSetup(stepId);
+    run?.();
+    const st = taskRef.current.subtasks.find((x) => x.id === stepId);
+    if (!st) return;
+    const isActive = currentStep(taskRef.current.subtasks)?.id === stepId;
+    if (a.who && a.who !== "client") rememberPick(a.who);
+    if (a.who === CLAUDE_ID) { toClaude(stepId); return; }
+    if (a.who === "client") { askClientOn(stepId, a.when); return; }
+    if (a.who && a.who !== st.assigneeId) assignStep(st, a.who, isActive);
+    setStepDue(st, a.when, isActive);
+  };
+  /** The set up for a step, or null when it has none to show. */
+  const setupOf = (sub: Subtask, entry: SetupEntry | undefined): StepSetupProps | null => {
+    if (!entry || sub.done || (!entry.force && setupSkipped(sub))) return null;
+    const who = entry.who ?? preselectWho(sub, meId ?? null);
+    const list = whoChoices(meId ?? null, setupTeammates(), mayContactClient && !isPersonal);
+    return {
+      who: list.map((c) => ({ key: c.key, label: c.kind === "me" ? "You" : c.kind === "claude" ? "Claude" : c.kind === "client" ? firstName : c.kind === "else" ? "Someone else" : firstOf(c.key) })),
+      whoInitial: who,
+      nameOf: firstOf,
+      someoneElse: (label, pick) => <InlineAssignee value={null} noFace label={label} onChange={(id) => { if (id) pick(id); }} />,
+      whenInitial: entry.when ?? preselectWhen(sub, TODAY, who),
+      today: TODAY,
+      preset: entry.preset ?? null,
+      onDone: (a, run) => applySetup(sub.id, a, run),
+    };
+  };
   // An older handoff opened as a step: its brief, steps, files and reviews
   // move onto the step once (handoffIntoStep); its chat stays to read.
   const pageSub = openStepPage?.taskId === task.id ? task.subtasks.find((x) => x.id === openStepPage.id) ?? null : null;
@@ -3099,7 +3251,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const list = holdOnStep(taskRef.current.subtasks, sub.id, key)
         .map((x) => (x.id === sub.id && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
       onPatch({ subtasks: title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
-      if (!deliverablePresent(key)) setPendingStart(key);
+      // Shown on the step, not opened: a tap on it opens the editor (Derek,
+      // 2026-10-14). An email is the exception, its window is the work.
+      if (key === "email" && !deliverablePresent(key)) setPendingStart(key);
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML review" }, { key: "video" as const, label: "Video" }] : []),
@@ -3266,7 +3420,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   </span>
                 ) : (() => {
                   const d = k as DeliverableKey;
-                  if (!deliverablePresent(d)) return null;
+                  // Put on the step and not made yet (Quick step, the step's
+                  // Add): shown, a tap makes it and opens its editor.
+                  if (!deliverablePresent(d)) return sub.madeHere?.includes(d) && !sub.done && d !== "email" ? (
+                    <span role="button" tabIndex={0} onClick={() => openWork(d)} onKeyDown={(e) => { if (e.key === "Enter") openWork(d); }}
+                      className="flex min-w-0 cursor-pointer items-center gap-3 rounded-[5px] border bg-surface px-3 py-2 hover:border-accent hover:bg-background">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[16px] font-semibold">{KIND_LABEL[d]}</span>
+                        <span className="text-[16px] text-muted">Not started yet</span>
+                      </span>
+                      <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-4 text-[16px] font-semibold leading-9">Open</span>
+                      <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title="Take off this step" aria-label={`Take ${KIND_LABEL[d]} off this step`}
+                        className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
+                    </span>
+                  ) : null;
                   const r = d === "doc" || d === "image" || d === "page" || d === "video" ? reviews[d] : null;
                   // An email not yet sent on an open step is the work to do:
                   // the step's own colour, said plainly (Derek, 2026-10-13: "we
@@ -3740,7 +3907,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startTalk={openStepPage.talk} tone={stepTone(ps)}
+            <StepPage task={task} sub={ps} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
               nextPanel={sentStep ? nextBody(true) : undefined}
               onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
@@ -3763,6 +3930,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 });
               }}
               controls={stepControls(ps, isCur)}
+              setup={setupOf(ps, setupFor[ps.id])}
               addOptions={stepAddOptions(ps)}
               // The email to the client held here, written and ready: the
               // step's finish button sends it (Derek, 2026-10-13).

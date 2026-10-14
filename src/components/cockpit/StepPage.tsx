@@ -19,6 +19,22 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
+import { ADD_ICON, ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
+
+/** The set up a step shows before anything else (StepSetup): its answers
+ *  picked already, and what to do with them. The action row is the page's own
+ *  Add items. */
+export type StepSetupProps = {
+  who: SetupWho[];
+  whoInitial: string | null;
+  nameOf?: (id: string) => string;
+  someoneElse?: (label: React.ReactNode, pick: (id: string) => void) => React.ReactNode;
+  whenInitial: string;
+  today: string;
+  /** The action already chosen (Quick step): shown picked. */
+  preset?: string | null;
+  onDone: (answer: SetupAnswer, run?: () => void) => void;
+};
 
 /** The end of every step (Derek, 2026-10-13: "more guidance at the end of
  *  the step for next steps", asked several times): "What's next?", a line on
@@ -78,29 +94,6 @@ export function NextChoices({ intro, choices, moreLabel }: { intro?: React.React
   );
 }
 
-// An empty step lays the Add menu out in three rows (Derek, 2026-10-14):
-// what you write, how you talk to the client, what you make for them to
-// review. Anything else on the menu stays behind + More at the end.
-const ADD_ROWS = [
-  { row: "write", keys: ["directions", "checklist"] },
-  { row: "talk", keys: ["email", "text", "chat"] },
-  { row: "make", keys: ["doc", "image", "page", "video"] },
-] as const;
-const ADD_SHORT: Record<string, string> = {
-  directions: "Directions", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
-  doc: "Document", image: "Image", page: "HTML review", video: "Video",
-};
-// ui's icons have no image, HTML review or video; these match their stroke.
-const rowIcon = (d: React.ReactNode) => function RowIcon(p: { className?: string }) {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16" aria-hidden>{d}</svg>;
-};
-const ADD_ICON: Record<string, (p: { className?: string }) => React.ReactNode> = {
-  directions: I.pencil, checklist: I.list, email: I.mail, text: I.mobile, chat: I.chatBubbles, doc: I.note,
-  image: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>),
-  page: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01" /></>),
-  video: rowIcon(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9.5v5l4.5-2.5z" /></>),
-};
-
 /** The step's directions read as the task's description does: muted, four
  *  lines, then Read more, which opens the rest in place. A click on the text
  *  edits it. */
@@ -130,7 +123,7 @@ function ClampedDirections({ text, onEdit }: { text: string; onEdit: () => void 
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
-  controls, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -153,6 +146,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** The step's sentence under its name, like the task's: its state, who has
    *  it, its due date and follow up, each a word to change. */
   controls?: React.ReactNode;
+  /** A new step asks whose turn, by when and what first (StepSetup), in place
+   *  of its sentence and its Add rows, until answered or skipped. */
+  setup?: StepSetupProps | null;
+  /** Opened from a set up's Directions: the directions box is out. */
+  startWithDirections?: boolean;
   /** Where it sits in the steps, and the arrows to the one before and after
    *  (Derek, 2026-10-11: "can the arrows move them through the steps?"). */
   stepNo?: { at: number; total: number };
@@ -254,11 +252,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const setTalk = (t: Talk) => { setTalkState((cur) => (cur === t ? null : t)); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); };
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   const [showTodos, setShowTodos] = useState(startWithChecklist);
-  const [dirOpen, setDirOpen] = useState(!!sub.notes && htmlToText(sub.notes).trim() !== "");
+  const [dirOpen, setDirOpen] = useState(startWithDirections || (!!sub.notes && htmlToText(sub.notes).trim() !== ""));
   // The saved links being picked, or null when the list is closed.
   const [linkPick, setLinkPick] = useState<string[] | null>(null);
   // Directions read as text once written; new ones open ready to type.
-  const [dirEditing, setDirEditing] = useState(!(sub.notes && htmlToText(sub.notes).trim()));
+  const [dirEditing, setDirEditing] = useState(startWithDirections || !(sub.notes && htmlToText(sub.notes).trim()));
   const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirSave = useRef<(() => void) | null>(null);
   // Deleted directions can come back until the page closes.
@@ -533,12 +531,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // light, then the Add menu's own choices in three labelled rows, each doing what
   // picking it from + Add does. A suggested one isn't shown twice.
   const suggested = new Set<string>(suggestions.map((x) => x.kind));
-  const rowKeys = new Set<string>(ADD_ROWS.flatMap((r) => r.keys));
-  const addRowList = ADD_ROWS.map((r) => ({
-    label: r.row === "write" ? "Write" : r.row === "talk" ? `Talk to ${first}` : "Make to review",
-    items: (r.keys as readonly string[]).flatMap((k) => options.filter((o) => o.key === k && !suggested.has(k))),
-  })).filter((r) => r.items.length > 0);
-  const addRest = options.filter((o) => !rowKeys.has(o.key));
+  const { rows: addRowList, rest: addRest } = addRowsOf(options, first, suggested);
   const addRows = (
     <section aria-label="Add to this step" className="flex flex-col gap-3">
       {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}</div>}
@@ -719,7 +712,16 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 {/* Read like the task's header (Derek, 2026-10-13): the name,
                     one sentence ("● Your turn, assigned to Derek, due Oct 14,
                     follow up set a date"), then the directions in muted text. */}
-                {controls}
+                {setup ? (
+                  // The rows fold into the sentence once answered.
+                  <div className="mt-1 rounded-[5px] p-3 ring-1 ring-inset ring-border">
+                    <StepSetup {...setup} meId={meId ?? null} autoFocus
+                      lead={suggestions.map((x) => ({ key: x.kind, label: x.label, onPick: x.onPick }))}
+                      rows={addRowList.map((r) => ({ label: r.label, items: r.items.map((o) => ({ key: o.key, label: o.label, disabled: o.disabled, title: [o.label !== (ADD_SHORT[o.key] ?? o.label) && o.label, o.note].filter(Boolean).join(", ") || undefined, onPick: o.onPick })) }))}
+                      more={addRest.map((o) => ({ key: o.key, label: o.label, disabled: o.disabled, onPick: o.onPick }))}
+                      onDone={(a, run) => setup.onDone(a, run)} />
+                  </div>
+                ) : controls}
                 {/* Why it is whose move, when the sentence's first word doesn't
                     say it all ("Claude finished its part. Your turn", "Ryan
                     wrote", "Claude is working"): a line, no box, strong red
@@ -742,7 +744,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {outFor !== undefined ? outFor : empty && !dirOpen ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
+              {setup ? null : outFor !== undefined ? outFor : empty && !dirOpen ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
               {/* Saved links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
@@ -780,7 +782,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
-                    {outFor === undefined && <>{suggestButtons(true)}{addMenu(true)}</>}
+                    {outFor === undefined && !setup && <>{suggestButtons(true)}{addMenu(true)}</>}
                   </div>
                   {held}
                   {/* Links and files come in by paste or drag (Derek, 2026-10-11). */}
