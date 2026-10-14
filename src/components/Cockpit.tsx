@@ -352,7 +352,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [followingOpen, setFollowingOpen] = useState(false);
-  const [hideEmpty, setHideEmpty] = usePersisted("hideEmpty", true, (v) => typeof v === "boolean");
   const [hideDone, setHideDone] = usePersisted("hideDone", true, (v) => typeof v === "boolean");
 
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -852,7 +851,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     return null;
   };
 
-  const toggleHideEmpty = () => setHideEmpty(!hideEmpty);
   const toggleHideDone = () => setHideDone(!hideDone);
   const [drawerFull, setDrawerFull] = useState(false);
   useEffect(() => afterFirstFrame(() => setDrawerFull(localStorage.getItem("cut_drawerFull") === "1")), []);
@@ -2436,10 +2434,6 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           </div>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Group by</span><select value={groupBy} onChange={(e) => setGroupBy(e.target.value as typeof groupBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="status">Status</option><option value="priority">Priority</option><option value="due">Due date</option><option value="project">List</option></select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Sort</span><select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="manual">Manual</option><option value="due">Days left (due date)</option><option value="created">Created (oldest first)</option><option value="priority">Priority</option><option value="title">Task name</option><option value="status">Status</option><option value="assignee">Assignee</option></select></label>
-          <button onClick={toggleHideEmpty} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
-            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideEmpty ? "border-accent bg-accent text-white" : "border-border"}`}>{hideEmpty && <I.check />}</span>
-            <span className="text-muted">Hide empty groups</span>
-          </button>
           <button onClick={toggleHideDone} className="flex w-full items-center gap-2 rounded px-0 py-1 text-left hover:bg-background">
             <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${hideDone ? "border-accent bg-accent text-white" : "border-border"}`}>{hideDone && <I.check />}</span>
             <span className="text-muted">Hide done tasks</span>
@@ -3334,7 +3328,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
         ) : personalView ? (
-          <GroupedList ownList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} colOrder={colOrder} onReorderCols={reorderCols} />
+          <GroupedList ownList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(myPersonalTasks.filter(passesFilters))} showClient={false} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={["followUp", "due"]} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={(k) => setDumpGroup({ key: k, personal: true })} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} colOrder={colOrder} onReorderCols={reorderCols} />
         ) : showCompletedLog ? (
           // Now an All Tasks mode rather than a My Work tab — day-grouped feed
           // of what finished and when. The header's scope answers WHOSE work,
@@ -3428,7 +3422,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           ) : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} hideEmpty={hideEmpty} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>

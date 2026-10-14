@@ -24,7 +24,7 @@ function SortArrow({ col, activeCol, sortDir }: { col: string; activeCol: string
   return <span className="text-accent">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, onClearNeedsYou, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, hideEmpty, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor, ownList }: {
+export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient, onOpenClient, clientById, projectById, contactById, visibleCols, sortKey, sortDir, onSort, onOpen, onPatch, onClearNeedsYou, canQuickAdd, quickAddHint, onAddInGroup, folderById, onToggleSub, onAddSub, onDeleteSub, lensId, onDropInGroup, onMergeTasks, colOrder, onReorderCols, selectedIds, onToggleSelect, meId, previewByTask, listsFor, ownList }: {
   /** The client's last message on each task still waiting on an answer, shown
    *  under the title (data.ts unansweredPreviewByTask). */
   previewByTask?: Map<string, string>;
@@ -60,7 +60,7 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // five too many (Derek, 2026-09-08: "remove add tasks to each group title
   // and put one on" the rail instead).
   onAddInGroup?: (groupKey: string) => void;
-  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; hideEmpty?: boolean; 
+  onToggleSub: (taskId: string, subId: string) => void; onAddSub: (taskId: string, title: string) => void; onDeleteSub: (taskId: string, subId: string) => void; 
   // When set, task rows can be dragged onto a group header to move them into
   // that group (e.g. drag a row onto "Urgent" to reprioritize it) — only
   // meaningful for groupBy dimensions the caller knows how to translate back
@@ -124,12 +124,10 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
   // ref since it doesn't need to trigger a re-render on its own.
   const lastSelectedIdRef = useRef<string | null>(null);
 
-  const filteredGroups = hideEmpty ? groups.filter((g) => g.tasks.length > 0) : groups;
-  // hideEmpty must never hide the only way to add a first task — if filtering
-  // would leave nothing on screen at all, fall back to the first defined
-  // group (empty, but its quick-add row is still reachable) instead of a
-  // dead-end "No tasks yet." with no input anywhere.
-  const visibleGroups = filteredGroups.length === 0 && canQuickAdd && groups.length > 0 ? [groups[0]] : filteredGroups;
+  // A group with no tasks never shows (Derek, 2026-10-14: "Overdue 0" was a
+  // header over nothing). With no tasks at all, the empty note below offers
+  // the add instead of an empty group's header.
+  const visibleGroups = groups.filter((g) => g.tasks.length > 0);
   // Flat visible order (collapsed groups excluded, they're not on screen) —
   // what a shift-click range actually spans.
   const flatVisibleTaskIds = visibleGroups.filter((g) => !collapsedG.has(g.key)).flatMap((g) => g.tasks.map((t) => t.id));
@@ -274,7 +272,12 @@ export function GroupedList({ groups, groupKind, collapseFarBuckets, showClient,
             </tbody>
           ))}
         </table>
-        {visibleGroups.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted">No tasks yet.</div>}
+        {visibleGroups.length === 0 && (
+          <div className="px-4 py-10 text-center text-[16px] text-muted">
+            No tasks here.
+            {canQuickAdd && onAddInGroup && groups[0] && <> <button onClick={() => onAddInGroup(groups[0].key)} className="font-semibold text-accent hover:underline">Add a task</button></>}
+          </div>
+        )}
       </div>
       {!canQuickAdd && quickAddHint && <div className="mt-3 text-center text-[13px] text-muted">{quickAddHint}</div>}
     </div>
