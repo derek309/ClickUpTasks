@@ -40,6 +40,14 @@ export function meetNowEmail(text: string): { subject: string; html: string } {
   return { subject: "Join me now", html };
 }
 
+/** How the sheet offers the link. Google's invite went (invited): a text
+ *  as well, when they have a phone, since the meeting is now and they may not
+ *  see the email. No invite: email or text, whichever they have. */
+export function meetNowChannels(o: { invited: string | null; email: string | null; phone: string | null }): ("email" | "sms")[] {
+  if (o.invited) return o.phone ? ["sms"] : [];
+  return [...(o.email ? ["email" as const] : []), ...(o.phone ? ["sms" as const] : [])];
+}
+
 /** The meeting's two steps, as a booked meeting has them (withMeetingSteps):
  *  "Meet with <first>", current, due today and holding the link, then "Add
  *  the meeting transcript" for Granola to fill. Both marked meetNow, so a

@@ -68,14 +68,20 @@ export function withGoogleLinks<E extends { busy: boolean; start: string; end: s
 // meeting link.
 const WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
-export type GoogleMeetResult = { ok: true; url: string; eventId: string } | { ok: false; refused: boolean; error: string };
+export type GoogleMeetResult = { ok: true; url: string; eventId: string; invited: string | null } | { ok: false; refused: boolean; error: string };
 
 /** Google said no to the scope (not set up in Google Admin), rather than failing. */
 export const isScopeRefusal = (msg: string) => /unauthorized_client|access_denied|insufficient|forbidden|\b403\b|not authorized/i.test(msg);
 
+/** Where the event is made. With a guest, Google emails them its invitation
+ *  (sendUpdates all), so the meeting lands on their calendar with its link
+ *  (Derek, 2026-10-14: the invite rather than a written email). */
+export function meetNowEventUrl(invite: boolean): string {
+  return `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=${invite ? "all" : "none"}`;
+}
+
 /** The event Google is asked for: Meet made by Google (link null), or the
- *  person's own link in its location and description. Sends Google's own
- *  invitation to nobody: the app sends the link itself. */
+ *  person's own link in its location and description. */
 export function meetNowEventBody(o: { title: string; start: string; end: string; guest: { email: string; name?: string | null } | null; link: string | null; requestId: string }) {
   return {
     summary: o.title,
@@ -96,7 +102,7 @@ export async function createGoogleMeeting(userEmail: string, o: { title: string;
     const jwt = new JWT({ email: SA_EMAIL, key: SA_KEY, scopes: [WRITE_SCOPE], subject: userEmail });
     const body = meetNowEventBody({ ...o, requestId: `meetnow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` });
     const res = await jwt.request<any>({
-      url: "https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none",
+      url: meetNowEventUrl(!!o.guest),
       method: "POST", data: body, timeout: 15000,
     });
     let ev = res.data;
@@ -107,7 +113,7 @@ export async function createGoogleMeeting(userEmail: string, o: { title: string;
     }
     const url = o.link ?? meetingLinkOf(ev);
     if (!url) return { ok: false, refused: false, error: "Google made the event without a Meet link." };
-    return { ok: true, url, eventId: String(ev.id) };
+    return { ok: true, url, eventId: String(ev.id), invited: o.guest?.email ?? null };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, refused: isScopeRefusal(msg), error: msg.slice(0, 200) };

@@ -9,10 +9,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { authedFetch } from "@/lib/supabase";
-import { cleanMeetingLink, meetNowEmail, meetNowText } from "@/lib/meetNow";
+import { cleanMeetingLink, meetNowChannels, meetNowEmail, meetNowText } from "@/lib/meetNow";
 import { useEscapeToClose } from "./useEscapeToClose";
 
-type Started = { url: string; via: "meet" | "link"; calendar: boolean; again?: boolean; taskId?: string; stepId?: string | null; title?: string };
+type Started = { url: string; via: "meet" | "link"; calendar: boolean; invited: string | null; again?: boolean; taskId?: string; stepId?: string | null; title?: string };
 
 export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, savedLink, onSaveLink, onSend, onStarted, onClose, pushToast }: {
   clientId: string;
@@ -36,8 +36,8 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
   const [state, setState] = useState<{ kind: "starting" } | { kind: "needLink"; google: boolean } | { kind: "error"; text: string } | ({ kind: "ready" } & Started)>({ kind: "starting" });
   const [linkDraft, setLinkDraft] = useState(savedLink ?? "");
   const [linkError, setLinkError] = useState<string | null>(null);
-  const channels = [...(email ? ["email" as const] : []), ...(phone ? ["sms" as const] : [])];
-  const [channel, setChannel] = useState<"email" | "sms" | null>(channels[0] ?? null);
+  // Picked once it starts: with Google's invite sent, a text is only an extra.
+  const [channel, setChannel] = useState<"email" | "sms" | null>(null);
   const [subject, setSubject] = useState("Join me now");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -52,8 +52,9 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
     const j = (res ? await res.json().catch(() => ({})) : {}) as Partial<Started> & { needLink?: boolean; google?: boolean; error?: string };
     if (res?.ok && j.needLink) { setState({ kind: "needLink", google: !!j.google }); return; }
     if (!res?.ok || !j.url) { setState({ kind: "error", text: j.error ?? "The meeting couldn't be started." }); return; }
-    const r: Started = { url: j.url, via: j.via === "meet" ? "meet" : "link", calendar: !!j.calendar, again: j.again, taskId: j.taskId, stepId: j.stepId ?? null, title: j.title };
+    const r: Started = { url: j.url, via: j.via === "meet" ? "meet" : "link", calendar: !!j.calendar, invited: typeof j.invited === "string" ? j.invited : null, again: j.again, taskId: j.taskId, stepId: j.stepId ?? null, title: j.title };
     setBody(meetNowText(first, r.url));
+    setChannel(r.invited ? null : meetNowChannels({ invited: null, email, phone })[0] ?? null);
     setState({ kind: "ready", ...r });
     onStarted?.(r);
   };
@@ -91,6 +92,7 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
   const dark = "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-50";
   const light = "inline-flex h-10 shrink-0 items-center rounded-[5px] bg-surface px-3 text-[16px] font-semibold text-accent ring-1 ring-inset ring-border hover:bg-background";
   const ready = state.kind === "ready" ? state : null;
+  const channels = meetNowChannels({ invited: ready?.invited ?? null, email, phone });
   return createPortal(
     <>
       <div className="fixed inset-0 z-[60] bg-black/30" onClick={onClose} />
@@ -102,7 +104,7 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
             <p className="text-muted">
               {state.kind === "starting" ? "Starting the meeting…"
                 : ready ? (ready.again ? "Already started. Here is its link again."
-                  : ready.via === "meet" ? `Google Meet, on your calendar with ${first} as a guest, for 30 minutes from now.`
+                  : ready.via === "meet" ? "Google Meet, on your calendar, for 30 minutes from now."
                   : `Your meeting link${ready.calendar ? ", on your calendar" : ""}, for 30 minutes from now.`)
                 : state.kind === "needLink" ? "Paste your meeting link once and it's kept for next time."
                 : "Nothing was started."}
@@ -127,7 +129,22 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
               <button onClick={() => void copy(ready.url)} className={light}>Copy</button>
               <a href={ready.url} target="_blank" rel="noopener noreferrer" className={light}>Join now</a>
             </div>
-            {channels.length > 0 && onSend ? <>
+            {ready.invited ? <>
+              {/* Google emailed them the invite (Derek, 2026-10-14): it is on
+                  their calendar with the link. A text only as an extra. */}
+              <div className="flex items-center gap-2 border-t pt-3 font-semibold text-success">Calendar invite sent to {ready.invited} ✓</div>
+              {channels.includes("sms") && onSend && (
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input type="checkbox" checked={channel === "sms"} onChange={(e) => setChannel(e.target.checked ? "sms" : null)} className="h-5 w-5 shrink-0 accent-[var(--accent)]" />
+                  <span><b className="block font-semibold">Also text them the link</b><span className="text-muted">The meeting is now, and they may not see the email</span></span>
+                </label>
+              )}
+              {channel === "sms" && <>
+                <span className="text-muted">To {phone}</span>
+                <label className="grid gap-1"><span className="font-semibold">Message</span>
+                  <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} className={`${field} resize-y py-2 leading-snug`} /></label>
+              </>}
+            </> : channels.length > 0 && onSend ? <>
               <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                 <span className="font-semibold">Send the link by</span>
                 <span role="radiogroup" aria-label="Send the link by" className="flex gap-1.5">
@@ -147,6 +164,10 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
             </> : (
               <div className="rounded-[5px] bg-background px-3 py-2 text-muted">{onSend ? `No email or phone for ${first}, so copy the link and send it your own way.` : `You can't message ${first} from here, so copy the link and send it your own way.`}</div>
             )}
+            {/* Your own link and no calendar: Google can't invite them. */}
+            {!ready.invited && !ready.again && ready.via === "link" && !ready.calendar && (
+              <span className="text-muted">A calendar invite needs Google Calendar access (ask Derek)</span>
+            )}
           </>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t px-4 py-3 sm:px-5">
@@ -154,9 +175,11 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
             <button onClick={onClose} className={quiet}>Cancel</button>
             <button onClick={saveAndStart} disabled={!linkDraft.trim()} className={dark}>Start the meeting</button>
           </> : ready && channel && onSend ? <>
-            <button onClick={onClose} className={quiet}>Not now</button>
+            <button onClick={onClose} className={quiet}>{ready.invited ? "Done" : "Not now"}</button>
             <button onClick={() => void send()} disabled={sending || !body.trim()} className={dark}>{sending ? "Sending…" : channel === "email" ? "Send email" : "Send text"}</button>
-          </> : (
+          </> : ready?.invited ? (
+            <button onClick={onClose} className="h-10 rounded-[5px] bg-surface px-4 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background">Done</button>
+          ) : (
             <button onClick={onClose} className={quiet}>Close</button>
           )}
         </div>

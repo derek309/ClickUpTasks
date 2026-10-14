@@ -17,8 +17,10 @@ import { isReplyTask, titleCase, type Subtask } from "@/lib/data";
 // "when a client says let's meet, start a meeting right away and send them the
 // link"). Makes the meeting, starting now for 30 minutes, then puts "Meet with
 // <first>" (current, holding the link) and "Add the meeting transcript" on
-// the task, as a booked meeting has them. Sends nothing: the sheet that
-// called this shows the link to send, written for the client, with Send.
+// the task, as a booked meeting has them. On Google, the client is a guest
+// and Google emails them the calendar invite with the link (Derek,
+// 2026-10-14); the sheet then only offers to text the link too. Otherwise
+// nothing is sent here: the sheet offers the link by email or text, with Send.
 //
 // The meeting: a Google Calendar event on your own calendar with a Google
 // Meet link and the client as a guest, when Google lets us (the calendar.events
@@ -86,10 +88,12 @@ export async function POST(req: NextRequest) {
   const onGoogle = calendarConfigured && myEmail.endsWith("@clickuplocal.com");
   let meeting: MeetNowMeeting | null = null;
   let calendar = false;
+  // Google emailed them its calendar invite: the address it went to.
+  let invited: string | null = null;
   let googleRefused = !onGoogle;
   if (onGoogle) {
     const g = await createGoogleMeeting(myEmail, { title, start, end, guest, link: null });
-    if (g.ok) { meeting = { url: g.url, start, end, via: "meet" }; calendar = true; }
+    if (g.ok) { meeting = { url: g.url, start, end, via: "meet" }; calendar = true; invited = g.invited; }
     else { googleRefused = g.refused; if (!g.refused) console.error("[meet-now] Google Meet failed", g.error); }
   }
   if (!meeting) {
@@ -106,6 +110,7 @@ export async function POST(req: NextRequest) {
     if (onGoogle && !googleRefused) {
       const g = await createGoogleMeeting(myEmail, { title, start, end, guest, link });
       calendar = g.ok;
+      if (g.ok) invited = g.invited;
     }
   }
 
@@ -115,7 +120,7 @@ export async function POST(req: NextRequest) {
   if (!task) {
     if (!contact.ghlContactId) return NextResponse.json({ error: "This client isn't linked to GoHighLevel yet." }, { status: 400 });
     taskId = await upsertConversationTask({ id: contact.id, name: fullName, client_id: clientId }, contact.ghlContactId, { title: `Meeting with ${fullName}` });
-    if (!taskId) return NextResponse.json({ error: "The meeting is on, but its task couldn't be made.", url: meeting.url, via: meeting.via, calendar }, { status: 500 });
+    if (!taskId) return NextResponse.json({ error: "The meeting is on, but its task couldn't be made.", url: meeting.url, via: meeting.via, calendar, invited }, { status: 500 });
   } else if (isReplyTask(task)) {
     renamed = `Meeting with ${fullName}`;
     await supabaseAdmin.from("tasks").update({ title: renamed, updated_by: null }).eq("id", task.id);
@@ -126,5 +131,5 @@ export async function POST(req: NextRequest) {
   const { error: attErr } = await supabaseAdmin.rpc("append_task_attachments", { task_id: taskId, items: [att] });
   if (attErr) console.error("[meet-now] link attach failed", attErr);
   const stepId = await stepsOnMeetNow(taskId!, { first, attachmentId: att.id, meeting, fromStepId: typeof b.stepId === "string" ? b.stepId : null });
-  return NextResponse.json({ ok: true, url: meeting.url, via: meeting.via, calendar, taskId, stepId, first, ...(renamed ? { title: renamed } : {}) });
+  return NextResponse.json({ ok: true, url: meeting.url, via: meeting.via, calendar, invited, taskId, stepId, first, ...(renamed ? { title: renamed } : {}) });
 }

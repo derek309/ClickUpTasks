@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { cleanMeetingLink, liveMeeting, liveMeetingOf, meetNowEmail, meetNowText, meetNowTimes, withMeetNowSteps } from "./meetNow";
+import { cleanMeetingLink, liveMeeting, liveMeetingOf, meetNowChannels, meetNowEmail, meetNowText, meetNowTimes, withMeetNowSteps } from "./meetNow";
 import { withMeetingSteps, type Subtask } from "./data";
-import { meetNowEventBody } from "./googleCalendar";
+import { meetNowEventBody, meetNowEventUrl } from "./googleCalendar";
 
 const meeting = { url: "https://meet.google.com/abc-defg-hij", start: "2026-10-14T21:05:00.000Z", end: "2026-10-14T21:35:00.000Z", via: "meet" as const };
 const ids = () => { let n = 0; return () => `n${++n}`; };
@@ -17,6 +17,18 @@ describe("Meet now's message", () => {
     const e = meetNowEmail("Hi Pam, here's the link to join me now: https://zoom.us/j/123?pwd=a&b=c.\n\nSee you <soon>");
     expect(e.subject).toBe("Join me now");
     expect(e.html).toBe(`<p>Hi Pam, here's the link to join me now: <a href="https://zoom.us/j/123?pwd=a&amp;b=c">https://zoom.us/j/123?pwd=a&amp;b=c</a>.</p><p>See you &lt;soon&gt;</p>`);
+  });
+});
+
+describe("how the link is offered", () => {
+  it("Google's invite went: only a text as well, when they have a phone", () => {
+    expect(meetNowChannels({ invited: "pam@x.com", email: "pam@x.com", phone: "+15555550123" })).toEqual(["sms"]);
+    expect(meetNowChannels({ invited: "pam@x.com", email: "pam@x.com", phone: null })).toEqual([]);
+  });
+  it("no invite: email or text, whichever they have", () => {
+    expect(meetNowChannels({ invited: null, email: "pam@x.com", phone: "+15555550123" })).toEqual(["email", "sms"]);
+    expect(meetNowChannels({ invited: null, email: null, phone: "+15555550123" })).toEqual(["sms"]);
+    expect(meetNowChannels({ invited: null, email: null, phone: null })).toEqual([]);
   });
 });
 
@@ -92,6 +104,10 @@ describe("the meeting's times and Google event", () => {
     const b = meetNowEventBody({ title: "Pam Macias and Derek", start: "s", end: "e", guest: { email: "pam@x.com", name: "Pam Macias" }, link: null, requestId: "r1" });
     expect(b).toEqual({ summary: "Pam Macias and Derek", start: { dateTime: "s" }, end: { dateTime: "e" }, attendees: [{ email: "pam@x.com", displayName: "Pam Macias" }],
       conferenceData: { createRequest: { requestId: "r1", conferenceSolutionKey: { type: "hangoutsMeet" } } } });
+  });
+  it("Google emails the guest its invite; with no guest, nobody", () => {
+    expect(meetNowEventUrl(true)).toBe("https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all");
+    expect(meetNowEventUrl(false)).toContain("sendUpdates=none");
   });
   it("with your own link, no Meet: the link in the location", () => {
     const b = meetNowEventBody({ title: "t", start: "s", end: "e", guest: null, link: "https://zoom.us/j/1", requestId: "r1" });
