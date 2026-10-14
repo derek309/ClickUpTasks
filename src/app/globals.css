@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* dark: follows the app's own theme (light by day, dark from 7pm, or the
+   person's pick), set as data-theme on <html>, not the Mac's setting
+   (Derek, 2026-10-14: pale reds on a light row under a dark Mac). Pages
+   without the app's theme (the client portal, review links) stay light. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
 :root {
   --background: #eef4fb;
   --surface: #ffffff;
