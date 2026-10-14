@@ -33,7 +33,6 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
   const [picked, setPicked] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<Pending | null>(null);
   const [reason, setReason] = React.useState("");
-  const [allNext, setAllNext] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
 
   const order = [...g.now, ...g.waiting, ...g.upNext.map((u) => u.task)];
@@ -119,8 +118,9 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
     </section>
   );
 
-  const SHOW_NEXT = 5;
-  const nextShown = allNext ? g.upNext : g.upNext.slice(0, SHOW_NEXT);
+  // Every task in line shows, none folded (Derek, 2026-10-14: "let's just
+  // show all of them").
+  const nextShown = g.upNext;
   const finished = [...g.done].sort((a, b) => doneAt(b).localeCompare(doneAt(a))).slice(0, 5);
 
   return (
@@ -176,11 +176,6 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
             ? <span className="whitespace-nowrap font-bold text-red-700">Deadline {formatDue(u.task.due)}</span>
             : <span className="whitespace-nowrap text-muted">{u.label}</span>, false))}
           {!g.upNext.length && <p className="px-4 py-3 text-[16px] text-muted">Nothing waiting in line.</p>}
-          {g.upNext.length > SHOW_NEXT && (
-            <button type="button" onClick={() => setAllNext((v) => !v)} className="w-full border-t px-4 py-3 text-left text-[16px] font-semibold text-accent hover:bg-background">
-              {allNext ? "Show fewer" : `Show ${g.upNext.length - SHOW_NEXT} more`}
-            </button>
-          )}
           {dragId && (
             <div onDragOver={(e) => { e.preventDefault(); setOverId("__end"); }} onDrop={(e) => { e.preventDefault(); ask(dragId, null); }}
               className={`border-t px-4 py-3 text-[16px] text-muted ${overId === "__end" ? "shadow-[inset_0_3px_0_var(--accent)]" : ""}`}>Drop here for the end of the line</div>
