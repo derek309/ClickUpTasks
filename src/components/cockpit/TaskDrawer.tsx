@@ -8,7 +8,7 @@ import {
   users, labels, userById, labelById, timeAgo, htmlToText, plainTextToHtml, PERSONAL_CLIENT_ID,
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
-  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, dueCountdown,
+  parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
   assignableUsers, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
@@ -2975,14 +2975,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Under Send: which step it will finish and when it checks in, by the same
   // order onSend below takes (to dos asked, a review, the client's step, then
   // talkStepPlan). Blank when no step will change.
+  // One line (Derek, 2026-10-14): "Sending finishes 'Email Derek'. Checking
+  // in Fri, Oct 16.", the check in left off with no follow up day picked.
   const sendNote = (followUpDate: string | null): string | null => {
     if (taskRef.current.draftEmail?.asks) return null;
-    if (activeStep && sendReviewKind()) return `Finishes: ${activeStep.title}, then checks in ${formatDue(addBusinessDaysIso(TODAY, reviewFollowUpDays(1)))}`;
+    if (activeStep && sendReviewKind()) return `Sending finishes "${activeStep.title.trim()}". Checking in ${formatDayDate(addBusinessDaysIso(TODAY, reviewFollowUpDays(1)))}.`;
     if (activeStep?.onClient && !activeStep.holds?.includes("email")) return null;
     const plan = talkStepPlan("email", followUpDate);
     if (!plan) return null;
-    if (plan.kind === "finish") return `Finishes: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
-    return `A follow up on: ${plan.cur.title}, then checks in ${formatDue(plan.due)}`;
+    const checking = followUpDate ? ` Checking in ${formatDayDate(plan.due)}.` : "";
+    if (plan.kind === "finish") return `Sending finishes "${plan.cur.title.trim()}".${checking}`;
+    return `Sending follows up on "${plan.cur.title.trim()}".${checking}`;
   };
   // Sending the task's draft email, from its window or from a step's "Send
   // the email" button: the same steps either way.

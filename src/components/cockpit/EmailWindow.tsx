@@ -10,7 +10,7 @@
 // typing stops. Nothing sends on its own.
 import { useEffect, useRef, useState } from "react";
 import {
-  htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDue, TODAY,
+  htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDayDate, TODAY,
   type Attachment, type Contact, type EmailDraft, type Message, type ScheduledMessage,
 } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
@@ -43,6 +43,8 @@ export type OutgoingEmail = { subject: string; body: string; attachments: Attach
 // month, or any date. Remembered as a kind ("d2" is two days out), so it
 // still makes sense tomorrow.
 const FOLLOW_UP_KEY = "emailFollowUpPick";
+/** A quiet text control under Send: no box, muted until pointed at. */
+const quietText = "font-medium text-muted underline-offset-4 hover:text-foreground hover:underline";
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const dow = (iso: string) => new Date(`${iso}T12:00:00`).getDay();
 const weekdayOn = (iso: string) => (dow(iso) === 6 ? addDaysIso(iso, 2) : dow(iso) === 0 ? addDaysIso(iso, 1) : iso);
@@ -469,15 +471,45 @@ export function EmailWindow({
               )}
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2.5 sm:gap-3">
+            {/* Under the email, in this order on a phone and a desktop (Derek,
+                2026-10-14): its files; Send with the follow up day; what
+                sending finishes; then the quiet controls. */}
+            <div className="mt-4">
+              <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
+                {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
+                {count > 0 && (
+                  <ul className="mt-1.5 divide-y">
+                    {attachments.map((a) => (
+                      <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
+                        <span className="min-w-0 break-words font-medium">{a.name}</span>
+                        {a.size && <span className="text-muted">{a.size}</span>}
+                        <button onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {(taskFiles.length > 0 || taskLinks.length > 0) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2 text-[16px]">
+                    <span className="text-muted">From this task:</span>
+                    {taskFiles.map((a) => (
+                      <button key={a.id} onClick={() => addFromTask(a)} title="Attach this file" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">+ {a.name}</button>
+                    ))}
+                    {taskLinks.map((a) => (
+                      <button key={a.id} onClick={() => addFromTask(a)} title="Add this link to the end of the email" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">🔗 {a.name || a.url}</button>
+                    ))}
+                  </div>
+                )}
+              </FileDropLine>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <button onClick={send} disabled={!!cannotSend} title={cannotSend}
                 className="rounded-lg bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">Send</button>
               {followUp && onSend && (
-                <label className="inline-flex items-center gap-1.5 text-[16px] text-muted" title="The task waits on them and comes back to you that day; it joins their Monday reminder email">
+                <label className="inline-flex flex-wrap items-center gap-1.5 text-[16px] text-muted" title="The task waits on them and comes back to you that day; it joins their Monday reminder email">
                   Follow up
                   <select value={pickNow} onChange={(e) => { setFollowUpPick(e.target.value); try { localStorage.setItem(FOLLOW_UP_KEY, e.target.value); } catch { /* not kept */ } }}
                     className="rounded-md border bg-surface px-2 py-1.5 text-[16px] font-semibold text-foreground outline-none focus:border-accent">
-                    {picks.map((p) => <option key={p.value} value={p.value}>{p.label}, {formatDue(p.date)}</option>)}
+                    {picks.map((p) => <option key={p.value} value={p.value}>{formatDayDate(p.date)}</option>)}
                     <option value="custom">Custom date…</option>
                     <option value="none">No follow up</option>
                   </select>
@@ -487,21 +519,23 @@ export function EmailWindow({
                   )}
                 </label>
               )}
-              {/* What a phone took off the top of the window, as two buttons. */}
-              {onAiDraft && (
-                <button onClick={() => setShowAi((v) => !v)} aria-pressed={showAi} title="Write with AI" aria-label="Write with AI"
-                  className={`h-11 w-11 rounded-lg border text-[18px] sm:hidden ${showAi ? "border-accent bg-accent-soft text-accent" : "text-muted"}`}>✨</button>
-              )}
-              <button onClick={() => setShowTools((v) => !v)} aria-pressed={showTools} title="Bold, italic and the rest" aria-label="Formatting"
-                className={`h-11 w-11 rounded-lg border text-[16px] font-semibold sm:hidden ${showTools ? "border-accent bg-accent-soft text-accent" : "text-muted"}`}>Aa</button>
-              {onSchedule && toEmail && <SchedulePopover onSchedule={schedule} />}
-              <span className="text-[16px] text-muted">{saveLabel}</span>
-              <button onClick={discard} className={`ml-auto ${quiet} hover:text-danger`}>Discard</button>
             </div>
             {(() => {
               const note = onSend && sendNote ? sendNote(followUp ? followUpDate : null) : null;
               return note ? <p className="mt-2 text-[16px] text-muted">{note}</p> : null;
             })()}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+              {/* What a phone took off the top of the window. */}
+              <button onClick={() => setShowTools((v) => !v)} aria-pressed={showTools} title="Bold, italic and the rest" aria-label="Formatting"
+                className={`${quietText} sm:hidden ${showTools ? "text-accent" : ""}`}>Aa</button>
+              {onAiDraft && (
+                <button onClick={() => setShowAi((v) => !v)} aria-pressed={showAi} title="Write with AI" aria-label="Write with AI"
+                  className={`${quietText} sm:hidden ${showAi ? "text-accent" : ""}`}>✨</button>
+              )}
+              {onSchedule && toEmail && <SchedulePopover label="Send later" onSchedule={schedule} />}
+              <button onClick={discard} className={`${quietText} hover:text-danger`}>Discard</button>
+              <span className="ml-auto text-muted">{saveLabel}</span>
+            </div>
           </div>
 
           <div className="space-y-4 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto">
@@ -510,31 +544,6 @@ export function EmailWindow({
               try { await navigator.clipboard.writeText(l.url); pushToast(`Copied: ${l.label}. Paste it into the email.`); }
               catch { pushToast(`Couldn't copy. The link is ${l.url}`); }
             }} />
-            <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
-              {previewImages.length > 0 && <ImageThumbGrid images={previewImages} onOpen={setLightbox} />}
-              {count > 0 && (
-                <ul className="mt-1.5 divide-y">
-                  {attachments.map((a) => (
-                    <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
-                      <span className="min-w-0 break-words font-medium">{a.name}</span>
-                      {a.size && <span className="text-muted">{a.size}</span>}
-                      <button onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {(taskFiles.length > 0 || taskLinks.length > 0) && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 border-t pt-2 text-[16px]">
-                  <span className="text-muted">From this task:</span>
-                  {taskFiles.map((a) => (
-                    <button key={a.id} onClick={() => addFromTask(a)} title="Attach this file" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">+ {a.name}</button>
-                  ))}
-                  {taskLinks.map((a) => (
-                    <button key={a.id} onClick={() => addFromTask(a)} title="Add this link to the end of the email" className="rounded-full border px-3 py-0.5 hover:border-accent hover:text-accent">🔗 {a.name || a.url}</button>
-                  ))}
-                </div>
-              )}
-            </FileDropLine>
             {scheduled && scheduled.length > 0 && (
               <div className="rounded-2xl border bg-surface p-4">
                 <p className="text-[16px] font-semibold">Scheduled</p>

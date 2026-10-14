@@ -1921,6 +1921,14 @@ export function formatDue(iso: string | null): string {
   const [, m, d] = iso.split("-");
   return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(d, 10)}`;
 }
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** "Fri, Oct 16": a date with its weekday, read in UTC so it never slips a day. */
+export function formatDayDate(iso: string | null): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  return Number.isNaN(at.getTime()) ? iso : `${WEEKDAYS[at.getUTCDay()]}, ${formatDue(iso)}`;
+}
 /** Whole days from today to a due date. Positive is future, 0 is today,
  *  negative is overdue. Date-only maths in UTC so it can't drift by one
  *  either side of midnight the way a local-time subtraction does. */

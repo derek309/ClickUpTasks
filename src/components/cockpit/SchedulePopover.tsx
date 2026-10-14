@@ -25,7 +25,13 @@ function toLocalInputValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function SchedulePopover({ disabled, onSchedule }: { disabled?: boolean; onSchedule: (whenIso: string) => void }) {
+export function SchedulePopover({ disabled, onSchedule, label }: {
+  disabled?: boolean;
+  onSchedule: (whenIso: string) => void;
+  /** A quiet text control ("Send later") in place of the clock button; its
+   *  menu opens to the right, and on a phone as a sheet from the bottom. */
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   // Stamped when the popover is opened, not during a render: reading the clock
@@ -47,24 +53,31 @@ export function SchedulePopover({ disabled, onSchedule }: { disabled?: boolean; 
 
   return (
     <div className="relative inline-flex">
-      <button type="button" onClick={toggle} disabled={disabled} title="Schedule for later"
-        className={`shrink-0 rounded-lg border px-2 py-1.5 text-muted hover:bg-background hover:text-foreground disabled:opacity-40 ${open ? "border-accent text-accent" : ""}`}>
-        <I.clock className="h-4 w-4" />
-      </button>
+      {label ? (
+        <button type="button" onClick={toggle} disabled={disabled} title="Schedule for later" aria-expanded={open}
+          className={`shrink-0 text-[16px] font-medium underline-offset-4 hover:text-foreground hover:underline disabled:opacity-40 ${open ? "text-accent" : "text-muted"}`}>{label}</button>
+      ) : (
+        <button type="button" onClick={toggle} disabled={disabled} title="Schedule for later"
+          className={`shrink-0 rounded-lg border px-2 py-1.5 text-muted hover:bg-background hover:text-foreground disabled:opacity-40 ${open ? "border-accent text-accent" : ""}`}>
+          <I.clock className="h-4 w-4" />
+        </button>
+      )}
       {open && (<>
-        <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-        <div className="absolute bottom-full right-0 z-40 mb-1 w-56 rounded-lg border bg-surface p-2 shadow-soft-md">
-          <div className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted">Send later</div>
+        <div className={`fixed inset-0 z-30 ${label ? "bg-black/30 sm:bg-transparent" : ""}`} onClick={() => setOpen(false)} />
+        <div className={label
+          ? "fixed inset-x-0 bottom-0 z-40 rounded-t-[5px] border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-soft-md sm:absolute sm:inset-x-auto sm:bottom-full sm:left-0 sm:mb-1 sm:w-72 sm:rounded-[5px] sm:p-2"
+          : "absolute bottom-full right-0 z-40 mb-1 w-56 rounded-lg border bg-surface p-2 shadow-soft-md"}>
+          <div className={label ? "mb-1.5 text-[16px] font-semibold" : "mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted"}>Send later</div>
           {quickPicks.map((q) => (
-            <button key={q.label} onClick={() => pick(q.date())} className="block w-full rounded px-2 py-1.5 text-left text-[13px] hover:bg-background">{q.label}</button>
+            <button key={q.label} onClick={() => pick(q.date())} className={`block w-full rounded px-2 text-left hover:bg-background ${label ? "py-2 text-[16px]" : "py-1.5 text-[13px]"}`}>{q.label}</button>
           ))}
           <div className="my-1.5 border-t" />
           <div className="flex items-center gap-1.5">
             <input type="datetime-local" value={custom} onChange={(e) => setCustom(e.target.value)}
               min={minValue}
-              className="min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 text-[12px] outline-none focus:border-accent" />
+              className={`min-w-0 flex-1 rounded-md border bg-background px-1.5 py-1 outline-none focus:border-accent ${label ? "text-[16px]" : "text-[12px]"}`} />
             <button onClick={() => { if (!custom) return; const d = new Date(custom); if (!Number.isNaN(d.getTime())) pick(d); }}
-              disabled={!custom} className="shrink-0 rounded-md border border-accent bg-accent px-2 py-1 text-[12px] font-medium text-white disabled:opacity-40">Set</button>
+              disabled={!custom} className={`shrink-0 rounded-md border px-2 py-1 font-medium disabled:opacity-40 ${label ? "bg-surface text-[16px] text-foreground" : "border-accent bg-accent text-[12px] text-white"}`}>Set</button>
           </div>
         </div>
       </>)}
