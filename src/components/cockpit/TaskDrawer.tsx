@@ -1161,7 +1161,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       email: [`Email ${firstName}`, "Write an email on this step, to read and send."],
       text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
       doc: ["Write a document", `A document on this step, for ${firstName} to review.`],
-      page: ["Build a web page", `An HTML page on this step, for ${firstName} to review.`],
+      page: ["Build an HTML review", `An HTML page on this step, for ${firstName} to review.`],
     };
     const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
     return (
@@ -2214,7 +2214,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(mayContactClient ? [{ key: "toclient", group: "handoff" as const, label: `Delegate to ${firstName} (client)`, disabled: false, note: "emails them what you need", onPick: clientStep }] : []),
     { key: "followup", group: "handoff", label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep },
   ];
-  const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "Web page", video: "Video" };
+  const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "HTML review", video: "Video" };
   const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
     key: k, group: "make" as const, label: MAKE_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
   }));
@@ -3074,7 +3074,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       if (!deliverablePresent(key)) setPendingStart(key);
     };
     const kinds: { key: DeliverableKey; label: string }[] = [
-      ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML" }, { key: "video" as const, label: "Video" }] : []),
+      ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML review" }, { key: "video" as const, label: "Video" }] : []),
       // An email drafted on the step, to read and send (Derek, 2026-10-12);
       // quick messages still go through the conversation.
       ...(hasMessaging ? [{ key: "email" as const, label: "Email" }] : []),

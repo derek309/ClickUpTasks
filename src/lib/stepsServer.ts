@@ -15,7 +15,7 @@ import { reviewFollowUpDays } from "./reviewReminders";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-const KIND_NAME: Record<ReviewKindKey, string> = { doc: "the document", image: "the image", page: "the page", video: "the video" };
+const KIND_NAME: Record<ReviewKindKey, string> = { doc: "the document", image: "the image", page: "the HTML review", video: "the video" };
 
 type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | null; client_id: string; status: TaskStatus; due: string | null; follow_up_at: string | null; updated_at: string };
 

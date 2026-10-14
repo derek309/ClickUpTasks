@@ -88,9 +88,9 @@ const ADD_ROWS = [
 ] as const;
 const ADD_SHORT: Record<string, string> = {
   directions: "Directions", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
-  doc: "Document", image: "Image", page: "Web page", video: "Video",
+  doc: "Document", image: "Image", page: "HTML review", video: "Video",
 };
-// ui's icons have no image, web page or video; these match their stroke.
+// ui's icons have no image, HTML review or video; these match their stroke.
 const rowIcon = (d: React.ReactNode) => function RowIcon(p: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className} width="16" height="16" aria-hidden>{d}</svg>;
 };
