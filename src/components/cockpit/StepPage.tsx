@@ -226,8 +226,11 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
   ].sort((x, y) => y.at.localeCompare(x.at));
 
   // One line for what was said: "2 emails, 1 text · last from Pamela, 2h ago".
-  const [showSaid, setShowSaid] = useState(false);
+  // Texts open by default: they have no box in Actions the way an email does
+  // (Derek, 2026-10-13). Null until someone folds or opens it by hand.
+  const [showSaidPick, setShowSaid] = useState<boolean | null>(null);
   const saidMessages = said.flatMap((x) => (x.kind === "message" ? [x.m] : []));
+  const showSaid = showSaidPick ?? saidMessages.some((m) => m.channel === "sms");
   const saidNotes = said.filter((x) => x.kind === "action");
   const saidSummary = (() => {
     const n = (c: string) => saidMessages.filter((m) => m.channel === c).length;
@@ -260,7 +263,7 @@ export function StepPage({ task, sub, client, isCurrent, full, onToggleFull, onC
           those boxes"; the client is written to through Actions, as a
           draft held on the step). The only box here is a note to the team. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button onClick={() => setShowSaid((o) => !o)} aria-expanded={showSaid} disabled={!saidMessages.length && !saidNotes.length}
+        <button onClick={() => setShowSaid(!showSaid)} aria-expanded={showSaid} disabled={!saidMessages.length && !saidNotes.length}
           className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default">
           <h3 id="step-talk" className="text-[17px] font-bold">Messages on this step</h3>
           <span className="min-w-0 truncate text-[16px] text-muted">{saidSummary}</span>
