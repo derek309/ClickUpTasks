@@ -72,7 +72,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -83,6 +83,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   slideBackLabel?: string | null;
   /** Opened from a draft on the client's page: its email window opens with it. */
   openEmail?: boolean;
+  /** Made from the new task box with step 1's action picked: what to start
+   *  on it as it opens, as + Add step does (useComposer TaskStart). */
+  start?: { stepId: string; open: "checklist" | "directions" | "email" | "text" | "chat" | "ask"; when: string | null };
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
   onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; /** The × on the red Needs you line. */ onClearNeedsYou?: () => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
@@ -3274,6 +3277,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (a.who && a.who !== st.assigneeId) assignStep(st, a.who, isActive);
     setStepDue(st, a.when, isActive);
   };
+  // A task made from the new task box with step 1's action picked: the same
+  // start + Add step gives a new step (submitNew), once, as it opens.
+  const started = useRef(false);
+  useEffect(() => {
+    if (!start || started.current) return;
+    started.current = true;
+    const id = start.stepId;
+    if (!taskRef.current.subtasks.some((x) => x.id === id)) return;
+    if (start.open === "checklist" || start.open === "directions") { setOpenStepPage({ taskId: task.id, id, full: false, [start.open]: true }); return; }
+    if (start.open === "text" || start.open === "chat") { talkReturn.current = id; setOpenStepPage({ taskId: task.id, id, full: false }); return; }
+    if (start.open === "email") {
+      talkReturn.current = id;
+      setOpenStepPage({ taskId: task.id, id, full: false });
+      if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail(undefined, true);
+      return;
+    }
+    // The client's turn: the ask, as Delegate to the client's set up.
+    applySetup(id, { who: "client", when: start.when ?? TODAY });
+  }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
   /** The set up for a step, or null when it has none to show. */
   const setupOf = (sub: Subtask, entry: SetupEntry | undefined): StepSetupProps | null => {
     if (!entry || sub.done || (!entry.force && setupSkipped(sub))) return null;

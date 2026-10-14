@@ -3,9 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MindDumpModal } from "./MindDumpModal";
 
-// The composer's whole contract after 2026-09-28: four ways in, and the two on
-// the left touch nothing. The test that matters most is the negative one, that
-// adding a task as typed never calls either AI handler.
+// The composer's whole contract after 2026-09-28: one dark Add that touches
+// nothing, and words beside it for a list and the AI (2026-10-14). The test
+// that matters most is the negative one, that Add never calls either AI
+// handler.
 
 let root: Root | null = null;
 let host: HTMLDivElement;
@@ -22,7 +23,7 @@ afterEach(() => {
   root = null;
 });
 
-const button = (label: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.trim().includes(label))!;
+const button = (label: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.trim() === label)!;
 const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
 const type = (value: string) => {
   const box = host.querySelector("textarea")!;
@@ -53,7 +54,7 @@ describe("adding a task as typed", () => {
   it("creates it with the words as they were typed, and asks no model anything", () => {
     const p = open();
     type("Contact GoDaddy support to disconnect the associated product");
-    click(button("Add as typed"));
+    click(button("Add"));
     expect(p.onCreate).toHaveBeenCalledTimes(1);
     const [rows] = p.onCreate.mock.calls[0];
     expect(rows).toHaveLength(1);
@@ -89,8 +90,65 @@ describe("adding a task as typed", () => {
 
   it("creates nothing from an empty box", () => {
     const p = open();
-    click(button("Add as typed"));
+    click(button("Add"));
     expect(p.onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("step 1, set up in the box", () => {
+  it("is yours to start with: Add makes no handoff", () => {
+    const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
+    type("Call Amanda back");
+    click(button("Add"));
+    const [rows] = p.onCreate.mock.calls[0];
+    expect(rows[0].delegateTo).toBeNull();
+    expect(rows[0].step1).toMatchObject({ who: null, action: null });
+  });
+
+  it("picking an action adds the task with step 1 holding it", () => {
+    const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
+    type("Design the spring flyer");
+    click(button("Document"));
+    expect(p.onCreate).toHaveBeenCalledTimes(1);
+    expect(p.onCreate.mock.calls[0][0][0].step1).toMatchObject({ action: "doc" });
+  });
+
+  it("an action with nothing typed adds nothing", () => {
+    const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
+    click(button("Document"));
+    expect(p.onCreate).not.toHaveBeenCalled();
+  });
+
+  it("Escape in the rows is the box's, never an Add", () => {
+    const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
+    type("Call Amanda back");
+    const you = button("You");
+    act(() => { you.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(p.onCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("on a queue list", () => {
+  const settings = { now: 1, spacing: 3 };
+  const t = (id: string, pos: number, due: string | null = null) => ({ id, title: id, status: "todo", due, queuePos: pos, createdAt: "2026-10-01", priority: "normal", subtasks: [] });
+  const queue = { settings, tasks: [t("a", 1000, "2026-10-15"), t("b", 2000), t("c", 3000)] };
+
+  it("says where it joins the line instead of a due date and a follow up", () => {
+    open({ meId: "u_derek", queue });
+    const text = host.textContent ?? "";
+    expect(text).toContain("joins the line");
+    expect(text).not.toContain("follow up");
+    const where = host.querySelector("select[aria-label='Where in the line']") as HTMLSelectElement;
+    expect(where.value).toBe("bottom");
+    expect(where.selectedOptions[0].textContent).toBe("at the bottom (4th)");
+  });
+
+  it("adds it with no due and no follow up, following its priority", () => {
+    const p = open({ meId: "u_derek", queue });
+    type("Fix the footer");
+    click(button("Add"));
+    const [rows] = p.onCreate.mock.calls[0];
+    expect(rows[0]).toMatchObject({ due: null, followUpAt: null, queueAt: null, deadline: false });
   });
 });
 
@@ -98,7 +156,7 @@ describe("a pasted list, one per line", () => {
   it("shows the rows to review rather than creating them, and asks no model", () => {
     const p = open();
     type("Book the venue\nSend the deposit\nChase the contract");
-    click(button("One per line"));
+    click(button("Add several, one per line"));
     expect(p.onCreate).not.toHaveBeenCalled();
     expect(p.onParse).not.toHaveBeenCalled();
     expect(host.textContent).toContain("3 tasks found");
@@ -109,10 +167,10 @@ describe("a pasted list, one per line", () => {
 });
 
 describe("the two AI ways", () => {
-  it("Ask AI goes to the single task handler and nowhere else", () => {
+  it("Tidy with AI goes to the single task handler and nowhere else", () => {
     const p = open();
     type("call brian re the newsletter");
-    click(button("Ask AI"));
+    click(button("Tidy with AI"));
     expect(p.onAiAdd).toHaveBeenCalledTimes(1);
     expect(p.onParse).not.toHaveBeenCalled();
   });
@@ -130,7 +188,7 @@ describe("when there is no client on screen", () => {
   it("refuses every route until one is picked", () => {
     open({ needsClient: true, clients: [{ id: "cl_1", name: "Brian Goodell" }] });
     type("Something to do");
-    for (const label of ["Add as typed", "Ask AI", "One per line", "Ask AI to split"]) {
+    for (const label of ["Add", "Tidy with AI", "Add several, one per line", "Ask AI to split"]) {
       expect((button(label) as HTMLButtonElement).disabled).toBe(true);
     }
   });
@@ -138,6 +196,6 @@ describe("when there is no client on screen", () => {
   it("lets them through once it has one", () => {
     open({ needsClient: true, defaultClientId: "cl_1", clients: [{ id: "cl_1", name: "Brian Goodell" }] });
     type("Something to do");
-    expect((button("Add as typed") as HTMLButtonElement).disabled).toBe(false);
+    expect((button("Add") as HTMLButtonElement).disabled).toBe(false);
   });
 });

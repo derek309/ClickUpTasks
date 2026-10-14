@@ -310,13 +310,18 @@ export function queueOffPatches(tasks) {
 /** A task coming into a queue list (made there, moved there, a repeat's next
  *  copy): where its priority puts it, its date saved and cleared unless it is
  *  a deadline. `bottom` puts it last whatever its priority (a repeat's copy).
+ *  `at` is a place picked by hand (the new task box, 2026-10-14): "now" first
+ *  in line, "next" the top of Up next, "bottom" last.
  *  The Now check after the move gives it a date if it lands in Now.
  *  @param {QTask[]} listTasks the list's tasks before it arrives
- *  @param {QueueSettings} settings @param {QTask} task @param {{ bottom?: boolean }} [opts]
+ *  @param {QueueSettings} settings @param {QTask} task @param {{ bottom?: boolean; at?: "now" | "next" | "bottom" }} [opts]
  *  @returns {{ self: QPatch; others: QPatch[] }} */
 export function queueEntry(listTasks, settings, task, opts = {}) {
   const line = queueOrder(listTasks.filter((t) => t.id !== task.id), settings);
-  const at = opts.bottom ? line.length : entryIndex(line, settings, task.priority);
+  const at = opts.bottom || opts.at === "bottom" ? line.length
+    : opts.at === "now" ? 0
+    : opts.at === "next" ? entryIndex(line, settings, "urgent")
+    : entryIndex(line, settings, task.priority);
   const arriving = { ...task, queuePos: null };
   const ordered = [...line.slice(0, at), arriving, ...line.slice(at)];
   const places = placesFor(ordered);

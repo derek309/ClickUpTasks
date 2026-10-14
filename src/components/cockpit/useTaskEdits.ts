@@ -546,5 +546,5 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
   };
-  return { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask };
+  return { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask, applyQueuePatches };
 }

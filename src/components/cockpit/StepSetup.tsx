@@ -70,7 +70,7 @@ const TILE_ON = `${TILE} bg-accent-soft text-accent ring-2 ring-accent`;
 const TILE_WORD: Record<string, string> = { chat: "Chat" };
 const tileWord = (key: string, label: string) => TILE_WORD[key] ?? ADD_SHORT[key] ?? label;
 
-export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false, search = false, enterSubmits = false, onAnswer }: {
+export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false, search = false, enterSubmits = false, onAnswer, hide = [], skip = true }: {
   /** What's next: the next step's name, above the three rows. */
   name?: React.ReactNode;
   who: SetupWho[];
@@ -100,6 +100,12 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   enterSubmits?: boolean;
   /** Told each pick, for a name box outside the rows (+ Add step's input). */
   onAnswer?: (a: SetupAnswer) => void;
+  /** Rows not asked (the new task box: a queue list's step 1 gets its date
+   *  when the task reaches Now; your own list has nobody else's turn). */
+  hide?: ("who" | "when")[];
+  /** Skip, and Escape as Skip. Off where the rows sit inside a box with its
+   *  own button and its own Escape (the new task box). */
+  skip?: boolean;
 }) {
   const [whoPick, setWhoPick] = useState<string | null>(whoInitial);
   const [when, setWhen] = useState(whenInitial);
@@ -115,14 +121,18 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     const b = el?.matches("button") ? el : el?.querySelector<HTMLElement>("button");
     b?.focus({ preventScroll: true });
   };
-  useEffect(() => { if (autoFocus) focusRow(0); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The rows shown, in order: the keys move between these.
+  const shown = [0, 1, 2].filter((i) => !(i === 0 && hide.includes("who")) && !(i === 1 && hide.includes("when")));
+  const nextRow = (i: number) => shown.find((r) => r > i);
+  const prevRow = (i: number) => [...shown].reverse().find((r) => r < i);
+  useEffect(() => { if (autoFocus) focusRow(shown[0]); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const answer = (): SetupAnswer => ({ who: whoPick, when });
   const pickWho = (k: string) => {
     setWhoPick(k);
     // Claude starts on it now: today, always.
     if (k === CLAUDE_ID) setWhen(today);
     onAnswer?.({ who: k, when: k === CLAUDE_ID ? today : when });
-    setTimeout(() => focusRow(1), 0);
+    setTimeout(() => focusRow(nextRow(0) ?? 2), 0);
   };
   const pickWhen = (d: string) => {
     setWhen(d);
@@ -144,7 +154,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   const known = who.some((c) => c.key === whoPick);
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onDone(answer()); return; }
+    if (e.key === "Escape") { if (!skip) return; e.preventDefault(); e.stopPropagation(); onDone(answer()); return; }
     if (enterSubmits && e.key === "Enter" && !e.nativeEvent.isComposing && t.matches("input[data-name]")) { e.preventDefault(); onDone(answer()); return; }
     if (t.closest("input, textarea, [contenteditable=true]") || e.metaKey || e.ctrlKey || e.altKey) return;
     const row = [0, 1, 2].findIndex((i) => !!rowEl(i)?.contains(t));
@@ -154,8 +164,8 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
       if (!el) return;
       e.preventDefault();
       (el.matches("button") ? el : el.querySelector<HTMLElement>("button"))?.click();
-    } else if (e.key === "Tab" && !e.shiftKey && row < 2) { e.preventDefault(); focusRow(row + 1); }
-    else if (e.key === "Tab" && e.shiftKey && row > 0) { e.preventDefault(); focusRow(row - 1); }
+    } else if (e.key === "Tab" && !e.shiftKey && nextRow(row) != null) { e.preventDefault(); focusRow(nextRow(row)!); }
+    else if (e.key === "Tab" && e.shiftKey && prevRow(row) != null) { e.preventDefault(); focusRow(prevRow(row)!); }
   };
   // Each row: its question, then its choices. On a phone the question is a
   // short word above them and they wrap onto new lines, never scrolling
@@ -174,14 +184,14 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   return (
     <section aria-label="Set up this step" onKeyDown={onKeyDown} className="flex min-w-0 flex-col gap-3 sm:gap-2">
       {name}
-      {Row({ i: 0, label: "Whose turn?", short: "Who", children: who.map((c) => c.key === "else" && someoneElse ? (
+      {shown.includes(0) && Row({ i: 0, label: "Whose turn?", short: "Who", children: who.map((c) => c.key === "else" && someoneElse ? (
         <span key={c.key} data-choice className="shrink-0">
           {someoneElse(<span aria-pressed={!known && !!whoPick} className={!known && !!whoPick ? ON : OFF}>{whoLabel(c)}</span>, pickWho)}
         </span>
       ) : (
         <button key={c.key} data-choice aria-pressed={whoPick === c.key} onClick={() => pickWho(c.key)} className={whoPick === c.key ? ON : OFF}>{whoLabel(c)}</button>
       )) })}
-      {Row({ i: 1, label: "By when?", short: "When", children: (<>
+      {shown.includes(1) && Row({ i: 1, label: "By when?", short: "When", children: (<>
         {whenChoices(today).map((c) => (
           <button key={c.key} data-choice aria-pressed={whenKey === c.key} onClick={() => pickWhen(c.date)} className={whenKey === c.key ? ON : OFF}>{c.label}</button>
         ))}
@@ -271,9 +281,9 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
         </div>
         </>
       ) })}
-      <div className="flex justify-end">
+      {skip && <div className="flex justify-end">
         <button onClick={() => onDone(answer())} title="Keep what is picked (Escape)" className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Skip</button>
-      </div>
+      </div>}
     </section>
   );
 }

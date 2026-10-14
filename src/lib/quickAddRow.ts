@@ -29,7 +29,18 @@ export type TaskRow = {
   /** Delegated as it is made: step 1 goes to this teammate or Claude (user
    *  id), the task stays yours (Derek, 2026-10-13). */
   delegateTo?: string | null;
+  /** Step 1 as the box set it up (Derek, 2026-10-14): whose turn, by when
+   *  (whenSet once picked by hand) and the action picked, if one. */
+  step1?: StepOneSetup | null;
+  /** On a queue list: where it joins the line, null to follow its priority. */
+  queueAt?: "now" | "next" | "bottom" | null;
+  /** Its due is a real deadline (tasks.deadline): a queue never clears it. */
+  deadline?: boolean;
 };
+
+/** Step 1's set up from the new task box. `who` is a member id, "client",
+ *  or null for whoever is creating it. */
+export type StepOneSetup = { who: string | null; when: string | null; whenSet: boolean; action: string | null };
 
 const emptyRow = (): TaskRow => ({
   title: "", description: "", verbatim: "", assignee: null, due: null,
@@ -78,6 +89,9 @@ export type DumpDefaults = {
   priorityTouched: boolean;
   size: TaskSize | null;
   delegateTo?: string | null;
+  step1?: StepOneSetup | null;
+  queueAt?: "now" | "next" | "bottom" | null;
+  deadline?: boolean;
 };
 
 /** Fills in everything a row did not answer for itself, so nothing arrives
@@ -97,6 +111,9 @@ export function applyDumpDefaults(rows: TaskRow[], d: DumpDefaults): TaskRow[] {
     // tasks to normal on creation"): no priority that follows the due date.
     priorityAuto: d.priorityTouched || r.priority === "urgent" ? false : r.priorityAuto,
     delegateTo: r.delegateTo ?? d.delegateTo ?? null,
+    ...(d.step1 !== undefined ? { step1: r.step1 ?? d.step1 } : {}),
+    ...(d.queueAt !== undefined ? { queueAt: r.queueAt ?? d.queueAt } : {}),
+    ...(d.deadline !== undefined ? { deadline: r.deadline ?? d.deadline } : {}),
     keep: true,
   }));
 }

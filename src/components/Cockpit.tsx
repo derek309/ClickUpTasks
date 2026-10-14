@@ -1,6 +1,6 @@
 "use client";
 
-import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, tickedAStep } from "@/lib/data";
+import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, tickedAStep, todayIso } from "@/lib/data";
 import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -71,7 +71,7 @@ import { usePins } from "./cockpit/usePins";
 import { useShareLinks } from "./cockpit/useShareLinks";
 import { useNotify } from "./cockpit/useNotify";
 import { useAiHelpers } from "./cockpit/useAiHelpers";
-import { useComposer } from "./cockpit/useComposer";
+import { useComposer, type TaskStart } from "./cockpit/useComposer";
 import { useTaskEdits } from "./cockpit/useTaskEdits";
 import { useClientRecords } from "./cockpit/useClientRecords";
 import { useClientAdmin } from "./cockpit/useClientAdmin";
@@ -487,6 +487,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [clientText, setClientText] = useState<{ clientId: string; body?: string; queuedId?: string; nonce: number } | null>(null);
   // A task opened from a draft on the client's page: its email window opens too.
   const [openTaskEmail, setOpenTaskEmail] = useState<string | null>(null);
+  // A task just made from the new task box with step 1's action to start on
+  // it (its email window, its step page on a box, the ask to the client).
+  const [openTaskStart, setOpenTaskStart] = useState<TaskStart | null>(null);
   const openClientText = (clientId: string, body?: string, queuedId?: string) => setClientText((c) => ({ clientId, body, queuedId, nonce: (c?.nonce ?? 0) + 1 }));
   const openCompose = (mode: "email" | "sms", body?: string) => {
     if (mode === "sms") { openClientText(activeClient, body); return; }
@@ -2185,7 +2188,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // ref set once useChecklist has run.
   const toggleSubRef = useRef<(taskId: string, subId: string) => void>(() => {});
   const toggleSubLate = (taskId: string, subId: string) => toggleSubRef.current(taskId, subId);
-  const { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask } = useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, clientById, tasks, sendMentionEmail });
+  const { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask, applyQueuePatches } = useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, clientById, tasks, sendMentionEmail });
   const { addFiles, uploadOneImage, downloadFile, downloadFileAs, downloadAllAsZip, zippingIds, removeFile, copyAttachmentLink } = useTaskFiles({ tasks, pushToast, setUploadProgress, update, setConfirmDialog });
   // --- GoHighLevel task sync -----------------------------------------------
   // A client is a GHL contact (cl_<localContactId>). To act on its GHL tasks we
@@ -2250,7 +2253,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
   const { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue } = useQueue({ projectById, setProjects, tasksRef, setTasks, me, notify, pushToast });
   const { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
-  const { createTasksFromDump } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles });
+  const { createTasksFromDump, targetProjectId } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles,
+    tasksRef, applyQueuePatches, today: todayIso(), openTaskWith: (start) => { setOpenTaskStart(start); setOpenTaskId(start.taskId); } });
   const { draftMessage, draftingMessage, refreshContact, refreshingContact, regenerateAiSummary } = useAiHelpers({ setAiSummaryBusyId, setClients, addNote, pushToast, openTask, setContacts });
   const { getClientShareUrl, copyClientShareLink, copyProjectShareLink } = useShareLinks({ clientById, pushToast, canAdmin, setClients, markOwnClientWrite, projectById, setProjects });
   if (loading) return (<div className="flex h-screen items-center justify-center text-muted">Loading your workspace…</div>);
@@ -3450,7 +3454,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             onPageLink={() => getClientShareUrl(cid)} />
         );
       })()}
-      {dumpGroup && (
+      {dumpGroup && (() => {
+        // The list it lands on, when that is a queue: the box says where in
+        // the line instead of a due date (lib/newTaskQueue).
+        const cid = dumpGroup.clientId ?? activeClient;
+        const pid = targetProjectId();
+        const q = pid ? queueSettings(projectById(pid)?.queue) : null;
+        const ct = dumpGroup.personal ? null : contactForClient(cid);
+        return (
         <MindDumpModal
           // Keyed on the group so reopening on a different bar starts clean
           // rather than inheriting the last one's text and dates.
@@ -3469,8 +3480,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           onAiAdd={aiAddTask}
           onCreate={createTasksFromDump}
           onCancel={() => setDumpGroup(null)}
+          meId={me.id}
+          clientFirst={dumpGroup.personal ? null : clientFirstName(ct, clientById(cid)?.name ?? null)}
+          canMessage={!dumpGroup.personal && cid.startsWith("cl_") && canMessageClient(cid) && !!ct}
+          hasPhone={!!ct?.phone}
+          queue={q && pid ? { settings: q, tasks: tasks.filter((t) => t.projectId === pid) } : null}
         />
-      )}
+        );
+      })()}
       {openTask && (
         // Keyed on the task, so switching tasks closes this drawer and opens
         // a new one rather than swapping the record underneath a drawer that
@@ -3489,8 +3506,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           slideBackLabel={dirView === "inbox" ? inboxBackLabel : (activeProject ? projectById(activeProject)?.name : null) ?? (activeClient !== "all" ? clientById(activeClient)?.name : null) ?? "Back"}
           navIndex={openTaskIdx} navTotal={navTaskIds.length} onPrev={() => goToTask(-1)} onNext={() => goToTask(1)}
           openEmail={openTaskEmail === openTask.id}
+          start={openTaskStart?.taskId === openTask.id ? openTaskStart : undefined}
           // Closed, the next task opens as the panel again, not full page.
-          onClose={() => { setOpenTaskId(null); setOpenTaskEmail(null); setDrawerFull(false); }} onPatch={(patch) => seenOnTick(openTask.id, () => patchTask(openTask.id, patch))} onClearNeedsYou={() => clearNeedsYou(openTask.id)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
+          onClose={() => { setOpenTaskId(null); setOpenTaskEmail(null); setOpenTaskStart(null); setDrawerFull(false); }} onPatch={(patch) => seenOnTick(openTask.id, () => patchTask(openTask.id, patch))} onClearNeedsYou={() => clearNeedsYou(openTask.id)} onDelete={() => deleteTask(openTask.id)} onAddComment={(body, attachments) => addComment(openTask.id, body, attachments)}
           onAddFiles={(files) => addFiles(openTask.id, files)} onDownloadFile={downloadFile} onDownloadFileAs={downloadFileAs} onDownloadAll={downloadAllAsZip} zippingIds={zippingIds} onRemoveFile={(att) => removeFile(openTask.id, att)} uploadProgress={uploadProgress} allClients={[...workableClients].sort((a, b) => a.name.localeCompare(b.name))} onMoveClient={(cid) => moveTaskToClient(openTask.id, cid)} clientProjects={projectsForClient(openTask.clientId)} onSetProject={(pid) => { patchTask(openTask.id, { projectId: pid }); }} onNewProject={() => moveTaskToNewProject(openTask.id, openTask.clientId)} onRenameProject={() => renameProject(openTask.projectId)} onToggleSub={(sid) => toggleSubSeen(openTask.id, sid)} onAddSub={(title) => addSub(openTask.id, title)} onRenameSub={(sid, title) => renameSub(openTask.id, sid, title)} onDeleteSub={(sid, after) => deleteSub(openTask.id, sid, after)} onPatchSub={(sid, patch) => seenOnTick(openTask.id, () => patchSub(openTask.id, sid, patch))} onToggleLabel={(lid) => toggleLabel(openTask.id, lid)} onCopyLink={() => copyLink({ view: null, client: "all", project: null, task: openTask.id, clientTab: null, vaultFolder: null, dm: null, assignee: null, sub: null })} onDuplicate={(target) => duplicateTask(openTask.id, target)} onStepToTask={(sid) => stepToTask(openTask.id, sid)} projectsFor={projectsForClient} onOpenMerge={() => setMergeSourceId(openTask.id)} onOpenClientList={() => openClientList(openTask.clientId, openTask.projectId)} templates={taskTemplates} onApplyTemplate={(templateId) => applyTemplate(openTask.id, templateId)} onSaveTemplate={canAdmin ? (spec) => saveTemplate(undefined, spec) : undefined} onUploadCommentImage={(file) => uploadOneImage(`${openTask.id}/comments`, file)} onCopyAttachmentLink={copyAttachmentLink} onGetSignedUrl={signedUrlForFile} messages={openTaskMessages} onMarkChannelRead={(channel) => markTaskChannelRead(openTask.id, channel)} linkedContactInfo={contactForClient(openTask.clientId)} onSaasSaved={noteSaasUrl} ccContacts={contacts} onUploadMessageImage={(file) => uploadOneImage(`messages/${openTask.clientId}`, file)} onSendTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, attachments, cc, bcc, replyToMessageId) => sendMessage(openTask.clientId, channel, subject, body, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} onScheduleTaskMessage={canMessageClient(openTask.clientId) ? (channel, subject, body, scheduledAt, attachments, cc, bcc, replyToMessageId) => scheduleMessage(openTask.clientId, channel, subject, body, scheduledAt, attachments, cc, bcc, openTask.id, undefined, replyToMessageId) : undefined} sendingMessage={sendingMessage} onDraftMessage={(channel, prompt, context) => draftMessage(openTask.clientId, channel, prompt, openTask.projectId, context)} draftingMessage={draftingMessage} canAdmin={canAdmin} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onCopyClientLink={() => {
             // The client's portal, opened straight on this task (Derek, 2026-10-12).
             const url = getClientShareUrl(openTask.clientId, { taskId: openTask.id });

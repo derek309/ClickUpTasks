@@ -29,12 +29,18 @@
 //     api/ai/parse-tasks.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, assignableUsers, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
-  SIZE_META, SIZE_ORDER, SIZING_ON, type Priority, type TaskSize,
+  users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
+  SIZE_META, SIZE_ORDER, SIZING_ON, userById, type Priority, type TaskSize,
 } from "@/lib/data";
-import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow } from "@/lib/quickAddRow";
+import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow, type StepOneSetup } from "@/lib/quickAddRow";
+import { rankTeammates, whoChoices } from "@/lib/stepSetup";
+import { suggestStepActions } from "@/lib/stepSuggest";
+import { defaultQueueAt, previewPlace, queueAtWords, deadlineWords, type QueueAt } from "@/lib/newTaskQueue";
+import type { QTask, QueueSettings } from "../../../mcp/queue.mjs";
 import { I, DateChip, SearchableSelect } from "./ui";
 import { useEscapeToClose } from "./useEscapeToClose";
+import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
+import { InlineAssignee } from "./GroupedList";
 
 /** A row on its way to a task. Lives in lib/quickAddRow so the two no-AI
  *  paths can build one without importing a React component; re-exported here
@@ -51,6 +57,8 @@ export type ParsedRow = TaskRow;
 export const DEFAULT_DUE = () => addBusinessDaysIso(TODAY, 3);
 
 // A word in the sentence that is a picker, like the task page's.
+// A small text action beside the one dark button.
+const LINK = "inline-flex min-h-10 items-center text-[16px] font-medium text-accent underline decoration-dotted underline-offset-4 hover:text-foreground disabled:opacity-40";
 const WORD = "cursor-pointer appearance-none [field-sizing:content] bg-transparent font-semibold text-foreground underline decoration-dotted underline-offset-4 outline-none hover:text-accent";
 
 /** A date in the sentence: the quick picks by name, or any date. */
@@ -81,8 +89,17 @@ export const DEFAULT_FOLLOW_UP = () => addBusinessDaysIso(TODAY, 1);
 
 type PastedFile = { file: File; url: string; row: number };
 
-export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, needsClient, clients, companyFor, defaultClientId, onPickClient, onParse, onAiAdd, onCreate, onCancel }: {
+export function MindDumpModal({ clientName, listName, destinationHint, suggestedDue, busy, needsClient, clients, companyFor, defaultClientId, onPickClient, onParse, onAiAdd, onCreate, onCancel, meId = null, clientFirst = null, canMessage = false, hasPhone = false, queue = null }: {
   clientName: string;
+  /** Whoever is creating it: step 1's turn starts as theirs. */
+  meId?: string | null;
+  /** The client's first name, as the steps say it; null on your own list. */
+  clientFirst?: string | null;
+  /** The client can be emailed and chatted with from the app. */
+  canMessage?: boolean;
+  hasPhone?: boolean;
+  /** The list it lands on is a queue (mcp/queue.mjs): its settings and tasks. */
+  queue?: { settings: QueueSettings; tasks: QTask[] } | null;
   listName: string;
   /** True when the composer was opened with no client on screen (the header on
    *  Tasks). Nothing can be created until one is picked. */
@@ -121,8 +138,17 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // date derived priority every other task in the app has.
   const [priorityTouched, setPriorityTouched] = useState(false);
   const [size, setSize] = useState<TaskSize | null>(null);
-  // Delegated as it is made: step 1 goes to them (Derek, 2026-10-13).
-  const [delegateTo, setDelegateTo] = useState<string | null>(null);
+  // Step 1 set up in the box (Derek, 2026-10-14): whose turn (you to start
+  // with), by when, and the action, the same rows as everywhere (StepSetup).
+  // A teammate's or Claude's turn is the handoff "Give step 1 to" made.
+  const [stepWho, setStepWho] = useState<string | null>(meId);
+  const [stepWhen, setStepWhen] = useState<string>(() => addBusinessDaysIso(TODAY, 1));
+  const [whenSet, setWhenSet] = useState(false);
+  // A queue list: where in the line, null while it follows the priority, and
+  // the one date it can carry, a deadline.
+  const [queueAt, setQueueAt] = useState<QueueAt | null>(null);
+  const [deadline, setDeadline] = useState<string | null>(null);
+  const deadlinePick = useRef<HTMLInputElement | null>(null);
   const [clientId, setClientId] = useState<string>(defaultClientId ?? "");
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
   // Which button is waiting on its request — busy alone can't tell the two
@@ -155,19 +181,31 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   };
 
   // The defaults every row is finished with, wherever it came from.
-  const defaults = () => ({ due, followUpAt, assignee: owner, priority, priorityTouched, size, delegateTo });
+  const placeAt: QueueAt = queueAt ?? defaultQueueAt(priority);
+  // Step 1's date waits for Now on a queue list, unless it is placed now.
+  const askWhen = !queue || placeAt === "now";
+  const defaults = (step?: { who: string | null; when: string; action: string | null }) => {
+    const who = step ? step.who : stepWho;
+    const member = who && who !== meId && who !== "client" ? who : null;
+    const step1: StepOneSetup = { who: who === meId ? null : who, when: askWhen ? (step?.when ?? stepWhen) : null, whenSet: askWhen && (whenSet || (!!step && step.when !== stepWhen)), action: step?.action ?? null };
+    // A queue list has no due or follow up: the line dates it, or its deadline.
+    return queue
+      ? { due: deadline, followUpAt: null, assignee: owner, priority, priorityTouched, size, delegateTo: member, step1, queueAt, deadline: !!deadline }
+      : { due, followUpAt, assignee: owner, priority, priorityTouched, size, delegateTo: member, step1 };
+  };
   const attachAll = () => files.map((f) => ({ file: f.file, row: 0 }));
   const blocked = !text.trim() || busy || (needsClient && !clientId);
 
-  // Add as typed: no network, no model, no rewrite. The whole reason this
-  // exists (Derek, 2026-09-28: "just created without changing the name").
-  const addAsTyped = () => {
+  // Add: no network, no model, no rewrite. The whole reason this exists
+  // (Derek, 2026-09-28: "just created without changing the name"). An action
+  // picked in step 1's rows adds it the same way, with step 1 holding it.
+  const addAsTyped = (step?: { who: string | null; when: string; action: string | null }) => {
     if (blocked) return;
     // Several lines are the whole request: it all goes to step 1's directions
     // with a short name (lib/tidyTitle), not split into a name and a
     // description (Derek, 2026-10-13).
     const row = text.trim().includes("\n") ? { ...verbatimTaskRow(text), title: text.trim(), description: "" } : verbatimTaskRow(text);
-    onCreate(applyDumpDefaults([row], defaults()), attachAll());
+    onCreate(applyDumpDefaults([row], defaults(step)), attachAll());
   };
 
   // One per line: the same promise, for a list that is already a list. No AI,
@@ -257,6 +295,40 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
   const fieldLabel = (t: string) => <span className="w-[80px] shrink-0 text-[12px] font-semibold uppercase tracking-wide text-muted">{t}</span>;
 
+  // Where each choice would put it in the line, for the picker's words:
+  // "next up (2nd)", "at the bottom (9th)".
+  const placeWords: Record<QueueAt, number | null> = { now: null, next: null, bottom: null };
+  if (queue) {
+    const draft: QTask = { id: "new-task", title: text, status: "todo", due: deadline, deadline: !!deadline, queuePos: null, createdAt: "9999", priority, assigneeId: meId, subtasks: [] };
+    for (const at of ["next", "bottom"] as const) placeWords[at] = previewPlace(queue.tasks, queue.settings, draft, queueAt === null && at === defaultQueueAt(priority) ? null : at, TODAY).place;
+  }
+  const openDeadline = () => { const el = deadlinePick.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
+
+  // Step 1's rows: Whose turn as everywhere (You, two teammates most picked,
+  // Claude, the client; TaskDrawer setupOf), then what the action is.
+  const firstOf = (id: string) => userById(id)?.name.split(" ")[0] ?? "Someone";
+  let picks: Record<string, number> = {};
+  try { picks = JSON.parse(localStorage.getItem("cut.setup.whoPicks") ?? "{}"); } catch { /* none kept */ }
+  const whoRaw = whoChoices(meId, rankTeammates(users.map((u) => u.id), picks, meId), canMessage && !!clientFirst);
+  const first = clientFirst ?? "them";
+  const whoList = whoRaw.map((c) => ({ key: c.key, label: c.kind === "me" ? "You" : c.kind === "claude" ? "Claude" : c.kind === "client" ? (whoRaw.some((o) => o.kind === "teammate" && firstOf(o.key).toLowerCase() === first.toLowerCase()) ? `${first} (client)` : first) : c.kind === "else" ? "Someone else" : firstOf(c.key) }));
+  // Which action a tap picked: the set up hands back the action's own run,
+  // and each run is known by its key.
+  const keyOf = new Map<() => void, string>();
+  const act = (key: string, label: string, show = true): SetupAction[] => {
+    if (!show) return [];
+    const run = () => {};
+    keyOf.set(run, key);
+    return [{ key, label, onPick: run }];
+  };
+  const options: SetupAction[] = [
+    ...act("directions", "Directions"), ...act("checklist", "To dos"),
+    ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
+    ...(clientFirst ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
+  ];
+  const lead = suggestStepActions(text, first).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
+  const grouped = addRowsOf(options, first, new Set(lead.map((x) => x.key)));
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onCancel} />
@@ -273,7 +345,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
             <h2 className="text-[19px] font-semibold">{rows === null ? "What needs doing?" : `${rows.length} task${rows.length === 1 ? "" : "s"} found`}</h2>
             <p className="mt-0.5 truncate text-[14px] text-muted">
               {rows === null
-                ? `${destinationHint ?? `${clientName} · ${listName}`}${due ? ` · due ${formatDue(due)}` : ""}${followUpAt ? `, follow up ${formatDue(followUpAt)}` : ""}`
+                ? `${destinationHint ?? `${clientName} · ${listName}`}${queue ? " · a queue" : `${due ? ` · due ${formatDue(due)}` : ""}${followUpAt ? `, follow up ${formatDue(followUpAt)}` : ""}`}`
                 : "Edit anything that is off, and untick what you do not want."}
             </p>
           </div>
@@ -282,7 +354,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
         {rows === null ? (
           <>
-            <div className="flex min-h-0 flex-col px-4 py-3 sm:px-6 sm:py-4">
+            <div className="flex min-h-0 flex-col overflow-y-auto px-4 py-3 sm:px-6 sm:py-4">
               {/* field-sizing:content makes the box track what is typed.
                   `rows` does NOT survive as a minimum next to it (Chrome
                   sizes to the placeholder instead, which measured 3 lines),
@@ -298,7 +370,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                 onKeyDown={onKey}
                 onDragOver={(e) => e.preventDefault()} onDrop={onDrop} autoFocus rows={1}
                 placeholder={"What needs doing? Type it and press Enter."}
-                className="min-h-[3rem] w-full resize-none overflow-y-auto rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted focus:border-accent" />
+                className="min-h-[3rem] w-full shrink-0 resize-none overflow-y-auto rounded-xl border bg-background px-4 py-3 text-[16px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted focus:border-accent" />
               <p className="mt-1.5 shrink-0 text-[14px] text-muted">
                 Enter adds it as you typed it. Shift and Enter for a new line. Paste an image or drop a file in and it rides along.
               </p>
@@ -330,7 +402,9 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
 
               {/* The task page's own sentence, always showing (Derek, 2026-10-13:
                   "don't hide the details, convert it into the sentence we have
-                  on the task so it's all consistent"). Each word is a picker. */}
+                  on the task so it's all consistent"). Each word is a picker.
+                  On a queue list it says where the task joins the line
+                  instead of a due date and a follow up (Derek, 2026-10-14). */}
               <p className="mt-3 shrink-0 text-[16px] leading-loose text-muted">
                 On{" "}
                 <select value={owner ?? ""} onChange={(e) => setOwner(e.target.value || null)} aria-label="Owner" className={WORD}>
@@ -347,67 +421,74 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                     <option value="">not sized</option>
                     {SIZE_ORDER.map((sz) => <option key={sz} value={sz}>{SIZE_META[sz].label}</option>)}
                   </select></>},{" "}
-                due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
+                {queue ? (<>
+                  joins the line{" "}
+                  <span className="whitespace-nowrap">
+                    <select value={placeAt} onChange={(e) => setQueueAt(e.target.value as QueueAt)} aria-label="Where in the line"
+                      title={queueAt ? "Picked by hand" : "Follows the priority until you pick"} className={WORD}>
+                      {(["now", "next", "bottom"] as const).map((at) => <option key={at} value={at}>{queueAtWords(at, placeWords[at])}</option>)}
+                    </select>
+                    <I.chevron className="ml-0.5 inline h-3.5 w-3.5 -rotate-90 align-middle text-foreground" />
+                  </span>
+                  {deadline && <>,{" "}
+                    <span className="whitespace-nowrap">
+                      <button type="button" onClick={openDeadline} className={`${WORD} text-accent`} title="Its due date is a real deadline: the queue never clears it">{deadlineWords(deadline)}</button>
+                      <button type="button" onClick={() => setDeadline(null)} aria-label="Remove the deadline" title="Remove the deadline" className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-[5px] align-middle text-muted hover:bg-background hover:text-danger">×</button>
+                    </span>
+                  </>}
+                  {!deadline && <>{" "}
+                    <button type="button" onClick={openDeadline} className="whitespace-nowrap text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:text-foreground">+ Add a deadline</button>
+                  </>}
+                  <input ref={deadlinePick} type="date" tabIndex={-1} aria-hidden value={deadline ?? ""} onChange={(e) => setDeadline(e.target.value || null)}
+                    className="pointer-events-none absolute h-0 w-0 opacity-0" />
+                </>) : (<>
+                  due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
+                </>)}
               </p>
-              {/* Its own line under the sentence (Derek, 2026-10-13). */}
-              <p className="shrink-0 text-[16px] leading-loose text-muted">
-                Give step 1 to:{" "}
-                <select value={delegateTo ?? ""} onChange={(e) => setDelegateTo(e.target.value || null)} aria-label="Give step 1 to"
-                  title="Step 1 goes to them; the task stays yours and comes back the day after it is due" className={WORD}>
-                  <option value="">nobody</option>
-                  {assignableUsers().map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </p>
+              {/* Step 1, set up here as it is everywhere (StepSetup): whose
+                  turn, you to start with, by when, and the action, the name's
+                  suggestion first. Picking an action adds the task with step 1
+                  holding it (Derek, 2026-10-14). */}
+              <div className="mt-3 shrink-0 border-t pt-3">
+                <p className="mb-2 text-[16px] font-semibold text-foreground">Step 1</p>
+                <StepSetup who={whoList} whoInitial={meId} nameOf={firstOf}
+                  someoneElse={(label, pick) => <InlineAssignee value={null} noFace label={label} onChange={(id) => { if (id) pick(id); }} />}
+                  whenInitial={stepWhen} today={TODAY} meId={meId} lead={lead} rows={grouped.rows} preset={null}
+                  hide={[...(clientFirst ? [] : ["who" as const]), ...(askWhen ? [] : ["when" as const])]} skip={false}
+                  onAnswer={(a: SetupAnswer) => { if (a.who !== stepWho) setStepWho(a.who); if (a.when !== stepWhen) { setStepWhen(a.when); setWhenSet(true); } }}
+                  onDone={(a: SetupAnswer, run?: () => void) => {
+                    if (!run) return;
+                    const action = keyOf.get(run) ?? null;
+                    if (blocked) { dumpRef.current?.focus(); return; }
+                    addAsTyped({ who: a.who, when: a.when, action });
+                  }} />
+              </div>
             </div>
-            {/* Two pairs rather than a row of four: one task or a list, and
-                within each, your words or the AI's (Derek, 2026-09-28: "we
-                have click different buttons to process quick add, AI add,
-                multi"). The left of each pair is the one that touches
-                nothing, and it is the one styled as the answer. */}
-            <div className="shrink-0 space-y-2 border-t px-4 py-3 sm:space-y-2.5 sm:px-6 sm:py-3.5">
+            {/* One dark button, Add, as typed. The rest are words beside it
+                (Derek, 2026-10-14): a list one per line, the AI's split, and
+                the AI's tidy of one task. */}
+            <div className="shrink-0 space-y-2 border-t px-4 py-3 sm:px-6 sm:py-3.5">
               {splitFailed && (
-                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg bg-highlight-soft px-3.5 py-2.5 text-[16px]">
+                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[5px] bg-highlight-soft px-3.5 py-2.5 text-[16px]">
                   <span className="min-w-0 flex-1 font-semibold text-highlight">The AI couldn&apos;t split that just now. Your text is still here.</span>
                   <button onClick={() => { setSplitFailed(false); addAsTyped(); }} disabled={blocked}
-                    className="rounded-lg bg-accent px-3.5 py-2 font-semibold text-white disabled:opacity-40">Add as one task</button>
+                    className="rounded-[5px] border bg-surface px-3.5 py-2 font-semibold hover:bg-background disabled:opacity-40">Add as one task</button>
                   <button onClick={read} disabled={blocked}
-                    className="rounded-lg border bg-surface px-3.5 py-2 font-medium hover:bg-background disabled:opacity-40">Try again</button>
+                    className="rounded-[5px] border bg-surface px-3.5 py-2 font-medium hover:bg-background disabled:opacity-40">Try again</button>
                 </div>
               )}
-              {/* On a phone the label goes above its pair: 48px of padding, a
-                  76px label and the gaps left each button about 117px, and
-                  "Ask AI to split" needs half as much again, so it wrapped
-                  inside itself and pushed Cancel to a line of its own. The
-                  long AI labels shorten there too; the pair they sit in is
-                  what says what they split. */}
-              <div className="sm:flex sm:flex-wrap sm:items-center sm:gap-2">
-                <span className="block pb-1 text-[16px] font-semibold text-muted sm:w-[76px] sm:shrink-0 sm:pb-0">One task</span>
-                <div className="flex gap-2">
-                  <button onClick={addAsTyped} disabled={blocked} title="Created exactly as you typed it. No AI, nothing rewritten."
-                    className="flex-1 rounded-lg bg-accent px-4 py-2.5 text-[16px] font-semibold text-white disabled:opacity-40 sm:flex-none sm:py-2">
-                    Add as typed
-                  </button>
-                  <button onClick={aiAdd} disabled={blocked} title="AI tidies the wording and reads a date, an owner and a priority out of it"
-                    className="shrink-0 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:py-2">
-                    {pending === "quick" ? "Asking…" : <><span aria-hidden>✨</span> <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span></>}
-                  </button>
-                </div>
-              </div>
-              <div className="sm:flex sm:flex-wrap sm:items-center sm:gap-2">
-                <span className="block pb-1 pt-1 text-[16px] font-semibold text-muted sm:w-[76px] sm:shrink-0 sm:py-0">A list</span>
-                <div className="flex gap-2">
-                  <button onClick={splitByLine} disabled={blocked} title="One task per line, worded exactly as you wrote them. No AI."
-                    className="flex-1 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:flex-none sm:py-2">
-                    One per line
-                  </button>
-                  <button onClick={read} disabled={blocked} title="AI reads the whole thing for every distinct action, then you review before anything is created"
-                    className="shrink-0 rounded-lg border px-3.5 py-2.5 text-[16px] font-medium hover:bg-background disabled:opacity-40 sm:py-2">
-                    {pending === "split" ? "Reading…" : <><span aria-hidden>✨</span> <span className="sm:hidden">AI split</span><span className="hidden sm:inline">Ask AI to split</span></>}
-                  </button>
-                </div>
-                {/* The panel's own ✕ is right there on a phone, so a second
-                    way out would only cost a line. */}
-                <button onClick={onCancel} className="ml-auto hidden rounded-lg px-3.5 py-2 text-[16px] font-medium text-muted hover:bg-background sm:block">Cancel</button>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <button onClick={() => addAsTyped()} disabled={blocked} title="Created exactly as you typed it. No AI, nothing rewritten. (Enter)"
+                  className="h-11 rounded-[5px] bg-accent px-6 text-[16px] font-semibold text-white disabled:opacity-40 max-sm:w-full">
+                  Add
+                </button>
+                <button onClick={splitByLine} disabled={blocked} title="One task per line, worded exactly as you wrote them. No AI."
+                  className={LINK}>Add several, one per line</button>
+                <button onClick={read} disabled={blocked} title="AI reads the whole thing for every distinct action, then you review before anything is created"
+                  className={LINK}>{pending === "split" ? "Reading…" : "Ask AI to split"}</button>
+                <button onClick={aiAdd} disabled={blocked} title="One task: AI tidies the wording and reads a date, an owner and a priority out of it"
+                  className={LINK}>{pending === "quick" ? "Tidying…" : "Tidy with AI"}</button>
+                <button onClick={onCancel} className="ml-auto min-h-10 rounded-[5px] px-3.5 text-[16px] font-medium text-muted hover:bg-background">Cancel</button>
               </div>
             </div>
           </>

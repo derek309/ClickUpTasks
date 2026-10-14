@@ -10,6 +10,22 @@ import { newId } from "./ui";
 import { directionsOntoStepOne, PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
 import { bulkUpsertTasks, tidyIfLong, upsertProject } from "@/lib/db";
 import { authedFetch } from "@/lib/supabase";
+import { applyStepOne, type StepOneOpen } from "@/lib/newTaskStep";
+import { placeNewTask } from "@/lib/newTaskQueue";
+import { queueSettings, type QPatch } from "../../../mcp/queue.mjs";
+
+/** What to open on a task once it is saved: step 1's page on its box, its
+ *  email window, or the ask to the client (TaskDrawer `start`). */
+export type TaskStart = { taskId: string; stepId: string; open: StepOneOpen; when: string | null };
+
+/** A queue patch as Task fields. */
+function queueFields(p: QPatch): Partial<Task> {
+  const f: Partial<Task> = {};
+  if (p.queuePos !== undefined) f.queuePos = p.queuePos;
+  if (p.due !== undefined) f.due = p.due;
+  if (p.queueSavedDue !== undefined) f.queueSavedDue = p.queueSavedDue;
+  return f;
+}
 
 // A dumped task's directions, on step 1 (Derek, 2026-10-14: no task
 // description): what the AI summarised, then the client's own wording
@@ -37,9 +53,34 @@ export type UseComposerDeps = {
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   notify: (recipientId: string, text: string, taskId: string | null, extra?: { clientId?: string | null; projectId?: string | null; kind?: NotificationKind; skipEmail?: boolean; link?: string; }) => void;
   addFiles: (id: string, fileList: FileList | File[]) => Promise<void>;
+  /** The tasks as they are now, for a queue list's line. */
+  tasksRef: React.RefObject<Task[]>;
+  /** useTaskEdits' queue writes, for a task the new one moved in the line. */
+  applyQueuePatches: (patches: QPatch[]) => void;
+  /** Opens the task made, with step 1's action started on it. */
+  openTaskWith: (start: TaskStart) => void;
+  today: string;
 };
 
-export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles }: UseComposerDeps) {
+export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles, tasksRef, applyQueuePatches, openTaskWith, today }: UseComposerDeps) {
+  /** The list the composer will create into, when it already exists: the
+   *  group it was opened on, the list on screen, or the client's first list.
+   *  Null for your own list, no client yet, or a list still to be made. */
+  const targetProjectId = (): string | null => {
+    if (!dumpGroup || dumpGroup.personal) return null;
+    const targetClient = dumpGroup.clientId ?? activeClient;
+    if (!targetClient.startsWith("cl_")) return null;
+    const sameClient = targetClient === activeClient;
+    if (dumpGroup.key && groupBy === "project" && sameClient) return dumpGroup.key;
+    if (activeProject && sameClient) return activeProject;
+    return projects.find((pr) => pr.clientId === targetClient)?.id ?? null;
+  };
+  // Step 1 set up in the box, and a task to open once it is saved.
+  const withStepOne = (t: Task, r: ParsedRow) => {
+    const s = applyStepOne(t.subtasks, { setup: r.step1, title: t.title, owner: t.assigneeId ?? me.id, meId: me.id, today, now: t.createdAt, makeId: () => newId("s_") });
+    return { task: s.subtasks === t.subtasks ? t : { ...t, subtasks: s.subtasks }, start: s.open && s.stepId ? { taskId: t.id, stepId: s.stepId, open: s.open, when: r.step1?.when ?? null } : null };
+  };
+
   // One shared list resolution for the whole batch, so 12 tasks can't race
   // each other into creating 12 copies of a missing "Tasks" list.
   //
@@ -56,7 +97,7 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     const now = new Date().toISOString();
 
     if (personal) {
-      const made: Task[] = rows.map((r) => ({
+      const stepped = rows.map((r) => ({
         id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID,
         title: r.title.trim(), description: "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
@@ -64,10 +105,12 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto, private: true,
         subtasks: directionsOntoStepOne([], describeDumpRow(r), r.title, () => newId("s_"), now), attachments: [], comments: [], createdAt: now, createdBy: me.id,
-      } as Task));
+      } as Task)).map((t, i) => withStepOne(t, rows[i]));
+      const made = stepped.map((x) => x.task);
       setTasks((ts) => [...ts, ...made]);
       made.forEach((t) => pinJustAdded(t.id));
-      bulkUpsertTasks(made, me.id);
+      const start = stepped.length === 1 ? stepped[0].start : null;
+      void Promise.resolve(bulkUpsertTasks(made, me.id)).then(() => { if (start) openTaskWith(start); });
       attachDumpFiles(made, files);
       setDumpGroup(null);
       pushToast(`Created ${made.length} task${made.length === 1 ? "" : "s"}`);
@@ -100,8 +143,10 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
       const to = r.delegateTo && r.delegateTo !== owner ? r.delegateTo : null;
       // Claude's step is due today with no follow up (Derek, 2026-10-13).
       const claude = to === "u_claude";
-      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : r.due, ...(claude ? {} : { followUpAt: TODAY }), startedAt: now } : null;
-      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : r.due ? addBusinessDaysIso(r.due, 1) : r.followUpAt } : null;
+      // Its date is step 1's By when, else the task's.
+      const stepDue = r.step1?.when ?? r.due;
+      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : stepDue, ...(claude ? {} : { followUpAt: TODAY }), startedAt: now } : null;
+      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : stepDue ? addBusinessDaysIso(stepDue, 1) : r.followUpAt } : null;
       return {
         id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
@@ -118,20 +163,40 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto,
         private: false, subtasks: directionsOntoStepOne(step ? [step] : [], describeDumpRow(r), r.title, () => newId("s_"), now), attachments: [], comments: [], createdAt: now, createdBy: me.id,
+        ...(r.deadline && r.due ? { deadline: true } : {}),
         ...(handoff && !waiting ? handoff : {}),
       } as Task;
     });
     // waiting/status must move together — the one rule that owns that lives in
     // applyWaitingStatusSync, so route each one through it rather than hand
     // rolling it here.
-    const synced = made.map((t) => ({ ...t, ...applyWaitingStatusSync({ status: t.status, waitingOnClient: t.waitingOnClient }, { waitingOnClient: t.waitingOnClient }) }));
+    const stepped = made.map((t, i) => withStepOne({ ...t, ...applyWaitingStatusSync({ status: t.status, waitingOnClient: t.waitingOnClient }, { waitingOnClient: t.waitingOnClient }) }, rows[i]));
+    // A queue list (mcp/queue.mjs): each takes its place in the line as it is
+    // made, the place picked in the box or the one its priority gives, the
+    // same rule as a task moved into the list, and the Now check runs, so a
+    // task placed now is dated today. Written with the task, so its place is
+    // never missing.
+    const q = queueSettings(projects.find((pr) => pr.id === projectId)?.queue);
+    const placed: Task[] = [];
+    stepped.forEach(({ task: t }, i) => {
+      if (!q) { placed.push(t); return; }
+      const list = [...tasksRef.current.filter((x) => x.projectId === projectId), ...placed];
+      const { self, others } = placeNewTask(list, q, t, rows[i].queueAt ?? null, today);
+      // Another task's place moves only when the line had to be renumbered.
+      const ours = new Map(others.filter((p) => placed.some((x) => x.id === p.id)).map((p) => [p.id, p]));
+      placed.forEach((x, k) => { const p = ours.get(x.id); if (p) placed[k] = { ...x, ...queueFields(p) }; });
+      applyQueuePatches(others.filter((p) => !ours.has(p.id)));
+      placed.push({ ...t, ...queueFields(self) });
+    });
+    const synced = placed;
     setTasks((ts) => [...ts, ...synced]);
     // Pinned so a task created into a group the current sort or filter would
     // hide does not vanish the moment it is made.
     synced.forEach((t) => pinJustAdded(t.id));
     // A task typed as the whole request gets its short name and the request
     // as step 1's directions once saved (lib/tidyTitle).
-    const write = () => { void Promise.resolve(bulkUpsertTasks(synced, me.id)).then(() => synced.forEach((t) => {
+    const start = stepped.length === 1 ? stepped[0].start : null;
+    const write = () => { void Promise.resolve(bulkUpsertTasks(synced, me.id)).then(() => { if (start) openTaskWith(start); }).then(() => synced.forEach((t) => {
       tidyIfLong(t.id, t.title);
       // Delegated to Claude as it was made: Claude starts in the cloud (lib/claudeCloud).
       const claudeStep = t.subtasks.find((x) => x.assigneeId === "u_claude" && !x.done);
@@ -151,5 +216,5 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     files.forEach((f) => { const t = made[f.row]; if (t) void addFiles(t.id, [f.file]); });
   };
 
-  return { createTasksFromDump };
+  return { createTasksFromDump, targetProjectId };
 }
