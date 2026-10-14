@@ -3353,6 +3353,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     </button>
   );
 
+  // Nothing left to do and nothing drawn in full: the card is one line.
+  const actionsDone = !actionRows.length && !looseWork && deletedOpen === 0;
+  const restoreLink = deletedTotal > 0 && deletedOpen === 0 ? (
+    <button onClick={() => setDeletedOpen((n) => n + 1)} className="text-[16px] text-muted hover:text-foreground">
+      {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
+    </button>
+  ) : null;
+
   const section = (title: string, children: React.ReactNode, right?: React.ReactNode, empty?: string) => (
     <section className={CARD} id={title === "Client work" ? "task-deliverables" : undefined}>
       <div className={`flex items-center justify-between gap-3 ${empty ? "" : "mb-3"}`}>
@@ -3585,18 +3593,24 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           a document, a review) are what Open on a step opens (2026-10-13:
           folding it left "Open" doing nothing). Fixed windows are not
           clipped by the zero height. */}
-      {isFolded("Client work") && <div className="h-0 overflow-hidden">{workBlocks}</div>}
-      {isFolded("Client work") ? foldedCard("Client work", actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length) : section("Client work", (
+      {(isFolded("Client work") || actionsDone) && <div className="h-0 overflow-hidden">{workBlocks}</div>}
+      {/* Nothing left: one line, "Actions · Nothing to do" and + Add (Derek,
+          2026-10-13). No fold arrow then; the remembered fold applies again
+          once there is something to do. */}
+      {actionsDone ? (
+        <section className={CARD} id="task-deliverables">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            {headingText("Client work", <span className="font-normal text-muted">· Nothing to do</span>)}
+            <span className="flex shrink-0 items-center gap-3">{restoreLink}{addMenu}</span>
+          </div>
+        </section>
+      ) : isFolded("Client work") ? foldedCard("Client work", actionRows.length + DELIVERABLE_KEYS.filter((k) => deliverablePresent(k) && !workCompact(k)).length) : section("Client work", (
         <>
           {actionRows.map(actionLine)}
           {workBlocks}
-          {deletedTotal > 0 && deletedOpen === 0 && (
-            <button onClick={() => setDeletedOpen((n) => n + 1)} className="mt-2 px-1 text-[16px] text-muted hover:text-foreground">
-              {deletedTotal} deleted · <span className="font-semibold text-accent">Restore</span>
-            </button>
-          )}
+          {restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
         </>
-      ), addMenu, !actionRows.length && !looseWork && !(deletedTotal > 0 && deletedOpen === 0) ? (steps.length ? "Documents, reviews and emails. Add them from a step's page." : "Documents, reviews and emails show here.") : undefined)}
+      ), addMenu)}
       {/* Links and files under the checklist, for every task: the client
           column that held them is gone (task detail redesign, 2026-10-11). */}
       {isFolded("Links and files") ? foldedCard("Links and files", task.attachments.length + conversationFiles.length) : attachmentsBlock}
