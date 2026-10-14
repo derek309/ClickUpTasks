@@ -2125,7 +2125,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const id = newId("s_");
     const now = new Date().toISOString();
     onPatch({
-      subtasks: onStep ? holdOnStep(taskRef.current.subtasks, onStep.id, "email") : holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
+      // On the waiting step itself, leaving the step that sent the review as
+      // it is (holdOnStep would take its email off and give back its old name).
+      subtasks: onStep ? taskRef.current.subtasks.map((x) => (x.id === onStep.id && !x.holds?.includes("email") ? { ...x, holds: [...(x.holds ?? []), "email"] } : x)) : holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
       draftEmail: { subject: `Reminder: ${task.title}`.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>A quick reminder about <strong>${esc(task.title)}</strong>.</p>${what}${where}`, replyTo: null, createdAt: now, updatedAt: now },
     });
     setEmailOpenNonce((n) => n + 1);
