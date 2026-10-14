@@ -1740,10 +1740,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             }} />
         </span>
       )}
-      {/* A teammate's step has their own follow up: the day it lands on their list. */}
-      {!sub.onClient && !sub.done && sub.assigneeId && sub.assigneeId !== task.assigneeId && (
+      {/* A teammate's step has their own date: the day it lands on their list.
+          Claude has none (due today, no follow up), so Claude's step shows no
+          second date (Derek, 2026-10-13: "I don't understand"). */}
+      {!sub.onClient && !sub.done && sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID && (
         <span className="inline-flex items-center gap-1">
-          <span className="text-muted">{userById(sub.assigneeId)?.name.split(" ")[0] ?? "Their"}&apos;s follow up</span>
+          <span className="text-muted">On {userById(sub.assigneeId)?.name.split(" ")[0] ?? "their"}&apos;s list</span>
           <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
             emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))}
             className="font-semibold underline decoration-dotted underline-offset-4" />
@@ -1755,15 +1757,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           small "+ Follow up" to set a different one (Derek, 2026-10-13). */}
       {isActive && !sub.done && (followUp && followUp.slice(0, 10) !== (sub.due ?? "").slice(0, 10) ? (
         <span className="inline-flex items-center gap-1">
-          {/* Yours, the task's, apart from a teammate's own follow up beside it. */}
-          <span className="text-muted">{sub.assigneeId && sub.assigneeId !== task.assigneeId ? "Your follow up" : "Follow up"}</span>
+          {/* Yours, the task's: when you check back on a teammate's step. */}
+          <span className="text-muted">{sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID ? "You check back" : "Follow up"}</span>
           <InlineDate value={followUp} onChange={(v) => moveStepDate(v)} onClear={() => moveStepDate(null)}
             emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
             className="font-semibold underline decoration-dotted underline-offset-4" />
         </span>
       ) : (
         <InlineDate value={null} onChange={(v) => moveStepDate(v)}
-          emptyLabel={<span className="font-semibold text-accent">+ {sub.assigneeId && sub.assigneeId !== task.assigneeId ? "Your follow up" : "Follow up"}</span>} formatValue={formatDue} />
+          emptyLabel={<span className="font-semibold text-accent">+ {sub.assigneeId && sub.assigneeId !== task.assigneeId && sub.assigneeId !== CLAUDE_ID ? "You check back" : "Follow up"}</span>} formatValue={formatDue} />
       ))}
     </div>
   );
