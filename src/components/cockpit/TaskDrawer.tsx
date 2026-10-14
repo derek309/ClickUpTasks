@@ -3051,8 +3051,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [nextSetupDone, setNextSetupDone] = useState<string | null>(null);
   const startNext = () => {
     const next = sentStep;
-    // Not answered yet: the set up goes along to the step's own page.
-    if (next && nextSetupDone !== next.id && !setupSkipped(next) && !asksWhatsNext(next)) setSetupFor((m) => ({ ...m, [next.id]: {} }));
+    // The set up is asked once, in What's next, never again on the step
+    // (Derek, 2026-10-14: "I select everything I want, and then it goes to
+    // here. It's very confusing").
     closeSentNext();
     if (stepPageOpen() && next && !asksWhatsNext(next)) setOpenStepPage({ taskId: task.id, id: next.id, full: openStepPage!.full });
   };
