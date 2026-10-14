@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured } from "@/lib/supabaseAdmin";
-import { teamDocAccess } from "@/lib/taskDocumentServer";
+import { teamTaskAccess } from "@/lib/taskDocumentServer";
 import { tidyLongTitle } from "@/lib/tidyTitle";
 
 // POST: a task named with the whole request gets a short name, and the request
@@ -9,7 +9,7 @@ import { tidyLongTitle } from "@/lib/tidyTitle";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { id } = await params;
-  const access = await teamDocAccess(req, id);
+  const access = await teamTaskAccess(req, id);
   if (!access.ok) return access.res;
   return NextResponse.json(await tidyLongTitle(id));
 }

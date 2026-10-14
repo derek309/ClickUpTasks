@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminConfigured, supabaseAdmin } from "@/lib/supabaseAdmin";
-import { teamDocAccess } from "@/lib/taskDocumentServer";
+import { teamTaskAccess } from "@/lib/taskDocumentServer";
 import { claudeCloudReady, startClaudeCloud } from "@/lib/claudeCloud";
 import { CLAUDE_ID, type Subtask } from "@/lib/data";
 
@@ -10,7 +10,7 @@ import { CLAUDE_ID, type Subtask } from "@/lib/data";
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!adminConfigured) return NextResponse.json({ error: "Not configured" }, { status: 501 });
   const { id } = await params;
-  const access = await teamDocAccess(req, id);
+  const access = await teamTaskAccess(req, id);
   if (!access.ok) return access.res;
   // Not set up: said before anything else, whatever the step.
   if (!claudeCloudReady()) return NextResponse.json({ error: "not_set_up" }, { status: 501 });

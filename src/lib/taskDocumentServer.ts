@@ -419,6 +419,18 @@ export async function teamDocAccess(req: NextRequest, taskId: string): Promise<{
   return { ok: true, user, task: found.task };
 }
 
+/** A signed in teammate who can see the task, not in the trash: private
+ *  tasks and My list too. For work on the task's own steps and name
+ *  (Delegate to Claude, tidy title); teamDocAccess is the client document rule. */
+export async function teamTaskAccess(req: NextRequest, taskId: string): Promise<{ ok: true; user: AuthedUser } | { ok: false; res: NextResponse }> {
+  const user = await requireUser(req);
+  if (!user) return { ok: false, res: json({ error: "Unauthorized" }, 401) };
+  if (!(await callerCanSeeTask(req, taskId))) return { ok: false, res: json({ error: "Not found" }, 404) };
+  const { data: task } = await supabaseAdmin.from("tasks").select("id, deleted_at").eq("id", taskId).maybeSingle();
+  if (!task || (task as { deleted_at?: string | null }).deleted_at) return { ok: false, res: json({ error: "Not found" }, 404) };
+  return { ok: true, user };
+}
+
 /** The task, when it can have review documents: not in the trash, not private and
  *  not the Personal client. Claude over MCP checks this without a session; the
  *  team routes check it after the teammate's own row level security read. */
