@@ -3247,6 +3247,14 @@ export function isLongTitle(title: string): boolean {
   return t.includes("\n") || t.length > 90 || t.split(/\s+/).length > 16;
 }
 
+/** The open steps with a long name that this edit named: new, or renamed.
+ *  Only those get a short name (lib/tidyTitle); a long step already there,
+ *  such as directions Claude wrote as the name, is left as it is. */
+export function longStepsNamed(before: Pick<Subtask, "id" | "title">[] | null | undefined, after: Pick<Subtask, "id" | "title" | "done" | "fromClient">[] | null | undefined): string[] {
+  const was = new Map((before ?? []).map((x) => [x.id, x.title]));
+  return (after ?? []).filter((x) => !x.done && !x.fromClient && isLongTitle(x.title) && was.get(x.id) !== x.title).map((x) => x.id);
+}
+
 /** "Thanks!", "Sounds good": nothing to do, so no step (Derek, 2026-10-12). */
 export function isJustThanks(text: string): boolean {
   const own = emailOwnWords(text).replace(/\s+/g, " ").trim();

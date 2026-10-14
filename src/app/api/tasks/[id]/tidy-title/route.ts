@@ -11,5 +11,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const access = await teamTaskAccess(req, id);
   if (!access.ok) return access.res;
-  return NextResponse.json(await tidyLongTitle(id));
+  // The steps the app's save named; none means the name only.
+  const body = (await req.json().catch(() => ({}))) as { stepIds?: unknown };
+  const stepIds = Array.isArray(body.stepIds) ? body.stepIds.filter((x): x is string => typeof x === "string").slice(0, 50) : [];
+  return NextResponse.json(await tidyLongTitle(id, stepIds));
 }

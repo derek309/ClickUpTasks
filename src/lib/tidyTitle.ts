@@ -70,12 +70,13 @@ async function stepNameFor(request: string): Promise<string> {
 
 /** Shortens a long task name and moves the request onto step 1. False when
  *  the name is not long (or was changed in the meantime). */
-export async function tidyLongTitle(taskId: string): Promise<{ ok: boolean; title?: string; steps?: number }> {
+export async function tidyLongTitle(taskId: string, stepIds: string[] = []): Promise<{ ok: boolean; title?: string; steps?: number }> {
   const { data } = await supabaseAdmin.from("tasks").select("title").eq("id", taskId).maybeSingle();
   const request = String((data as { title?: string } | null)?.title ?? "").trim();
   // A step typed as the whole request: a short name, the request its
   // directions (Derek, 2026-10-13, the Lincoln Automotive step).
-  const steps = await longStepsToDirections(taskId, stepNameFor);
+  // Only the steps just named in the app (stepIds), never every long one.
+  const steps = stepIds.length ? await longStepsToDirections(taskId, stepNameFor, stepIds) : 0;
   if (!request || !isLongTitle(request)) return { ok: steps > 0, steps };
   const { title, step } = await namesFor(request);
   const done = await requestOntoStepOne(taskId, request, title, step);

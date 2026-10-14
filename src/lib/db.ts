@@ -2,7 +2,7 @@
 // domain types, seeds demo data on first run, and exposes upsert/delete helpers.
 
 import { supabase, authedFetch } from "./supabase";
-import { isLongTitle } from "./data";
+import { isLongTitle, longStepsNamed } from "./data";
 import { noteTaskWrite } from "./localTaskWrites";
 import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
@@ -562,9 +562,11 @@ export async function trashedSince(table: "tasks" | "clients", sinceIso: string)
 // name and makes the request step 1's directions (lib/tidyTitle, 2026-10-13).
 // A step named the same way gets the same: a short name, the request as its
 // directions.
-export const tidyIfLong = (id: string, title: string, subtasks?: Subtask[] | null) => {
-  if (!isLongTitle(title) && !(subtasks ?? []).some((x) => !x.done && !x.fromClient && isLongTitle(x.title))) return;
-  void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST" }).catch(() => undefined);
+// Only the steps this save named (longStepsNamed): every long open step used
+// to be renamed on any save, Claude's written directions too (t_mg7qn4bu).
+export const tidyIfLong = (id: string, title: string, stepIds: string[] = []) => {
+  if (!isLongTitle(title) && !stepIds.length) return;
+  void authedFetch(`/api/tasks/${encodeURIComponent(id)}/tidy-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepIds }) }).catch(() => undefined);
 };
 // One task's saves run one after another (Derek, 2026-10-13: a step added
 // and an email sent seconds apart, and the step was gone). A save read the
@@ -580,7 +582,7 @@ function inOrder<T>(id: string, run: () => Promise<T>): Promise<T> {
 export const upsertTask = (t: Task, updatedBy?: string | null) => inOrder(t.id, () => upsertTaskNow(t, updatedBy));
 const upsertTaskNow = (t: Task, updatedBy?: string | null) => {
   noteTaskWrite(t.id);
-  return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title, t.subtasks); return r; });
+  return save(() => supabase.from("tasks").upsert(taskToRow(t, updatedBy))).then((r) => { tidyIfLong(t.id, t.title, longStepsNamed(null, t.subtasks)); return r; });
 };
 
 /** The task columns an edit actually changes, compared as stored. Saving an
@@ -618,7 +620,7 @@ async function saveTaskEditNow(before: Task, after: Task, updatedBy?: string | n
   }
   const res = await save(() => supabase.from("tasks").update({ ...changed, updated_by: updatedBy ?? null }).eq("id", after.id).select("id"));
   if (res && !res.error && !res.data?.length) return upsertTaskNow(after, updatedBy);
-  if (("title" in changed || "subtasks" in changed) && res && !res.error) tidyIfLong(after.id, "title" in changed ? after.title : "", "subtasks" in changed ? after.subtasks : null);
+  if (("title" in changed || "subtasks" in changed) && res && !res.error) tidyIfLong(after.id, "title" in changed ? after.title : "", "subtasks" in changed ? longStepsNamed(before.subtasks, after.subtasks) : []);
   return res;
 }
 /** A task's draft email, written alone: the only browser write of draft_email

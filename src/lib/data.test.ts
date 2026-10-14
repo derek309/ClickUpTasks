@@ -1407,3 +1407,14 @@ describe("dropOpenWhatsNext", () => {
     expect(dropOpenWhatsNext(none)).toBe(none);
   });
 });
+
+describe("longStepsNamed", () => {
+  it("only the long open steps this edit named", async () => {
+    const { longStepsNamed } = await import("./data");
+    const long = "Please go through the whole site and check every page for the old phone number and the old address, then fix each one you find and tell me";
+    const before = [{ id: "a", title: long, done: false }, { id: "b", title: "Short", done: false }];
+    const after = [{ id: "a", title: long, done: false }, { id: "b", title: long, done: false }, { id: "c", title: long, done: false }, { id: "d", title: long, done: true }];
+    expect(longStepsNamed(before, after)).toEqual(["b", "c"]);
+    expect(longStepsNamed(null, after)).toEqual(["a", "b", "c"]);
+  });
+});

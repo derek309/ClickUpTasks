@@ -169,9 +169,10 @@ export async function requestOntoStepOne(taskId: string, request: string, title:
 
 /** Each open step named with a whole request gets a short name, and the
  *  request goes on top of its directions. How many it renamed. */
-export async function longStepsToDirections(taskId: string, nameFor: (request: string) => Promise<string>): Promise<number> {
+export async function longStepsToDirections(taskId: string, nameFor: (request: string) => Promise<string>, onlyIds?: string[]): Promise<number> {
+  const only = onlyIds ? new Set(onlyIds) : null;
   const { data } = await supabaseAdmin.from("tasks").select("subtasks").eq("id", taskId).maybeSingle();
-  const long = (((data as { subtasks?: Subtask[] | null } | null)?.subtasks) ?? []).filter((x) => !x.done && !x.fromClient && isLongTitle(x.title));
+  const long = (((data as { subtasks?: Subtask[] | null } | null)?.subtasks) ?? []).filter((x) => !x.done && !x.fromClient && isLongTitle(x.title) && (!only || only.has(x.id)));
   if (!long.length) return 0;
   const names = new Map(await Promise.all(long.map(async (x) => [x.title, await nameFor(x.title)] as const)));
   const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -179,7 +180,7 @@ export async function longStepsToDirections(taskId: string, nameFor: (request: s
   const ok = await rewriteSteps(taskId, (row) => {
     count = 0;
     const next = (row.subtasks ?? []).map((x) => {
-      const name = !x.done && !x.fromClient ? names.get(x.title) : undefined;
+      const name = !x.done && !x.fromClient && (!only || only.has(x.id)) ? names.get(x.title) : undefined;
       if (!name) return x;
       count++;
       const request = x.title.split(/\n{2,}/).map((p) => `<p>${esc(p.trim()).replace(/\n/g, "<br>")}</p>`).join("");
