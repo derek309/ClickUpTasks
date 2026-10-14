@@ -1817,7 +1817,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       done: "bg-background/60",
       later: "",
     };
-    const sayTone = state === "mine" ? "text-red-700 dark:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
+    // Your turn is the strong red of the list's "Claude finished. Your turn"
+    // (Derek, 2026-10-14). Tailwind's dark: follows the Mac's setting, not the
+    // app's theme, so a Mac in dark mode with the app light got the pale
+    // dark shade on a pale pink row; the pale shade is kept for a dark row
+    // only (Mac dark and the app dark).
+    const sayTone = state === "mine" ? "text-red-700 dark:[[data-theme=dark]_&]:text-red-300" : state === "claude" ? "text-orange-700 dark:text-orange-300" : "text-amber-800 dark:text-amber-300";
     const say = state === "claude" ? (
         sub.cloudSession ? "Claude is working"
         : sub.cloudError ? `Claude has not started: ${sub.cloudError === "not_set_up" ? "not set up" : sub.cloudError}`
