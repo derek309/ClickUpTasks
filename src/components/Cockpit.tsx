@@ -3703,8 +3703,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         }} />
       {/* Above every window (reviews and emails are z-100, pictures z-110), so a
           message about what you just did there is never hidden behind it. */}
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[120] flex -translate-x-1/2 flex-col items-center gap-2">
-        {toasts.map((t) => (<div key={t.id} className="flex items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-[15px] font-medium text-[color:var(--surface)] shadow-lg"><span>{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md border border-[color:var(--surface)]/35 px-2 py-0.5 text-[14px] font-semibold hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-md bg-[color:var(--surface)] px-2 py-0.5 text-[14px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
+      {/* On a phone: one toast at a time, the newest, one wide line across the
+          bottom with the page's 16px gutters, not a narrow tower in the middle
+          (Derek, 2026-10-14: "very narrow, bulky, distracting"). */}
+      <div className="pointer-events-none fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] z-[120] flex flex-col items-stretch gap-2 sm:inset-x-auto sm:bottom-4 sm:left-1/2 sm:-translate-x-1/2 sm:items-center">
+        {toasts.map((t) => (<div key={t.id} className="pointer-events-auto hidden items-center gap-3 rounded-[5px] bg-foreground px-3.5 py-2 text-[16px] font-medium leading-snug text-[color:var(--surface)] shadow-lg last:flex sm:flex"><span className="min-w-0 flex-1">{t.text}</span>{t.action && (<button onClick={() => { t.action!.run(); dismissToast(t.id); }} className="shrink-0 rounded-[5px] px-1.5 py-0.5 text-[16px] font-semibold underline underline-offset-4 hover:bg-[color:var(--surface)]/15">{t.action.label}</button>)}{t.secondaryAction && (<button onClick={() => { t.secondaryAction!.run(); dismissToast(t.id); }} className="shrink-0 rounded-[5px] bg-[color:var(--surface)] px-2 py-0.5 text-[16px] font-semibold text-foreground hover:opacity-90">{t.secondaryAction.label}</button>)}</div>))}
       </div>
     </div>
   );
