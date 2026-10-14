@@ -105,6 +105,7 @@ import { ClientsDirectory } from "./cockpit/ClientsDirectory";
 import { FinishedFeed, type CompletionRow } from "./cockpit/FinishedFeed";
 import { BulkDelegateModal } from "./cockpit/BulkDelegateModal";
 import { ProjectsDirectory } from "./cockpit/ProjectsDirectory";
+import { orderLists } from "@/lib/listOrder";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
@@ -699,7 +700,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const link = url ? { url, label: "Reply or upload everything here" } : null;
     // Grouped by list, in the client's list order (Derek, 2026-10-05); one
     // list needs no heading.
-    const order = projectsForClient(clientId);
+    const order = orderLists(projectsForClient(clientId));
     const groups = [...order.map((pr) => ({ name: pr.name, items: waiting.filter((t) => t.projectId === pr.id) })),
       { name: "Other", items: waiting.filter((t) => !order.some((pr) => pr.id === t.projectId)) }].filter((g) => g.items.length);
     const headed = groups.length > 1;
@@ -1704,7 +1705,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
 
   // Sorted by position so folder-grouped list headings match the folder rail's
   // drag order (B5). Falls back to insertion order for equal/absent positions.
-  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient) && (!activeFolder || p.folderId === activeFolder)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0)), [projects, activeClient, activeFolder]);
+  const visibleProjects = useMemo(() => projects.filter((p) => p.clientId.startsWith("cl_") && (activeClient === "all" || p.clientId === activeClient) && (!activeFolder || p.folderId === activeFolder)), [projects, activeClient, activeFolder]);
   // On the All Tasks tab (activeClient === "all"), further restrict to your
   // own tasks by default — reusing scopedTasks' own assigneeId === me.id
   // pattern. Redundant-but-harmless for VAs, who are already fully
@@ -2123,8 +2124,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       return needsReply.length ? [{ key: "needs_reply", label: "Needs your reply", color: "#0ea5e9", tasks: needsReply }, ...buckets] : buckets;
     }
     if (dim === "due") return DUE_BUCKETS.map((b) => ({ key: b.key, label: b.label, color: b.color, tasks: list.filter((t) => dueBucket(t) === b.key) }));
-    // By list, A to Z like the list tabs (Derek, 2026-10-08).
-    return [...visibleProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
+    // By list, in the order of the client's list tabs (lib/listOrder: A to Z
+    // until an admin rearranges them); every client's lists together, A to Z.
+    return (activeClient === "all" ? [...visibleProjects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })) : orderLists(visibleProjects)).map((p) => ({ key: p.id, label: p.name, color: clientById(p.clientId)?.color ?? "#94a3b8", tasks: list.filter((t) => t.projectId === p.id) }));
   };
 
 

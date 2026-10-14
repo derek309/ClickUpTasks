@@ -8,6 +8,7 @@ import { TASK_FILES_BUCKET } from "@/lib/db";
 import { QUEUE_TASK_COLS, portalQueueMarks, queueSettings, queueTaskFromRow, type QueueSettings } from "../../../../../mcp/queue.mjs";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
+import { orderLists } from "@/lib/listOrder";
 
 // Public, deliberately unauthenticated — the first route of its kind in this
 // app. Backs /waiting/[token], a client-facing page showing "here's what
@@ -48,9 +49,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // A project-scoped token additionally filters this down to its own id, so
   // there is exactly one project here and the page's own switcher never
   // renders (same `projects.length > 1` check it already uses).
-  let projectQuery = supabaseAdmin.from("projects").select("id, name").eq("client_id", scope.clientId).eq("hidden_from_client", false).is("deleted_at", null).order("position", { ascending: true });
+  let projectQuery = supabaseAdmin.from("projects").select("id, name, position").eq("client_id", scope.clientId).eq("hidden_from_client", false).is("deleted_at", null);
   if (scope.projectId) projectQuery = projectQuery.eq("id", scope.projectId);
-  const { data: projectRows } = await projectQuery;
+  // In the order of the list tabs in the app (lib/listOrder).
+  const { data: rawProjectRows } = await projectQuery;
+  const projectRows = rawProjectRows ? orderLists(rawProjectRows as { id: string; name: string; position: number | null }[]) : rawProjectRows;
   // Queue lists (mcp/queue.mjs): the "What we're doing" tab shows what is
   // Now and what is in line, in order, with no dates for the line. Read only
   // when the database has the queue column; otherwise no list is a queue.

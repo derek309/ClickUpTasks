@@ -4,11 +4,20 @@
 // standalone lists · (admin) +Folder/+List. Selecting a folder scopes the task
 // list to that folder's lists (grouped by list); selecting a standalone list
 // scopes to just it. Admin chips carry a ⋮ menu (rename/delete/move).
-import { useState } from "react";
+//
+// Admins rearrange the tabs (Derek, 2026-10-14): drag one (a bar shows where
+// it lands) or, on a phone, iPad or keyboard, Move left / Move right / Move to
+// first on its ⋮ menu. All stays first and + List last.
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { type Folder, type Project } from "@/lib/data";
+import { moveBy, moveNextTo, moveToFirst, orderLists, sameOrder } from "@/lib/listOrder";
 import { I } from "./ui";
 import { MenuSheet } from "./ActionMenu";
+import { useEscapeToClose } from "./useEscapeToClose";
+
+type Side = "before" | "after";
+type Drag = { kind: "folder" | "list"; id: string };
 
 // Folders are off (Derek, 2026-10-06: "no one has used folders"; there were
 // none). Only the New folder button goes: folders that exist still show, so
@@ -62,11 +71,24 @@ export function FolderRail({
   // rail scrolls sideways below lg, which clipped a menu hung under the chip.
   const [menuAt, setMenuAt] = useState({ top: 0, left: 0 });
   const MENU_W = 272;
-  const [dragFolder, setDragFolder] = useState<string | null>(null);
-  const [dragList, setDragList] = useState<string | null>(null);
-  // A to Z (Derek, 2026-10-08), and one line: past VISIBLE the rest sit under
-  // More, with the open list always kept in view.
-  const standalone = lists.filter((l) => !l.folderId).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  // A ⋮ opened from the keyboard puts the focus on its first item.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [kbMenu, setKbMenu] = useState(false);
+  useEffect(() => {
+    if (!menu || !kbMenu) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [menu, kbMenu]);
+  useEscapeToClose(() => setMenu(null), !!menu);
+  // The tab being dragged, and where it would land: just before or just after
+  // the tab under the pointer (by which half the pointer is over).
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; side: Side } | null>(null);
+  const endDrag = () => { setDrag(null); setDropAt(null); };
+  // A to Z until an admin rearranges them (lib/listOrder), and one line: past
+  // VISIBLE the rest sit under More, with the open list always kept in view.
+  const standalone = orderLists(lists.filter((l) => !l.folderId));
+  const listIds = standalone.map((l) => l.id);
+  const folderIds = folders.map((f) => f.id);
   const VISIBLE = 7;
   const activeIdx = standalone.findIndex((l) => l.id === activeProject);
   const shownLists = standalone.length <= VISIBLE + 1 ? standalone
@@ -75,52 +97,91 @@ export function FolderRail({
   const [moreOpen, setMoreOpen] = useState(false);
   const allActive = !activeFolder && !activeProject;
 
-  // Drag-sort helpers — same splice-before-target idiom as QuickLinksBar.
-  const dropFolder = (targetId: string) => {
-    if (!dragFolder || dragFolder === targetId) { setDragFolder(null); return; }
-    const ids = folders.map((f) => f.id).filter((id) => id !== dragFolder);
-    ids.splice(ids.indexOf(targetId), 0, dragFolder);
-    onReorderFolders(ids); setDragFolder(null);
+  // One reorder path for the drag and the menu: the folder order, or this
+  // client's standalone lists (the bucket the rail shows).
+  const order = (kind: Drag["kind"]) => (kind === "folder" ? folderIds : listIds);
+  const commit = (kind: Drag["kind"], next: string[]) => {
+    if (sameOrder(next, order(kind))) return;
+    if (kind === "folder") onReorderFolders(next); else onReorderLists(null, next);
   };
-  const dropList = (targetId: string) => {
-    if (!dragList || dragList === targetId) { setDragList(null); return; }
-    const ids = standalone.map((l) => l.id).filter((id) => id !== dragList);
-    ids.splice(ids.indexOf(targetId), 0, dragList);
-    onReorderLists(null, ids); setDragList(null);
+  // Where a drag over this tab would land; nothing when it would not move.
+  const aim = (kind: Drag["kind"], id: string, side: Side) => {
+    if (!drag || drag.kind !== kind) return;
+    const lands = !sameOrder(moveNextTo(order(kind), drag.id, id, side), order(kind));
+    const next = lands ? { id, side } : null;
+    setDropAt((cur) => (cur?.id === next?.id && cur?.side === next?.side ? cur : next));
+  };
+  const drop = () => {
+    if (drag && dropAt) commit(drag.kind, moveNextTo(order(drag.kind), drag.id, dropAt.id, dropAt.side));
+    endDrag();
+  };
+  const sortable = (kind: Drag["kind"], id: string) => (canAdmin && order(kind).length > 1 ? { kind, id } : undefined);
+
+  const openMenu = (menuKey: string, el: HTMLElement, fromKeyboard: boolean) => {
+    const r = el.getBoundingClientRect();
+    setMenuAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left - 8, window.innerWidth - MENU_W - 8)) });
+    setKbMenu(fromKeyboard);
+    setMenu((m) => (m === menuKey ? null : menuKey));
   };
 
-  const chip = (label: React.ReactNode, active: boolean, onClick: () => void, menuKey?: string, menuBody?: React.ReactNode, drag?: { dim: boolean; onDragStart: () => void; onDrop: () => void }) => (
-    <span key={menuKey} className={`relative inline-flex shrink-0 ${drag?.dim ? "opacity-40" : ""}`}
-      draggable={canAdmin && !!drag} onDragStart={drag?.onDragStart}
-      onDragOver={(e) => { if (canAdmin && drag) e.preventDefault(); }} onDrop={(e) => { if (drag) { e.preventDefault(); drag.onDrop(); } }}>
-      <button onClick={onClick}
-        className={`group/chip inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[16px] font-medium ${active ? "is-active border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
+  const chip = (label: React.ReactNode, active: boolean, onClick: () => void, menuKey?: string, menuBody?: React.ReactNode, sort?: Drag) => {
+    const dragging = !!sort && drag?.kind === sort.kind && drag.id === sort.id;
+    const bar = sort && drag?.kind === sort.kind && dropAt?.id === sort.id ? dropAt.side : null;
+    return (
+    <span key={menuKey} className={`relative inline-flex shrink-0 ${dragging ? "opacity-40" : ""}`}
+      draggable={!!sort}
+      onDragStart={sort ? (e) => { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", sort.id); setMenu(null); setDrag(sort); } : undefined}
+      onDragEnd={sort ? endDrag : undefined}
+      onDragOver={sort ? (e) => {
+        if (!drag || drag.kind !== sort.kind) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = "move";
+        const r = e.currentTarget.getBoundingClientRect();
+        aim(sort.kind, sort.id, e.clientX < r.left + r.width / 2 ? "before" : "after");
+      } : undefined}
+      onDrop={sort ? (e) => { e.preventDefault(); drop(); } : undefined}>
+      {/* Where the dragged tab will land: a bar in the gap before or after this one. */}
+      {bar && <span aria-hidden className={`pointer-events-none absolute -bottom-1 -top-1 z-10 w-[3px] rounded-[5px] bg-accent ${bar === "before" ? "-left-[5px]" : "-right-[5px]"}`} />}
+      <button onClick={onClick} title={sort ? "Drag to move" : undefined}
+        className={`group/chip inline-flex items-center gap-1.5 rounded-[5px] border px-3 py-1 text-[16px] font-medium ${sort ? "cursor-grab active:cursor-grabbing" : ""} ${active ? "is-active border-accent bg-accent-soft text-accent" : "bg-surface text-muted hover:text-foreground"}`}>
         {label}
         {canAdmin && menuKey && (
-          // On the open chip at every size (a phone has no hover), on hover too from sm.
-          <span role="button" tabIndex={-1} aria-label="More actions" onClick={(e) => {
-            e.stopPropagation();
-            const r = e.currentTarget.getBoundingClientRect();
-            setMenuAt({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left - 8, window.innerWidth - MENU_W - 8)) });
-            setMenu((m) => (m === menuKey ? null : menuKey));
-          }}
-            className="-mr-1 hidden rounded p-1 opacity-60 hover:opacity-100 group-[.is-active]/chip:inline-block sm:p-0.5 sm:group-hover/chip:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
+          // On the open chip at every size (a phone has no hover), on hover
+          // too from sm, and once the tab has the keyboard focus.
+          <span role="button" tabIndex={0} aria-label="More actions" aria-haspopup="menu" aria-expanded={menu === menuKey}
+            onClick={(e) => { e.stopPropagation(); openMenu(menuKey, e.currentTarget, false); }}
+            onKeyDown={(e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); openMenu(menuKey, e.currentTarget, true); }}
+            className="-mr-1 hidden cursor-pointer rounded p-1 opacity-60 hover:opacity-100 focus-visible:opacity-100 group-focus-within/chip:inline-block group-[.is-active]/chip:inline-block sm:p-0.5 sm:group-hover/chip:inline-block"><I.dots className="h-3.5 w-3.5" /></span>
         )}
       </button>
       {/* A sheet at the bottom on a phone, a menu under the chip from sm up. */}
       {/* On the page's body, so nothing it sits in can clip or move it. */}
       {menu === menuKey && menuKey && createPortal(<>
         <div className="fixed inset-0 z-30 hidden sm:block" onClick={() => setMenu(null)} />
-        <div role="menu" style={{ position: "fixed", top: menuAt.top, left: menuAt.left, width: MENU_W }}
+        <div ref={menuRef} role="menu" style={{ position: "fixed", top: menuAt.top, left: menuAt.left, width: MENU_W }}
           className="z-40 hidden max-h-[70vh] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-soft-md sm:block">{menuBody}</div>
-        <MenuSheet label="List actions" onClose={() => setMenu(null)}>{menuBody}</MenuSheet>
+        <MenuSheet label={menuKey.startsWith("folder:") ? "Folder actions" : "List actions"} onClose={() => setMenu(null)}>{menuBody}</MenuSheet>
       </>, document.body)}
     </span>
-  );
+    );
+  };
 
-  const item = (label: string, onClick: () => void, danger?: boolean, key?: string) => (
-    <button key={key} onClick={() => { setMenu(null); onClick(); }} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[16px] hover:bg-background ${danger ? "text-danger" : ""}`}>{label}</button>
+  const item = (label: string, onClick: () => void, danger?: boolean, key?: string, opts?: { disabled?: boolean; keepOpen?: boolean }) => (
+    <button key={key} role="menuitem" disabled={opts?.disabled} onClick={() => { if (!opts?.keepOpen) setMenu(null); onClick(); }}
+      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[16px] hover:bg-background disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent ${danger ? "text-danger" : ""}`}>{label}</button>
   );
+  // Move left / Move right / Move to first: the drag for touch and keyboard.
+  // Left and right keep the menu open, so a few taps walk a tab along.
+  const moveItems = (kind: Drag["kind"], id: string) => {
+    const ids = order(kind);
+    if (!canAdmin || ids.length < 2) return null;
+    const i = ids.indexOf(id);
+    return (<>
+      {item("Move left", () => commit(kind, moveBy(ids, id, -1)), false, "move-left", { disabled: i <= 0, keepOpen: true })}
+      {item("Move right", () => commit(kind, moveBy(ids, id, 1)), false, "move-right", { disabled: i < 0 || i >= ids.length - 1, keepOpen: true })}
+      {item("Move to first", () => commit(kind, moveToFirst(ids, id)), false, "move-first", { disabled: i <= 0 })}
+      <div className="my-1 border-t" />
+    </>);
+  };
 
   return (
     <div className="no-scrollbar flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b bg-background/40 px-4 py-2 lg:overflow-visible">
@@ -138,11 +199,12 @@ export function FolderRail({
         () => onSelectFolder(f.id),
         `folder:${f.id}`,
         <>
+          {moveItems("folder", f.id)}
           {item("+ Add list", () => onCreateList(f.id))}
           {item("Rename folder", () => onRenameFolder(f.id))}
           {item("Delete folder", () => onDeleteFolder(f.id), true)}
         </>,
-        { dim: dragFolder === f.id, onDragStart: () => setDragFolder(f.id), onDrop: () => dropFolder(f.id) },
+        sortable("folder", f.id),
       ))}
       {shownLists.map((l) => chip(
         <>
@@ -165,6 +227,7 @@ export function FolderRail({
         () => onSelectList(l.id),
         `list:${l.id}`,
         <>
+          {moveItems("list", l.id)}
           {folders.length > 0 && <div className="px-3 pb-0.5 pt-1.5 text-[16px] font-semibold text-muted">Move to</div>}
           {folders.map((f) => item(f.name, () => onMoveList(l.id, f.id), false, f.id))}
           {folders.length > 0 && <div className="my-1 border-t" />}
@@ -184,7 +247,7 @@ export function FolderRail({
           )}
           {item("Delete list", () => onDeleteList(l.id), true)}
         </>,
-        { dim: dragList === l.id, onDragStart: () => setDragList(l.id), onDrop: () => dropList(l.id) },
+        sortable("list", l.id),
       ))}
       {moreLists.length > 0 && (
         <span className="relative inline-flex shrink-0">
@@ -201,7 +264,15 @@ export function FolderRail({
         </span>
       )}
       {canAdmin && (
-        <span className="ml-1 inline-flex shrink-0 gap-1">
+        // Dropping a list here (or anywhere past the last tab) puts it last.
+        <span className="ml-1 inline-flex shrink-0 gap-1"
+          onDragOver={(e) => {
+            const last = shownLists[shownLists.length - 1];
+            if (drag?.kind !== "list" || !last) return;
+            e.preventDefault(); e.dataTransfer.dropEffect = "move";
+            aim("list", last.id, "after");
+          }}
+          onDrop={(e) => { e.preventDefault(); drop(); }}>
           {FOLDERS_ON && <button onClick={onCreateFolder} title="New folder" className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.folder className="h-3.5 w-3.5" /> +</button>}
           <button onClick={() => onCreateList(activeFolder)} title={activeFolder ? "New list in this folder" : "New list"} className="inline-flex items-center gap-1 rounded-[5px] border border-dashed px-2.5 py-1 text-[13px] text-muted hover:text-foreground"><I.plus className="h-3.5 w-3.5" /> List</button>
         </span>

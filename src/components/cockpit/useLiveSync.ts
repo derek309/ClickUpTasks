@@ -150,6 +150,12 @@ export function useLiveSync({
         const m = rowToDmMessage(p.new);
         setDmMessages((ms) => (ms.some((x) => x.id === m.id) ? ms.map((x) => (x.id === m.id ? m : x)) : [...ms, m]));
       },
+      // An admin rearranged a client's list tabs in another tab: the new
+      // places, so the tabs, By list groups and portal order match at once.
+      onListOrder: (places) => {
+        const at = new Map(places.map((x) => [x.id, x.position]));
+        setProjects((ps) => (ps.some((x) => at.has(x.id)) ? ps.map((x) => (at.has(x.id) ? { ...x, position: at.get(x.id)! } : x)) : ps));
+      },
       // A phone drops the channel whenever the tab sleeps; it reconnects and
       // the page refetches on return (below). Only say so when it is still
       // down 20 seconds later with the page in front (Derek, 2026-10-14: the

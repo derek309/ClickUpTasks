@@ -11,6 +11,8 @@ import { type ConfirmSpec, type PromptSpec } from "./modals";
 import { newId } from "./ui";
 import { type Client, type ClientNote, type Folder, type Me, type Message, type Project, type Stage, type Task, type TaskStatus } from "@/lib/data";
 import { deleteFolderDb, deleteProjectDb, deleteStageDb, deleteTaskDb, reassignMessagesTaskDb, upsertFolder, upsertProject, upsertStage, upsertTask } from "@/lib/db";
+import { placedPosition } from "@/lib/listOrder";
+import { broadcastListOrder } from "@/lib/realtime";
 
 export type UseListsDeps = {
   setPromptDialog: React.Dispatch<React.SetStateAction<PromptSpec | null>>;
@@ -110,12 +112,23 @@ export function useLists({ setPromptDialog, projects, setProjects, folders, setF
     setFolders((fs) => [...fs.filter((f) => f.clientId !== clientId), ...reordered]);
     reordered.forEach((f) => upsertFolder(f));
   };
-  // Drag-sort lists within one bucket (a folder, or the standalone bucket when
-  // folderId is null). Renumber only that bucket so positions stay local to it.
+  // Rearrange lists within one bucket (a folder, or the standalone bucket when
+  // folderId is null): a dragged tab, or Move left / right / to first. Every
+  // list in the bucket is saved at its new place from PLACED up (lib/listOrder:
+  // below that a client's lists show A to Z), only the ones whose place
+  // changed are written, and the other open tabs are told at once.
   const reorderLists = (clientId: string, folderId: string | null, orderedIds: string[]) => {
-    const reordered = orderedIds.map((id, i) => { const p = projects.find((x) => x.id === id)!; return { ...p, position: i }; });
-    setProjects((ps) => [...ps.filter((p) => !(p.clientId === clientId && (p.folderId ?? null) === folderId)), ...reordered]);
-    reordered.forEach((p) => upsertProject(p));
+    if (!canAdmin) return;
+    const changed: Project[] = [];
+    orderedIds.forEach((id, i) => {
+      const p = projects.find((x) => x.id === id && x.clientId === clientId && (x.folderId ?? null) === folderId);
+      if (p && p.position !== placedPosition(i)) changed.push({ ...p, position: placedPosition(i) });
+    });
+    if (!changed.length) return;
+    const byId = new Map(changed.map((p) => [p.id, p]));
+    setProjects((ps) => ps.map((p) => byId.get(p.id) ?? p));
+    changed.forEach((p) => upsertProject(p));
+    broadcastListOrder(changed.map((p) => ({ id: p.id, position: p.position! })));
   };
   // Custom Kanban stages (a project's own board columns, e.g. "Backlog /
   // Designing / In Review / Shipped"). Mirrors the folder CRUD shape exactly;

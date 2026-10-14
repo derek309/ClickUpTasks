@@ -21,6 +21,22 @@ import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 export type Payload = RealtimePostgresChangesPayload<Record<string, unknown>>;
 
+/** A list's new place, sent to the other open tabs when an admin rearranges a client's tabs. */
+export type ListPlace = { id: string; position: number };
+
+// The channel that is up right now, so a rearrange can be told to everyone on it.
+let live: ReturnType<typeof supabase.channel> | null = null;
+
+/** Tell every other open tab a client's lists were rearranged (Derek, 2026-10-14).
+ *  projects is not in the realtime publication, and adding a table that is not
+ *  there to this one channel would break live updates for all of them, so the
+ *  new places go out as a broadcast on the same channel (no extra connection,
+ *  nothing to run in the database). The save itself is the projects upsert. */
+export function broadcastListOrder(places: ListPlace[]) {
+  if (!live || !places.length) return;
+  void live.send({ type: "broadcast", event: "list-order", payload: { places } }).catch(() => {});
+}
+
 export function subscribeRealtime(handlers: {
   onTask: (p: Payload) => void;
   onClient: (p: Payload) => void;
@@ -28,6 +44,7 @@ export function subscribeRealtime(handlers: {
   onMessage: (p: Payload) => void;
   onClientNote: (p: Payload) => void;
   onDmMessage: (p: Payload) => void;
+  onListOrder?: (places: ListPlace[]) => void;
   onStatusChange?: (status: string) => void;
 }, opts: { meId?: string; dm?: boolean } = {}): () => void {
   let channel: ReturnType<typeof supabase.channel> | null = null;
@@ -47,10 +64,15 @@ export function subscribeRealtime(handlers: {
       .on("postgres_changes", { event: "*", schema: "public", table: "client_notes" }, handlers.onClientNote);
     // Direct messages only while they're switched on (app_settings).
     if (opts.dm !== false) channel = channel.on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, handlers.onDmMessage);
+    // A rearranged client's tabs, from another tab (broadcastListOrder).
+    channel = channel.on("broadcast", { event: "list-order" }, (msg) => {
+      const places = (msg.payload as { places?: unknown })?.places;
+      if (Array.isArray(places)) handlers.onListOrder?.(places.filter((x): x is ListPlace => !!x && typeof x.id === "string" && typeof x.position === "number"));
+    });
     channel = channel
       .subscribe((status) => {
         handlers.onStatusChange?.(status);
-        if (status === "SUBSCRIBED") retries = 0;
+        if (status === "SUBSCRIBED") { retries = 0; live = channel; }
         if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT") && !torn) {
           // One reconnect in flight at a time. A flapping connection can
           // report the error several times over, and each report used to
@@ -61,6 +83,7 @@ export function subscribeRealtime(handlers: {
           const delay = Math.min(1000 * 2 ** retries, 15000);
           retryTimer = setTimeout(() => {
             retryTimer = null;
+            if (live === channel) live = null;
             if (channel) supabase.removeChannel(channel);
             connect();
           }, delay);
@@ -72,6 +95,7 @@ export function subscribeRealtime(handlers: {
   return () => {
     torn = true;
     if (retryTimer) clearTimeout(retryTimer);
+    if (live === channel) live = null;
     if (channel) supabase.removeChannel(channel);
   };
 }
