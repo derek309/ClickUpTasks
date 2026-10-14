@@ -27,33 +27,24 @@ export function MenuSheet({ label, onClose, children }: { label: string; onClose
   );
 }
 
-/** A sheet that sits right above a phone's keyboard (visualViewport), for
- *  typing in without the page under it jumping (2026-10-14: + Add step).
- *  Below sm only; the backdrop and Escape close it. */
-export function KeyboardSheet({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
-  const measure = () => {
-    if (typeof window === "undefined") return { bottom: 12, max: 600 };
-    const vv = window.visualViewport;
-    const h = vv ? vv.height : window.innerHeight;
-    const top = vv ? vv.offsetTop : 0;
-    return { bottom: Math.max(12, window.innerHeight - (h + top) + 12), max: Math.max(200, h - 24) };
-  };
-  const [box, setBox] = useState(measure);
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const fit = () => setBox(measure());
-    vv.addEventListener("resize", fit);
-    vv.addEventListener("scroll", fit);
-    return () => { vv.removeEventListener("resize", fit); vv.removeEventListener("scroll", fit); };
-  }, []);
+/** A whole screen page on a phone (Derek, 2026-10-14: + Add step had no room
+ *  as a sheet): white, the full height, scrolling inside, with a back line at
+ *  the top that scrolls with it (never sticky). Nothing is focused when it
+ *  opens, so no keyboard or AutoFill bar comes up; the page itself takes the
+ *  focus. Below sm only; Escape and the back line close it. */
+export function PhonePage({ label, back, title, onClose, children }: { label: string; back: string; title: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.focus({ preventScroll: true }); }, []);
   useEscapeToClose(onClose);
   if (typeof document === "undefined") return null;
   return createPortal(
-    <div className="sm:hidden">
-      <div className="fixed inset-0 z-[120] bg-black/30" onClick={onClose} />
-      <div role="dialog" aria-label={label} style={{ bottom: box.bottom, maxHeight: box.max }}
-        className="fixed inset-x-3 z-[121] overflow-y-auto overscroll-contain rounded-[5px] bg-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+    <div ref={ref} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}
+      className="fixed inset-0 z-[120] overflow-y-auto overscroll-contain bg-surface text-foreground outline-none sm:hidden">
+      <div className="flex min-h-full flex-col gap-3 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <button onClick={onClose} className="-ml-2 inline-flex h-10 min-w-0 max-w-full items-center gap-1.5 self-start rounded-[5px] px-2 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">
+          <span aria-hidden>←</span><span className="min-w-0 truncate">{back}</span>
+        </button>
+        <h2 className="text-[24px] font-bold leading-tight">{title}</h2>
         {children}
       </div>
     </div>,

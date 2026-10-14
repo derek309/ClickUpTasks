@@ -18,7 +18,7 @@ import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
 import { ActionDock } from "./ActionDock";
-import { ActionMenu, KeyboardSheet } from "./ActionMenu";
+import { ActionMenu, PhonePage } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
 import { normalizeSaasUrl } from "@/lib/saasUrl";
 import { AttachmentTile } from "./AttachmentTile";
@@ -2355,8 +2355,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         name={sheet ? (
           // No keyboard on open (Derek, 2026-10-14, iPhone: the keyboard and the
           // AutoFill bar hid the choices). The name is optional; tap it to type.
-          <input data-name value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="Name the step (optional)" aria-label="Step name"
-            name="step-name" autoComplete="off" autoCorrect="on" enterKeyHint="done"
+          // No "name" in its attributes: Safari offers contact AutoFill on one.
+          <input data-name value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="What is this step? (optional)" aria-label="Step"
+            name="step-title" autoComplete="off" autoCorrect="on" enterKeyHint="done"
             className="h-11 w-full rounded-[5px] bg-background px-3 text-[16px] font-semibold outline-none ring-1 ring-inset ring-border focus:ring-accent" />
         ) : undefined} />
     );
@@ -2455,8 +2456,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {clientItemsOf(null).length > 0 && <li className={`px-4 py-3 ${steps.length || asking ? "border-t" : ""}`}>{clientChangesList(clientItemsOf(null))}</li>}
         {/* One + Add step (Derek, 2026-10-14: "one flow everywhere"): the
             name, optional, then the set up under it. A desktop types in place;
-            a phone opens a sheet above its keyboard, so the page under it
-            does not jump. */}
+            a phone opens it as a page of its own, full screen, nothing
+            focused (Derek, 2026-10-14). */}
         <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onFocus={() => setNewOpen("inline")}
             onKeyDown={(e) => {
@@ -2474,7 +2475,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <button onClick={() => setNewOpen("sheet")} className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold text-accent hover:bg-background"><I.plus className="h-4 w-4" /> Add step</button>
         </li>
         {newOpen === "sheet" && (
-          <KeyboardSheet label="Add a step" onClose={closeNew}>{newStepSetup(true)}</KeyboardSheet>
+          <PhonePage label="Add a step" back={task.title.trim() || "Back"} title="New step" onClose={closeNew}>{newStepSetup(true)}</PhonePage>
         )}
       </ol>
     </section>
@@ -2751,7 +2752,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     };
     const nameRow = (
       <input autoFocus={typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches} value={asking ? "" : sentStep.title} placeholder={asking ? "Name the next step, or pick one below" : undefined}
-        name="next-step-name" autoComplete="off" enterKeyHint="done"
+        name="next-step-title" autoComplete="off" enterKeyHint="done"
         onChange={(e) => onRenameSub(sentStep.id, e.target.value || sentStep.title)} aria-label="Next step"
         className="-mx-1 mt-0.5 w-[calc(100%+0.5rem)] rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
     );

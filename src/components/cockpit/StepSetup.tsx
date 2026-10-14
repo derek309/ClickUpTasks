@@ -55,23 +55,20 @@ export function addRowsOf<T extends { key: string }>(options: T[], first: string
 export type SetupWho = { key: string; label: string };
 export type SetupAnswer = { who: string | null; when: string };
 
-// On a phone (Derek, 2026-10-14) a choice is a little smaller and each row is
-// one line that scrolls sideways, so the set up fits above the keyboard.
-const CHOICE = "inline-flex h-9 shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold ring-1 ring-inset sm:h-10 sm:px-3";
+// Choices wrap onto new lines, never scroll sideways (Derek, 2026-10-14).
+const CHOICE = "inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset";
 const OFF = `${CHOICE} bg-surface text-foreground ring-border hover:ring-accent`;
 const ON = `${CHOICE} bg-accent-soft text-accent ring-2 ring-accent`;
-// The name's suggestion on a phone: first in the line, outlined in the accent.
-const LEAD = `${OFF} max-sm:text-accent max-sm:ring-accent`;
-// An action on a desktop sits in its labelled row as a plain accent word; on a
-// phone it is a chip like the others in one line.
-const ITEM = "inline-flex h-10 shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50 max-sm:h-9 max-sm:bg-surface max-sm:text-foreground max-sm:ring-1 max-sm:ring-inset max-sm:ring-border";
-// A phone's chip says less where the desktop's word is long.
-const PHONE_SHORT: Record<string, string> = { chat: "Chat" };
-const shortOf = (key: string, label: string) => {
-  const full = ADD_SHORT[key] ?? label;
-  const phone = PHONE_SHORT[key];
-  return phone && phone !== full ? <><span className="sm:hidden">{phone}</span><span className="max-sm:hidden">{full}</span></> : full;
-};
+// An action on a desktop sits in its labelled row as a plain accent word.
+const ITEM = "inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50";
+// On a phone the actions are large tiles, three a row, the icon above a short
+// word; the name's suggestion comes first, outlined in the accent.
+const TILE = "flex min-h-[4.75rem] min-w-0 flex-col items-center justify-center gap-1.5 rounded-[5px] px-1 py-2 text-center text-[16px] font-semibold leading-tight ring-inset [overflow-wrap:anywhere] disabled:opacity-50";
+const TILE_OFF = `${TILE} bg-surface text-foreground ring-1 ring-border hover:ring-accent`;
+const TILE_LEAD = `${TILE} bg-surface text-accent ring-2 ring-accent`;
+const TILE_ON = `${TILE} bg-accent-soft text-accent ring-2 ring-accent`;
+const TILE_WORD: Record<string, string> = { chat: "Chat" };
+const tileWord = (key: string, label: string) => TILE_WORD[key] ?? ADD_SHORT[key] ?? label;
 
 export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false, search = false, enterSubmits = false, onAnswer }: {
   /** What's next: the next step's name, above the three rows. */
@@ -119,20 +116,6 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     b?.focus({ preventScroll: true });
   };
   useEffect(() => { if (autoFocus) focusRow(0); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // A row that scrolls sideways (a phone) keeps its picked choice in view,
-  // moving only the row, never the page.
-  useEffect(() => {
-    for (const i of [0, 1, 2]) {
-      const box = rowEl(i);
-      if (!box || box.scrollWidth <= box.clientWidth + 1) continue;
-      const on = box.querySelector<HTMLElement>("[aria-pressed=true], [data-on=true]");
-      if (!on) continue;
-      const b = box.getBoundingClientRect();
-      const r = on.getBoundingClientRect();
-      // Lined up with the row's start, where it snaps, so it stays put.
-      if (r.left < b.left || r.right > b.right) box.scrollLeft += r.left - b.left;
-    }
-  }, [whoPick, when, preset]); // eslint-disable-line react-hooks/exhaustive-deps
   const answer = (): SetupAnswer => ({ who: whoPick, when });
   const pickWho = (k: string) => {
     setWhoPick(k);
@@ -174,24 +157,24 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     } else if (e.key === "Tab" && !e.shiftKey && row < 2) { e.preventDefault(); focusRow(row + 1); }
     else if (e.key === "Tab" && e.shiftKey && row > 0) { e.preventDefault(); focusRow(row - 1); }
   };
-  // Each row: its question, then its choices on one line. On a phone the
-  // question is one short word on the left and the line scrolls sideways
-  // (no bar, snapping to a choice), never wrapping (Derek, 2026-10-14).
+  // Each row: its question, then its choices. On a phone the question is a
+  // short word above them and they wrap onto new lines, never scrolling
+  // sideways (Derek, 2026-10-14); a desktop keeps them on one line.
   const Row = ({ i, label, short, children }: { i: number; label: string; short: string; children: React.ReactNode }) => (
-    <div className={`flex min-w-0 items-center gap-2 sm:gap-3 ${i === 2 ? "sm:items-start" : ""}`}>
-      <span id={`${uid}-q${i}`} className={`w-[3.25rem] shrink-0 text-[16px] font-semibold text-muted sm:w-[9.5rem] ${i === 2 ? "sm:pt-2.5" : ""}`}>
+    <div className={`flex min-w-0 flex-col gap-1.5 sm:flex-row sm:gap-3 ${i === 2 ? "sm:items-start" : "sm:items-center"}`}>
+      <span id={`${uid}-q${i}`} className={`shrink-0 text-[16px] font-semibold text-muted sm:w-[9.5rem] ${i === 2 ? "sm:pt-2.5" : ""}`}>
         <span className="sm:hidden">{short}</span><span className="max-sm:hidden">{label}</span>
       </span>
       <div id={`${uid}-row${i}`} role="group" aria-labelledby={`${uid}-q${i}`}
-        className="no-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 py-0.5 max-sm:snap-x max-sm:overflow-x-auto max-sm:overscroll-x-contain max-sm:px-0.5">{children}</div>
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 py-0.5 sm:flex-nowrap">{children}</div>
     </div>
   );
   const whoLabel = (c: SetupWho) => c.key === "else" ? <>{!known && whoPick ? nameOf?.(whoPick) ?? "Someone else" : "Someone else"}<I.chevron className="h-3.5 w-3.5 -rotate-90" /></> : c.label;
   return (
-    <section aria-label="Set up this step" onKeyDown={onKeyDown} className="flex min-w-0 flex-col gap-1.5 sm:gap-2">
+    <section aria-label="Set up this step" onKeyDown={onKeyDown} className="flex min-w-0 flex-col gap-3 sm:gap-2">
       {name}
       {Row({ i: 0, label: "Whose turn?", short: "Who", children: who.map((c) => c.key === "else" && someoneElse ? (
-        <span key={c.key} data-choice className="shrink-0 snap-start">
+        <span key={c.key} data-choice className="shrink-0">
           {someoneElse(<span aria-pressed={!known && !!whoPick} className={!known && !!whoPick ? ON : OFF}>{whoLabel(c)}</span>, pickWho)}
         </span>
       ) : (
@@ -202,15 +185,36 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
           <button key={c.key} data-choice aria-pressed={whenKey === c.key} onClick={() => pickWhen(c.date)} className={whenKey === c.key ? ON : OFF}>{c.label}</button>
         ))}
         {/* A picked day shows in place of Pick a date, picked. */}
-        <span data-choice data-on={whenKey === "pick"} className="shrink-0 snap-start">
+        <span data-choice className="shrink-0">
           <InlineDate value={whenKey === "pick" ? when : null} onChange={(d) => { if (d) pickWhen(d); }}
             formatValue={(v) => formatDue(v)} emptyLabel="Pick a date"
-            className={`${whenKey === "pick" ? ON : OFF} !overflow-visible !rounded-[5px] !px-2.5 !py-0 sm:!px-3`} />
+            className={`${whenKey === "pick" ? ON : OFF} !overflow-visible !rounded-[5px] !px-3 !py-0`} />
         </span>
       </>) })}
       {Row({ i: 2, label: "What's the action?", short: "Do", children: (
-        // On a phone the rows below dissolve (contents) into the one line.
-        <div className="flex min-w-0 flex-col gap-1 max-sm:contents">
+        <>
+        {/* A phone: large tiles, three a row (Derek, 2026-10-14). Not
+            numbered choices: the desktop's rows below keep the keys. */}
+        {!needle && (
+          <div className="grid w-full grid-cols-3 gap-2 sm:hidden">
+            {[...lead.map((a) => ({ a, lead: true })), ...rows.flatMap((r) => r.items.map((a) => ({ a, lead: false })))].map(({ a, lead: first }) => {
+              const Icon = ADD_ICON[a.key];
+              const on = preset === a.key;
+              return (
+                <button key={`t-${a.key}`} aria-pressed={on} disabled={a.disabled && !on} title={a.title ?? (tileWord(a.key, a.label) !== a.label ? a.label : undefined)}
+                  onClick={() => (on ? onDone(answer(), a.disabled ? undefined : a.onPick) : act(a))} className={on ? TILE_ON : first ? TILE_LEAD : TILE_OFF}>
+                  {Icon ? <Icon className="h-6 w-6 shrink-0" /> : <I.plus className="h-6 w-6 shrink-0" />}{first ? a.label : tileWord(a.key, a.label)}
+                </button>
+              );
+            })}
+            {more.length > 0 && (
+              <ActionMenu sheet label={<span className="flex flex-col items-center gap-1.5"><I.plus className="h-6 w-6" />More</span>} title="More to add to this step"
+                triggerClassName={`${TILE_OFF} w-full text-accent`}
+                items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
+            )}
+          </div>
+        )}
+        <div className="flex min-w-0 flex-col gap-1 max-sm:hidden">
           {search && (
             <input value={q} onChange={(e) => { setQ(e.target.value); setQAt(0); }} placeholder="Find an action, or type a letter" aria-label="Find an action"
               onKeyDown={(e) => {
@@ -229,37 +233,38 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
             </div>
           ) : (<>
           {lead.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 max-sm:contents">
+            <div className="flex flex-wrap items-center gap-1.5">
               {lead.map((a) => {
                 const Icon = ADD_ICON[a.key];
-                return <button key={`lead-${a.key}`} data-choice aria-pressed={preset === a.key} disabled={a.disabled} title={a.title} onClick={() => (preset === a.key ? onDone(answer(), a.disabled ? undefined : a.onPick) : act(a))} className={preset === a.key ? ON : LEAD}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{a.label}</button>;
+                return <button key={`lead-${a.key}`} data-choice aria-pressed={preset === a.key} disabled={a.disabled} title={a.title} onClick={() => (preset === a.key ? onDone(answer(), a.disabled ? undefined : a.onPick) : act(a))} className={preset === a.key ? ON : OFF}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{a.label}</button>;
               })}
             </div>
           )}
           {rows.map((r) => (
-            <div key={r.label} className="flex flex-wrap items-center gap-x-1 max-sm:contents">
-              <span className="mr-1 shrink-0 text-[16px] text-muted max-sm:hidden">{r.label}</span>
+            <div key={r.label} className="flex flex-wrap items-center gap-x-1">
+              <span className="mr-1 shrink-0 text-[16px] text-muted">{r.label}</span>
               {r.items.map((a) => {
                 const Icon = ADD_ICON[a.key];
                 const on = preset === a.key;
                 return (
                   <button key={a.key} data-choice aria-pressed={on} disabled={a.disabled && !on} title={a.title} onClick={() => (on ? onDone(answer(), a.disabled ? undefined : a.onPick) : act(a))}
                     className={on ? ON : ITEM}>
-                    {Icon && <Icon className="h-4 w-4 shrink-0" />}{shortOf(a.key, a.label)}
+                    {Icon && <Icon className="h-4 w-4 shrink-0" />}{ADD_SHORT[a.key] ?? a.label}
                   </button>
                 );
               })}
             </div>
           ))}
           {more.length > 0 && (
-            <span data-choice className="shrink-0 snap-start self-start max-sm:self-center">
+            <span data-choice className="shrink-0 self-start">
               <ActionMenu sheet label={<span className="inline-flex items-center gap-1.5"><I.plus className="h-4 w-4" />More</span>} title="More to add to this step"
-                triggerClassName="inline-flex h-10 items-center whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background max-sm:h-9 max-sm:bg-surface max-sm:ring-1 max-sm:ring-inset max-sm:ring-border"
+                triggerClassName="inline-flex h-10 items-center whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
                 items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
             </span>
           )}
           </>)}
         </div>
+        </>
       ) })}
       <div className="flex justify-end">
         <button onClick={() => onDone(answer())} title="Keep what is picked (Escape)" className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Skip</button>
