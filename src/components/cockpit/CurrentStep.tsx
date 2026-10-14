@@ -92,7 +92,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   // The suggestion sits in the name box until it is typed over.
   const [typed, setTyped] = useState(false);
   const options: AddOption[] = [
-    { key: "directions", label: "Directions", disabled: dir.open, onPick: dir.start },
+    // Not offered once the step has them (Derek, 2026-10-14).
+    ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
     { key: "checklist", label: "Checklist", onPick: () => todo.ref.current?.focus() },
     ...addOptions,
   ];

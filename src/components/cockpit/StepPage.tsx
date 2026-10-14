@@ -494,7 +494,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // Everything "Add client work" offers: a checklist, the task's documents and
   // reviews and an email (from the task page), and a text.
   const options = [
-    { key: "directions", label: "Directions", disabled: dir.open, note: dir.open ? "on this step" : undefined, onPick: dir.start },
+    // Not offered once the step has them (Derek, 2026-10-14: "directions is already taken").
+    ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
     // The client's saved short links, picked from a list (Derek, 2026-10-12).
     ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved files and links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
     { key: "checklist", label: "Checklist", onPick: () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },

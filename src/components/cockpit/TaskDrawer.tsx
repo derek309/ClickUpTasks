@@ -2294,7 +2294,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           <CurrentStep key={sub.id} {...handOn(sub)} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
             clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
-            addOptions={withGiveClaude(sub, stepAddOptions(sub))}
+            addOptions={addOptionsFor(sub)}
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
             files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
             incoming={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "came") ?? undefined}
@@ -3704,6 +3704,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const withGiveClaude = <T extends { key: string; label: string; disabled: boolean; onPick: () => void }>(sub: Subtask, opts: T[]) =>
     sub.done || sub.onClient || sub.assigneeId === CLAUDE_ID ? opts
       : [...opts, { key: "claude", label: "Give to Claude", disabled: false, onPick: () => toClaude(sub.id) } as T];
+  // Claude's step offers only what tells Claude what to do: its directions,
+  // to dos and saved files, none of the work to make (Derek, 2026-10-14: "it's
+  // assigned to Claude. Why would I want to write a document? I want to add
+  // directions, maybe a checklist").
+  const addOptionsFor = (sub: Subtask) => sub.assigneeId === CLAUDE_ID ? [] : withGiveClaude(sub, stepAddOptions(sub));
   // Handing a step on while working it, beside Done (Derek, 2026-10-14:
   // "I'm going to be delegating stuff to Claude a lot, and it's hidden"):
   // Give to Claude as its own button, a teammate, you again or the client
@@ -3734,7 +3739,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepPlanBits = (sub: Subtask, isActive: boolean, light = false) => {
     // Not an email the client's own email on the step is there to Reply to
     // (planOffer, Derek 2026-10-14: one way to write back).
-    const offer = planOffer(sub) as DeliverableKey | null;
+    const offer = sub.assigneeId === CLAUDE_ID ? null : planOffer(sub) as DeliverableKey | null;
     const makes = offer && (offer === "email" ? hasMessaging : canHaveDocument) ? offer : null;
     const needs = sub.needs ?? [];
     // "Send to Brian again": the review is back on this step; open it to send.
@@ -4473,7 +4478,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               }}
               controls={stepControls(ps, isCur)}
               setup={setupOf(ps, setupFor[ps.id])}
-              addOptions={withGiveClaude(ps, stepAddOptions(ps))}
+              addOptions={addOptionsFor(ps)}
               onSendHeldEmail={heldEmailSendFor(ps)}
               canText={!!messageDest?.phone && mayContactClient}
               onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
