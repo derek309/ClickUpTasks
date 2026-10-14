@@ -1045,8 +1045,10 @@ export interface Task {
    * Submitting while waitingOnClient is true clears that flag, hands the task
    * back to its owner (or the client's follower when it has none), and bumps
    * due to today (see /api/waiting/[token]/respond); editing an
-   * already-submitted response afterward just updates this field in place. */
-  clientResponse?: { body: string; attachments: Attachment[]; submittedAt: string } | null;
+   * already-submitted response afterward just updates this field in place.
+   * A website feedback report (source "website_feedback", lib/websiteFeedback)
+   * is saved here too, as the client's own words. */
+  clientResponse?: { body: string; attachments: Attachment[]; submittedAt: string; source?: "website_feedback" } | null;
   /** An outbound email Claude (via the MCP server's draft_email tool)
    * prepared on this task for a human to review before it goes out — never
    * sent automatically. Single overwritable field like clientResponse

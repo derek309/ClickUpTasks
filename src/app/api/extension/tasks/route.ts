@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
-import { directionsOntoStepOne, looksLikeHtml, plainTextToHtml } from "@/lib/data";
+import { directionsOntoStepOne, looksLikeHtml, plainTextToHtml, htmlToText } from "@/lib/data";
+import { isWebsiteFeedbackReport, clientWordsOfReport, WEBSITE_FEEDBACK } from "@/lib/websiteFeedback";
 
 // Create a task on the token owner's behalf — the Gmail extension's core
 // action. Mirrors the "reuse-or-create the client's default Tasks project"
@@ -46,6 +47,15 @@ export async function POST(req: NextRequest) {
   // step 1's directions, not a task description (Derek, 2026-10-14).
   const directions = typeof body.description === "string" ? body.description : "";
   const subtasks = directionsOntoStepOne([], looksLikeHtml(directions) ? directions : plainTextToHtml(directions), title, () => "s_" + randomUUID().replace(/-/g, ""));
+  // A website feedback report is the client's own request: their words are
+  // also saved the way a portal request is (./waiting/[token]/request), as
+  // the task's client response and a chat message from them, so their portal
+  // ("See all your changes") shows it as theirs and the task reads "From
+  // Pam's website feedback". The team's lines (page, element, browser) stay
+  // in step 1's directions only (Derek, 2026-10-14).
+  const plain = looksLikeHtml(directions) ? htmlToText(directions) : directions;
+  const feedback = isWebsiteFeedbackReport(plain, body.source) ? clientWordsOfReport(plain).slice(0, 10000) : "";
+  const nowIso = new Date().toISOString();
   const due = typeof body.due === "string" && body.due ? body.due : null;
   // A caller that knows when it wants to see this again can say so. The
   // website feedback plugin does: its reports are due in three working days
@@ -96,8 +106,17 @@ export async function POST(req: NextRequest) {
     assignee_id: typeof body.assignee_id === "string" && body.assignee_id ? body.assignee_id : caller.memberId,
     contact_id: clientId.startsWith("cl_") ? clientId.slice(3) : null,
     due, follow_up_at: followUpAt, attachments, created_by: caller.memberId,
+    ...(feedback ? { client_response: { body: feedback, attachments: [], submittedAt: nowIso, source: WEBSITE_FEEDBACK } } : {}),
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  const contactId = clientId.startsWith("cl_") ? clientId.slice(3) : null;
+  if (feedback && contactId) {
+    await supabaseAdmin.from("messages").insert({
+      id: "msg_" + randomUUID(), contact_id: contactId, client_id: clientId, task_id: id,
+      channel: "chat", direction: "inbound", subject: null, body: feedback, attachments: [],
+      created_by: null, created_at: nowIso,
+    });
+  }
   return NextResponse.json({ id, title, clientId, projectId });
 }
 
