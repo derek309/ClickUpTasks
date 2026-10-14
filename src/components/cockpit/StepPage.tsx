@@ -312,20 +312,23 @@ export function StepPage({ task, sub, client, firstName, isCurrent, full, onTogg
     .map((x) => ({ href: x[1].replace(/&amp;/g, "&"), label: htmlToText(x[2]).trim() || x[1] }))
     .filter((l) => /^https?:\/\//.test(l.href));
   const toneOf = (m: Message) => CHANNEL_TONE[m.channel === "sms" ? "sms" : m.channel === "email" ? "email" : "chat"];
+  // Nothing said yet: only the Note to the team link, no heading and no "None
+  // yet" (Derek, 2026-10-13); they come back with the first message or note.
+  const anySaid = saidMessages.length > 0 || saidNotes.length > 0;
   const conversation = (
-    <section aria-labelledby="step-talk" className="flex min-w-0 flex-col gap-3">
+    <section aria-labelledby={anySaid ? "step-talk" : undefined} aria-label={anySaid ? undefined : "Messages on this step"} className="flex min-w-0 flex-col gap-3">
       {/* Read only, folded (Derek, 2026-10-13: "we shouldn't be writing in
           those boxes"; the client is written to through Actions, as a
           draft held on the step). The only box here is a note to the team. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button onClick={() => setShowSaid(!showSaid)} aria-expanded={showSaid} disabled={!saidMessages.length && !saidNotes.length}
-          className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-left disabled:cursor-default sm:w-auto sm:flex-nowrap">
+        {anySaid && <button onClick={() => setShowSaid(!showSaid)} aria-expanded={showSaid}
+          className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-left sm:w-auto sm:flex-nowrap">
           {/* On a phone the heading keeps its line and the summary takes the
               next one, whole (Derek, 2026-10-13); from sm up, one line. */}
           <h3 id="step-talk" className="shrink-0 text-[17px] font-bold">Messages on this step</h3>
           <span className="order-last min-w-0 basis-full text-[16px] text-muted sm:order-none sm:basis-auto sm:truncate">{saidSummary}</span>
-          {(saidMessages.length > 0 || saidNotes.length > 0) && <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />}
-        </button>
+          <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />
+        </button>}
         <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : "Note to the team"}</button>
       </div>
       {/* The chat from when this step was a handoff, kept to read (Derek,
