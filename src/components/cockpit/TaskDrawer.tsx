@@ -2791,22 +2791,23 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           it, always there: on the picture they hid each other and needed a
           hover a phone does not have (Derek, 2026-10-14). */}
       {galleryTiles.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-2">
+        // Two across on a phone, 140px tiles from sm up.
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
           {galleryTiles.map(({ a, own }) => {
             const step = stepTitleHolding(attachmentKey(a.id));
-            const tool = "flex h-8 w-7 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground";
+            const tool = "flex h-8 min-w-0 flex-1 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground";
             return (
               <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
                 onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
                 onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
-                className={`w-[140px] overflow-hidden rounded-[5px] bg-background ring-1 ring-[var(--border)] ${dragAttId === a.id ? "opacity-40" : ""}`}>
+                className={`min-w-0 overflow-hidden rounded-[5px] bg-background ring-1 ring-[var(--border)] sm:w-[140px] ${dragAttId === a.id ? "opacity-40" : ""}`}>
                 <button onClick={() => openPreview(a)} title={step ? `${a.name}, on ${step}` : a.name} aria-label={`View ${a.name}`} className="block h-[120px] w-full hover:opacity-90">
                   {a.path && attImageUrls[a.path]
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-[120px] w-full object-cover" />
                     : <span className="grid h-[120px] w-full place-items-center text-muted">🖼️</span>}
                 </button>
-                <div className="flex items-center justify-between gap-0.5 border-t px-0.5 py-0.5">
+                <div className="flex items-center justify-between border-t py-0.5">
                   <button onClick={() => openPreview(a)} title="Open" aria-label={`Open ${a.name}`} className={tool}><I.expand className="h-4 w-4" /></button>
                   {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" aria-label={`Download ${a.name}`} className={tool}><I.download className="h-4 w-4" /></button>}
                   {own && a.path && (
@@ -3920,7 +3921,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {filesEmpty ? headingText("Files") : heading("Files", fileCount > 0 && <span className="font-normal text-muted">· {fileCount}</span>)}
         {filesEmpty && emptyHint("Drop, paste or attach · max 25MB each")}
         {(filesOpen || filesEmpty) && (
-          <span className="flex shrink-0 items-center gap-3">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             {/* Sorting two things is not a job. It earns its place at five. */}
             {task.attachments.length >= 5 && (
               <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">

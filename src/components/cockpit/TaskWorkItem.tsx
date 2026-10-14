@@ -841,7 +841,7 @@ export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={img.name} onClick={onClose} className="fixed inset-0 z-[110] flex flex-col bg-black/85">
       <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white">
+        <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white max-sm:basis-full">
           {img.name}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
         </span>
         {onDownload
