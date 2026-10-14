@@ -23,12 +23,17 @@ function query(table: string) {
   let payload: unknown;
   let single = false;
   let max: number | undefined;
+  let head = false;
   const b: any = {
-    select: () => b,
+    // { count: "exact", head: true } answers with the count only.
+    select: (_cols?: string, opts?: { head?: boolean }) => { head = !!opts?.head; return b; },
     insert: (p: unknown) => { op = "insert"; payload = p; return b; },
     update: (p: unknown) => { op = "update"; payload = p; return b; },
     eq: (k: string, v: unknown) => { preds.push((r) => r[k] === v); return b; },
     neq: (k: string, v: unknown) => { preds.push((r) => r[k] !== v); return b; },
+    // Compared as strings, which is how ISO dates order.
+    gte: (k: string, v: string) => { preds.push((r) => String(r[k] ?? "") >= v); return b; },
+    lt: (k: string, v: string) => { preds.push((r) => String(r[k] ?? "") < v); return b; },
     is: (k: string, v: unknown) => { preds.push((r) => (r[k] ?? null) === v); return b; },
     // Only ever called as not(col, "is", null) by the code under test.
     not: (k: string, _op: string, v: unknown) => { preds.push((r) => (r[k] ?? null) !== v); return b; },
@@ -46,12 +51,13 @@ function query(table: string) {
     order: () => b,
     limit: (n: number) => { max = n; return b; },
     maybeSingle: () => { single = true; return b; },
-    then: (resolve: (r: { data: unknown; error: null }) => unknown, reject?: (e: unknown) => unknown) => {
+    then: (resolve: (r: { data: unknown; count?: number; error: null }) => unknown, reject?: (e: unknown) => unknown) => {
       if (op !== "select") {
         writes.push({ table, op, payload });
         return Promise.resolve({ data: null, error: null }).then(resolve, reject);
       }
       let rows = (tables[table] ?? []).filter((r) => preds.every((p) => p(r)));
+      if (head) return Promise.resolve({ data: null, count: rows.length, error: null }).then(resolve, reject);
       if (max !== undefined) rows = rows.slice(0, max);
       return Promise.resolve({ data: single ? rows[0] ?? null : rows, error: null }).then(resolve, reject);
     },
