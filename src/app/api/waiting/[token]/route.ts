@@ -5,6 +5,7 @@ import {
   type Attachment, type Recurrence, type RecurrenceUnit,
 } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
+import { QUEUE_TASK_COLS, portalQueueMarks, queueSettings, queueTaskFromRow, type QueueSettings } from "../../../../../mcp/queue.mjs";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 
@@ -50,7 +51,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   let projectQuery = supabaseAdmin.from("projects").select("id, name").eq("client_id", scope.clientId).eq("hidden_from_client", false).is("deleted_at", null).order("position", { ascending: true });
   if (scope.projectId) projectQuery = projectQuery.eq("id", scope.projectId);
   const { data: projectRows } = await projectQuery;
-  const projects = (projectRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string }));
+  // Queue lists (mcp/queue.mjs): the "What we're doing" tab shows what is
+  // Now and what is in line, in order, with no dates for the line. Read only
+  // when the database has the queue column; otherwise no list is a queue.
+  const queues = new Map<string, QueueSettings>();
+  if (projectRows?.length) {
+    const { data: queueRows, error: queueErr } = await supabaseAdmin.from("projects").select("id, queue").in("id", projectRows.map((p) => p.id as string));
+    if (!queueErr) for (const r of (queueRows ?? []) as { id: string; queue: unknown }[]) { const q = queueSettings(r.queue); if (q) queues.set(r.id, q); }
+  }
+  const projects = (projectRows ?? []).map((p) => ({ id: p.id as string, name: p.name as string, ...(queues.has(p.id as string) ? { queue: true } : {}) }));
+  // Each open task's place: the line is worked out over the whole list (its
+  // private and hidden tasks are in it too), and the places are counted over
+  // what this page shows, so nothing hidden leaves a gap.
+  const queueMarks = new Map<string, { queue: "now" | "line"; place: string | null }>();
+  for (const [listId, q] of queues) {
+    const { data: listRows, error: listErr } = await supabaseAdmin.from("tasks").select(`${QUEUE_TASK_COLS}, is_private, hidden_from_client`).eq("client_id", scope.clientId).eq("project_id", listId).is("deleted_at", null).neq("status", "done");
+    if (listErr) continue;
+    const raw = (listRows ?? []) as unknown as Record<string, unknown>[];
+    const shown = new Set(raw.filter((r) => r.is_private !== true && r.hidden_from_client !== true).map((r) => r.id as string));
+    for (const [id, mark] of portalQueueMarks(raw.map(queueTaskFromRow), q, (t) => shown.has(t.id))) queueMarks.set(id, mark);
+  }
 
   type Row = {
     id: string; project_id: string | null; title: string; due: string | null; description: string | null; status: string;
@@ -266,7 +286,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   }
   const rows = [...byId.values()].sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999"));
   const full = new Set(rows.filter((t) => t.status !== "done" || (finishedAt(t) ?? "") >= fullSince || t.id === deepLinkTaskId || t.waiting_on_client || t.client_response).map((t) => t.id));
-  const tasks = await buildTasks(rows, full);
+  const tasks = (await buildTasks(rows, full)).map((t) => {
+    const mark = t.status !== "done" ? queueMarks.get(t.id) : undefined;
+    // In line: its place, never a date (the queue sets one when its turn comes).
+    return mark ? { ...t, queue: mark.queue, place: mark.place, ...(mark.queue === "line" ? { due: null } : {}) } : t;
+  });
 
   // Whether this client may raise brand-new tasks here at all — the page uses
   // it to show or hide the "Add Something" composer. Not a permission the

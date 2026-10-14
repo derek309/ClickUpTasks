@@ -177,6 +177,23 @@ export function groupQueue(tasks, settings) {
   };
 }
 
+/** What the client's portal says of each open task on a queue list: "now"
+ *  (being done, or with a teammate or them) or "line" with its place, "2nd",
+ *  "3rd"... A task on its way through the line has no date to show. The line
+ *  is worked out over the whole list; the places are counted over the tasks
+ *  the client can see, so a private task leaves no gap.
+ *  @param {QTask[]} tasks @param {QueueSettings} settings @param {(t: QTask) => boolean} [visible]
+ *  @returns {Map<string, { queue: "now" | "line"; place: string | null }>} */
+export function portalQueueMarks(tasks, settings, visible = () => true) {
+  const g = groupQueue(tasks, settings);
+  /** @type {Map<string, { queue: "now" | "line"; place: string | null }>} */
+  const out = new Map();
+  for (const t of [...g.now, ...g.waiting]) if (visible(t)) out.set(t.id, { queue: "now", place: null });
+  const shownNow = g.now.filter(visible).length;
+  g.upNext.filter((u) => visible(u.task)).forEach((u, i) => out.set(u.task.id, { queue: "line", place: ordinal(shownNow + i + 1) }));
+  return out;
+}
+
 /** Ids of the tasks waiting in line (Up next): kept off the main task list.
  *  @param {QTask[]} tasks @param {QueueSettings} settings @returns {Set<string>} */
 export function upNextIds(tasks, settings) {

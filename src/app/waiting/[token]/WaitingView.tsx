@@ -14,7 +14,8 @@ import { uploadSharedFile } from "@/lib/docFileUpload";
 import { doneByMonth, doneLines, monthCount, ongoingWork, type DoneLine } from "@/lib/portalDone";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
-type WaitingProject = { id: string; name: string };
+/** queue: the list works one at a time (a queue list): Now, then in line. */
+type WaitingProject = { id: string; name: string; queue?: boolean };
 // One message in a task's running chat — see ./messages/route.ts (client
 // sends) and the team's existing task drawer (reads/sends the same
 // underlying `messages` row, just via the internal app instead of here).
@@ -37,6 +38,9 @@ type WaitingTask = {
   repeat?: string | null;
   /** Finished a while ago and sent short; ?detail= fetches it in full. */
   short?: boolean;
+  /** On a queue list: being done now, or waiting in line at `place` ("2nd"). */
+  queue?: "now" | "line";
+  place?: string | null;
 };
 // "Here's where you are, what's done, what's next" — see
 // A draft attachment is either a stored file (has `path`, uploaded via
@@ -1165,6 +1169,8 @@ export default function WaitingView({ token }: { token: string }) {
                 // A colour per list, so the sections tell apart at a glance
                 // (Derek, 2026-10-07: "each section a different color").
                 const LIST_COLORS = ["#2563eb", "#e8772e", "#16a34a", "#7c3aed", "#0891b2", "#db2777"];
+                const queueOf = (id: string | null) => !!id && !!projects.find((p) => p.id === id)?.queue;
+                const placeNumber = (place: string | null | undefined) => parseInt(place ?? "", 10) || 9999;
                 const box = (l: { id: string | null; name: string }, single: boolean) => {
                   const color = LIST_COLORS[Math.max(0, lists.indexOf(l)) % LIST_COLORS.length];
                   const mine = all.filter(inList(l.id));
@@ -1181,10 +1187,39 @@ export default function WaitingView({ token }: { token: string }) {
                       </div>
                       {/* What we're doing only: what needs them and what's done have
                           their own tabs (Derek, 2026-10-08: "they don't need an all view"). */}
-                      <div>
-                        {tableHead}
-                        {prog.map((t) => renderTaskRow(t))}
-                      </div>
+                      {queueOf(l.id) ? (() => {
+                        // A queue list (Derek, 2026-10-14): what we are doing
+                        // now, then the rest in the order we will get to them,
+                        // with no dates for those.
+                        const nowRows = prog.filter((t) => t.queue !== "line");
+                        const line = prog.filter((t) => t.queue === "line").sort((a, b) => placeNumber(a.place) - placeNumber(b.place));
+                        return (
+                          <div>
+                            <h3 className="px-4 pt-3 text-[16px] font-bold">Now</h3>
+                            {nowRows.length ? <>{tableHead}{nowRows.map((t) => renderTaskRow(t))}</> : <p className="px-4 pb-3 text-[16px] text-muted">Nothing right now.</p>}
+                            {line.length > 0 && (<>
+                              <h3 className="border-t px-4 pt-3 text-[16px] font-bold">In line</h3>
+                              <p className="px-4 text-[16px] text-muted">One at a time, in this order.</p>
+                              <ol className="pb-2">
+                                {line.map((t) => (
+                                  <li key={t.id}>
+                                    <button onClick={() => openTask(t.id, t.review)} className="grid w-full grid-cols-[48px_minmax(0,1fr)_16px] items-center gap-x-3 px-4 py-2.5 text-left transition hover:bg-background">
+                                      <span className="text-[16px] font-semibold text-muted">{t.place}</span>
+                                      <span className="break-words text-[17px] font-semibold">{t.title}</span>
+                                      <span className="text-muted" aria-hidden>›</span>
+                                    </button>
+                                  </li>
+                                ))}
+                              </ol>
+                            </>)}
+                          </div>
+                        );
+                      })() : (
+                        <div>
+                          {tableHead}
+                          {prog.map((t) => renderTaskRow(t))}
+                        </div>
+                      )}
                     </div>
                   );
                 };
