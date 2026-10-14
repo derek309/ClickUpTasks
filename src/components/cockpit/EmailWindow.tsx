@@ -412,10 +412,13 @@ export function EmailWindow({
                   <RecipientField label="Bcc" value={bcc} onChange={setBcc} contacts={ccContacts ?? []} />
                 </div>
               )}
-              <label className="flex min-h-12 items-center gap-3 border-b px-4 py-2 text-[16px] sm:px-6">
-                <span className="w-16 shrink-0 font-semibold text-muted">Subject</span>
-                <input value={subject} onChange={(e) => setSubject(e.target.value)}
-                  placeholder={subjectFallback || "Subject"} className="min-w-0 flex-1 bg-transparent font-semibold outline-none" />
+              <label className="flex min-h-12 items-start gap-3 border-b px-4 py-2 text-[16px] sm:items-center sm:px-6">
+                <span className="w-16 shrink-0 py-0.5 font-semibold text-muted">Subject</span>
+                {/* Wraps on a phone instead of running off the edge (2026-10-14);
+                    still one line of text: Enter adds no line. */}
+                <textarea value={subject} onChange={(e) => setSubject(e.target.value.replace(/\s*\n\s*/g, " "))} rows={1}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault(); }}
+                  placeholder={subjectFallback || "Subject"} className="min-w-0 flex-1 resize-none bg-transparent py-0.5 font-semibold leading-snug outline-none [field-sizing:content]" />
               </label>
               <div className={`p-4 sm:p-6 ${showTools ? "" : "[&_.rte-toolbar]:hidden sm:[&_.rte-toolbar]:flex"}`}
                 onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(); } }}>

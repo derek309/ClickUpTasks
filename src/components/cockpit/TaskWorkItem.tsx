@@ -118,8 +118,11 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, b
 
   // Portalled to the body so it covers the drawer and the app around it.
   return createPortal(
-    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex flex-col bg-background">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 sm:px-8">
+    // On a phone the header scrolls away with the page (Derek, 2026-10-14:
+    // never a fixed header; it took a third of a 375px screen): one scroll
+    // for both. From sm up the header stays and the body scrolls, as before.
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-background sm:overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 sm:px-8">
         {/* On a phone the back link has a line of its own, then the icon and
             the name a full line under it, so a long name wraps instead of
             running off the screen (Derek, 2026-10-14). */}
@@ -140,7 +143,7 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, b
         {actions}
         <button onClick={onClose} className="rounded-[5px] border px-4 py-2 text-[16px] font-medium hover:bg-background">Close</button>
       </header>
-      <div className="flex-1 overflow-y-auto px-4 pb-16 pt-6 sm:px-8">
+      <div className="flex-1 px-4 pb-16 pt-6 sm:overflow-y-auto sm:px-8">
         {/* 1280px, the width every ClickUpLocal page uses (Derek, 2026-09-11: "open up the full to 1280px"). */}
         <div className="mx-auto w-full max-w-[1280px]">{children}</div>
       </div>
