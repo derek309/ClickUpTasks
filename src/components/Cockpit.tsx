@@ -2908,6 +2908,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             let late = 0, today = 0;
             for (const t of list) {
               if (t.status === "done" || t.status === "on_hold") continue;
+              // Waiting in line on a queue (Up next) is not today's work, even
+              // with a follow up left on it (Derek, 2026-10-14: Amanda showed
+              // here for a queued meeting task with nothing late or due).
+              if (inLineOnly(t)) continue;
               const d = urgencyDateOf(t); if (!d) continue;
               if (d < TODAY) late++; else if (d === TODAY) today++;
             }
