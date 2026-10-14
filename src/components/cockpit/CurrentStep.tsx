@@ -8,7 +8,7 @@
 // useStepTodos), so they edit and save the same way in both places.
 import { useState } from "react";
 import { htmlToText, type Message, type StepTodo, type Subtask } from "@/lib/data";
-import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
+import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
@@ -87,7 +87,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
     : (sub.holds ?? []).includes(k);
   const optionFor = (k: StepSuggestKind) => options.find((o) => o.key === k);
   const named = whatsNext ? [] : suggestStepActions(sub.title, firstName);
-  const quick = sub.done || sub.onClient || outFor !== undefined ? null : named
+  const quick = sub.done || sub.onClient || outFor !== undefined ? null : dedupeSuggestions(named, sub)
     .filter((x) => !holdsKind(x.kind) && optionFor(x.kind) && !optionFor(x.kind)!.disabled)
     .map((x) => ({ label: x.label, onPick: optionFor(x.kind)!.onPick }))[0] ?? null;
   // Its email is written and all it asks for is on it: finishing is sending.

@@ -88,3 +88,31 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
 
   return found.sort((a, b) => a.at - b.at).slice(0, 1).map(({ kind, label }) => ({ kind, label }));
 }
+
+/** The client's email on a step not answered yet: its Reply is the one way to
+ *  write back (Derek, 2026-10-14: "+ Make the draft email", "Email Brian" and
+ *  Reply all sat on one step). Answered once the step is done or a reply
+ *  draft sits on it. */
+export function replyWaiting(step: { done?: boolean; fromEmails?: unknown[] | null; holds?: string[] | null }, hasDraftEmail: boolean): boolean {
+  if (step.done || !step.fromEmails?.length) return false;
+  return !(hasDraftEmail && (step.holds ?? []).includes("email"));
+}
+
+/** What a step's plan offers to make ("+ Make the …"): its `makes`, unless
+ *  the step holds it already, or it is an email and the client's email on the
+ *  step is there to Reply to (or its reply is written). */
+export function planOffer(step: { done?: boolean; makes?: string | null; holds?: string[] | null; fromEmails?: unknown[] | null }): string | null {
+  const makes = step.makes ?? null;
+  if (!makes || (step.holds ?? []).includes(makes)) return null;
+  if (makes === "email" && !step.done && step.fromEmails?.length) return null;
+  return makes;
+}
+
+/** The suggestion chips a step shows: never the kind its plan already offers
+ *  (one button per kind of work), and no "Email …" while the client's email
+ *  on it waits for a Reply or has its reply written. */
+export function dedupeSuggestions<T extends { kind: StepSuggestKind }>(list: T[], step: { done?: boolean; makes?: string | null; holds?: string[] | null; fromEmails?: unknown[] | null }): T[] {
+  const offer = planOffer(step);
+  const email = !!step.fromEmails?.length && !step.done;
+  return list.filter((x) => x.kind !== offer && !(email && x.kind === "email"));
+}

@@ -10,7 +10,7 @@ import {
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
   assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName,
-  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
+  type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { usePersisted } from "@/lib/usePersisted";
@@ -49,7 +49,7 @@ import { clientFirstName } from "@/lib/clientFirstName";
 import { conversationSummary } from "@/lib/conversationSummary";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices, setupHistory, recommendActions, historyKinds } from "@/lib/stepSetup";
 import { StepSetup, WhatsNextPicks, addRowsOf, type NextPick, type SetupAction, type SetupAnswer } from "./StepSetup";
-import { suggestStepActions } from "@/lib/stepSuggest";
+import { planOffer, replyWaiting, suggestStepActions } from "@/lib/stepSuggest";
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
 import { isPicture } from "@/lib/pictures";
@@ -3525,9 +3525,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [nextInlineId]);
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
+  // Reply to the client's email on a step: the answer drafted on that step.
+  const replyToEmail = (sub: Subtask, e: ReceivedEmail) => {
+    startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
+    onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
+  };
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
     const pick = (key: DeliverableKey) => {
+      // A step holding the client's email: Email is its Reply (2026-10-14).
+      const waiting = key === "email" && !deliverablePresent("email") && sub.fromEmails?.length && !sub.done ? sub.fromEmails[sub.fromEmails.length - 1] : null;
+      if (waiting) { replyToEmail(sub, waiting); return; }
       // A step still named "…: what's next?" takes the name of what it makes,
       // and its choices are gone until Change (Derek, 2026-10-14).
       const asking = asksWhatsNext(sub);
@@ -3578,7 +3586,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const missingNeeds = (sub: Subtask) => (sub.needs ?? []).filter((n) => !needMet(n, heldLabels(sub)));
   // What a plan's step makes, one click away on it, and what it needs.
   const stepPlanBits = (sub: Subtask, isActive: boolean, light = false) => {
-    const makes = sub.makes && !(sub.holds ?? []).includes(sub.makes) && (sub.makes === "email" ? hasMessaging : canHaveDocument) ? sub.makes : null;
+    // Not an email the client's own email on the step is there to Reply to
+    // (planOffer, Derek 2026-10-14: one way to write back).
+    const offer = planOffer(sub) as DeliverableKey | null;
+    const makes = offer && (offer === "email" ? hasMessaging : canHaveDocument) ? offer : null;
     const needs = sub.needs ?? [];
     // "Send to Brian again": the review is back on this step; open it to send.
     const sendAgain = isActive && sub.makes && (sub.holds ?? []).includes(sub.makes) && sub.makes !== "email" && sub.makes !== "brief" ? sub.makes : null;
@@ -3658,10 +3669,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 return k ? { label: `Mark version ${reviews[k]!.version} approved`, onClick: () => void markReview(k, "approved") } : undefined;
               })()}
               files={files.length ? <EmailFiles files={files} urls={attImageUrls} onOpenPicture={(a) => void openPreview(a)} onOpenFile={openEmailFile} /> : undefined}
-              onReply={hasMessaging ? () => {
-                startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
-                onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
-              } : undefined} />
+              // Its reply written, the draft on the step is the one thing for
+              // email: no Reply beside it (Derek, 2026-10-14).
+              onReply={hasMessaging && replyWaiting(sub, !!task.draftEmail) ? () => replyToEmail(sub, e) : undefined} />
           );
         })}
         {keys.map((k) => {

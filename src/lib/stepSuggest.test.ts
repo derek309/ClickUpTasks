@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { suggestStepActions } from "./stepSuggest";
+import { dedupeSuggestions, planOffer, replyWaiting, suggestStepActions } from "./stepSuggest";
 
 const kinds = (title: string) => suggestStepActions(title, "Ryan").map((s) => s.kind);
 const labels = (title: string) => suggestStepActions(title, "Ryan").map((s) => s.label);
@@ -112,5 +112,38 @@ describe("a mass send is not an email to the client (Derek, 2026-10-14)", () => 
     expect(brian("Email Brian about the newsletter")).toEqual(["Email Brian"]);
     expect(brian("Reply to Brian")).toEqual(["Email Brian"]);
     expect(brian("Let Brian know")).toEqual(["Email Brian"]);
+  });
+});
+
+describe("one way to do each thing on a step", () => {
+  const email = [{ messageId: "m1" }];
+  const chips = [{ kind: "email" as const, label: "Email Brian" }, { kind: "image" as const, label: "Make the image" }];
+  it("a client's email waiting for a Reply: no Email chip, no Make the draft email", () => {
+    const step = { done: false, makes: "email", fromEmails: email };
+    expect(planOffer(step)).toBeNull();
+    expect(dedupeSuggestions(chips, step).map((x) => x.kind)).toEqual(["image"]);
+    expect(replyWaiting(step, false)).toBe(true);
+  });
+  it("its reply written: nothing else for email", () => {
+    const step = { done: false, makes: "email", holds: ["email"], fromEmails: email };
+    expect(replyWaiting(step, true)).toBe(false);
+    expect(planOffer(step)).toBeNull();
+    expect(dedupeSuggestions(chips, step).map((x) => x.kind)).toEqual(["image"]);
+  });
+  it("never a chip for the kind the plan already offers", () => {
+    const step = { done: false, makes: "image" };
+    expect(planOffer(step)).toBe("image");
+    expect(dedupeSuggestions(chips, step).map((x) => x.kind)).toEqual(["email"]);
+  });
+  it("the plan's offer goes once the step holds it, and the chip may come back", () => {
+    const step = { done: false, makes: "image", holds: ["image"] };
+    expect(planOffer(step)).toBeNull();
+    expect(dedupeSuggestions(chips, step)).toHaveLength(2);
+  });
+  it("a step with no email from the client keeps Make the draft email", () => {
+    expect(planOffer({ done: false, makes: "email" })).toBe("email");
+  });
+  it("a done step's email is answered", () => {
+    expect(replyWaiting({ done: true, fromEmails: email }, false)).toBe(false);
   });
 });
