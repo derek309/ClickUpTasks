@@ -3,6 +3,7 @@
 
 import { supabase, authedFetch } from "./supabase";
 import { isLongTitle, longStepsNamed } from "./data";
+import { queueSettings } from "../../mcp/queue.mjs";
 import { noteTaskWrite } from "./localTaskWrites";
 import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
@@ -66,8 +67,11 @@ export const rowToContact = (r: any): Contact => ({ id: r.id, clientId: r.client
 
 const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p.name, description: p.description, assigned_to: p.assignedTo ?? [], folder_id: p.folderId ?? null, position: p.position ?? 0, share_token: p.shareToken ?? null,
   // As with a task's: only once set, so a save never names a column the SQL hasn't added.
-  ...(p.hiddenFromClient !== undefined ? { hidden_from_client: p.hiddenFromClient } : {}) });
-const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null, hiddenFromClient: r.hidden_from_client ?? undefined });
+  ...(p.hiddenFromClient !== undefined ? { hidden_from_client: p.hiddenFromClient } : {}),
+  // The queue only once the column exists (supabase/task-queues.sql).
+  ...(p.queue !== undefined ? { queue: p.queue } : {}) });
+const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null, hiddenFromClient: r.hidden_from_client ?? undefined,
+  ...("queue" in r ? { queue: queueSettings(r.queue) } : {}) });
 const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
 const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
 const stageToRow = (s: Stage) => ({ id: s.id, project_id: s.projectId, name: s.name, position: s.position, is_done: s.isDone, created_at: s.createdAt });
@@ -86,6 +90,11 @@ const taskToRow = (t: Task, updatedBy?: string | null) => ({
   // Only once someone has set it, so a save never names the column on a
   // database the SQL (supabase/task-hidden-from-client.sql) hasn't reached.
   ...(t.hiddenFromClient !== undefined ? { hidden_from_client: t.hiddenFromClient } : {}),
+  // The queue's columns the same way (supabase/task-queues.sql): a database
+  // without them never hears of them.
+  ...(t.queuePos !== undefined ? { queue_pos: t.queuePos } : {}),
+  ...(t.deadline !== undefined ? { deadline: t.deadline } : {}),
+  ...(t.queueSavedDue !== undefined ? { queue_saved_due: t.queueSavedDue } : {}),
   // No draft_email: the server stages drafts too (the doc-reminders cron, Claude's
   // draft_email tool), and a full-row save from a task opened before that would
   // write the old value over it. saveTaskDraftEmail writes it on its own.
@@ -110,6 +119,7 @@ export const rowToTask = (r: any): Task => ({
   attachments: r.attachments ?? [], comments: r.comments ?? [], createdAt: r.created_at ?? new Date().toISOString(),
   private: r.is_private ?? false,
   hiddenFromClient: r.hidden_from_client ?? undefined,
+  ...("queue_pos" in r ? { queuePos: r.queue_pos ?? null, deadline: r.deadline === true, queueSavedDue: r.queue_saved_due ?? null } : {}),
   stageId: r.stage_id ?? null,
   clientResponse: r.client_response ?? null,
   draftEmail: r.draft_email ?? null,

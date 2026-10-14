@@ -10,8 +10,9 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, todayIso, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
+import { queueEntry, queueExit, queuePromotions, queueSettings, type QPatch } from "../../../mcp/queue.mjs";
 
 export type UseTaskEditsDeps = {
   tasksRef: React.RefObject<Task[]>;
@@ -34,6 +35,68 @@ export type UseTaskEditsDeps = {
 };
 
 export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, me, toggleSubLate, notify, setSelectedTaskIds, selectedTaskIds, setConfirmDialog, openTaskId, setOpenTaskId, projectById, clientById, tasks, sendMentionEmail }: UseTaskEditsDeps) {
+  // --- queues (mcp/queue.mjs) -------------------------------------------------
+  // A list with its Queue switch on: the app keeps Now filled. These are the
+  // app's own writes, made beside the edit that caused them, never through
+  // patchTask, so they notify nobody and start no loop.
+  const queueOf = (projectId: string | null | undefined) => (projectId ? queueSettings(projectById(projectId)?.queue) : null);
+  const listOf = (projectId: string, without?: string) => tasksRef.current.filter((t) => t.projectId === projectId && t.id !== without);
+  const applyQueuePatches = (patches: QPatch[]) => {
+    for (const p of patches) {
+      const before = tasksRef.current.find((t) => t.id === p.id);
+      if (!before) continue;
+      const fields: Partial<Task> = {};
+      if (p.queuePos !== undefined) fields.queuePos = p.queuePos;
+      if (p.due !== undefined) fields.due = p.due;
+      if (p.queueSavedDue !== undefined) fields.queueSavedDue = p.queueSavedDue;
+      // Its turn: a line in its Changes saying why it has a date now.
+      const turn = p.due && p.due !== before.due && !before.deadline
+        ? { id: newId("cm_"), authorId: me.id, body: `came up next in the queue, due ${formatDue(p.due)}`, at: new Date().toISOString(), kind: "event" as const }
+        : null;
+      const updated: Task = { ...before, ...fields, ...(turn ? { comments: [...before.comments, turn] } : {}) };
+      setTasks((ts) => ts.map((t) => (t.id === p.id ? updated : t)));
+      tasksRef.current = tasksRef.current.map((t) => (t.id === p.id ? updated : t));
+      void saveTaskEdit(before, { ...before, ...fields }, me.id);
+      if (turn) void appendCommentDb(p.id, turn);
+    }
+  };
+  /** The Now check after an edit: when a Now task finished, went to waiting,
+   *  left or was deleted, the next in line gets its turn and its date. */
+  const followQueue = (projectId: string | null | undefined, without?: string) => {
+    const q = queueOf(projectId);
+    if (!q || !projectId) return;
+    applyQueuePatches(queuePromotions(listOf(projectId, without), q, todayIso()));
+  };
+  /** A move to another list: into a queue it takes the place its priority
+   *  gives it and its date is saved; out of one, its saved date comes back.
+   *  Folded into the edit itself (fields the edit sets win). */
+  const queueMoveFields = (cur: Task, synced: Partial<Task>): Partial<Task> => {
+    if (synced.projectId === undefined || synced.projectId === cur.projectId) return {};
+    const out: Partial<Task> = {};
+    const exit = queueExit(cur);
+    if (exit) { out.due = exit.due ?? null; out.queueSavedDue = null; }
+    const q = queueOf(synced.projectId);
+    if (q) {
+      const arriving = { ...cur, ...synced, ...out };
+      const e = queueEntry(listOf(synced.projectId, cur.id), q, arriving);
+      applyQueuePatches(e.others);
+      out.queuePos = e.self.queuePos ?? null;
+      if (e.self.due !== undefined) out.due = e.self.due;
+      if (e.self.queueSavedDue !== undefined) out.queueSavedDue = e.self.queueSavedDue;
+    }
+    if (synced.due !== undefined) delete out.due;
+    return out;
+  };
+  /** A repeat's next copy in a queue list: the bottom of the line, no date
+   *  (the date it would have had is saved for when the queue goes off). */
+  const queueClone = (clone: Task): Task => {
+    const q = queueOf(clone.projectId);
+    if (!q) return clone;
+    const e = queueEntry(listOf(clone.projectId, clone.id), q, { ...clone, queuePos: null }, { bottom: true });
+    applyQueuePatches(e.others);
+    return { ...clone, queuePos: e.self.queuePos ?? null, ...(e.self.due !== undefined ? { due: e.self.due } : {}), queueSavedDue: e.self.queueSavedDue ?? null };
+  };
+
   // --- mutations ------------------------------------------------------------
 
   const saveChecklistChange = (taskId: string, item: ChecklistChange, author: string) => {
@@ -51,6 +114,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // patches status through here, bypassing patchTask entirely, so this
     // needs its own copy of the sync rather than relying on patchTask's.
     const synced = cur ? { ...patch, ...applyWaitingStatusSync(cur, patch) } : patch;
+    if (cur) Object.assign(synced, queueMoveFields(cur, synced));
     // Starting a wait on the client sets when we check back (waitingFollowUp).
     const checkBack = cur ? waitingFollowUp(cur, synced) : null;
     if (checkBack) synced.followUpAt = checkBack;
@@ -70,8 +134,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (cur && synced.status === "done" && cur.status !== "done" && cur.recurrence !== "none") {
       const nextDue = nextDueAhead(cur.due, cur.recurrence, cur.recurrenceInterval, cur.recurrenceUnit, cur.recurrenceDaysOfMonth, cur.recurrenceNth, cur.recurrenceWeekday);
       if (!hasFreshClone(tasksRef.current, cur, nextDue)) {
-        clone = nextOccurrence(cur, nextDue, newId);
-        pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+        clone = queueClone(nextOccurrence(cur, nextDue, newId));
+        pushToast(clone.queuePos != null && !clone.due ? "🔁 Recurring: the next one is at the end of the queue" : `🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
       }
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
@@ -101,6 +165,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     }
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if (cur && "draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
+    if (cur) { followQueue(cur.projectId); if (synced.projectId && synced.projectId !== cur.projectId) followQueue(synced.projectId); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored
@@ -202,6 +267,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     // date moves.
     const withAuto: Partial<Task> = patch.priority !== undefined && patch.priority !== before.priority ? { ...patch, priorityAuto: false } : patch;
     const synced: Partial<Task> = { ...withAuto, ...applyWaitingStatusSync(before, withAuto) };
+    Object.assign(synced, queueMoveFields(before, synced));
     // Done is done: an unsent draft email on it is thrown out, so Drafts
     // doesn't fill with emails nobody will send (Derek, 2026-10-07).
     if (synced.status === "done" && before.draftEmail && synced.draftEmail === undefined) synced.draftEmail = null;
@@ -240,8 +306,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (synced.status === "done" && before.status !== "done" && before.recurrence !== "none") {
       const nextDue = nextDueAhead(before.due, before.recurrence, before.recurrenceInterval, before.recurrenceUnit, before.recurrenceDaysOfMonth, before.recurrenceNth, before.recurrenceWeekday);
       if (!hasFreshClone(tasksRef.current, before, nextDue)) {
-        clone = nextOccurrence(before, nextDue, newId);
-        pushToast(`🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
+        clone = queueClone(nextOccurrence(before, nextDue, newId));
+        pushToast(clone.queuePos != null && !clone.due ? "🔁 Recurring: the next one is at the end of the queue" : `🔁 Recurring — next occurrence created for ${formatDue(nextDue)}`);
       }
     }
     if (synced.status === "done" && before.status !== "done") keepDoneVisible(id);
@@ -259,6 +325,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (clone) upsertTask(clone, me.id);
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if ("draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
+    followQueue(before.projectId);
+    if (synced.projectId && synced.projectId !== before.projectId) followQueue(synced.projectId);
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);
@@ -403,6 +471,8 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       followUpAt: null,
       createdAt: new Date().toISOString(),
       createdBy: me.id,
+      // Not placed in a queue yet: it enters where its priority puts it.
+      ...(src.queuePos !== undefined ? { queuePos: null, queueSavedDue: null } : {}),
       // A copy sent to another list is a fresh piece of work there, so it
       // arrives unassigned rather than silently landing on whoever happened
       // to own the original in a different client's list.
@@ -441,10 +511,12 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
       onConfirm: () => {
         setConfirmDialog(null);
+        const gone = tasksRef.current.find((t) => t.id === id);
         setTasks((ts) => ts.filter((t) => t.id !== id));
         setOpenTaskId(null);
         deleteTaskDb(id, me.id);
         pushToast("Task moved to Trash");
+        followQueue(gone?.projectId, id);
       },
     });
   };

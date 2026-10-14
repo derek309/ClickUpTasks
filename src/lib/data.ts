@@ -750,6 +750,11 @@ export interface Project {
    * away from), a project token scopes every /api/waiting/[token]/* query to
    * this project_id, so there is nothing else in the response to reach. */
   shareToken?: string | null;
+  /** The list is a queue (mcp/queue.mjs): how many tasks are Now at once and
+   *  how many business days out the next one is due. null is off;
+   *  undefined means the database has no queue column yet
+   *  (supabase/task-queues.sql), so the switch is not offered. */
+  queue?: { now: number; spacing: number } | null;
 }
 
 export interface Label {
@@ -1118,6 +1123,14 @@ export interface Task {
   /** Kept off the client's portal and reminder emails; the team sees it as
    *  usual (Derek, 2026-10-12). */
   hiddenFromClient?: boolean;
+  /** In a queue list (mcp/queue.mjs): its place in line, null when not placed
+   *  yet. Undefined until supabase/task-queues.sql has run, and then never
+   *  written, so a save works before and after it. */
+  queuePos?: number | null;
+  /** Its due date is a real deadline: a queue never clears it. */
+  deadline?: boolean;
+  /** The due date a queue cleared, put back when the queue is turned off. */
+  queueSavedDue?: string | null;
   subtasks: Subtask[];
   attachments: Attachment[];
   comments: Comment[];
