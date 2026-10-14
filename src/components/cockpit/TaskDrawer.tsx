@@ -717,9 +717,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const tag = el?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
     if (!/^https?:\/\/[^\s]+$/i.test(text)) return;
-    if (task.attachments.some((a) => a.url === text)) {
-      pushToast?.("That link is already attached");
+    // Already on the task: never a second copy, but it goes onto this step
+    // too, and stays on any other step that has it (Derek, 2026-10-14: "it's
+    // not attached to this step. That's why I wanted to add it... just add it").
+    const existing = task.attachments.find((a) => a.url === text);
+    if (existing) {
       e.preventDefault();
+      const key = attachmentKey(existing.id);
+      const step = addStepId ? taskRef.current.subtasks.find((x) => x.id === addStepId) : null;
+      if (!step || step.holds?.includes(key)) return;
+      onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === step.id ? { ...x, holds: [...(x.holds ?? []), key] } : x)) });
+      pushToast?.(pageStepId ? "Link added to this step" : `Link added to step ${stepNumberOf(step.id)}`);
       return;
     }
     e.preventDefault();
