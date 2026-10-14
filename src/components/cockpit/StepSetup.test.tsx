@@ -49,6 +49,22 @@ describe("StepSetup's action row", () => {
     click(buttons("Give to Claude")[0]);
     expect(onDone).toHaveBeenCalledWith({ who: CLAUDE_ID, when: WED }, expect.any(Function));
   });
+  it("Claude's turn asks only what Claude should do: no date, Directions or To dos, Give to Claude", () => {
+    const onDone = setup({ submit: "Save next step" });
+    click(buttons("Claude")[0]);
+    expect(host.textContent).not.toContain("By when?");
+    expect(host.textContent).toContain("Tell Claude what to do");
+    expect(buttons("Document")).toHaveLength(0);
+    expect(host.querySelector("input[name=find-action]")).toBeNull();
+    click(buttons("Give to Claude")[0]);
+    expect(onDone).toHaveBeenCalledWith({ who: CLAUDE_ID, when: WED });
+  });
+  it("Claude then Directions hands it over with the directions to write", () => {
+    const onDone = setup({ submit: "Save next step" });
+    click(buttons("Claude")[0]);
+    click(buttons("Directions")[0]);
+    expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ who: CLAUDE_ID, when: WED }), expect.any(Function));
+  });
   it("Add step sets it up with what is picked", () => {
     const onDone = setup({ submit: "Add step" });
     click(buttons("Add step")[0]);

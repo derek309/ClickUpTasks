@@ -139,7 +139,11 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     b?.focus({ preventScroll: true });
   };
   // The rows shown, in order: the keys move between these.
-  const shown = [0, 1, 2].filter((i) => !(i === 0 && hide.includes("who")) && !(i === 1 && hide.includes("when")));
+  // Claude's turn needs no date (always today) and only what Claude should
+  // do: Directions or To dos (Derek, 2026-10-14: "the only thing that we
+  // really need to do at this point is add directions or a to-do list").
+  const forClaude = whoPick === CLAUDE_ID;
+  const shown = [0, 1, 2].filter((i) => !(i === 0 && hide.includes("who")) && !(i === 1 && (hide.includes("when") || forClaude)));
   const nextRow = (i: number) => shown.find((r) => r > i);
   const prevRow = (i: number) => [...shown].reverse().find((r) => r < i);
   useEffect(() => { if (autoFocus) focusRow(shown[0]); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -187,6 +191,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
     .filter((a) => !a.disabled)
     .filter((a) => a.label.toLowerCase().split(/\s+/).some((w) => w.startsWith(needle)) || a.label.toLowerCase().includes(needle));
   const known = who.some((c) => c.key === whoPick);
+  const claudeActs = forClaude ? ["directions", "checklist"].flatMap((k) => { const a = pool.find((x) => x.key === k && !x.disabled); return a ? [a] : []; }) : [];
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (e.key === "Escape") { if (!skip) return; e.preventDefault(); e.stopPropagation(); onDone(answer()); return; }
@@ -238,7 +243,10 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
             className={`${whenKey === "pick" ? ON : OFF} !overflow-visible !rounded-[5px] !px-3 !py-0`} />
         </span>
       </>) })}
-      {Row({ i: 2, label: "What's the action?", short: "Do", children: (
+      {claudeActs.length ? Row({ i: 2, label: "Tell Claude what to do", short: "Do", children: claudeActs.map((a) => {
+        const Icon = ADD_ICON[a.key];
+        return <button key={`c-${a.key}`} data-choice onClick={() => act(a)} className={OFF}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{ADD_SHORT[a.key] ?? a.label}</button>;
+      }) }) : Row({ i: 2, label: "What's the action?", short: "Do", children: (
         <div className="flex w-full min-w-0 flex-col gap-2">
           <input value={q} onChange={(e) => { setQ(e.target.value); setQAt(0); }} placeholder="Find an action" aria-label="Find an action"
             name="find-action" autoComplete="off" enterKeyHint="go"
@@ -342,7 +350,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
         {/* The one dark button while no action is picked (a picked one is
             the button to finish on). */}
         {submit && <button onClick={() => onDone(answer())} title="Enter"
-          className={preset ? "h-10 rounded-[5px] px-4 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{submit}</button>}
+          className={preset ? "h-10 rounded-[5px] px-4 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background" : "h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90"}>{forClaude && claudeActs.length ? "Give to Claude" : submit}</button>}
       </div>}
     </section>
   );
