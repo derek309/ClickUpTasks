@@ -42,6 +42,7 @@ import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
 import { draftLinkAsButton } from "@/lib/draftLink";
 import { EmailPreview, ReceivedEmailBox, SentEmailBox, ShowLink } from "./SentEmail";
 import { clientFirstName } from "@/lib/clientFirstName";
+import { conversationSummary } from "@/lib/conversationSummary";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices } from "@/lib/stepSetup";
 import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
 import { suggestStepActions } from "@/lib/stepSuggest";
@@ -2556,12 +2557,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isFolded(title) ? "rotate-180" : "-rotate-90"}`} />
     </button>
   ) : headingText(title, extra);
-  // A folded section: its heading and how many things are in it, one line.
-  const foldedCard = (title: string, count?: number) => (
-    <section className={CARD}>
-      {heading(title, count ? <span className="font-normal text-muted">· {count}</span> : undefined)}
-    </section>
-  );
   // Client work and Links and files look alike: a card, and while empty one
   // line, the hint beside the heading (Derek, 2026-10-12: "make these
   // consistent and make it one line, not two, if nothing is there").
@@ -3928,7 +3923,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       {filesCard}
       {/* The composer the floating dock opens for a text, chat or note. */}
       {composerFooter}
-      {isFolded("Conversation") ? foldedCard("Conversation", (messages ?? []).filter((m) => m.taskId === task.id).length || undefined) : (
+      {/* Folded, one useful line (Derek, 2026-10-14): how many and the newest,
+          "Conversation · 8 · last from Pam, 2h ago: Looks great…"; on a phone
+          the newest goes on a second line. A tap opens the whole history. */}
+      {isFolded("Conversation") ? (() => {
+        const convo = conversationSummary({ comments: task.comments, messages, actions, meetings: clientMeetings, taskCreatedAt: task.createdAt, firstName });
+        const newest = convo.count ? convo.line.replace(/^\d+ · /, "") : null;
+        return (
+          <section className={CARD}>
+            <button onClick={() => toggleFold("Conversation")} aria-expanded={false} title="Show the conversation"
+              className="flex w-full min-w-0 flex-col gap-1 text-left hover:opacity-80 sm:flex-row sm:items-center sm:gap-2">
+              <span className="flex shrink-0 items-center gap-1">
+                {headingText("Conversation", <span className="font-normal text-muted">· {convo.count || "nothing yet"}</span>)}
+                <I.chevron className={`h-3.5 w-3.5 shrink-0 rotate-180 text-muted ${newest ? "sm:hidden" : ""}`} />
+              </span>
+              {newest && <span className="min-w-0 truncate text-[16px] text-muted sm:flex-1"><span className="sm:hidden">{newest[0].toUpperCase()}{newest.slice(1)}</span><span className="max-sm:hidden">· {newest}</span></span>}
+              {newest && <I.chevron className="h-3.5 w-3.5 shrink-0 rotate-180 text-muted max-sm:hidden" />}
+            </button>
+          </section>
+        );
+      })() : (
         <section className="mt-7">
           <div className="mb-2">{heading("Conversation")}</div>
           <div className="mt-4">{feedArea}</div>
