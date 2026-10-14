@@ -21,7 +21,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -54,6 +54,10 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   onOpenStep: () => void;
   /** A What's next answered by a pick: what it became, and Change to ask again. */
   picked?: { says: string; onChange: () => void };
+  /** A "what's next?" step's suggested next step, shown in its name box;
+   *  Enter takes it. */
+  suggestion?: string;
+  onAcceptSuggestion?: () => void;
 }) {
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const dir = useStepDirections({ sub, onPatchSub, inline: true });
@@ -61,6 +65,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   // Naming a "what's next?" step: the box stays while typing, though the
   // first letter renames it.
   const [naming, setNaming] = useState(false);
+  // The suggestion sits in the name box until it is typed over.
+  const [typed, setTyped] = useState(false);
   const options: AddOption[] = [
     { key: "directions", label: "Directions", disabled: dir.open, onPick: dir.start },
     { key: "checklist", label: "Checklist", onPick: () => todo.ref.current?.focus() },
@@ -91,9 +97,13 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-1">
         {whatsNext || naming ? (
-          <input value={whatsNext ? "" : sub.title} aria-label="Name the next step" placeholder="What's next? Name the next step"
-            onChange={(e) => { setNaming(true); if (!whatsNext || e.target.value.trim()) onRename(e.target.value); }}
-            onBlur={() => setNaming(false)} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          <input value={whatsNext ? (typed ? "" : suggestion ?? "") : sub.title} aria-label="Name the next step" placeholder="What's next? Name the next step"
+            onChange={(e) => { setNaming(true); setTyped(true); if (!whatsNext || e.target.value.trim()) onRename(e.target.value); }}
+            onBlur={() => setNaming(false)} onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              if (whatsNext && !typed && suggestion && onAcceptSuggestion) onAcceptSuggestion();
+              e.currentTarget.blur();
+            }}
             className="-mx-1 min-w-0 rounded-[5px] bg-transparent px-1 py-0.5 text-[17px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
         ) : showName && (
           <div className="text-[17px] font-bold leading-snug [overflow-wrap:anywhere]">

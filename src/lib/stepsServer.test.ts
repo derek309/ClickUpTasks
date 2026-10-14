@@ -310,3 +310,14 @@ describe("an approval with no step waiting on the client", () => {
     expect(steps().find((x) => x.id === "s7")!.done).toBe(false);
   });
 });
+
+describe("a What's next keeps its suggested next step", () => {
+  it("is kept once, and only on a step still asking", async () => {
+    const { setSuggestedNext } = await import("./stepsServer");
+    setup([{ id: "a", title: "Built it", done: true }, { id: "q", title: "Brian approved: what's next?", done: false, addedFor: "ok:page:4" }]);
+    expect(await setSuggestedNext("t1", "q", { name: "Put it in the Bulk customers blast", kind: "page" })).toBe(true);
+    expect(steps()[1].suggested).toEqual({ name: "Put it in the Bulk customers blast", kind: "page" });
+    expect(await setSuggestedNext("t1", "q", { name: "Other" })).toBe(false);
+    expect(await setSuggestedNext("t1", "a", { name: "Other" })).toBe(false);
+  });
+});

@@ -546,3 +546,14 @@ export async function holdMadeWork(taskId: string, key: DeliverableKey, claudeId
   });
   return { on, note };
 }
+
+/** Keeps a "what's next?" step's suggested next step on it (nextStepServer),
+ *  once: a step that already has one, or no longer asks, is left alone. */
+export async function setSuggestedNext(taskId: string, stepId: string, suggested: { name: string; kind?: string }): Promise<boolean> {
+  return rewriteSteps(taskId, (row) => {
+    const list = row.subtasks ?? [];
+    const s = list.find((x) => x.id === stepId);
+    if (!s || s.suggested || !asksWhatsNext(s)) return null;
+    return list.map((x) => (x.id === stepId ? { ...x, suggested } : x));
+  });
+}

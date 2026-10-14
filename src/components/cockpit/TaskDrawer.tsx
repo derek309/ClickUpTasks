@@ -17,6 +17,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
+import { nextStepFromContext, whatsNextContext } from "@/lib/nextStepSuggest";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu, PhonePage, type ActionMenuItem } from "./ActionMenu";
 import { fetchTaskDocumentComments, fetchTaskActions, insertTaskAction, setNextStepDoneDb, deleteTaskActionDb, editTaskActionDb, patchNextStepDb, fetchTaskDocument, saveContactSaasUrl, type TaskDocumentKind } from "@/lib/db";
@@ -1191,8 +1192,50 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // A "What's next?" step: suggestions that make this step the next piece of
   // work, then the ways to end the task (Derek, 2026-10-13: "quick links or
   // suggestions for next steps").
+  // The next step a "what's next?" step's context asks for (Derek,
+  // 2026-10-14): kept on the step once the server has worked it out with the
+  // app's AI, read from the words here until then.
+  const suggestionFor = (sub: Subtask): { name: string; kind?: string } | null => {
+    if (!asksWhatsNext(sub)) return null;
+    if (sub.suggested) return sub.suggested;
+    const plan = planSteps(task.subtasks);
+    const prev = plan.slice(0, plan.findIndex((x) => x.id === sub.id)).reverse().find((x) => x.done);
+    const name = nextStepFromContext(whatsNextContext({ notes: htmlToText(sub.notes ?? ""), prevNotes: htmlToText(prev?.notes ?? ""), description: htmlToText(task.description ?? "") }));
+    return name ? { name, kind: suggestStepActions(name, firstName)[0]?.kind } : null;
+  };
+  // The suggestion made the next step, with the work it likely needs on it.
+  const acceptSuggestion = (sid: string) => {
+    const sub = taskRef.current.subtasks.find((x) => x.id === sid);
+    const sg = sub ? suggestionFor(sub) : null;
+    if (!sub || !sg) return;
+    const key = (["doc", "image", "page", "video", "email"] as string[]).includes(sg.kind ?? "") ? sg.kind as DeliverableKey : null;
+    let list = taskRef.current.subtasks;
+    if (key) {
+      const made = !deliverablePresent(key);
+      list = holdOnStep(list, sid, key).map((x) => (x.id === sid && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
+    }
+    onPatch({ subtasks: answerWhatsNext(list, sid, sg.name) });
+    if (key === "email" && !deliverablePresent("email")) setPendingStart("email");
+  };
+  // Asked of the server once per step: it keeps the AI's answer on the step.
+  const askedNext = useRef<Set<string>>(new Set());
+  const askingStep = activeStep && asksWhatsNext(activeStep) && !activeStep.suggested ? activeStep.id : null;
+  useEffect(() => {
+    if (!askingStep || askedNext.current.has(askingStep)) return;
+    askedNext.current.add(askingStep);
+    void authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/next-step`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId: askingStep, clientFirst: firstName }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { suggested?: { name: string; kind?: string } | null } | null) => {
+        if (!j?.suggested) return;
+        const list = taskRef.current.subtasks.map((x) => (x.id === askingStep && !x.suggested ? { ...x, suggested: j.suggested! } : x));
+        taskRef.current = { ...taskRef.current, subtasks: list };
+        onStepsFromServer?.(list);
+      })
+      .catch(() => undefined);
+  }, [askingStep]); // eslint-disable-line react-hooks/exhaustive-deps
   const whatsNextActions = (sid: string) => {
     const sub = task.subtasks.find((x) => x.id === sid);
+    const sg = sub ? suggestionFor(sub) : null;
     const SAYS: Record<string, [string, string]> = {
       email: [`Email ${firstName}`, "Write an email on this step, to read and send."],
       text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
@@ -1202,9 +1245,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
     return (
       <NextChoices heading={false} intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
+        // What the context asks for comes first, and the task is never
+        // "finished" by default while it asks for more (Derek, 2026-10-14).
+        ...(sg ? [{ label: sg.name, says: "Makes it the next step, with the work it needs on it.", primary: true, onClick: () => acceptSuggestion(sid) }] : []),
         ...ideas,
-        { label: "Give it to Claude", says: "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
-        { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: true, onClick: () => finishTask(sid) },
+        { label: "Give it to Claude", says: sg ? `Claude does "${sg.name}", due today.` : "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
+        { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: !sg, onClick: () => finishTask(sid) },
         ...(hasMessaging && !!messageDest?.email ? [{ label: `Finish and email ${firstName}`, says: `Marks it done and opens an email telling ${firstName} it's done, to read and send.`, onClick: () => finishTask(sid, true) }] : []),
       ]} />
     );
@@ -2049,6 +2095,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true) ?? undefined}
             outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
             doneActions={doneActionsFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
+            suggestion={suggestionFor(sub)?.name ?? undefined} onAcceptSuggestion={() => acceptSuggestion(sub.id)}
             picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
             onMarkDone={() => completeStep(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
@@ -2165,7 +2212,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // A "what's next?" given to Claude becomes Claude's step, named for the
     // next thing its context asks for (Derek, 2026-10-14).
     const asked = list.find((x) => x.id === stepId);
-    list = answerWhatsNext(list, stepId, asked?.suggested?.name ?? "Work out the next step and do it",
+    list = answerWhatsNext(list, stepId, (asked && suggestionFor(asked)?.name) ?? "Work out the next step and do it",
       { assigneeId: CLAUDE_ID, due: TODAY, followUpAt: undefined, toClaudeAt: new Date().toISOString(), cloudError: undefined });
     const step = list.find((x) => x.id === stepId)!;
     const st = statusForStep(task.status, stepStage(step, task.assigneeId));

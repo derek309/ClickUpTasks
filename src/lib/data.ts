@@ -3574,8 +3574,9 @@ export function reopenWhatsNext(subtasks: Subtask[], id: string): Subtask[] | nu
   const a = s.asked;
   return subtasks.map((x) => {
     if (x.id !== id) return x;
-    const { asked: _a, toClaudeAt: _t, cloudError: _e, cloudSession: _c, namedFrom: _n, ...rest } = x;
-    return { ...rest, title: a.title, assigneeId: a.assigneeId ?? undefined, due: a.due ?? undefined };
+    const back: Subtask = { ...x, title: a.title, assigneeId: a.assigneeId ?? undefined, due: a.due ?? undefined };
+    for (const k of ["asked", "toClaudeAt", "cloudError", "cloudSession", "namedFrom"] as const) delete back[k];
+    return back;
   });
 }
 
