@@ -299,11 +299,21 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
           ))}
         </ul>
       )}
-      <input ref={ref} value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
-        placeholder="+ Add a to do" aria-label="Add a to do"
-        // On the task page no box until it is in use: the app colours every
-        // border, a transparent one included.
-        className={`rounded-md py-1.5 text-[16px] outline-none placeholder:text-accent hover:bg-background focus:bg-background focus:placeholder:text-muted ${inline ? "-mx-2 px-2 focus:ring-1 focus:ring-inset focus:ring-accent" : "border border-transparent px-2 focus:border-accent"}`} />
+      {/* Text typed here and not added yet reads as a box with Add beside
+          it, never as a second copy of a to do (Derek, 2026-10-14: "Schedule
+          email to bulk customers: unopened" sat under the real to do). */}
+      <div className="flex items-center gap-2">
+        <input ref={ref} value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addTodo(); if (e.key === "Escape" && todoDraft) { e.stopPropagation(); setTodoDraft(""); } }}
+          placeholder="+ Add a to do" aria-label="Add a to do" autoComplete="off"
+          // On the task page no box until it is in use: the app colours every
+          // border, a transparent one included.
+          className={`min-w-0 flex-1 rounded-md py-1.5 text-[16px] outline-none placeholder:text-accent hover:bg-background focus:bg-background focus:placeholder:text-muted ${todoDraft ? "bg-background ring-1 ring-inset ring-accent" : ""} ${inline ? "-mx-2 px-2 focus:ring-1 focus:ring-inset focus:ring-accent" : "border border-transparent px-2 focus:border-accent"}`} />
+        {todoDraft.trim() && <>
+          <button onClick={addTodo} className="h-9 shrink-0 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background">Add</button>
+          <button onClick={() => setTodoDraft("")} title="Clear" aria-label="Clear the to do being typed" className="h-9 shrink-0 rounded-[5px] px-2 text-muted hover:text-foreground">×</button>
+        </>}
+      </div>
     </section>
   );
   return { todos, show, showTodos, setShowTodos, ref, node };
