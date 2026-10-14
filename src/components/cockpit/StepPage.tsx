@@ -111,8 +111,8 @@ export function NextChoices({ intro, choices, row, link }: {
 
 /** The step's directions read as the task's description does: muted, four
  *  lines, then Read more, which opens the rest in place. A click on the text
- *  edits it. */
-function ClampedDirections({ text, onEdit }: { text: string; onEdit: () => void }) {
+ *  edits it. On the task page (six) they keep their lines and show six. */
+function ClampedDirections({ text, onEdit, six = false }: { text: string; onEdit: () => void; six?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
   const [cut, setCut] = useState(false);
@@ -129,12 +129,180 @@ function ClampedDirections({ text, onEdit }: { text: string; onEdit: () => void 
     <div className="flex flex-col items-start">
       {/* A div, not a button: a button won't clamp to four lines. */}
       <div ref={ref} role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }} title="Click to edit"
-        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${more ? "" : "line-clamp-4"}`}>{text}</div>
+        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${six ? "whitespace-pre-line" : ""} ${more ? "" : six ? "line-clamp-6" : "line-clamp-4"}`}>{text}</div>
       {(cut || more) && (
         <button onClick={() => setMore(!more)} aria-expanded={more} className="text-[16px] font-semibold text-accent hover:underline">{more ? "Show less" : "Read more"}</button>
       )}
     </div>
   );
+}
+
+/** A step's directions, the same on its page and on the task page (Derek,
+ *  2026-10-14: the current step opens on the task): read as muted text, a
+ *  click edits them in the rich editor, they save as you type, Done closes,
+ *  the bin deletes them with an Undo. `inline` (the task page): shown only
+ *  once written or asked for, six lines, their lines kept. */
+export function useStepDirections({ sub, onPatchSub, startEditing = false, inline = false }: {
+  sub: Subtask;
+  onPatchSub: (patch: Partial<Subtask>) => void;
+  startEditing?: boolean;
+  inline?: boolean;
+}) {
+  const hasText = !!sub.notes && htmlToText(sub.notes).trim() !== "";
+  const [dirOpen, setDirOpen] = useState(startEditing || hasText);
+  // Directions read as text once written; new ones open ready to type (on
+  // the step's page; on the task page only when asked for).
+  const [dirEditing, setDirEditing] = useState(startEditing || (!inline && !hasText));
+  const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirSave = useRef<(() => void) | null>(null);
+  // Deleted directions can come back until the page closes.
+  const [dirRemoved, setDirRemoved] = useState<string | null>(null);
+  const removeDirections = () => {
+    if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; }
+    dirSave.current = null;
+    setDirRemoved(sub.notes ?? "");
+    onPatchSub({ notes: undefined });
+    setDirOpen(false);
+  };
+  // Closing the page right after typing still saves what was typed.
+  useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
+  const start = () => { setDirRemoved(null); setDirOpen(true); setDirEditing(true); };
+  // On the task page, directions written elsewhere (Claude, the step's page)
+  // show as soon as they arrive.
+  const open = dirOpen || (inline && hasText && dirRemoved === null);
+  const raw = htmlToText(sub.notes ?? "");
+  const dirText = (inline ? raw : raw.replace(/\s*\n\s*/g, " ")).trim();
+  const node = (
+    <>
+      {!open && dirRemoved !== null && (
+        <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
+      )}
+      {open && (
+        <section aria-label="Directions" className={`${inline ? "" : "mt-1 "}flex flex-col gap-2`}>
+          {dirEditing ? (<>
+            <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
+              onChange={(html) => {
+                if (dirTimer.current) clearTimeout(dirTimer.current);
+                dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
+                dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
+              }}
+              placeholder="What we want on this step: what to make, what to change, where things are…" />
+            {/* They save as you type; Done closes (Derek, 2026-10-12: "no way
+                to save or close the directions"). */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }}
+                className={inline ? "h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background" : "h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90"}>Done</button>
+              <span className="text-[16px] text-muted">Saves as you type.</span>
+              <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="ml-auto rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
+            </div>
+          </>) : dirText ? (
+            <ClampedDirections text={dirText} six={inline} onEdit={() => setDirEditing(true)} />
+          ) : (
+            <button onClick={() => setDirEditing(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
+          )}
+        </section>
+      )}
+    </>
+  );
+  return { open, start, node };
+}
+
+/** A step's to dos, the same on its page and on the task page: tick, add,
+ *  delete, ask the client about some in one email; what the client sent from
+ *  their portal ticks off the same way. `inline` (the task page): no heading,
+ *  and "+ Add a to do" is always there. */
+export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos, startOpen = false, inline = false }: {
+  sub: Subtask;
+  onPatchSub: (patch: Partial<Subtask>) => void;
+  messages: Message[];
+  first: string;
+  clientItems?: Subtask[];
+  onToggleClientItem?: (id: string) => void;
+  onTodoDone?: (todo: StepTodo) => void;
+  onAskTodos?: (todoIds: string[]) => void;
+  startOpen?: boolean;
+  inline?: boolean;
+}) {
+  const headId = useId();
+  const todos = sub.todos ?? [];
+  const own = todoProgress(todos);
+  const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
+  const [todoDraft, setTodoDraft] = useState("");
+  const [showTodos, setShowTodos] = useState(startOpen);
+  const ref = useRef<HTMLInputElement>(null);
+  const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
+  // To-dos picked to ask the client about, in one email.
+  const [asking, setAsking] = useState<string[]>([]);
+  const toggleAsk = (id: string) => setAsking((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
+  const waitingOn = todos.filter((t) => todoWaiting(t, messages) === "waiting").length;
+  const addTodo = () => {
+    const title = todoDraft.trim();
+    if (!title) return;
+    setTodos([...todos, { id: newId("td_"), title, done: false }]);
+    setTodoDraft("");
+  };
+  const toggleTodo = (t: StepTodo) => {
+    setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
+    if (!t.done && t.commentId) onTodoDone?.(t);
+  };
+  const show = inline || todos.length > 0 || clientItems.length > 0 || showTodos;
+  const node = !show ? null : (
+    <section aria-labelledby={inline ? undefined : headId} aria-label={inline ? "To do" : undefined} className={`flex flex-col ${inline ? "gap-1" : "gap-2"}`}>
+      {!inline && <h3 id={headId} className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>}
+      {/* The questions picked so far, asked in one email. */}
+      {asking.length > 0 && onAskTodos && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[5px] bg-sky-50 px-3 py-2 text-[16px] dark:bg-sky-500/10">
+          <span className="min-w-0 flex-1 font-semibold">Ask {first} about {asking.length === 1 ? "this one" : `these ${asking.length}`}</span>
+          <button onClick={() => { onAskTodos(asking); setAsking([]); }} className={inline ? "h-9 rounded-[5px] border bg-surface px-3 font-semibold text-accent hover:bg-background" : "h-9 rounded-[5px] bg-accent px-3 font-semibold text-white hover:opacity-90"}>Write the email</button>
+          <button onClick={() => setAsking([])} className="h-9 rounded-[5px] px-2 text-muted hover:text-foreground">Cancel</button>
+        </div>
+      )}
+      {clientItems.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {clientItems.map((c) => (
+            <li key={c.id} className="flex items-start gap-2.5">
+              <button onClick={() => onToggleClientItem?.(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
+                className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
+              <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>
+                {c.title}<span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {todos.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {todos.map((t) => (
+            <li key={t.id} className={`group/todo flex items-start gap-2.5 rounded-[5px] ${asking.includes(t.id) ? "bg-sky-50 ring-1 ring-sky-300 dark:bg-sky-500/10" : ""}`}>
+              <button onClick={() => toggleTodo(t)} aria-pressed={t.done} aria-label={t.done ? `Reopen ${t.title}` : `Mark ${t.title} done`}
+                className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${t.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{t.done && <I.check className="h-3.5 w-3.5" />}</button>
+              <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${t.done ? "text-muted line-through" : ""}`}>
+                {t.title}{t.fromClient && <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}</span>}
+                {(() => {
+                  const w8 = todoWaiting(t, messages);
+                  return w8 === "waiting" ? <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">? Asked {first} {timeAgo(t.askedAt!)}</span>
+                    : w8 === "answered" ? <span className="ml-2 font-semibold text-success no-underline">{first} answered</span> : null;
+                })()}
+              </span>
+              {/* Ask the client about just this one (or several, picked together). */}
+              {!t.done && onAskTodos && (
+                <button onClick={() => toggleAsk(t.id)} aria-pressed={asking.includes(t.id)} title={`Ask ${first} about this`}
+                  className={`shrink-0 rounded-[5px] px-1.5 text-[16px] font-semibold text-accent hover:bg-background ${asking.includes(t.id) ? "" : "opacity-0 focus:opacity-100 group-hover/todo:opacity-100"}`}>{asking.includes(t.id) ? "✓ Ask" : `Ask ${first}`}</button>
+              )}
+              <button onClick={() => setTodos(todos.filter((x) => x.id !== t.id))} title="Delete" aria-label={`Delete ${t.title}`}
+                className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/todo:opacity-100"><I.trash className="h-4 w-4" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <input ref={ref} value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
+        placeholder="+ Add a to do" aria-label="Add a to do"
+        // On the task page no box until it is in use: the app colours every
+        // border, a transparent one included.
+        className={`rounded-md py-1.5 text-[16px] outline-none placeholder:text-accent hover:bg-background focus:bg-background focus:placeholder:text-muted ${inline ? "-mx-2 px-2 focus:ring-1 focus:ring-inset focus:ring-accent" : "border border-transparent px-2 focus:border-accent"}`} />
+    </section>
+  );
+  return { todos, show, showTodos, setShowTodos, ref, node };
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onReopen, onDelete, onToTask,
@@ -256,61 +424,42 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   }, [onPrev, onNext]);
   const first = firstName ?? client.name.split(" ")[0];
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
-  const todos = sub.todos ?? [];
-  const own = todoProgress(todos);
-  const progress = { done: own.done + clientItems.filter((c) => c.done).length, total: own.total + clientItems.length };
-  const [todoDraft, setTodoDraft] = useState("");
+  const dir = useStepDirections({ sub, onPatchSub, startEditing: startWithDirections });
+  const todo = useStepTodos({ sub, onPatchSub, messages, first, clientItems, onToggleClientItem, onTodoDone, onAskTodos, startOpen: startWithChecklist });
   // No box until a tab is picked (Derek, 2026-10-13: the conversation box was
   // what pulled the eye, away from the work). A tab again folds it.
   type Talk = "client" | "email" | "text" | "team";
   const [talk, setTalkState] = useState<Talk | null>(startTalk ?? null);
   const setTalk = (t: Talk) => { setTalkState((cur) => (cur === t ? null : t)); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); };
   const [subject, setSubject] = useState(`Re: ${task.title}`);
-  const [showTodos, setShowTodos] = useState(startWithChecklist);
-  const [dirOpen, setDirOpen] = useState(startWithDirections || (!!sub.notes && htmlToText(sub.notes).trim() !== ""));
   // The saved links being picked, or null when the list is closed.
   const [linkPick, setLinkPick] = useState<string[] | null>(null);
-  // Directions read as text once written; new ones open ready to type.
-  const [dirEditing, setDirEditing] = useState(startWithDirections || !(sub.notes && htmlToText(sub.notes).trim()));
-  const dirTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirSave = useRef<(() => void) | null>(null);
-  // Deleted directions can come back until the page closes.
-  const [dirRemoved, setDirRemoved] = useState<string | null>(null);
-  const removeDirections = () => {
-    if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; }
-    dirSave.current = null;
-    setDirRemoved(sub.notes ?? "");
-    onPatchSub({ notes: undefined });
-    setDirOpen(false);
-  };
-  // Closing the page right after typing still saves what was typed.
-  useEffect(() => () => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirSave.current?.(); } }, []);
   // Which Add menu is open (the + beside Actions, the rows' + More), or none.
   const [addOpen, setAddOpen] = useState<"main" | "compact" | "more" | null>(null);
   // Where the desktop menu sits, kept inside the window.
   const [addPos, setAddPos] = useState({ top: 0, left: 0 });
-  const todoRef = useRef<HTMLInputElement>(null);
   const talkRef = useRef<HTMLTextAreaElement>(null);
+  const todoRef = todo.ref;
   // Which box to put the cursor in next, set by a choice, done after drawing.
   const [focusNext, setFocusNext] = useState<{ box: "todo" | "talk"; n: number } | null>(startWithChecklist ? { box: "todo", n: 1 } : startTalk ? { box: "talk", n: 1 } : null);
   useEffect(() => {
     if (!focusNext) return;
     (focusNext.box === "todo" ? todoRef.current : talkRef.current)?.focus();
-  }, [focusNext]);
+  }, [focusNext, todoRef]);
   // Everything "Add client work" offers: a checklist, the task's documents and
   // reviews and an email (from the task page), and a text.
   const options = [
-    { key: "directions", label: "Directions", disabled: dirOpen, note: dirOpen ? "on this step" : undefined, onPick: () => { setDirRemoved(null); setDirOpen(true); setDirEditing(true); } },
+    { key: "directions", label: "Directions", disabled: dir.open, note: dir.open ? "on this step" : undefined, onPick: dir.start },
     // The client's saved short links, picked from a list (Derek, 2026-10-12).
     ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
-    { key: "checklist", label: "Checklist", onPick: () => { setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
+    { key: "checklist", label: "Checklist", onPick: () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   // What the step's name says it needs, as one button before + Add (Derek,
   // 2026-10-13; one thing per step, 2026-10-14): it does what picking that
   // item from + Add does, and goes once the step holds that kind of work.
   const holdsKind = (k: StepSuggestKind) =>
-    k === "checklist" ? todos.length > 0 || clientItems.length > 0 || showTodos
+    k === "checklist" ? todo.show
     : k === "text" ? sub.draftMessage?.channel === "sms"
     : (sub.holds ?? []).includes(k);
   const optionFor = (k: StepSuggestKind) => options.find((o) => o.key === k);
@@ -336,22 +485,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const nextRef = useRef<HTMLElement | null>(null);
   const hasNext = !!nextPanel;
   useEffect(() => { if (hasNext) nextRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [hasNext]);
-
-  const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
-  // To-dos picked to ask the client about, in one email.
-  const [asking, setAsking] = useState<string[]>([]);
-  const toggleAsk = (id: string) => setAsking((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
-  const waitingOn = todos.filter((t) => todoWaiting(t, messages) === "waiting").length;
-  const addTodo = () => {
-    const title = todoDraft.trim();
-    if (!title) return;
-    setTodos([...todos, { id: newId("td_"), title, done: false }]);
-    setTodoDraft("");
-  };
-  const toggleTodo = (t: StepTodo) => {
-    setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
-    if (!t.done && t.commentId) onTodoDone?.(t);
-  };
 
   // What was said while this step ran, newest first under the box you write
   // in (Derek, 2026-10-12: "flip the conversation so the latest is at the top").
@@ -504,8 +637,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     </section>
   );
 
-  const hasTodos = todos.length > 0 || clientItems.length > 0 || showTodos;
-  const empty = !held && todos.length === 0 && clientItems.length === 0 && !showTodos;
+  const empty = !held && !todo.show;
   // The one way to add to a step (Derek, 2026-10-11): a quick list to start
   // with while it is empty, then a button.
   // Once the step holds client work, the + sits beside its heading instead
@@ -589,100 +721,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
       </div>
     </section>
   );
-  const todoList = !hasTodos ? null : (
-    <section aria-labelledby="step-todo" className="flex flex-col gap-2">
-      <h3 id="step-todo" className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>
-      {/* The questions picked so far, asked in one email. */}
-      {asking.length > 0 && onAskTodos && (
-        <div className="flex flex-wrap items-center gap-2 rounded-[5px] bg-sky-50 px-3 py-2 text-[16px] dark:bg-sky-500/10">
-          <span className="min-w-0 flex-1 font-semibold">Ask {first} about {asking.length === 1 ? "this one" : `these ${asking.length}`}</span>
-          <button onClick={() => { onAskTodos(asking); setAsking([]); }} className="h-9 rounded-[5px] bg-accent px-3 font-semibold text-white hover:opacity-90">Write the email</button>
-          <button onClick={() => setAsking([])} className="h-9 rounded-[5px] px-2 text-muted hover:text-foreground">Cancel</button>
-        </div>
-      )}
-      {clientItems.length > 0 && (
-        <ul className="flex flex-col gap-1.5">
-          {clientItems.map((c) => (
-            <li key={c.id} className="flex items-start gap-2.5">
-              <button onClick={() => onToggleClientItem?.(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
-                className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
-              <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>
-                {c.title}<span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {todos.length > 0 && (
-        <ul className="flex flex-col gap-1.5">
-          {todos.map((t) => (
-            <li key={t.id} className={`group/todo flex items-start gap-2.5 rounded-[5px] ${asking.includes(t.id) ? "bg-sky-50 ring-1 ring-sky-300 dark:bg-sky-500/10" : ""}`}>
-              <button onClick={() => toggleTodo(t)} aria-pressed={t.done} aria-label={t.done ? `Reopen ${t.title}` : `Mark ${t.title} done`}
-                className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${t.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{t.done && <I.check className="h-3.5 w-3.5" />}</button>
-              <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${t.done ? "text-muted line-through" : ""}`}>
-                {t.title}{t.fromClient && <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}</span>}
-                {(() => {
-                  const w8 = todoWaiting(t, messages);
-                  return w8 === "waiting" ? <span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">? Asked {first} {timeAgo(t.askedAt!)}</span>
-                    : w8 === "answered" ? <span className="ml-2 font-semibold text-success no-underline">{first} answered</span> : null;
-                })()}
-              </span>
-              {/* Ask the client about just this one (or several, picked together). */}
-              {!t.done && onAskTodos && (
-                <button onClick={() => toggleAsk(t.id)} aria-pressed={asking.includes(t.id)} title={`Ask ${first} about this`}
-                  className={`shrink-0 rounded-[5px] px-1.5 text-[15px] font-semibold text-accent hover:bg-background ${asking.includes(t.id) ? "" : "opacity-0 focus:opacity-100 group-hover/todo:opacity-100"}`}>{asking.includes(t.id) ? "✓ Ask" : `Ask ${first}`}</button>
-              )}
-              <button onClick={() => setTodos(todos.filter((x) => x.id !== t.id))} title="Delete" aria-label={`Delete ${t.title}`}
-                className="shrink-0 text-muted opacity-0 hover:text-danger focus:opacity-100 group-hover/todo:opacity-100"><I.trash className="h-4 w-4" /></button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <input ref={todoRef} value={todoDraft} onChange={(e) => setTodoDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addTodo(); }}
-        placeholder="+ Add a to do" aria-label="Add a to do"
-        className="rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
-    </section>
-  );
-
   // Why it is whose move, when the sentence's first word doesn't say it all.
   // A bare "Your turn" or "Claude's turn" is the sentence itself (2026-10-13).
   const reason = tone?.say && !sub.done && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
-  // The directions, under the sentence the way the task shows its description
-  // (Derek, 2026-10-13): muted text, four lines, Read more; a click edits.
-  // Added from + Add like the rest (Derek, 2026-10-11); the ✳ above copies
-  // them for Claude.
-  const dirText = htmlToText(sub.notes ?? "").replace(/\s*\n\s*/g, " ").trim();
-  const directions = (
-    <>
-      {!dirOpen && dirRemoved !== null && (
-        <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
-      )}
-      {dirOpen && (
-        <section aria-label="Directions" className="mt-1 flex flex-col gap-2">
-          {dirEditing ? (<>
-            <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
-              onChange={(html) => {
-                if (dirTimer.current) clearTimeout(dirTimer.current);
-                dirSave.current = () => onPatchSub({ notes: htmlToText(html).trim() ? html : undefined });
-                dirTimer.current = setTimeout(() => { dirTimer.current = null; dirSave.current?.(); }, 600);
-              }}
-              placeholder="What we want on this step: what to make, what to change, where things are…" />
-            {/* They save as you type; Done closes (Derek, 2026-10-12: "no way
-                to save or close the directions"). */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }} className="h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90">Done</button>
-              <span className="text-[16px] text-muted">Saves as you type.</span>
-              <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="ml-auto rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
-            </div>
-          </>) : dirText ? (
-            <ClampedDirections text={dirText} onEdit={() => setDirEditing(true)} />
-          ) : (
-            <button onClick={() => setDirEditing(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
-          )}
-        </section>
-      )}
-    </>
-  );
+  // The directions sit under the sentence the way the task shows its
+  // description (Derek, 2026-10-13): muted text, four lines, Read more; a
+  // click edits. Added from + Add like the rest (Derek, 2026-10-11); the ✳
+  // above copies them for Claude.
+  const directions = dir.node;
 
   // Drawn at the page level: inside the task drawer its own layer kept the
   // app's sidebar on top of the full page (Derek, 2026-10-11).
@@ -776,7 +822,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               </div>
               {followBox}
               {planBits}
-              {setup ? null : outFor !== undefined ? outFor : empty && !dirOpen ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
+              {setup ? null : outFor !== undefined ? outFor : empty && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : held ? null : <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}{addMenu(false)}</div>}
               {/* Saved links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
@@ -809,7 +855,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   })()}
                 </section>
               )}
-              {todoList}
+              {todo.node}
               {held && (
                 <section aria-labelledby="step-works" className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-center gap-2">

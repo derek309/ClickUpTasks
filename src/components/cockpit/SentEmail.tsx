@@ -129,8 +129,10 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
 
 /** The client's email a "Reply to …" step answers (Derek, 2026-10-12): click
  *  to read it, Reply to start the answer on this step. */
-export function ReceivedEmailBox({ email, answered, onReply, files }: {
+export function ReceivedEmailBox({ email, answered, onReply, files, light = false }: {
   email: ReceivedEmail;
+  /** Reply as a light button (the task page's one dark button is Done). */
+  light?: boolean;
   answered: boolean;
   onReply?: () => void;
   /** The files that came with it, always in view (Derek, 2026-10-13). */
@@ -151,7 +153,7 @@ export function ReceivedEmailBox({ email, answered, onReply, files }: {
         <span aria-hidden className="shrink-0 text-[16px] text-muted">{open ? "Hide" : "Read"}</span>
         {onReply && !answered && (
           <button onClick={(e) => { e.stopPropagation(); onReply(); }}
-            className="shrink-0 rounded-[5px] bg-accent px-3 py-1.5 text-[16px] font-semibold text-white hover:opacity-90">Reply</button>
+            className={`shrink-0 rounded-[5px] px-3 py-1.5 text-[16px] font-semibold ${light ? "border bg-surface text-accent hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>Reply</button>
         )}
       </div>
       {open && (

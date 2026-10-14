@@ -6,7 +6,7 @@
 // sending finishes the step. Saved as you leave the box, not on every key.
 import { useState } from "react";
 
-export function DraftMessageBox({ channel, body, firstName, tone, waiting, onSave, onSend, onDiscard }: {
+export function DraftMessageBox({ channel, body, firstName, tone, waiting, light = false, onSave, onSend, onDiscard }: {
   channel: "sms" | "chat";
   body: string;
   firstName: string;
@@ -14,6 +14,9 @@ export function DraftMessageBox({ channel, body, firstName, tone, waiting, onSav
   tone?: { rowTone: string; sayTone: string } | null;
   /** The step is with Claude: not ready to send until Claude is done. */
   waiting?: boolean;
+  /** Send as a light button: on the task page the step's Done is the one
+   *  dark button (Derek, 2026-10-14). */
+  light?: boolean;
   onSave: (body: string) => void;
   onSend: (body: string) => void;
   onDiscard: () => void;
@@ -33,7 +36,7 @@ export function DraftMessageBox({ channel, body, firstName, tone, waiting, onSav
       <div className="flex items-center justify-end gap-2">
         <span className="mr-auto text-[16px] text-muted">{channel === "sms" ? "Goes to their phone." : "Shows in their portal."}</span>
         <button onClick={() => { const t = text.trim(); if (t) onSend(t); }} disabled={!text.trim()}
-          className="h-9 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-40">Send</button>
+          className={`h-9 rounded-[5px] px-4 text-[16px] font-semibold disabled:opacity-40 ${light ? "border bg-surface text-accent hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>Send</button>
       </div>
     </div>
   );
