@@ -2791,6 +2791,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             return;
           }
         }
+        // A reminder held on the review out with them: a follow up on that
+        // wait (finishTalkStep). The review email's own emailedAt stays as it was.
+        if (activeStep?.onClient && activeStep.holds?.includes("email") && finishTalkStep("email", email.followUpDate)) return;
         // The client's step is current: the email went to them for it.
         if (activeStep?.onClient) {
           const list = addEmailSentRecord(task.subtasks, activeStep.id, firstName, () => newId("s_"));
