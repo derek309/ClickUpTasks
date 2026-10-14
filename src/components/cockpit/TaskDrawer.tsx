@@ -2915,43 +2915,33 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // email, text, call or task chat"): each one is a follow up on this same
   // check in, never a new step. Email and Text draft on it; a call is noted.
   // A check in waiting on their reply ends the same way as every step: What's
-  // next, each follow up saying what it does (Derek, 2026-10-13).
+  // next. One line on the wait, three light buttons in a row and a small
+  // link, the same on a phone and a desktop; what each does is its title
+  // (Derek, 2026-10-14). Task chat stays under the step's + Add.
   const followUpBox = (ps: Subtask) => {
     const since = ps.startedAt ? formatDue(ps.startedAt.slice(0, 10)) : null;
-    const done = followUpsLine(ps.followUps);
-    // The email it waits on, named (Derek, 2026-10-13: "I don't see the email
-    // in there"): the one held on the step before, else the last one we sent.
-    const plan = planSteps(task.subtasks);
-    const before = plan[plan.findIndex((x) => x.id === ps.id) - 1];
-    const heldMail = before?.holds?.find((k) => k.startsWith("mail:"))?.slice(5);
-    const mail = messages ?? [];
-    const by = ps.startedAt ? Date.parse(ps.startedAt) + 60_000 : Infinity;
-    const sentOne = (heldMail ? mail.find((m) => m.id === heldMail) : undefined)
-      ?? mail.filter((m) => m.direction === "outbound" && m.channel === "email" && Date.parse(m.at) <= by).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
-    const waitingFor = sentOne?.subject ? ` for a reply to "${sentOne.subject}"` : "";
-    const draftOn = (channel: "sms" | "chat") => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, draftMessage: { channel, body: x.draftMessage?.body ?? "" } } : x)) });
+    // A follow up email already written and held here sends as the draft
+    // box's Open and send does; with none, one is started.
+    const heldDraft = !!task.draftEmail && (ps.holds ?? []).includes("email");
+    const textStarted = `Hi ${firstName}, I sent you an email about ${task.title.trim()}. Did you get it?`;
+    const startText = () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id
+      ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.channel === "sms" && x.draftMessage.body.trim() ? x.draftMessage.body : textStarted } } : x)) });
     return (
-      // Short lines, the wait first (Derek, 2026-10-13). On a phone only the
-      // wait and when it checks again; the email, the follow ups sent and how
-      // it finishes show from sm up. The phone shows three buttons: email,
-      // they answered, and More ways to follow up for the rest, in place.
-      <NextChoices moreLabel="More ways to follow up" intro={<>
-        <span className="block font-bold text-foreground">Waiting on {firstName}{since ? ` since ${since}` : ""}<span className="hidden sm:inline">{waitingFor}</span></span>
-        {done && <span className="hidden sm:block">{done}</span>}
-        <span className="hidden sm:block">Finishes by itself when {firstName} replies{stepAfter(task.subtasks, ps.id) ? <>; then &quot;{stepAfter(task.subtasks, ps.id)!.title}&quot; starts</> : null}.</span>
-        {task.followUpAt && <span className="block">Checking again {formatDue(task.followUpAt.slice(0, 10))}<span className="hidden sm:inline">.</span></span>}
-        <span className="hidden sm:block">Still nothing? Follow up:</span>
+      <NextChoices row intro={<>
+        <b className="font-bold text-foreground">Waiting on {firstName}{since ? ` since ${since}` : ""}</b>
+        {task.followUpAt ? ` · checking again ${formatDue(task.followUpAt.slice(0, 10))}` : ""}
+        {` · ends when ${firstName} replies`}
       </>} choices={[
-        ...(hasMessaging && messageDest?.email ? [{ label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", primary: true, onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }] : []),
-        ...(messageDest?.phone ? [{ label: "Text a follow up", says: "A text to write and send here. It keeps waiting.", more: true, onClick: () => draftOn("sms") }] : []),
-        { label: "I called them", says: "Notes the call and checks again in 3 business days.", more: true, onClick: () => {
+        ...(hasMessaging && messageDest?.email ? [heldDraft
+          ? { label: "Send the follow up", says: "Opens the follow up email held on this step, to read and send. It keeps waiting.", onClick: () => openWork("email") }
+          : { label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }] : []),
+        ...(messageDest?.phone ? [{ label: `Text ${firstName}`, says: "A text already started, to change and send here. It keeps waiting.", onClick: startText }] : []),
+        { label: `I called ${firstName}`, says: "Notes the call and checks again in 3 business days.", onClick: () => {
           const due = addBusinessDaysIso(TODAY, 3);
           onPatch({ subtasks: recordFollowUp(taskRef.current.subtasks, ps.id, "call", due), followUpAt: due });
           pushToast(`Call noted. Checking again ${formatDue(due)}.`);
         } },
-        ...(hasMessaging ? [{ label: "Task chat", says: `A message in ${firstName}'s portal. It keeps waiting.`, more: true, onClick: () => draftOn("chat") }] : []),
-        { label: `${firstName} answered`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => completeStep(ps.id, `${firstName} replied`) },
-      ]} />
+      ]} link={{ label: `${firstName} answered another way`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => completeStep(ps.id, `${firstName} replied`) }} />
     );
   };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
