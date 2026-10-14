@@ -45,7 +45,7 @@ describe("steps added on the server", () => {
 
   it("a send finishes our step and starts the client's waiting step", async () => {
     expect(await stepsOnReviewSent("t1", "doc")).toBe(true);
-    expect(steps().map((s) => [s.title, s.done])).toEqual([["Write the newsletter", true], ["Waiting on Brian to review Newsletter", false], ["Schedule it", false]]);
+    expect(steps().map((s) => [s.title, s.done])).toEqual([["Write the newsletter", true], ["Waiting on Brian's approval", false], ["Schedule it", false]]);
     // Sent again (the task page got there too): nothing more.
     expect(await stepsOnReviewSent("t1", "doc")).toBe(false);
     expect(steps()).toHaveLength(3);

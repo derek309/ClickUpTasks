@@ -3716,6 +3716,10 @@ export const inWindow = (at: string, w: { from: string; to: string | null }) => 
 export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, clientFirstName: string, name: string, review: DeliverableKey, due: string | null, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
   const from = subtasks.find((s) => s.id === fromStepId);
   if (!from || from.onClient) return null;
+  // Named for what it waits on, the same for every kind: "Waiting on Brian
+  // to review the review" doubled up (Derek, 2026-10-14). `name` is kept for
+  // callers that pass it.
+  void name;
   // Send for review, the review email and the document's own stage change can
   // all report the same send: one waiting step per step sent from.
   if (subtasks.some((s) => s.addedFor === `sent:${fromStepId}`)) return null;
@@ -3726,7 +3730,7 @@ export function addClientReviewStep(subtasks: Subtask[], fromStepId: string, cli
   // 2026-10-11: "it should live there cause it was created in the task").
   list = releaseFromSteps(releaseFromSteps(list, review), "email")
     .map((s) => (s.id === fromStepId ? { ...s, holds: [...(s.holds ?? []), review, "email"] } : s));
-  list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName} to review ${name}`, done: false, stage: "waiting", onClient: true,
+  list.splice(at + 1, 0, { id: makeId(), title: `Waiting on ${clientFirstName}'s approval`, done: false, stage: "waiting", onClient: true,
     addedFor: `sent:${fromStepId}`, waitsOn: review, startedAt: now, ...(due ? { due } : {}) });
   return list;
 }
