@@ -1393,3 +1393,17 @@ describe("clientEmailText", () => {
     expect(clientEmailText("<div>Looks <b>great</b></div><div>Send it Friday</div>", "Pam")).toBe("Looks great\nSend it Friday");
   });
 });
+
+describe("dropOpenWhatsNext", () => {
+  it("drops only open what's next steps", async () => {
+    const { dropOpenWhatsNext } = await import("./data");
+    const list = [
+      { id: "a", title: "Write it", done: true },
+      { id: "b", title: "Brian replied: what's next?", done: false, addedFor: "next:a" },
+      { id: "c", title: "Old: what's next?", done: true, addedFor: "next:x" },
+    ];
+    expect(dropOpenWhatsNext(list).map((x) => x.id)).toEqual(["a", "c"]);
+    const none = [list[0]];
+    expect(dropOpenWhatsNext(none)).toBe(none);
+  });
+});

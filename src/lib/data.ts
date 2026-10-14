@@ -3299,6 +3299,13 @@ export const sentEmailKey = (messageId: string) => `mail:${messageId}`;
  *  given client work or the task is finished (Derek, 2026-10-12: "keep asking
  *  what's next until I say it's finished"). */
 export const asksWhatsNext = (s: Pick<Subtask, "done" | "addedFor" | "title">) => !s.done && !!s.addedFor && /: what's next\?$/.test(s.title);
+/** A finished task asks nothing more: its open "what's next?" steps go,
+ *  however it was finished (the drawer, the status menu, a drag, the MCP's
+ *  set_task_status, which keeps its own copy of this rule). The same list
+ *  back when there are none. */
+export function dropOpenWhatsNext<T extends Pick<Subtask, "done" | "addedFor" | "title">>(subtasks: T[]): T[] {
+  return subtasks.some(asksWhatsNext) ? subtasks.filter((x) => !asksWhatsNext(x)) : subtasks;
+}
 
 /** The last open step is done: a "what's next?" step right after it. Null
  *  while any step is still open, or once it was asked for this step. */

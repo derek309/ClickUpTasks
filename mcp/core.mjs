@@ -658,7 +658,10 @@ export function createServer(opts = {}) {
       const patch = { status };
       // Finished: a "Task done" step records who and when, as in the app
       // (data.ts taskDoneStep); reopened, it goes.
-      const subs = before.subtasks || [];
+      // Finished: its open "what's next?" steps go, as in the app (data.ts
+      // dropOpenWhatsNext, the same rule).
+      const asksNext = (x) => !x.done && !!x.addedFor && /: what's next\?$/.test(x.title || "");
+      const subs = status === "done" && before.status !== "done" ? (before.subtasks || []).filter((x) => !asksNext(x)) : (before.subtasks || []);
       if (status === "done" && before.status !== "done") {
         await members();
         const at = nowIso();

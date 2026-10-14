@@ -10,7 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
+import { PRIORITY_META, STATUS_META, applyWaitingStatusSync, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, dropOpenWhatsNext, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 
 export type UseTaskEditsDeps = {
@@ -75,6 +75,12 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       }
     }
     if (cur && synced.status === "done" && cur.status !== "done") keepDoneVisible(id);
+    // Finished: no open "what's next?" step is left asking.
+    if (cur && !item && synced.status === "done" && cur.status !== "done") {
+      const base = synced.subtasks ?? cur.subtasks;
+      const kept = dropOpenWhatsNext(base);
+      if (kept !== base) synced.subtasks = kept;
+    }
     // Steps deleted, finished or reopened go on the task's Changes, the same as
     // patchTask, so a deleted step can be put back (Derek, 2026-10-13).
     const stepEvents = cur && synced.subtasks ? stepChangeEvents(cur.subtasks, synced.subtasks).map((e) => ({ id: newId("cm_"), authorId: me.id, at: new Date().toISOString(), kind: "event" as const, ...e })) : [];
@@ -201,7 +207,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if (synced.status === "done" && before.draftEmail && synced.draftEmail === undefined) synced.draftEmail = null;
     // Finished: a "Task done" step records who and when; reopened, it goes.
     if (synced.status === "done" && before.status !== "done") {
-      const base = synced.subtasks ?? before.subtasks;
+      const base = dropOpenWhatsNext(synced.subtasks ?? before.subtasks);
       synced.subtasks = [...base.filter((x) => x.addedFor !== "finished"), taskDoneStep({ createdAt: before.createdAt, subtasks: base }, me.id, me.name, new Date().toISOString(), () => newId("s_"))];
     } else if (synced.status && synced.status !== "done" && before.status === "done") {
       const base = synced.subtasks ?? before.subtasks;
