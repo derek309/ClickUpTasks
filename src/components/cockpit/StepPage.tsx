@@ -497,7 +497,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     // Not offered once the step has them (Derek, 2026-10-14: "directions is already taken").
     ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
     // The client's saved short links, picked from a list (Derek, 2026-10-12).
-    ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved files and links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
+    ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Files and links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
     { key: "checklist", label: "Checklist", onPick: () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
@@ -916,7 +916,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               {linkPick !== null && onAttachLinks && (
                 <section aria-label="Saved files and links" className="flex flex-col gap-2 rounded-[5px] border p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-[17px] font-bold">Saved files and links</h3>
+                    <h3 className="text-[17px] font-bold">Files and links</h3>
                     <button onClick={() => setLinkPick(null)} aria-label="Close" className="rounded px-1.5 text-muted hover:text-foreground">×</button>
                   </div>
                   <ul className="flex max-h-[320px] flex-col gap-1 overflow-y-auto">

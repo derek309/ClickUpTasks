@@ -4510,13 +4510,27 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onAddLink={(url) => { addLinkOn(url, "", ps.id); pushToast("Link added to this step"); }}
               onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}
-              savedLinks={(clientLinks ?? []).map((l) => {
-                const att = l.path ? task.attachments.find((a) => a.path === l.path) : task.attachments.find((a) => a.url === l.url);
-                const pic = !!l.path && isPicture({ name: l.label, kind: l.kind ?? "doc" });
-                return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)),
-                  ...(l.path ? { file: true, size: l.size, thumb: pic ? attImageUrls[l.path] : undefined } : {}) };
-              })}
-              onAttachLinks={(ids) => attachSavedLinks(ps.id, ids)}
+              savedLinks={[
+                // The task's own links and files first, so one pasted or added
+                // on another step can go on this one too (Derek, 2026-10-14:
+                // "when I go into files and links, it's not there").
+                ...task.attachments.filter((a) => (a.kind === "link" && !!a.url) || !!a.path)
+                  .filter((a) => !(clientLinks ?? []).some((l) => (l.path && l.path === a.path) || (!l.path && l.url === a.url)))
+                  .map((a) => ({ id: `task:${a.id}`, label: a.name, url: a.url ?? "", on: (ps.holds ?? []).includes(attachmentKey(a.id)),
+                    ...(a.path ? { file: true, size: a.size, thumb: isPicture(a) ? attImageUrls[a.path] : undefined } : {}) })),
+                ...(clientLinks ?? []).map((l) => {
+                  const att = l.path ? task.attachments.find((a) => a.path === l.path) : task.attachments.find((a) => a.url === l.url);
+                  const pic = !!l.path && isPicture({ name: l.label, kind: l.kind ?? "doc" });
+                  return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)),
+                    ...(l.path ? { file: true, size: l.size, thumb: pic ? attImageUrls[l.path] : undefined } : {}) };
+                }),
+              ]}
+              onAttachLinks={(ids) => {
+                const mine = ids.filter((id) => id.startsWith("task:")).map((id) => attachmentKey(id.slice(5)));
+                if (mine.length) onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id ? { ...x, holds: [...new Set([...(x.holds ?? []), ...mine])] } : x)) });
+                const saved = ids.filter((id) => !id.startsWith("task:"));
+                if (saved.length) attachSavedLinks(ps.id, saved);
+              }}
               onAskTodos={askTodosFor(ps)}
               onCopyLink={() => { const url = new URL(handoffLink(taskLink?.() ?? `?task=${task.id}`, ps.id), window.location.origin).href; navigator.clipboard?.writeText(url).then(() => pushToast("Link to this step copied"), () => pushToast(`Share this link: ${url}`)); }}
               messages={messages ?? []} actions={actions}
