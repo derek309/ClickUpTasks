@@ -82,7 +82,7 @@ describe("update_step: whose turn", () => {
     fake({ actions: [{ id: "a_1", next_step_watch: null }] });
     const text = await call(await connect(), { step_id: "s_2", assignee: "u_justin" });
     expect(stepWrites()).toEqual([{ method: "POST", url: expect.any(String), body: { task_id: "t_1", subtask_id: "s_2", patch: { assigneeId: "u_justin", followUpAt: today }, author: null } }]);
-    expect(taskWrite()).toEqual({ status: "delegated", due: "2026-10-20", follow_up_at: addBusinessDaysIso("2026-10-20", 1), updated_by: null });
+    expect(taskWrite()).toEqual({ status: "delegated", due: "2026-10-20", updated_by: null });
     expect(writes.some((w) => w.body && "subtasks" in w.body)).toBe(false);
     expect(writes.find((w) => w.url.includes("task_actions?id=eq.a_1"))?.body).toEqual({ next_step_watch: "handoff:s_2" });
     // The step as get_task shows it.
@@ -154,11 +154,11 @@ describe("update_step: when", () => {
     expect(stepWrites()[0].body.patch).toEqual({ due: "2026-10-23" });
     expect(taskWrite()).toEqual({ due: "2026-10-23", updated_by: null });
   });
-  it("a teammate's current step: due that day, the owner checks back the business day after", async () => {
+  it("a teammate's current step: due that day, no follow up made from it", async () => {
     fake({ task: baseTask({ subtasks: [{ id: "s_2", title: "Design", done: false, assigneeId: "u_justin" }] }) });
     await call(await connect(), { step_id: "s_2", due: "2026-10-23", follow_up: "2026-10-21" });
     expect(stepWrites()[0].body.patch).toEqual({ due: "2026-10-23", followUpAt: "2026-10-21" });
-    expect(taskWrite()).toEqual({ due: "2026-10-23", follow_up_at: "2026-10-26", updated_by: null });
+    expect(taskWrite()).toEqual({ due: "2026-10-23", updated_by: null });
   });
   it("a task in a queue's Up next keeps no date; a cleared date leaves the task alone", async () => {
     fake({ task: baseTask({ due: null, queue_pos: 2000 }), queue: { now: 1, spacing: 3 } });

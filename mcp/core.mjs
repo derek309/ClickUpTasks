@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
-import { QUEUE_TASK_COLS, addBusinessDaysIso, entryIndex, groupQueue, isQueueWaiting, pacificToday, placesFor, promoteQueueStore, queueMove, queueOrder, queuePatchRow, queuePromotions, queueSettings, queueTaskFromRow } from "./queue.mjs";
+import { QUEUE_TASK_COLS, entryIndex, groupQueue, isQueueWaiting, pacificToday, placesFor, promoteQueueStore, queueMove, queueOrder, queuePatchRow, queuePromotions, queueSettings, queueTaskFromRow } from "./queue.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -149,7 +149,8 @@ export function taskDatesForStepDue(o) {
   if (!o.due || !o.isCurrent || o.onClient) return null;
   const who = o.stepAssignee ?? null;
   if (!who || who === o.taskOwner) return o.upNext ? null : { due: o.due };
-  return { due: o.due, followUpAt: addBusinessDaysIso(o.due, 1) };
+  // No follow up from a due date (Derek, 2026-10-14).
+  return { due: o.due };
 }
 /** An open "<step>: what's next?" step: the task asking (data.ts asksWhatsNext). */
 const asksWhatsNext = (s) => !s.done && !!s.addedFor && /: what's next\?$/.test(s.title || "");

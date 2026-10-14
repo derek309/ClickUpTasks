@@ -7,7 +7,7 @@
 import * as React from "react";
 import { type ParsedRow } from "./MindDumpModal";
 import { newId } from "./ui";
-import { directionsOntoStepOne, PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
+import { directionsOntoStepOne, PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
 import { bulkUpsertTasks, tidyIfLong, upsertProject } from "@/lib/db";
 import { authedFetch } from "@/lib/supabase";
 import { applyStepOne, type StepOneOpen } from "@/lib/newTaskStep";
@@ -145,8 +145,8 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
       const claude = to === "u_claude";
       // Its date is step 1's By when, else the task's.
       const stepDue = r.step1?.when ?? r.due;
-      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : stepDue, ...(claude ? {} : { followUpAt: TODAY }), startedAt: now } : null;
-      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : stepDue ? addBusinessDaysIso(stepDue, 1) : r.followUpAt } : null;
+      const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : stepDue, startedAt: now } : null;
+      const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : r.followUpAt ?? null } : null;
       return {
         id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",

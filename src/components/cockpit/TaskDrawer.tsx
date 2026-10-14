@@ -2458,7 +2458,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // A teammate has the current step: the task is theirs until that date, and
   // comes back to its owner the business day after (Derek, 2026-10-12: "check
   // it the day after it is due").
-  const handoffDates = (due: string | null | undefined): Partial<Task> => (due ? { due, followUpAt: addBusinessDaysIso(due, 1) } : {});
+  // No follow up from it (Derek, 2026-10-14, the 8th time: "stop adding follow up dates when a due date is added").
+  const handoffDates = (due: string | null | undefined): Partial<Task> => (due ? { due } : {});
   // An email to the client as a step of its own: the draft sits on it and its
   // window opens to write in. Nothing goes until someone presses Send
   // (Derek, 2026-10-12).
@@ -3138,11 +3139,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="mt-1 text-[17px] leading-snug">
           <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stg].dot }} />{waiting ? `Waiting on ${firstName}` : STATUS_META[stg].label}
           {!sentStep.onClient && !waiting && <>, on {wordPick(sentStep.assigneeId ? userById(sentStep.assigneeId)?.name ?? "someone" : ownerName, "Owner", sentStep.assigneeId ?? task.assigneeId ?? "", assignableUsers().map((u) => ({ value: u.id, label: u.name })), (v) => onPatchSub(sentStep.id, { assigneeId: v || null }))}</>}
-          , {waiting ? "check in" : sentNext?.approved && !sentStep.onClient ? "due" : "follow up"}{" "}
+          , {waiting ? "check in" : "due"}{" "}
           <span className="inline-block">
             <InlineDate value={sentStep.due ?? null} formatValue={formatDue} emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
               className={`${word} rounded hover:bg-background`}
-              onChange={(d) => { if (!d) return; onPatchSub(sentStep.id, { due: d }); onPatch({ followUpAt: d, ...(task.due && task.due < d ? { due: d } : {}) }); }} />
+              // A wait's date is its check in (the task's follow up); any
+              // other step's is a due date and never makes a follow up.
+              onChange={(d) => { if (!d) return; onPatchSub(sentStep.id, { due: d }); onPatch({ ...(waiting ? { followUpAt: d } : {}), ...(task.due && task.due < d ? { due: d } : {}) }); }} />
           </span>.
         </div>
         </>)}

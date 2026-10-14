@@ -61,8 +61,8 @@ describe("a step's new due date and its task", () => {
     expect(taskDatesForStepDue({ ...base, due: "2026-10-20", stepAssignee: "u_derek" })).toEqual({ due: "2026-10-20" });
     expect(taskDatesForStepDue({ ...base, due: "2026-10-01", stepAssignee: null })).toEqual({ due: "2026-10-01" });
   });
-  it("a teammate's or Claude's current step keeps the handoff dates", () => {
-    expect(taskDatesForStepDue({ ...base, due: "2026-10-16", stepAssignee: "u_justin" })).toEqual({ due: "2026-10-16", followUpAt: "2026-10-19" });
+  it("a teammate's or Claude's current step moves the due date only, never a follow up", () => {
+    expect(taskDatesForStepDue({ ...base, due: "2026-10-16", stepAssignee: "u_justin" })).toEqual({ due: "2026-10-16" });
   });
   it("leaves the task alone otherwise", () => {
     expect(taskDatesForStepDue({ ...base, due: "2026-10-20", stepAssignee: "u_derek", upNext: true })).toBeNull();

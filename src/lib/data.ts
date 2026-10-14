@@ -3361,10 +3361,12 @@ export function datesForCurrentStep(before: Subtask[], after: Subtask[], task: {
   const was = currentStep(before);
   const now = currentStep(after);
   if (!now?.due || (was?.id === now.id && was.due === now.due)) return {};
-  const teammate = !!now.assigneeId && now.assigneeId !== task.assigneeId && !now.onClient;
-  const followUp = teammate ? addBusinessDaysIso(now.due, 1) : now.due;
+  // A step's due date never makes a follow up (Derek, 2026-10-14, the 8th time: "stop adding follow up dates when a due date is added"). Only a wait (the
+  // client's turn, or a check in that ends on their reply) has a check in
+  // date, and that one is the task's follow up.
+  const wait = !!now.onClient || now.finishWhen === "reply" || now.stage === "waiting";
   return {
-    ...(followUp !== (task.followUpAt ?? null) ? { followUpAt: followUp } : {}),
+    ...(wait && now.due !== (task.followUpAt ?? null) ? { followUpAt: now.due } : {}),
     ...(task.due && task.due < now.due ? { due: now.due } : {}),
   };
 }
@@ -3758,7 +3760,9 @@ export function taskDatesForStepDue(o: { due: string | null; isCurrent: boolean;
   if (!o.due || !o.isCurrent || o.onClient) return null;
   const who = o.stepAssignee ?? null;
   if (!who || who === o.taskOwner) return o.upNext ? null : { due: o.due };
-  return { due: o.due, followUpAt: addBusinessDaysIso(o.due, 1) };
+  // No follow up from a due date, a teammate's or Claude's step included
+  // (Derek, 2026-10-14, the 8th time: "stop adding follow up dates when a due date is added").
+  return { due: o.due };
 }
 
 /** A done step that ended in an approval ("Brian approved", "Brian approved
