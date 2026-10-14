@@ -1201,7 +1201,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     };
     const ideas = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
     return (
-      <NextChoices intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
+      <NextChoices heading={false} intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
         ...ideas,
         { label: "Give it to Claude", says: "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
         { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: true, onClick: () => finishTask(sid) },

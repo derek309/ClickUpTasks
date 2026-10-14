@@ -7,7 +7,7 @@
 // Its directions and to dos are the step page's own (useStepDirections,
 // useStepTodos), so they edit and save the same way in both places.
 import { useState } from "react";
-import type { Message, StepTodo, Subtask } from "@/lib/data";
+import { htmlToText, type Message, type StepTodo, type Subtask } from "@/lib/data";
 import { suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
 import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
@@ -80,6 +80,10 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
     && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
   const addRows = setup ? addRowsOf(options, firstName, new Set(quick ? named.map((x) => x.kind) : [])) : null;
   const link = "font-semibold text-accent underline-offset-4 hover:underline";
+  // A "what's next?" step's context (why it is asking, the original ask): the
+  // easiest thing on the card to read, in ink, right under its heading (Derek,
+  // 2026-10-14: it was pale grey under a red line).
+  const context = whatsNext ? htmlToText(sub.notes ?? "").trim() : "";
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -99,6 +103,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
           <span>{tone.say ?? tone.word}</span>
           {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
         </div>
+        {context && <p className="whitespace-pre-line text-[16px] leading-relaxed text-foreground [overflow-wrap:anywhere]">{context}</p>}
       </div>
       {/* A meeting started now: its link, one tap away (Derek, 2026-10-14). */}
       {sub.meeting && !sub.done && <JoinNowLine meeting={sub.meeting} />}
@@ -111,12 +116,14 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
             onDone={(a, run) => setup.onDone(a, run)} />
         </div>
       )}
-      {dir.node}
+      {!context && dir.node}
       {followBox}
       {planBits}
       {outFor ?? held}
       {/* A wait on the client gets no to do box until one is added. */}
-      {!sub.onClient && (sub.finishWhen !== "reply" || todo.todos.length > 0) && todo.node}
+      {/* Nor a step with no name yet, or still asking what's next: a to do
+          there has nothing to belong to (Derek, 2026-10-14). */}
+      {!sub.onClient && !whatsNext && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0) && todo.node}
       {/* How it ends: Done, then What's next; a waiting, check in or "what's
           next?" step has its own choices. The only dark button on the page. */}
       {!sub.done && doneActions ? (

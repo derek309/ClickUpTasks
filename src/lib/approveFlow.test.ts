@@ -57,3 +57,16 @@ describe("the step an approval finishes", () => {
     expect(needsYou({ status: "approved", assigneeId: "u_derek", subtasks: byClient }, "u_derek", "Brian")).toBe("Brian approved. Your turn");
   });
 });
+
+import { stepProgress } from "./data";
+
+describe("progress", () => {
+  it("an open what's next is not a step to count", () => {
+    const list: Subtask[] = [
+      { id: "a", title: "Build it", done: true },
+      { id: "q", title: "Brian approved: what's next?", done: false, addedFor: "ok:page:4" },
+    ];
+    expect(stepProgress(list)).toMatchObject({ done: 1, total: 1 });
+    expect(stepProgress([...list.slice(0, 1), { ...list[1], done: true }])).toMatchObject({ done: 2, total: 2 });
+  });
+});

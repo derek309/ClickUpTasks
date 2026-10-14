@@ -3075,8 +3075,10 @@ export function tickedSteps<T extends Pick<Subtask, "id" | "done">>(subtasks: T[
 
 /** Done and total steps. Handoffs count both ways: they used to count in the
  *  total but never as finished. */
-export function stepProgress(subtasks: Pick<Subtask, "done" | "fromClient">[]): { done: number; total: number; pct: number } {
-  const steps = planSteps(subtasks);
+export function stepProgress(subtasks: (Pick<Subtask, "done" | "fromClient"> & Partial<Pick<Subtask, "addedFor" | "title">>)[]): { done: number; total: number; pct: number } {
+  // An open "…: what's next?" is a question, not a step to count (Derek,
+  // 2026-10-14: "7 of 8 done" counted the unnamed What's next card).
+  const steps = planSteps(subtasks).filter((s) => s.done || !s.addedFor || !/: what's next\?$/.test(s.title ?? ""));
   const done = steps.filter((s) => s.done).length;
   return { done, total: steps.length, pct: steps.length ? Math.round((done / steps.length) * 100) : 0 };
 }

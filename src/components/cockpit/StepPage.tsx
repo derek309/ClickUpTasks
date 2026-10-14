@@ -45,8 +45,11 @@ export type NextChoice = {
   label: string; says: string; primary?: boolean;
   onClick: () => void;
 };
-export function NextChoices({ intro, choices, row, link }: {
+export function NextChoices({ intro, choices, row, link, heading = true }: {
   intro?: React.ReactNode; choices: NextChoice[];
+  /** False where the card already asks "What's next?" (a what's next step's
+   *  name box): said once (Derek, 2026-10-14). */
+  heading?: boolean;
   /** The buttons side by side, light, without what each does beside it (that
    *  stays as its title), the same on a phone and a desktop: a check in
    *  (Derek, 2026-10-14). */
@@ -68,7 +71,7 @@ export function NextChoices({ intro, choices, row, link }: {
   );
   return (
     <section aria-label="What's next" className="flex flex-col gap-2">
-      <h3 className="text-[18px] font-bold">What&apos;s next?</h3>
+      {heading && <h3 className="text-[18px] font-bold">What&apos;s next?</h3>}
       {intro && <p className="text-[16px] text-muted">{intro}</p>}
       {row ? (
         // One row, every button light; on a narrow phone a long name wraps
