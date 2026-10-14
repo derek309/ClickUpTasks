@@ -9,6 +9,7 @@
 import * as React from "react";
 import { CLAUDE_ID, currentStep, formatDue, needsYou, stepStage, userById, type Task } from "@/lib/data";
 import { deadlineWarnings, groupQueue, isQueueWaiting, type QueueSettings } from "../../../mcp/queue.mjs";
+import { Avatar } from "./ui";
 
 type Pending = { id: string; beforeId: string | null; up: boolean; moveUp?: boolean };
 
@@ -69,10 +70,13 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
     if (need) return { text: need, tone: "mine" };
     const cur = currentStep(t.subtasks);
     const person = cur?.assigneeId ?? t.assigneeId;
+    // ": <step>" only when the step says more than the task's own name.
+    const sameName = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, " ") === b.trim().toLowerCase().replace(/\s+/g, " ");
+    const of = cur && !sameName(cur.title, t.title) ? `: ${cur.title}` : "";
     if (cur?.assigneeId === CLAUDE_ID) return { text: "Claude's turn", tone: "claude" };
-    if (t.waitingOnClient || (cur && (cur.onClient || cur.finishWhen === "reply" || stepStage(cur, t.assigneeId) === "waiting"))) return { text: `${clientFirst}'s turn${cur ? `: ${cur.title}` : ""}`, tone: "wait" };
-    if (person && person !== meId) return { text: `${userById(person)?.name.split(" ")[0] ?? "A teammate"}'s turn${cur ? `: ${cur.title}` : ""}`, tone: isQueueWaiting(t) ? "wait" : "plain" };
-    return { text: `Your turn${cur ? `: ${cur.title}` : ""}`, tone: "mine" };
+    if (t.waitingOnClient || (cur && (cur.onClient || cur.finishWhen === "reply" || stepStage(cur, t.assigneeId) === "waiting"))) return { text: `${clientFirst}'s turn${of}`, tone: "wait" };
+    if (person && person !== meId) return { text: `${userById(person)?.name.split(" ")[0] ?? "A teammate"}'s turn${of}`, tone: isQueueWaiting(t) ? "wait" : "plain" };
+    return { text: `Your turn${of}`, tone: "mine" };
   };
   const TONE = { mine: "text-red-700", wait: "text-amber-800", claude: "text-orange-700", plain: "text-muted" } as const;
 
@@ -95,7 +99,13 @@ export function QueueList({ name, tasks, settings, meId, clientFirst, today, onO
           {tn && <span className={`block text-[16px] font-semibold ${TONE[tn.tone]}`}>{tn.text}</span>}
           {need && <span className="block text-[16px] font-semibold text-red-700">{need}</span>}
         </button>
-        <span className="col-start-2 text-[16px] sm:col-start-3 sm:text-right">{right}</span>
+        {/* Who it's on, at a glance, Up next included (Derek, 2026-10-14). */}
+        <span className="col-start-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] sm:col-start-3 sm:justify-end">
+          {(() => { const who = currentStep(t.subtasks)?.assigneeId ?? t.assigneeId; return who
+            ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted"><Avatar id={who} size={22} />{who === meId ? "You" : userById(who)?.name.split(" ")[0] ?? "Someone"}</span>
+            : <span className="whitespace-nowrap font-semibold text-amber-800">Not assigned</span>; })()}
+          {right}
+        </span>
       </div>
     );
   };
