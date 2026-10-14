@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminConfigured } from "@/lib/supabaseAdmin";
+import { adminConfigured, supabaseAdmin } from "@/lib/supabaseAdmin";
 import { teamDocAccess, teamActor, kindOf, NO_STORE } from "@/lib/taskDocumentServer";
 import {
   createReview, deleteReview, pickReviewVersion, removeReviewVersion, renameReview, reopenReview, setReviewReminders, setReviewStage, writeDocBody,
@@ -41,7 +41,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try { payload = JSON.parse(text) ?? {}; } catch { return json({ error: "Invalid request." }, 400); }
 
   if (payload.reopen === true) return answer(await reopenReview(id, kind, actor));
-  if (typeof payload.status === "string") return answer(await setReviewStage(id, kind, actor, payload.status));
+  if (typeof payload.status === "string") {
+    // The steps the new stage made (stepsServer) come back with it, so the
+    // task page can show them and ask What's next at once (Derek, 2026-10-14).
+    const r = await setReviewStage(id, kind, actor, payload.status);
+    if (!r.ok) return answer(r);
+    const { data } = await supabaseAdmin.from("tasks").select("subtasks").eq("id", id).maybeSingle();
+    return json({ document: r.document, subtasks: (data as { subtasks?: unknown } | null)?.subtasks ?? null });
+  }
   if (typeof payload.title === "string") return answer(await renameReview(id, kind, actor, payload.title));
   if (payload.reminders !== undefined) return answer(await setReviewReminders(id, kind, actor, payload.reminders));
   if (payload.pick !== undefined && isFileKind(kind)) return answer(await pickReviewOption(id, kind, actor, payload.pick));

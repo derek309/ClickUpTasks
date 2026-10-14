@@ -21,7 +21,7 @@
 // live (status and an event comment), and that is what makes this refetch.
 import { reviewTone } from "@/lib/reviewTone";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { STATUS_META, htmlToText, timeAgo, type Task, type TaskStatus } from "@/lib/data";
+import { STATUS_META, htmlToText, timeAgo, type Subtask, type Task, type TaskStatus } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import {
   fetchTaskDocument, fetchTaskDocumentVersions, fetchTaskDocumentFiles, fetchTaskDocumentCheckpoints, fetchTaskDocumentComments,
@@ -87,7 +87,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, sendNonce = 0, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onDeletedCount, deletedOpenNonce = 0 }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, sendNonce = 0, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onStageSet, onDeletedCount, deletedOpenNonce = 0 }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -128,6 +128,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   /** Its stage, each time it changes: the task's steps follow it (Derek,
    *  2026-10-11). Changing it here does not change the task itself. */
   onStage?: (s: { id: string; title: string; status: string; version: number; approvedAt: string | null }) => void;
+  /** The team picked a stage here and it saved: the steps the server moved
+   *  with it come along. Approved closes this window back to the task, where
+   *  What's next asks (Derek, 2026-10-14). */
+  onStageSet?: (status: string, r: { document: Record<string, unknown>; subtasks?: Subtask[] | null }) => void;
 }) {
   const image = kind === "image";
   const page = kind === "page";
@@ -810,6 +814,10 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     const j = await readJson(res);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not change the stage."); return; }
     setDoc(rowToTaskDocument(j.document));
+    if (onStageSet) {
+      onStageSet(status, { document: j.document as Record<string, unknown>, subtasks: j.subtasks as Subtask[] | null | undefined });
+      if (status === "approved") switchView({ full: false });
+    }
   };
 
   const deleteDocument = async () => {

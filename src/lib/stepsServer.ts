@@ -7,7 +7,7 @@
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
 import {
-  addApprovalStep, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
+  addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
   todayPacific, withMeetingSteps, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
@@ -97,24 +97,50 @@ export async function stepsOnReviewChanges(taskId: string, kind: ReviewKindKey, 
   }, true);
 }
 
+/** Who made a review's newest version: the newest file's adder for an image,
+ *  page or video review, the newest team version's author for a document.
+ *  Null when unknown. */
+async function latestMaker(taskId: string, kind: ReviewKindKey): Promise<string | null> {
+  try {
+    const { data: doc } = await supabaseAdmin.from("task_documents").select("id").eq("task_id", taskId).eq("kind", kind).is("deleted_at", null).maybeSingle();
+    const id = (doc as { id?: string } | null)?.id;
+    if (!id) return null;
+    if (kind === "doc") {
+      const { data } = await supabaseAdmin.from("task_document_versions").select("author_id, created_at").eq("document_id", id)
+        .not("author_id", "is", null).order("created_at", { ascending: false }).limit(1);
+      return ((data ?? []) as { author_id?: string | null }[])[0]?.author_id ?? null;
+    }
+    const { data } = await supabaseAdmin.from("task_document_files").select("added_by, created_at").eq("document_id", id).eq("purpose", kind)
+      .is("removed_at", null).order("created_at", { ascending: false }).limit(1);
+    return ((data ?? []) as { added_by?: string | null }[])[0]?.added_by ?? null;
+  } catch { return null; }
+}
+
 /** A review was approved, by the client or by us: the step working on it is
  *  done and the approval is recorded; the plan's next step starts, or it asks
- *  what's next. */
-export async function stepsOnReviewApproved(taskId: string, kind: ReviewKindKey, version: number, byClient: boolean): Promise<boolean> {
+ *  what's next (data.ts addReviewApproval). With no step waiting on the
+ *  client, the step holding or making the review takes it (Derek, 2026-10-14).
+ *  shown: the version as the client and team see it (an image or page review
+ *  numbers its files); approverId: the teammate who marked it. */
+export async function stepsOnReviewApproved(taskId: string, kind: ReviewKindKey, version: number, byClient: boolean, opts: { shown?: number; approverId?: string | null } = {}): Promise<boolean> {
   const name = await reviewName(taskId, kind);
+  const latestBy = await latestMaker(taskId, kind);
+  let status: TaskStatus | null = null;
   return rewriteSteps(taskId, (row, first) => {
+    status = null;
     const list = row.subtasks ?? [];
-    const cur = stepForReview(list, kind as DeliverableKey, row.assignee_id);
-    if (!cur) return null;
-    const title = byClient ? `${first} approved ${name}` : `${name.charAt(0).toUpperCase()}${name.slice(1)} approved`;
-    const made = addApprovalStep(list, cur.id, title, `ok:${kind}:${version}`, () => newId("s_"), undefined, byClient ? `${first} approved` : "Approved");
+    const made = addReviewApproval(list, kind as DeliverableKey, version, {
+      first, name, byClient, ownerId: row.assignee_id, makeId: () => newId("s_"), latestBy, shown: opts.shown, doneBy: byClient ? "client" : opts.approverId ?? null,
+    });
     if (!made) return null;
     const now = new Date().toISOString();
     // The plan's next step, not merely the next item in the list (a portal
     // request can sit between them).
     const next = made.hasNext ? stepAfter(made.list, made.approvalId) : null;
+    // The task's status follows, as on the task page.
+    status = statusForStep(row.status, next ? stepStage(next, row.assignee_id) : "approved");
     return made.list.map((x) => (next && x.id === next.id && !x.startedAt ? { ...x, startedAt: now } : x));
-  });
+  }, false, () => (status ? { status } : null));
 }
 
 /** The client wrote back: a current step waiting on their reply ("Check in

@@ -13,6 +13,9 @@ function builder(table: string) {
     update: (p: Row) => { patch = p; return b; },
     eq: (k: string, v: unknown) => { filters.push([k, v]); return b; },
     is: (k: string, v: unknown) => { filters.push([k, v]); return b; },
+    not: () => b,
+    order: () => b,
+    limit: () => b,
     maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null }),
     then: (res: (x: { data: Row[] }) => unknown) => {
       const hit = rows();
@@ -263,5 +266,47 @@ describe("steps added on the server", () => {
     expect(steps()[0]).toMatchObject({ holds: ["att:a_9"], meeting, assigneeId: "u_derek" });
     expect(await stepsOnMeetingTranscript("t1", "a_10")).toBe(true);
     expect(steps().slice(0, 2).map((x) => [x.done, x.outcome])).toEqual([[true, "Met"], [true, "Transcript from Granola"]]);
+  });
+});
+
+// t_mv01d2mnx "MEDAL of brands", 2026-10-14: Brian approved by email, Derek
+// marked the HTML review approved, and nothing moved: no step was waiting on
+// Brian, and the step making the designed version was Claude's.
+describe("an approval with no step waiting on the client", () => {
+  const medal = (): Subtask[] => [
+    { id: "s5", title: "Waiting on Brian to review the review", done: true, onClient: true, waitsOn: "page", outcome: "Brian approved" },
+    { id: "s6", title: "Reply to brian", done: true, outcome: "Done", assigneeId: "u_derek", holds: [] },
+    { id: "s7", title: "Build the HTML review version", done: false, assigneeId: "u_claude", holds: ["email"], madeHere: ["email"], addedFor: "next:s6", startedAt: "2026-10-13T17:52:38Z" },
+  ];
+  beforeEach(() => {
+    setup(medal());
+    db.task_documents = [{ id: "d9", task_id: "t1", kind: "page", title: "", deleted_at: null }];
+    db.task_document_files = [{ document_id: "d9", purpose: "page", added_by: "u_claude", removed_at: null }];
+  });
+
+  it("marked approved by the team: Claude's step is done and Brian approved: what's next? follows, on the owner", async () => {
+    expect(await stepsOnReviewApproved("t1", "page", 4, false, { approverId: "u_derek" })).toBe(true);
+    const s7 = steps().find((x) => x.id === "s7")!;
+    expect(s7).toMatchObject({ done: true, outcome: "Brian approved (version 4)", doneBy: "u_derek" });
+    const next = steps()[3];
+    expect(next).toMatchObject({ title: "Brian approved: what's next?", done: false, addedFor: "ok:page:4", assigneeId: "u_derek" });
+    expect(next.startedAt).toBeTruthy();
+    expect(db.tasks[0].status).toBe("approved");
+    // The same approval again (the task page got there too): nothing more.
+    expect(await stepsOnReviewApproved("t1", "page", 4, false, { approverId: "u_derek" })).toBe(false);
+    expect(steps()).toHaveLength(4);
+  });
+
+  it("the client's own button does the same, saying the version they saw", async () => {
+    expect(await stepsOnReviewApproved("t1", "page", 6, true, { shown: 5 })).toBe(true);
+    expect(steps().find((x) => x.id === "s7")).toMatchObject({ done: true, outcome: "Brian approved (version 5)", doneBy: "client" });
+    expect(steps()[3].title).toBe("Brian approved: what's next?");
+  });
+
+  it("a step waiting on Brian still takes it, as before", async () => {
+    setup([...medal(), { id: "w", title: "Waiting on Brian to review the review", done: false, onClient: true, waitsOn: "page" }]);
+    expect(await stepsOnReviewApproved("t1", "page", 4, true)).toBe(true);
+    expect(steps().find((x) => x.id === "w")).toMatchObject({ done: true, outcome: "Brian approved" });
+    expect(steps().find((x) => x.id === "s7")!.done).toBe(false);
   });
 });

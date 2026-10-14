@@ -28,3 +28,32 @@ describe("finishing a step never reopens one", () => {
     expect(tickedSteps(medal(), "nope", true)).toBeNull();
   });
 });
+
+import { addReviewApproval, approvalHolder, needsYou } from "./data";
+
+describe("the step an approval finishes", () => {
+  const open = (): Subtask[] => [
+    { id: "a", title: "Write it", done: true },
+    { id: "c", title: "Build the HTML review version", done: false, assigneeId: "u_claude" },
+  ];
+  it("holds, then made here, then Claude's step when Claude made the newest version", () => {
+    expect(approvalHolder(open(), "page", "u_claude")?.id).toBe("c");
+    expect(approvalHolder(open(), "page", "u_derek")).toBeNull();
+    expect(approvalHolder([...open(), { id: "h", title: "Fix the page", done: false, holds: ["page"] }], "page", "u_claude")?.id).toBe("h");
+    expect(approvalHolder([...open(), { id: "m", title: "Make it", done: false, madeHere: ["page"] }], "page", null)?.id).toBe("m");
+    expect(approvalHolder([...open(), { id: "w", title: "Waiting", done: false, onClient: true, waitsOn: "page" }], "page", "u_claude")).toBeNull();
+  });
+
+  it("asks what's next, and only a client's own approval says Needs you", () => {
+    let n = 0;
+    const made = addReviewApproval(open(), "page", 4, { first: "Brian", name: "the review", byClient: false, ownerId: "u_derek", makeId: () => `n${++n}`, latestBy: "u_claude", doneBy: "u_derek" })!;
+    expect(made.fromId).toBe("c");
+    const list = made.list.map((x) => (x.id === made.approvalId ? { ...x, assigneeId: "u_derek" } : x));
+    expect(list.map((x) => [x.title, x.done])).toEqual([["Write it", true], ["Build the HTML review version", true], ["Brian approved: what's next?", false]]);
+    // Derek marked it himself: not news to him.
+    expect(needsYou({ status: "approved", assigneeId: "u_derek", subtasks: list }, "u_derek", "Brian")).toBeNull();
+    // Brian pressed Approve: it is.
+    const byClient = list.map((x) => (x.id === "c" ? { ...x, doneBy: "client" } : x));
+    expect(needsYou({ status: "approved", assigneeId: "u_derek", subtasks: byClient }, "u_derek", "Brian")).toBe("Brian approved. Your turn");
+  });
+});

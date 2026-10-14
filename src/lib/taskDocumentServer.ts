@@ -361,7 +361,7 @@ export async function clientPublish(scope: DocScope, kind: "client_submitted" | 
   // Keyed on the document's own version, as the task page keys them, so the two never both add one.
   if (approved) {
     await resolveOpenComments(scope.documentId, "the approval").catch(() => undefined);
-    await stepsOnReviewApproved(scope.taskId, scope.kind, version, true).catch(() => false);
+    await stepsOnReviewApproved(scope.taskId, scope.kind, version, true, { shown: number }).catch(() => false);
   }
   else await stepsOnReviewChanges(scope.taskId, scope.kind, scope.documentId, version).catch(() => false);
 

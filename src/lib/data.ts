@@ -915,6 +915,10 @@ export interface Subtask {
   /** How the step ended (Derek, 2026-10-11: "every step will have an
    *  outcome"): "Sent to Derek for review", "Derek approved", "Done". */
   outcome?: string;
+  /** Who closed the step, when the app knows: "client" (their button), a
+   *  member's id (a teammate marking it, Claude as u_claude). Older steps have
+   *  none and are read from their assignee. */
+  doneBy?: string;
   /** When the step's owner last acted on the task while it said Needs you
    *  (moved its date): it leaves Needs you until something new happens
    *  (Derek, 2026-10-13: "they've had an action from me"). */
@@ -3348,6 +3352,10 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   const prev = plan.slice(0, Math.max(0, at)).reverse().find((x) => x.done);
   if (!prev) return null;
   if (prev.finishWhen === "reply" && prev.outcome?.endsWith(" replied")) return `${clientFirst} replied. Your turn`;
+  // An approval that finished the step making the review: news only when the
+  // client pressed Approve; a teammate marking it is their own act (Derek,
+  // 2026-10-14). Its what's next still asks.
+  if (/ approved \(version \d+\)$/.test(prev.outcome ?? "")) return prev.doneBy === "client" ? `${clientFirst} approved. Your turn` : null;
   if (prev.assigneeId === CLAUDE_ID) return "Claude finished. Your turn";
   return null;
 }
@@ -3766,6 +3774,52 @@ export function stepForReview(subtasks: Subtask[], kind: DeliverableKey, ownerId
     ?? open.find((x) => x.holds?.includes(kind) && !isHandoffStep(x, ownerId))
     ?? open.find((x) => x.onClient && !x.waitsOn)
     ?? (() => { const cur = currentStep(subtasks); return cur && !cur.onClient && !isHandoffStep(cur, ownerId) ? cur : null; })();
+}
+
+/** The step a review's approval finishes when no step is waiting on the
+ *  client for it (Derek, 2026-10-14, t_mv01d2mnx: Brian said "approved" by
+ *  email, Derek marked the HTML review approved, and nothing moved): the open
+ *  step holding the review, else the one that made it, else Claude's open
+ *  step when Claude made its newest version (latestBy). Any assignee, Claude's
+ *  own step included. Null when a step is waiting on the client for it (that
+ *  step takes the approval, as before) or none fits. */
+export function approvalHolder(subtasks: Subtask[], kind: DeliverableKey, latestBy?: string | null): Subtask | null {
+  const open = planSteps(subtasks).filter((x) => !x.done);
+  if (open.some((x) => x.onClient && (x.waitsOn === kind || !x.waitsOn))) return null;
+  const ours = open.filter((x) => !x.onClient);
+  return ours.find((x) => x.holds?.includes(kind))
+    ?? ours.find((x) => x.madeHere?.includes(kind))
+    ?? (latestBy === CLAUDE_ID ? ours.find((x) => x.assigneeId === CLAUDE_ID) : undefined)
+    ?? null;
+}
+
+/** A review approved, by the client's button or marked by the team: the step
+ *  it belongs to is done and the approval is recorded, keyed once per version
+ *  (ok:<kind>:<version>). With a step waiting on the client, that step takes
+ *  it as before. With none, the step holding or making the review is done with
+ *  "<Client> approved (version N)" and "<Client> approved: what's next?"
+ *  follows it, current, unless the plan already has a next step, which starts
+ *  (addApprovalStep, the same path). The task page and the server both use it. */
+export function addReviewApproval(subtasks: Subtask[], kind: DeliverableKey, version: number, o: {
+  first: string; name: string; byClient: boolean; ownerId: string | null; makeId: () => string;
+  latestBy?: string | null; shown?: number; doneBy?: string | null; now?: string;
+}): { list: Subtask[]; approvalId: string; hasNext: boolean; fromId: string } | null {
+  const now = o.now ?? new Date().toISOString();
+  const key = `ok:${kind}:${version}`;
+  if (subtasks.some((s) => s.addedFor === key)) return null;
+  const by = o.byClient ? "client" : o.doneBy ?? undefined;
+  const stamp = (r: { list: Subtask[]; approvalId: string; hasNext: boolean }, fromId: string) =>
+    ({ ...r, fromId, list: by ? r.list.map((x) => (x.id === fromId ? { ...x, doneBy: by } : x)) : r.list });
+  const holder = approvalHolder(subtasks, kind, o.latestBy);
+  if (holder) {
+    const made = addApprovalStep(subtasks, holder.id, `${o.first} approved`, key, o.makeId, now, `${o.first} approved (version ${o.shown ?? version})`);
+    return made && stamp(made, holder.id);
+  }
+  const cur = stepForReview(subtasks, kind, o.ownerId);
+  if (!cur) return null;
+  const title = o.byClient ? `${o.first} approved ${o.name}` : `${o.name.charAt(0).toUpperCase()}${o.name.slice(1)} approved`;
+  const made = addApprovalStep(subtasks, cur.id, title, key, o.makeId, now, o.byClient ? `${o.first} approved` : "Approved");
+  return made && stamp(made, cur.id);
 }
 
 /** New steps the app added by itself go on the task's owner (Derek,

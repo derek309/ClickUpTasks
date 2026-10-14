@@ -37,6 +37,9 @@ vi.mock("./taskDocumentFiles", () => files);
 const autoName = vi.hoisted(() => ({ nameReviewIfDefault: vi.fn() }));
 vi.mock("./reviewAutoName", () => autoName);
 
+const steps = vi.hoisted(() => ({ stepsOnReviewApproved: vi.fn(async () => true), stepsOnReviewChanges: vi.fn(async () => true), stepsOnReviewSent: vi.fn(async () => true) }));
+vi.mock("./stepsServer", () => steps);
+
 const svc = await import("./reviewService");
 
 const actor = (admin = true) => ({ id: "u_claude", memberId: "u_claude", admin, label: async () => "Claude" });
@@ -46,7 +49,7 @@ const saved = () => ({ data: { id: "tdoc_1" }, error: null });
 beforeEach(() => {
   calls.length = 0;
   result = () => ({ data: null, error: null });
-  for (const f of [...Object.values(server), ...Object.values(files), ...Object.values(autoName)]) f.mockReset();
+  for (const f of [...Object.values(server), ...Object.values(files), ...Object.values(autoName), ...Object.values(steps)]) f.mockReset();
   autoName.nameReviewIfDefault.mockResolvedValue(null);
   files.recordCheckpoint.mockResolvedValue(undefined);
   files.sharedVersionFiles.mockResolvedValue([]);
@@ -86,6 +89,13 @@ describe("setReviewStage", () => {
     expect(server.appendTaskEvent).toHaveBeenCalledWith("t_1", "approved the client document for the client (version 3)", "u_claude");
     // Its open comments close with it (Derek, 2026-10-12).
     expect(files.resolveOpenComments).toHaveBeenCalledWith("tdoc_1", "the approval");
+  });
+
+  it("moves the steps as the team's approval, saying who marked it (Derek, 2026-10-14)", async () => {
+    server.liveDocument.mockResolvedValue({ id: "tdoc_1", approved_at: null, version: 4 });
+    result = saved;
+    await svc.setReviewStage("t_1", "page", actor(), "approved");
+    expect(steps.stepsOnReviewApproved).toHaveBeenCalledWith("t_1", "page", 4, false, { approverId: "u_claude" });
   });
 
   it("leaves the client's own approval alone when the team picks Approved after them", async () => {

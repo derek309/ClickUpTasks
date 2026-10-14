@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, tickedSteps, carryForward, addClientReviewStep, addApprovalStep, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
+  assignableUsers, tickedSteps, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, addCheckInStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -73,7 +73,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -133,6 +133,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   meetingLink?: string | null;
   onSaveMeetingLink?: (link: string) => void;
   taskLink?: () => string;
+  /** Steps the server just wrote (a review's stage moved them): shown at once, not saved again. */
+  onStepsFromServer?: (subtasks: Subtask[]) => void;
 }) {
   // Every write also updates taskRef at once, so a second write in the same
   // moment builds on the first instead of undoing it (Pam's request was
@@ -1336,8 +1338,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }
     if (what === "ok") {
       const byClient = !!from?.onClient;
-      const title = byClient ? `${firstName} approved ${name}` : `${name.charAt(0).toUpperCase()}${name.slice(1)} approved`;
-      const made = addApprovalStep(taskRef.current.subtasks, stepId, title, key, () => newId("s_"), undefined, byClient ? `${firstName} approved` : "Approved");
+      // The same rule as the server (stepsServer), keyed on the version, so
+      // whichever gets there first adds it.
+      const version = Number(key.split(":")[2] ?? 0);
+      const made = addReviewApproval(taskRef.current.subtasks, k, version, { first: firstName, name, byClient, ownerId: task.assigneeId ?? null, makeId: () => newId("s_"), doneBy: byClient ? null : meId });
       if (!made) return;
       if (openStep) setNextStepDone(openStep.id, true);
       const next = made.hasNext ? stepAfter(made.list, made.approvalId) : null;
@@ -1573,7 +1577,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // the old ones (Derek, 2026-09-11: "there's like 100 on there").
     <TaskDocument key={`doc-${task.id}-${docNonce}`} task={task} onDeletedCount={countDeleted("doc")} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId}
       onEmailClient={(review) => startReviewEmail(review)} onSent={followUpOnReview} onReminders={reportReminders("doc")}
-      startNonce={docStartNonce} showOpenComments={onCurrentStep} onStage={reportStage("doc")}
+      startNonce={docStartNonce} showOpenComments={onCurrentStep} onStage={reportStage("doc")} onStageSet={stageSetFor("doc")}
       onPresence={(exists) => setDocPresence((p) => (p.taskId === task.id && p.exists === exists ? p : { taskId: task.id, exists }))} />
   );
   // Separate from the client document (Derek, 2026-09-30): its own line, link and files.
@@ -1786,13 +1790,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return <span className="inline-flex shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold" style={{ background: t.chip, color: t.text }}><span aria-hidden className="h-2 w-2 rounded-full" style={{ background: t.dot }} />{t.label}</span>;
   };
   const REVIEW_STATUS: Record<string, string> = { draft: "Draft", with_client: `With ${firstName}`, client_submitted: `${firstName} sent changes`, approved: "Approved", completed: "Completed" };
+  // A stage the team picked (the review window's stage menu, Approved on a
+  // waiting step, anywhere): the server moved the steps with it and sent them
+  // back. They show at once, and an approval asks What's next on the task
+  // page (Derek, 2026-10-14: marking the HTML review approved changed nothing).
+  const stageSetFor = (k: "doc" | "image" | "page" | "video") => (status: string, r: { document: Record<string, unknown>; subtasks?: Subtask[] | null }) => {
+    if (Array.isArray(r.subtasks)) {
+      taskRef.current = { ...taskRef.current, subtasks: r.subtasks };
+      onStepsFromServer?.(r.subtasks);
+    }
+    if (status !== "approved") return;
+    const list = taskRef.current.subtasks;
+    const approval = list.find((x) => x.addedFor === `ok:${k}:${Number(r.document.version ?? 0)}`);
+    if (!approval) return;
+    const next = approval.done ? stepAfter(list, approval.id) : null;
+    const name = String(r.document.title ?? "").trim() || reviews[k]?.title?.trim() || (k === "doc" ? "the document" : "the review");
+    setOpenStepPage(null);
+    setSentNext({ taskId: task.id, stepId: next?.id ?? approval.id, approved: name });
+  };
   // We mark it for them (they said so on a call, or by email): the document's
   // stage changes as if they had pressed it, and the steps follow.
   const markReview = async (k: "doc" | "image" | "page" | "video", status: "approved" | "client_submitted") => {
     const res = await docApi(task.id, k, "", { method: "PATCH", body: JSON.stringify({ status }) });
-    const j = await res.json().catch(() => ({})) as { document?: Record<string, unknown>; error?: string };
+    const j = await res.json().catch(() => ({})) as { document?: Record<string, unknown>; subtasks?: Subtask[] | null; error?: string };
     if (!res.ok || !j.document) { pushToast(j.error ?? "Could not change the review."); return; }
     const d = j.document;
+    stageSetFor(k)(status, { document: d, subtasks: j.subtasks });
     reportStage(k)({ id: String(d.id), title: String(d.title ?? ""), status: String(d.status), version: Number(d.version ?? 0), approvedAt: (d.approved_at as string | null) ?? null, clientViewedAt: (d.client_viewed_at as string | null) ?? null });
     setDocNonce((n) => n + 1);
   };
@@ -3123,7 +3146,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
     <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onDeletedCount={countDeleted(kind)} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
       onEmailClient={startReviewEmail}
-      startNonce={reviewStartNonce[kind]} sendNonce={reviewSendNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)}
+      startNonce={reviewStartNonce[kind]} sendNonce={reviewSendNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)} onStageSet={stageSetFor(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
         const kinds = p.taskId === task.id ? p.kinds : [];
         if (p.taskId === task.id && kinds.includes(kind) === exists) return p;

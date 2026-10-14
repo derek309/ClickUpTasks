@@ -84,7 +84,7 @@ export async function setReviewStage(taskId: string, kind: ReviewKind, actor: Re
     const v = (doc.version as number) ?? 0;
     if (approving) {
       await resolveOpenComments(doc.id as string, "the approval").catch(() => undefined);
-      await stepsOnReviewApproved(taskId, kind, v, false).catch(() => false);
+      await stepsOnReviewApproved(taskId, kind, v, false, { approverId: actor.memberId }).catch(() => false);
     }
     else if (stage === "client_submitted") await stepsOnReviewChanges(taskId, kind, doc.id as string, v).catch(() => false);
     else if (stage === "with_client") await stepsOnReviewSent(taskId, kind, Number((doc as Row).reminder_every_days ?? 1)).catch(() => false);
