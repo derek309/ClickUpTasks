@@ -1712,10 +1712,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         );
       })()}
       {sub.onClient ? (
-        <span className="inline-flex items-center gap-1.5 font-medium"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>On {client.name}</span>
+        <span className="inline-flex items-center gap-1.5 font-medium"><span aria-hidden className="font-normal text-muted">·</span><span className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: client.color }}>{initialsOf(client.name)}</span>On {client.name}</span>
       ) : (
         // Who has it, labelled like Due and Follow up (Derek, 2026-10-11).
         <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden className="text-muted">·</span>
           <span className="text-muted">Assign</span>
           <InlineAssignee value={sub.assigneeId ?? null} size={24}
             label={sub.assigneeId ? <span className="font-semibold">{userById(sub.assigneeId)?.name.split(" ")[0] ?? ""}</span> : undefined}
@@ -1747,8 +1748,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </span>
       )}
       {/* No stage to pick: the step is the stage (Derek, 2026-10-11). The task's
-          follow up date, settable from the step it is about. */}
-      {isActive && !sub.done && (
+          follow up date, settable from the step it is about. The same day as
+          the step's due date, or none, reads as the due date alone with a
+          small "+ Follow up" to set a different one (Derek, 2026-10-13). */}
+      {isActive && !sub.done && (followUp && followUp.slice(0, 10) !== (sub.due ?? "").slice(0, 10) ? (
         <span className="inline-flex items-center gap-1">
           {/* Yours, the task's, apart from a teammate's own follow up beside it. */}
           <span className="text-muted">{sub.assigneeId && sub.assigneeId !== task.assigneeId ? "Your follow up" : "Follow up"}</span>
@@ -1756,7 +1759,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>} formatValue={formatDue}
             className="font-semibold underline decoration-dotted underline-offset-4" />
         </span>
-      )}
+      ) : (
+        <InlineDate value={null} onChange={(v) => moveStepDate(v)}
+          emptyLabel={<span className="font-semibold text-accent">+ {sub.assigneeId && sub.assigneeId !== task.assigneeId ? "Your follow up" : "Follow up"}</span>} formatValue={formatDue} />
+      ))}
     </div>
   );
   // A step on the task: one line that says what is happening inside it, the
