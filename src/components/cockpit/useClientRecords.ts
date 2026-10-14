@@ -7,7 +7,7 @@
 import * as React from "react";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
-import { dmConversationId, mentionsUser, type Attachment, type Client, type ClientLink, type ClientNote, type DmMessage, type Me, type NoteType, type NotificationKind, type Project, users } from "@/lib/data";
+import { dmConversationId, mentionsUser, savedFileFrom, type Attachment, type Client, type ClientLink, type ClientNote, type DmMessage, type Me, type NoteType, type NotificationKind, type Project, users } from "@/lib/data";
 import { deleteClientLinkDb, deleteClientNoteDb, deleteDmMessageDb, insertDmMessage, updateDmMessageDb, upsertClientLink, upsertClientNote } from "@/lib/db";
 import { DM_LINK_PREFIX } from "@/lib/navState";
 
@@ -38,6 +38,16 @@ export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, se
       upsertClientLink(link);
     }
     setLinkModal(null);
+  };
+  // A task's file saved to its client, for any of its steps later (Derek,
+  // 2026-10-14): the same stored file, listed with the client's links.
+  const saveClientFile = (clientId: string, a: Attachment): boolean => {
+    if (clientLinks.some((l) => l.clientId === clientId && l.path && l.path === a.path)) return false;
+    const f = savedFileFrom(a, clientId, clientLinks.filter((l) => l.clientId === clientId).length, newId("cl_"));
+    if (!f) return false;
+    setClientLinks((ls) => [...ls, f]);
+    upsertClientLink(f);
+    return true;
   };
   const deleteLink = (link: ClientLink) => setConfirmDialog({
     title: `Delete "${link.label}"?`, message: "This can't be undone.", confirmLabel: "Delete",
@@ -112,5 +122,5 @@ export function useClientRecords({ setClientLinks, clientLinks, setLinkModal, se
     deleteClientNoteDb(note.id);
   };
 
-  return { addNote, deleteLink, reorderLinks, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink };
+  return { addNote, deleteLink, reorderLinks, saveClientFile, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink };
 }

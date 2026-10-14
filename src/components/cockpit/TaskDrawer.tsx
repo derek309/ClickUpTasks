@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -82,7 +82,7 @@ const saasChecked = new Map<string, boolean>();
 // CLAUDE_ROUTINE_ID is set). Null until known.
 const claudeCloud: { ready: boolean | null } = { ready: null };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onSaveToClient, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -137,6 +137,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   onDelegate?: (spec: DelegateSpec) => string | null;
   clientPortalUrl?: string | null;
   clientLinks?: ClientLink[];
+  /** Saves a task file to the client's Saved files and links (admins). */
+  onSaveToClient?: (a: Attachment) => void;
   clientMeetings?: ClientNote[];
   /** Your own meeting link for Meet now (Settings, Account), and saving it. */
   meetingLink?: string | null;
@@ -282,16 +284,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The client's saved short links put on a step (Derek, 2026-10-12): each
   // becomes a link on the task (or reuses the one already there) held by
   // the step.
+  // Saved files too (Derek, 2026-10-14): the same stored file, not uploaded again.
   const attachSavedLinks = (stepId: string, ids: string[]) => {
-    let atts = taskRef.current.attachments;
-    let subs = taskRef.current.subtasks;
-    for (const l of (clientLinks ?? []).filter((x) => ids.includes(x.id))) {
-      let att = atts.find((a) => a.url === l.url);
-      if (!att) { att = { id: newId("at_"), name: l.label || prettyLinkName(l.url), kind: "link", size: "", url: l.url }; atts = [...atts, att]; }
-      subs = holdOnStep(subs, stepId, attachmentKey(att.id));
-    }
-    onPatch({ attachments: atts, subtasks: subs });
-    pushToast(`${ids.length} ${ids.length === 1 ? "link" : "links"} added to the step`);
+    const r = attachSavedToStep(taskRef.current, stepId, (clientLinks ?? []).filter((x) => ids.includes(x.id)), () => newId("at_"));
+    onPatch({ attachments: r.attachments, subtasks: r.subtasks });
+    pushToast(`${savedCountLine(r.links, r.files)} added to the step`);
   };
   // A picture into the client's website Media Library (Derek, 2026-10-12).
   const [sendingSite, setSendingSite] = useState<string | null>(null);
@@ -304,6 +301,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!res?.ok || !j?.media) { pushToast(j?.error ?? "Couldn't send it to the website."); return; }
     onPatch({ attachments: taskRef.current.attachments.map((a) => (a.id === att.id ? { ...a, website: j.media } : a)) });
     pushToast("On the website's Media Library", { label: "Copy link", run: () => void navigator.clipboard?.writeText(j.media.url) });
+  };
+  // Save a task's file to the client's Saved files and links, ✓ once there.
+  const saveToClientButton = (a: Attachment, cls: string) => {
+    const saved = (clientLinks ?? []).some((l) => !!l.path && l.path === a.path);
+    return (
+      <button onClick={() => (saved ? pushToast(`Saved to ${client.name} already`) : onSaveToClient?.(a))}
+        title={saved ? `Saved to ${client.name}` : `Save to ${client.name}, for their other steps`} aria-label={saved ? `${a.name} is saved to ${client.name}` : `Save ${a.name} to ${client.name}`}
+        className={`${cls} ${saved ? "text-success" : ""}`}><I.bookmark className="h-4 w-4" /></button>
+    );
   };
   const websiteButton = (a: Attachment, onPicture = true) => (
     <button onClick={() => void sendToWebsite(a)} disabled={sendingSite === a.id}
@@ -508,8 +514,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // attachments (a screenshot dropped into the Activity tab) so those render
   // as real thumbnails in the feed too, not just a filename chip.
   const attImagePaths = useMemo(
-    () => [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? [])].filter((a) => isPicture(a) && a.path).map((a) => a.path as string).join(","),
-    [task.attachments, task.clientResponse, messages, task.comments]
+    () => [...task.attachments, ...(task.clientResponse?.attachments ?? []), ...(messages ?? []).flatMap((m) => m.attachments ?? []), ...task.comments.flatMap((c) => c.attachments ?? []),
+      // The client's saved pictures, for their thumbnails in Saved files and links.
+      ...(clientLinks ?? []).flatMap((l) => (l.path ? [{ name: l.label, kind: l.kind ?? "doc", path: l.path }] : []))].filter((a) => isPicture(a) && a.path).map((a) => a.path as string).join(","),
+    [task.attachments, task.clientResponse, messages, task.comments, clientLinks]
   );
   const [attImageUrls, setAttImageUrls] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -2786,7 +2794,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <div className="mt-2 flex flex-wrap gap-2">
           {galleryTiles.map(({ a, own }) => {
             const step = stepTitleHolding(attachmentKey(a.id));
-            const tool = "flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground";
+            const tool = "flex h-8 w-7 shrink-0 items-center justify-center rounded-[5px] text-muted hover:bg-surface hover:text-foreground";
             return (
               <div key={a.id} draggable={own && attSort === "added"} onDragStart={own ? () => setDragAttId(a.id) : undefined}
                 onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
@@ -2807,6 +2815,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                       aria-label={a.website ? `${a.name} is on the website, copy its link` : `Send ${a.name} to the website`}
                       className={`${tool} text-[16px] font-semibold ${a.website ? "text-success" : ""} ${sendingSite === a.id ? "animate-pulse" : ""}`}>{a.website ? "✓" : "⤴"}</button>
                   )}
+                  {own && a.path && onSaveToClient && saveToClientButton(a, tool)}
                   {own
                     ? <button onClick={() => onRemoveFile(a)} title="Delete" aria-label={`Delete ${a.name}`} className={`${tool} hover:text-danger`}><I.trash className="h-4 w-4" /></button>
                     : <button onClick={() => attachToTask(a)} title="Keep it with the task's files" aria-label={`Keep ${a.name} with the task's files`} className={tool}><I.plus className="h-4 w-4" /></button>}
@@ -2872,6 +2881,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   <button onClick={() => setRenamingAttId(a.id)} title="Rename" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.pencil className="h-3 w-3" /></button>
                 )}
                 {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
+                {a.path && onSaveToClient && saveToClientButton(a, "shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100 [@media(hover:none)]:opacity-100")}
                 <button onClick={() => onRemoveFile(a)} title="Remove" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-danger group-hover:opacity-100"><I.trash className="h-3 w-3" /></button>
               </span>
             );
@@ -4022,8 +4032,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       )}
       {!!clientLinks?.length && (
         <div className="border-t px-4 py-3">
-          <div className="mb-1 font-bold">Saved links</div>
-          <QuickLinksBar inline links={clientLinks} canEdit={false} onEdit={() => {}} onDelete={() => {}} onReorder={() => {}} />
+          <div className="mb-1 font-bold">Saved files and links</div>
+          <QuickLinksBar inline links={clientLinks} canEdit={false} onEdit={() => {}} onDelete={() => {}} onReorder={() => {}} onOpenFile={(l) => { if (l.path) onDownloadFile(l.path); }} />
         </div>
       )}
       {linkedContactInfo?.ghlContactId && (
@@ -4311,8 +4321,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}
               savedLinks={(clientLinks ?? []).map((l) => {
-                const att = task.attachments.find((a) => a.url === l.url);
-                return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)) };
+                const att = l.path ? task.attachments.find((a) => a.path === l.path) : task.attachments.find((a) => a.url === l.url);
+                const pic = !!l.path && isPicture({ name: l.label, kind: l.kind ?? "doc" });
+                return { id: l.id, label: l.label, url: l.url, on: !!att && (ps.holds ?? []).includes(attachmentKey(att.id)),
+                  ...(l.path ? { file: true, size: l.size, thumb: pic ? attImageUrls[l.path] : undefined } : {}) };
               })}
               onAttachLinks={(ids) => attachSavedLinks(ps.id, ids)}
               onAskTodos={askTodosFor(ps)}

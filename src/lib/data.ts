@@ -461,6 +461,45 @@ export interface ClientLink {
   url: string;
   position: number;
   color: string;
+  /** A saved FILE, not a link (Derek, 2026-10-14: "Saved files and links"):
+   *  its stored object, the same one the task it was saved from holds, never
+   *  a copy. url is "" then. supabase/client-links-files.sql adds these. */
+  path?: string;
+  kind?: Attachment["kind"];
+  size?: string;
+}
+
+/** A task file saved to its client, for any of the client's steps later. */
+export function savedFileFrom(a: Pick<Attachment, "name" | "kind" | "size" | "path">, clientId: string, position: number, id: string): ClientLink | null {
+  if (!a.path) return null;
+  return { id, clientId, groupLabel: "", label: a.name, url: "", position, color: "", path: a.path, kind: a.kind, size: a.size };
+}
+
+/** Puts saved files and links on a step: a link becomes a link on the task
+ *  (or the one already there), a file the same stored object (or the task's
+ *  own copy of it), never uploaded again; each held by the step. */
+export function attachSavedToStep(task: Pick<Task, "attachments" | "subtasks">, stepId: string, items: ClientLink[], makeId: () => string): { attachments: Attachment[]; subtasks: Subtask[]; links: number; files: number } {
+  let attachments = task.attachments;
+  let subtasks = task.subtasks;
+  let links = 0, files = 0;
+  for (const l of items) {
+    let att = l.path ? attachments.find((a) => a.path === l.path) : attachments.find((a) => !!l.url && a.url === l.url);
+    if (!att) {
+      att = l.path
+        ? { id: makeId(), name: l.label, kind: l.kind && l.kind !== "link" ? l.kind : "doc", size: l.size ?? "", path: l.path }
+        : { id: makeId(), name: l.label || prettyLinkName(l.url), kind: "link", size: "", url: l.url };
+      attachments = [...attachments, att];
+    }
+    if (l.path) files++; else links++;
+    subtasks = holdOnStep(subtasks, stepId, attachmentKey(att.id));
+  }
+  return { attachments, subtasks, links, files };
+}
+
+/** "2 links and 1 file", for what was just put on a step. */
+export function savedCountLine(links: number, files: number): string {
+  const part = (n: number, w: string) => (n ? `${n} ${w}${n === 1 ? "" : "s"}` : "");
+  return [part(links, "link"), part(files, "file")].filter(Boolean).join(" and ");
 }
 
 // A fixed, visually-distinct palette for quick links — assigned at random on

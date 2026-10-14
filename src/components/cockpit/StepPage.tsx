@@ -414,8 +414,9 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   onCopyLink?: () => void;
   /** The client's portal, opened on this task (they don't see steps). */
   onCopyPortalLink?: () => void;
-  /** The client's saved short links (quick links), to put on this step. */
-  savedLinks?: { id: string; label: string; url: string; on: boolean }[];
+  /** The client's saved files and links (quick links), to put on this step.
+   *  A file says so, with its size and, for a picture, its thumbnail. */
+  savedLinks?: { id: string; label: string; url: string; on: boolean; file?: boolean; size?: string; thumb?: string }[];
   onAttachLinks?: (ids: string[]) => void;
   /** Ask the client about these to-dos: one email, the step stays put. */
   onAskTodos?: (todoIds: string[]) => void;
@@ -460,7 +461,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const [talk, setTalkState] = useState<Talk | null>(startTalk ?? null);
   const setTalk = (t: Talk) => { setTalkState((cur) => (cur === t ? null : t)); setFocusNext((f) => ({ box: "talk", n: (f?.n ?? 0) + 1 })); };
   const [subject, setSubject] = useState(`Re: ${task.title}`);
-  // The saved links being picked, or null when the list is closed.
+  // The saved files and links being picked, or null when the list is closed.
   const [linkPick, setLinkPick] = useState<string[] | null>(null);
   // Which Add menu is open (the + beside Actions, the rows' + More), or none.
   const [addOpen, setAddOpen] = useState<"main" | "compact" | "more" | null>(null);
@@ -479,7 +480,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const options = [
     { key: "directions", label: "Directions", disabled: dir.open, note: dir.open ? "on this step" : undefined, onPick: dir.start },
     // The client's saved short links, picked from a list (Derek, 2026-10-12).
-    ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
+    ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Saved files and links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
     { key: "checklist", label: "Checklist", onPick: () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
     ...addOptions,
   ] as { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
@@ -857,11 +858,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               {followBox}
               {planBits}
               {setup ? null : outFor !== undefined ? outFor : empty && !files && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : null}
-              {/* Saved links: tick the ones this step needs. */}
+              {/* Saved files and links: tick the ones this step needs. */}
               {linkPick !== null && onAttachLinks && (
-                <section aria-label="Saved links" className="flex flex-col gap-2 rounded-[5px] border p-3">
+                <section aria-label="Saved files and links" className="flex flex-col gap-2 rounded-[5px] border p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-[17px] font-bold">Saved links</h3>
+                    <h3 className="text-[17px] font-bold">Saved files and links</h3>
                     <button onClick={() => setLinkPick(null)} aria-label="Close" className="rounded px-1.5 text-muted hover:text-foreground">×</button>
                   </div>
                   <ul className="flex max-h-[320px] flex-col gap-1 overflow-y-auto">
@@ -870,9 +871,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                         <label className="flex cursor-pointer items-center gap-2.5 rounded-[5px] px-1.5 py-1 text-[16px] hover:bg-background">
                           <input type="checkbox" checked={linkPick.includes(l.id)} disabled={l.on}
                             onChange={() => setLinkPick((p) => (p ?? []).includes(l.id) ? (p ?? []).filter((x) => x !== l.id) : [...(p ?? []), l.id])}
-                            className="h-4 w-4 accent-[var(--accent)]" />
+                            className="h-4 w-4 shrink-0 accent-[var(--accent)]" />
+                          {/* A picture shows small; a file and a link their icon. */}
+                          {l.thumb
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={l.thumb} alt="" className="h-10 w-10 shrink-0 rounded-[5px] object-cover ring-1 ring-[var(--border)]" />
+                            : <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[5px] bg-background text-muted">{l.file ? <I.clip className="h-4 w-4" /> : <I.link className="h-4 w-4" />}</span>}
                           <span className="min-w-0 flex-1 truncate font-medium">{l.label}</span>
-                          <span className="min-w-0 max-w-[45%] truncate text-muted">{l.on ? "on this step" : l.url.replace(/^https?:\/\//, "")}</span>
+                          <span className="min-w-0 max-w-[45%] truncate text-muted">{l.on ? "on this step" : l.file ? (l.size || "File") : l.url.replace(/^https?:\/\//, "")}</span>
                         </label>
                       </li>
                     ))}
@@ -882,7 +888,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     return (
                       <div className="flex items-center gap-2">
                         <button disabled={!fresh.length} onClick={() => { onAttachLinks(fresh); setLinkPick(null); }}
-                          className="h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white disabled:opacity-40">Add {fresh.length || ""} {fresh.length === 1 ? "link" : "links"}</button>
+                          className="h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white disabled:opacity-40">Add {fresh.length || ""}</button>
                         <button onClick={() => setLinkPick(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
                       </div>
                     );
