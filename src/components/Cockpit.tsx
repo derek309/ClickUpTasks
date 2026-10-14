@@ -3265,6 +3265,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             groupBy={clientsGroupBy} onSetGroupBy={setClientsGroupBy} teamGroups={teamActiveClients} />
         ) : dirView === "projects" ? (
           <ProjectsDirectory projects={sortedWorkspaceProjects} openCount={projectTaskCount}
+            needsYouCount={(id) => (scopedTasksByProjectId.get(id) ?? []).filter((t) => !!needsYou(t, me.id)).length}
             onOpen={(id) => { setDirView(null); setActiveClient(WORKSPACE_CLIENT_ID); setActiveProject(id); setOpenTaskId(null); setClientTab("tasks"); }}
             canAdmin={canAdmin} onAddProject={() => addProject(WORKSPACE_CLIENT_ID)} onRename={renameProject} onDelete={deleteProject}
             starredLists={starredLists} onToggleStarList={toggleStarList} />
