@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { requireApiToken } from "@/lib/serverAuth";
 import { isClientVisible } from "@/lib/extensionApi";
+import { directionsOntoStepOne, looksLikeHtml, plainTextToHtml } from "@/lib/data";
 
 // Create a task on the token owner's behalf — the Gmail extension's core
 // action. Mirrors the "reuse-or-create the client's default Tasks project"
@@ -41,7 +42,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const description = typeof body.description === "string" ? body.description : "";
+  // What the caller says is needed (the website feedback plugin's report) is
+  // step 1's directions, not a task description (Derek, 2026-10-14).
+  const directions = typeof body.description === "string" ? body.description : "";
+  const subtasks = directionsOntoStepOne([], looksLikeHtml(directions) ? directions : plainTextToHtml(directions), title, () => "s_" + randomUUID().replace(/-/g, ""));
   const due = typeof body.due === "string" && body.due ? body.due : null;
   // A caller that knows when it wants to see this again can say so. The
   // website feedback plugin does: its reports are due in three working days
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
 
   const id = "t_" + randomUUID();
   const { error } = await supabaseAdmin.from("tasks").insert({
-    id, project_id: projectId, client_id: clientId, title, description,
+    id, project_id: projectId, client_id: clientId, title, description: "", subtasks,
     status: "todo", priority,
     // Self-assign by default — unlike the MCP tool's "unassigned, creating
     // on someone else's behalf" default, this route IS the person (their

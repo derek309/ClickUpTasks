@@ -426,7 +426,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                         <input value={r.title} onChange={(e) => patch(i, { title: e.target.value })}
                           className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-[17px] font-semibold outline-none hover:border-border focus:border-accent focus:bg-background" />
                         <textarea value={r.description} onChange={(e) => patch(i, { description: e.target.value })} rows={2}
-                          placeholder="Add any detail…"
+                          placeholder="Directions for step 1…"
                           className="mt-1 w-full resize-y rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] text-muted outline-none placeholder:text-muted/60 hover:border-border focus:border-accent focus:bg-background" />
 
                         {r.verbatim && <VerbatimBlock value={r.verbatim} onChange={(v) => patch(i, { verbatim: v })} />}

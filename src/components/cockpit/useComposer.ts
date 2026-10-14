@@ -7,12 +7,13 @@
 import * as React from "react";
 import { type ParsedRow } from "./MindDumpModal";
 import { newId } from "./ui";
-import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
+import { directionsOntoStepOne, PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID, TODAY, addBusinessDaysIso, statusForStep, stepStage, userById, type Subtask, applyWaitingStatusSync, isManuallyAssignable, plainTextToHtml, type Me, type NotificationKind, type Priority, type Project, type Task, type TaskStatus, users } from "@/lib/data";
 import { bulkUpsertTasks, tidyIfLong, upsertProject } from "@/lib/db";
 import { authedFetch } from "@/lib/supabase";
 
-// A dumped task's description: what the AI summarised, then the client's own
-// wording underneath as a blockquote so it stays visibly theirs. The verbatim
+// A dumped task's directions, on step 1 (Derek, 2026-10-14: no task
+// description): what the AI summarised, then the client's own wording
+// underneath as a blockquote so it stays visibly theirs. The verbatim
 // half is escaped and line-broken but never reworded, which is the whole
 // point of carrying it in its own field (see api/ai/parse-tasks).
 function describeDumpRow(r: { description: string; verbatim: string }): string {
@@ -57,12 +58,12 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     if (personal) {
       const made: Task[] = rows.map((r) => ({
         id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID,
-        title: r.title.trim(), description: describeDumpRow(r),
+        title: r.title.trim(), description: "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         priority: r.priority, assigneeId: me.id, contactId: null,
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto, private: true,
-        subtasks: [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+        subtasks: directionsOntoStepOne([], describeDumpRow(r), r.title, () => newId("s_"), now), attachments: [], comments: [], createdAt: now, createdBy: me.id,
       } as Task));
       setTasks((ts) => [...ts, ...made]);
       made.forEach((t) => pinJustAdded(t.id));
@@ -102,7 +103,7 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
       const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : r.due, ...(claude ? {} : { followUpAt: TODAY }), startedAt: now } : null;
       const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : r.due ? addBusinessDaysIso(r.due, 1) : r.followUpAt } : null;
       return {
-        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: describeDumpRow(r),
+        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         // isManuallyAssignable guards Conversation (auto-created-only, see
         // data.ts): a dump into that group still lands as the row's own
@@ -116,7 +117,7 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
         contactId: targetClient.slice(3),
         due: r.due, followUpAt: r.followUpAt, size: r.size,
         recurrence: "none", labelIds: [], ghlTaskId: null, priorityAuto: r.priorityAuto,
-        private: false, subtasks: step ? [step] : [], attachments: [], comments: [], createdAt: now, createdBy: me.id,
+        private: false, subtasks: directionsOntoStepOne(step ? [step] : [], describeDumpRow(r), r.title, () => newId("s_"), now), attachments: [], comments: [], createdAt: now, createdBy: me.id,
         ...(handoff && !waiting ? handoff : {}),
       } as Task;
     });

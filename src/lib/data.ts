@@ -3360,6 +3360,21 @@ export function tickedAStep(before: Subtask[], after: Subtask[]): boolean {
  *  From template, and the templates in Quick step. */
 export const TEMPLATES_ON = false;
 
+/** A new task's directions go on step 1, never the task's description (Derek,
+ *  2026-10-14). Step 1 gets them on the end of its own directions; with no
+ *  steps, step 1 is made, named for the task. The same list back when there
+ *  is nothing to write. `directions` is HTML (plainTextToHtml for typed text). */
+export function directionsOntoStepOne(subtasks: Subtask[], directions: string, stepTitle: string, makeId: () => string, now = new Date().toISOString()): Subtask[] {
+  if (!htmlToText(directions).trim()) return subtasks;
+  const first = planSteps(subtasks)[0];
+  if (first) return subtasks.map((x) => (x.id === first.id ? { ...x, notes: x.notes?.trim() ? `${x.notes}${directions}` : directions } : x));
+  // A name that is the whole request is cut to its first words, as the
+  // long name tidy does (lib/tidyTitle).
+  const named = stepTitle.replace(/\s+/g, " ").trim();
+  const title = (isLongTitle(named) ? named.replace(/[.!?]\s[\s\S]*$/, "").split(" ").slice(0, 8).join(" ") : named) || "Work out what is needed";
+  return [{ id: makeId(), title, done: false, notes: directions, startedAt: now }, ...subtasks];
+}
+
 /** A task named with the whole request rather than a name: it gets a short
  *  name and the request becomes step 1's directions (lib/tidyTitle). */
 export function isLongTitle(title: string): boolean {
