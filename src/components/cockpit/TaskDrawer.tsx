@@ -17,7 +17,7 @@ import { usePersisted } from "@/lib/usePersisted";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
-import { nextStepFromContext, whatsNextContext } from "@/lib/nextStepSuggest";
+import { nextStepFromContext, taskForAsk, whatsNextContext } from "@/lib/nextStepSuggest";
 import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { ActionDock } from "./ActionDock";
 import { ActionMenu, PhonePage, type ActionMenuItem } from "./ActionMenu";
@@ -75,7 +75,7 @@ const ATT_KIND_ORDER: Record<Attachment["kind"], number> = { image: 0, pdf: 1, d
  *  and whether their sub-account has the field to edit. */
 const saasChecked = new Map<string, boolean>();
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, onAddStepToTask }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -137,6 +137,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   taskLink?: () => string;
   /** Steps the server just wrote (a review's stage moved them): shown at once, not saved again. */
   onStepsFromServer?: (subtasks: Subtask[]) => void;
+  /** The client's other tasks, for "the next step is already that task". */
+  sameClientTasks?: Task[];
+  /** Adds a step to another task (Add it to <task> on What's next). */
+  onAddStepToTask?: (taskId: string, step: Subtask) => void;
 }) {
   // Every write also updates taskRef at once, so a second write in the same
   // moment builds on the first instead of undoing it (Pam's request was
@@ -1234,9 +1238,29 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       })
       .catch(() => undefined);
   }, [askingStep]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The next step is already another task of this client's (Derek,
+  // 2026-10-14): a step on that one to include this, linked back, and this
+  // What's next is done.
+  const taskForNext = (sub: Subtask) => {
+    if (!onAddStepToTask || !sameClientTasks?.length) return null;
+    const plan = planSteps(task.subtasks);
+    const prev = plan.slice(0, plan.findIndex((x) => x.id === sub.id)).reverse().find((x) => x.done);
+    const ask = [suggestionFor(sub)?.name, whatsNextContext({ notes: htmlToText(sub.notes ?? ""), prevNotes: htmlToText(prev?.notes ?? "") })].filter(Boolean).join(" ");
+    return taskForAsk(ask, sameClientTasks, task);
+  };
+  const addToTask = (sid: string, other: Task) => {
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const link = taskLink?.() ?? "";
+    onAddStepToTask?.(other.id, { id: newId("s_"), title: `Include ${task.title}`, done: false,
+      notes: `<p>From the task ${link ? `<a href="${esc(link)}">${esc(task.title)}</a>` : esc(task.title)}.</p>` });
+    const now = new Date().toISOString();
+    onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sid ? { ...x, done: true, doneAt: now, outcome: `Added to ${other.title}`, ...(meId ? { doneBy: meId } : {}) } : x)) });
+    pushToast(`Added to ${other.title}`, { label: "The task is finished", run: () => onPatch({ status: "done" }) });
+  };
   const whatsNextActions = (sid: string) => {
     const sub = task.subtasks.find((x) => x.id === sid);
     const sg = sub ? suggestionFor(sub) : null;
+    const other = sub ? taskForNext(sub) : null;
     const SAYS: Record<string, [string, string]> = {
       email: [`Email ${firstName}`, "Write an email on this step, to read and send."],
       text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
@@ -1248,7 +1272,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <NextChoices heading={false} intro={<>Type the next step&apos;s name in the title at the top, or pick one of these. Each makes this step that work; <b>+ Add</b> has the rest.</>} choices={[
         // What the context asks for comes first, and the task is never
         // "finished" by default while it asks for more (Derek, 2026-10-14).
-        ...(sg ? [{ label: sg.name, says: "Makes it the next step, with the work it needs on it.", primary: true, onClick: () => acceptSuggestion(sid) }] : []),
+        ...(other ? [{ label: `Add it to ${other.title}`, says: `Adds a step on "${other.title}" to include this task, linked back, and finishes this one's What's next.`, primary: true, onClick: () => addToTask(sid, other) }] : []),
+        ...(sg ? [{ label: sg.name, says: "Makes it the next step, with the work it needs on it.", primary: !other, onClick: () => acceptSuggestion(sid) }] : []),
         ...ideas,
         { label: "Give it to Claude", says: sg ? `Claude does "${sg.name}", due today.` : "Claude works out the next step and does it, due today.", onClick: () => toClaude(sid) },
         { label: "The task is finished", says: `Marks the task done. Nothing goes to ${firstName}.`, primary: !sg, onClick: () => finishTask(sid) },

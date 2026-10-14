@@ -19,3 +19,21 @@ describe("the next step a What's next context asks for", () => {
     expect(whatsNextContext({ notes: "Ask: post it", prevNotes: "Build it", description: "" })).toBe("Ask: post it\n\nBuild it");
   });
 });
+
+import { taskForAsk } from "./nextStepSuggest";
+
+describe("the next step may already be another task", () => {
+  const tasks = [
+    { id: "t_news", title: "Bulk Customers Newsletter", clientId: "cl_brian", status: "todo" },
+    { id: "t_other", title: "Customers survey", clientId: "cl_brian", status: "todo" },
+    { id: "t_done", title: "Bulk customers blast October", clientId: "cl_brian", status: "done" },
+    { id: "t_pam", title: "Bulk Customers Newsletter", clientId: "cl_pam", status: "todo" },
+  ];
+  it("finds the client's open task the ask is about", () => {
+    expect(taskForAsk("Put it in the Bulk customers blast", tasks, { id: "t_medal", clientId: "cl_brian" })?.id).toBe("t_news");
+  });
+  it("needs two shared words, the same client, and an open task", () => {
+    expect(taskForAsk("Ask the customers", tasks, { id: "t_medal", clientId: "cl_brian" })).toBeNull();
+    expect(taskForAsk("Put it in the Bulk customers blast", tasks, { id: "t_medal", clientId: "cl_nobody" })).toBeNull();
+  });
+});

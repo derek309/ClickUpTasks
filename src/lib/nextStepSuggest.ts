@@ -35,3 +35,28 @@ export function nextStepFromContext(text: string | null | undefined): string | n
 export function whatsNextContext(parts: { notes?: string | null; prevNotes?: string | null; prevTitle?: string | null; description?: string | null }): string {
   return [parts.notes, parts.prevNotes, parts.description].map((x) => (x ?? "").trim()).filter(Boolean).join("\n\n");
 }
+
+const STOP = new Set(["the", "and", "for", "with", "this", "that", "into", "onto", "from", "your", "their", "them", "they", "will", "have", "has", "was", "were", "are", "our", "out", "put", "send", "make", "add", "it", "its", "his", "her", "him", "she", "about", "what", "next", "step", "task", "approved", "version", "email", "derek", "marked", "original", "ask", "by", "to", "of", "in", "on", "a", "an"]);
+/** The words that say what something is about: lower case, no small or
+ *  common words, a plural as its singular ("customers" is "customer"). */
+export function significantWords(text: string): Set<string> {
+  return new Set((text.toLowerCase().match(/[a-z0-9']+/g) ?? [])
+    .map((w) => w.replace(/'s$/, "").replace(/(?<=[a-z]{3})s$/, ""))
+    .filter((w) => w.length >= 3 && !STOP.has(w)));
+}
+
+/** An open task on the same client that the ask is already about (Derek,
+ *  2026-10-14: "put it in the Bulk customers blast", and "Bulk Customers
+ *  Newsletter" was due tomorrow on Brian's Bulk list): the one sharing the
+ *  most significant words, at least two, never this task or a finished one. */
+export function taskForAsk<T extends { id: string; title: string; clientId: string; status: string }>(ask: string, tasks: T[], self: { id: string; clientId: string }): T | null {
+  const want = significantWords(ask);
+  if (want.size < 2) return null;
+  let best: { t: T; n: number } | null = null;
+  for (const t of tasks) {
+    if (t.id === self.id || t.clientId !== self.clientId || t.status === "done") continue;
+    const n = [...significantWords(t.title)].filter((w) => want.has(w)).length;
+    if (n >= 2 && (!best || n > best.n)) best = { t, n };
+  }
+  return best?.t ?? null;
+}
