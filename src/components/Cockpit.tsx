@@ -125,6 +125,7 @@ import { sortTasks as sortTasksBy } from "@/lib/taskSort";
 import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS } from "@/lib/navState";
 import { shortcut } from "@/lib/platform";
+import { clientFirstName } from "@/lib/clientFirstName";
 import { BookAppointment } from "./cockpit/BookAppointment";
 
 
@@ -681,7 +682,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // persists a share token the first time it's called for a client.
   const openRemindClient = (clientId: string) => {
     const name = clientById(clientId)?.name ?? "";
-    const firstName = name.trim().split(/\s+/)[0] || "there";
+    const firstName = clientFirstName(contactForClient(clientId), name, "there");
     const waiting = waitingTasksFor(clientId);
     const url = getClientShareUrl(clientId);
     if (!url) pushToast("No portal link could be made for this client, so the reminder has no link. An admin needs to create the share link first.");
@@ -705,7 +706,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // opened for review before it goes. From a list, the link opens on that list.
   const openSendClientLink = (clientId: string, projectId?: string | null) => {
     const name = clientById(clientId)?.name ?? "";
-    const firstName = name.trim().split(/\s+/)[0] || "there";
+    const firstName = clientFirstName(contactForClient(clientId), name, "there");
     const url = getClientShareUrl(clientId, projectId ? { projectId } : undefined);
     if (!url) return;
     const link = { url, label: "Open your page" };
@@ -720,7 +721,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // calendar (else your first) and its booking page, as an email or a text
   // that opens for you to check. Nothing is booked until they pick.
   const requestMeeting = async (clientId: string, channel: "email" | "sms", defaultCalendarId: string | null) => {
-    const first = (clientById(clientId)?.name ?? "").trim().split(/\s+/)[0] || "there";
+    const first = clientFirstName(contactForClient(clientId), clientById(clientId)?.name, "there");
     const links = await loadBookingLinks();
     const cal = links.find((l) => l.calendarId === defaultCalendarId) ?? links.find((l) => l.memberId === me.id) ?? links[0];
     if (!cal) { pushToast("No GoHighLevel calendar found to offer times from."); return; }
@@ -2539,7 +2540,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const plain = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
           const canMsg = canMessageClient(activeClient);
           return (
-              <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={(clientById(activeClient)!.name.trim().split(/\s+/)[0]) || "them"}
+              <ClientNeeds clientId={activeClient} ghlContactId={ct?.ghlContactId ?? null} first={clientFirstName(ct, clientById(activeClient)!.name)}
                 lastIn={inn ? { at: inn.at, channel: inn.channel as "email" | "sms" | "chat", preview: `${inn.channel === "sms" ? "Text" : inn.channel === "chat" ? "Chat" : "Email"}: ${plain(inn.subject && inn.channel === "email" ? `${inn.subject}. ${inn.body}` : inn.body).slice(0, 140)}`, unread: !inn.read } : null}
                 lastOut={out ? { at: out.at, channel: out.channel as "email" | "sms" | "chat" } : null}
                 onReply={canMsg && inn ? () => { if (inn.channel === "chat") { if (inn.taskId) setOpenTaskId(inn.taskId); } else if (inn.channel === "sms") openClientText(activeClient); else { const subj = (inn.subject ?? "").trim(); openClientEmail(activeClient, { subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "", replyTo: inn.id }); } } : null}
