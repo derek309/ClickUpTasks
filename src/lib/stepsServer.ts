@@ -117,7 +117,11 @@ export async function stepsOnClientReply(taskId: string): Promise<boolean> {
     const list = row.subtasks ?? [];
     // Any open step waiting on their reply, current or not: a changes step
     // their answer just made can sit in front of it.
-    const waiting = list.filter((x) => !x.done && x.finishWhen === "reply").map((x) => x.id);
+    // Only a wait that has begun (or is the current step): a reply step later
+    // in the plan, never started, is not finished by an answer to something
+    // else (t_b3ucv3k1 "Review Ads").
+    const cur = currentStep(list);
+    const waiting = list.filter((x) => !x.done && x.finishWhen === "reply" && (!!x.startedAt || x.id === cur?.id)).map((x) => x.id);
     if (!waiting.length) return null;
     const now = new Date().toISOString();
     const done = list.map((x) => (waiting.includes(x.id) ? { ...x, done: true, doneAt: now, outcome: `${first} replied` } : x));

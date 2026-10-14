@@ -75,6 +75,12 @@ describe("steps added on the server", () => {
     expect(steps()[0]).toMatchObject({ done: true, outcome: "Brian replied" });
   });
 
+  it("a reply leaves a reply step that never started", async () => {
+    setup([{ id: "a", title: "Make the ads", done: false, startedAt: "2026-10-10T00:00:00Z" }, { id: "r", title: "Review Ads", done: false, finishWhen: "reply" }]);
+    expect(await stepsOnClientReply("t1")).toBe(false);
+    expect(steps().find((s) => s.id === "r")!.done).toBe(false);
+  });
+
   it("a reply stops the task waiting on the client and moves its status", async () => {
     setup([{ id: "k", title: "Check in if Brian hasn't replied", done: false, finishWhen: "reply", startedAt: "2026-10-10T00:00:00Z" }, { id: "n", title: "Schedule it", done: false }]);
     Object.assign(db.tasks[0], { status: "waiting", waiting_on_client: true });
