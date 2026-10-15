@@ -24,8 +24,9 @@ import { REVIEW_STATUS } from "./portalReminders";
 import { reminderQueueStatus } from "./reminderSchedule";
 import { stepAskWords, type AskWords } from "./stepReminders";
 import { REMINDER_MESSAGE_PREFIX } from "./reviewReminders";
+import { cancelReminderRow, reminderRowStillWanted } from "./clientReminderGuard";
 import {
-  CLIENT_REMINDER_PREFIXES, REQUEST_PREFIX, comingUpForClient, expectedMove, expectedMoveComment, lastAnswerAt, openCheckIt, orderRequests, parseReminderId,
+  CLIENT_REMINDER_PREFIXES, NO_LONGER_WAITING, REQUEST_PREFIX, comingUpForClient, expectedMove, expectedMoveComment, lastAnswerAt, openCheckIt, orderRequests, parseReminderId,
   planForClient, requestEmail, requestFromTask, requestRowId, requestStepForThread, stageLabel, chasedRequest, daysLate,
   type ClientRequest, type ComingUp, type RequestStage, type StepHistory,
 } from "./clientRequests";
@@ -152,7 +153,7 @@ export async function runClientRequests(o: { today?: string; nowMs?: number; dry
     if (r.status !== REVIEW_STATUS || !r.id.startsWith(REQUEST_PREFIX)) continue;
     const p = parseReminderId(r.id);
     if (!p.stepId || open.has(p.stepId)) continue;
-    if (!o.dry) await supabaseAdmin.from("scheduled_messages").update({ status: "canceled", error: "No longer waiting on the client." }).eq("id", r.id).eq("status", REVIEW_STATUS);
+    if (!o.dry) await supabaseAdmin.from("scheduled_messages").update({ status: "canceled", error: NO_LONGER_WAITING }).eq("id", r.id).eq("status", REVIEW_STATUS);
     r.status = "canceled";
     tally.stale++;
   }
@@ -287,6 +288,11 @@ export async function sendReviewedReminder(id: string): Promise<{ ok: true } | {
   const { data: claimed } = await supabaseAdmin.from("scheduled_messages").update({ status: "sending" }).eq("id", id).eq("status", REVIEW_STATUS).select(COLS);
   const row = (claimed ?? [])[0] as any;
   if (!row) return { ok: false, error: "It was already sent or skipped.", status: 409 };
+  // Its step finished since it was queued (answered, booked, ticked): not sent.
+  if (!(await reminderRowStillWanted(row))) {
+    await cancelReminderRow(row.id, ["sending"]);
+    return { ok: false, error: `${NO_LONGER_WAITING}, so it was not sent.`, status: 409 };
+  }
   const { replyTo, subject } = await threadRequestRow(row);
   const result = await sendScheduledMessageNow({
     id: row.id, clientId: row.client_id, taskId: row.task_id, channel: row.channel,

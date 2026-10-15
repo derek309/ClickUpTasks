@@ -5,7 +5,8 @@ import { authorizeCron } from "@/lib/cronAuth";
 import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
 import { MAX_REMINDERS, REMINDER_MESSAGE_PREFIX } from "@/lib/reviewReminders";
 import { runClientRequests, threadRequestRow } from "@/lib/clientRequestsServer";
-import { isFollowOnHour } from "@/lib/clientRequests";
+import { CLIENT_REMINDER_PREFIXES, isFollowOnHour } from "@/lib/clientRequests";
+import { cancelReminderRow, cancelStaleClientReminders, reminderRowStillWanted } from "@/lib/clientReminderGuard";
 
 // Fires due scheduled sends (supabase/scheduled-messages.sql). Runs for
 // Vercel's cron or an admin session, see cronAuth.ts.
@@ -73,6 +74,10 @@ async function run(req: NextRequest) {
     followOn = await runClientRequests({ dry: false, mode: "follow-on" }).then((r) => r.tally, (e) => ({ error: e instanceof Error ? e.message : String(e) }));
   }
 
+  // A reminder whose step is no longer the client's turn (answered, booked,
+  // ticked in the app) is canceled before anything goes (Derek, 2026-10-15).
+  const stale = await cancelStaleClientReminders().catch(() => 0);
+
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
     .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by, reply_to_message_id, attempts")
@@ -80,7 +85,7 @@ async function run(req: NextRequest) {
     .lte("scheduled_at", new Date().toISOString());
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  let sent = 0, failed = 0, retried = 0;
+  let sent = 0, failed = 0, retried = 0, canceled = stale;
   for (const row of due ?? []) {
     // Claim the row before sending. Only one run can move it from pending to
     // sending, so an overlapping manual run, or a message canceled after the
@@ -90,6 +95,12 @@ async function run(req: NextRequest) {
       .from("scheduled_messages").update({ status: "sending" })
       .eq("id", row.id).eq("status", "pending").select("id");
     if (!claimed?.length) continue;
+    // Read again just before it goes: a step finished since the sweep above.
+    if (CLIENT_REMINDER_PREFIXES.some((p) => row.id.startsWith(p)) && !(await reminderRowStillWanted(row))) {
+      await cancelReminderRow(row.id, ["sending"]);
+      canceled++;
+      continue;
+    }
     // A request reminder answers the first one sent for its step (one thread).
     const thread = await threadRequestRow(row);
     const result = await sendScheduledMessageNow({
@@ -116,5 +127,5 @@ async function run(req: NextRequest) {
       if (tryAgain) { retried++; } else { failed++; await tellAuthor(row, `didn't send: ${result.error}${reminderNote}`); }
     }
   }
-  return NextResponse.json({ ok: true, sent, failed, retried, stuck: stuck?.length ?? 0, checked: (due ?? []).length, ...(followOn ? { requests: followOn } : {}) });
+  return NextResponse.json({ ok: true, sent, failed, retried, canceled, stuck: stuck?.length ?? 0, checked: (due ?? []).length, ...(followOn ? { requests: followOn } : {}) });
 }

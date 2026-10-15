@@ -7,6 +7,7 @@ import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
+import { bookingClosesRequestsFor } from "@/lib/bookingServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
   if (custom?.event === "message_reply" || body?.event === "message_reply") return handleMessageReply(body, custom);
   const ev: string = custom?.event ?? body?.event ?? "";
   if (ev === "call" || ev === "inbound_call" || ev === "missed_call") return handleCall(body, custom);
+  if (ev === "appointment" || ev === "appointment_booked" || ev === "appointment_created") return handleAppointment(body, custom);
 
   // GHL workflow webhook payloads vary; accept the common shapes.
   const ghlTaskId: string | null = body?.task?.id ?? body?.taskId ?? body?.id ?? null;
@@ -287,6 +289,28 @@ async function handleCall(body: any, custom: any) {
   }
   if (!msgError) await notifyInbound(contact, taskId, `📞 ${label} ${titleCase(contact.name)}`);
   return NextResponse.json({ ok: true });
+}
+
+// A booking, relayed by a GHL "Customer Booked Appointment" (or "Appointment
+// Status") Workflow's Webhook action to this same URL. Custom Data rows:
+//   event      -> appointment_booked
+//   contactId  -> {{contact.id}}
+//   startTime  -> {{appointment.start_time}}
+//   status     -> {{appointment.status}}   (optional)
+// GHL's own trigger data carries the appointment under `calendar` too, and
+// its start time there is read first (it carries its time zone). A booking closes the request to meet it answers
+// (lib/bookingServer, Derek 2026-10-15: "booking might come in any place");
+// the hourly sync does the same, so this only makes it sooner, and running
+// both changes nothing twice. The meeting task itself stays the sync's.
+async function handleAppointment(body: any, custom: any) {
+  const ghlContactId: string | null = custom?.contactId ?? body?.contact_id ?? body?.contactId ?? null;
+  const start: string | null = [body?.calendar?.startTime, body?.appointment?.startTime, custom?.startTime].find((x) => typeof x === "string" && x) ?? null;
+  if (!ghlContactId || !start || !Number.isFinite(Date.parse(start))) return NextResponse.json({ ok: true, skipped: "missing contactId or startTime" });
+  const status: string | null = [custom?.status, body?.calendar?.appointmentStatus, body?.calendar?.status, body?.appointment?.appointmentStatus].find((x) => typeof x === "string" && x) ?? null;
+  const made: string | null = [body?.calendar?.date_created, body?.calendar?.dateAdded, body?.appointment?.dateAdded].find((x) => typeof x === "string" && x) ?? null;
+  // Arriving now, it was booked now when GHL doesn't say.
+  const closed = await bookingClosesRequestsFor(ghlContactId, [{ start: new Date(Date.parse(start)).toISOString(), createdAt: made ?? new Date().toISOString(), status }]).catch(() => 0);
+  return NextResponse.json({ ok: true, closed });
 }
 
 // resolveTrackedClientId / upsertConversationTask now live in

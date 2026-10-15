@@ -79,6 +79,26 @@ export function parseReminderId(id: string): { kind: ReminderKind; stage: Reques
   return { kind: "other", stage: null, stepId: null };
 }
 
+/** Why a client reminder is canceled when its step is no longer their turn. */
+export const NO_LONGER_WAITING = "No longer waiting on the client";
+
+/** Whether a client reminder should still go (Derek, 2026-10-15: Jack booked
+ *  through the link and his reminder was still set to go out). A reminder
+ *  about one step goes only while that step is open, the task's current step
+ *  and still the client's turn, on a task that is open. `task` null: the task
+ *  is gone; undefined: not known (no task on the row), so it is left to go.
+ *  A reminder about no one step (the counts email, the summary) is not
+ *  judged here. */
+export function reminderStillWanted(rowId: string, task: { status: string; deleted_at?: string | null; subtasks: Subtask[] | null } | null | undefined): boolean {
+  const p = parseReminderId(rowId);
+  if (!p.stepId || task === undefined) return true;
+  if (!task || task.deleted_at || task.status === "done" || task.status === "on_hold") return false;
+  const list = task.subtasks ?? [];
+  const step = list.find((s) => s.id === p.stepId);
+  if (!step || step.done) return false;
+  return currentStep(list)?.id === step.id && isClientWait(step);
+}
+
 /** The words a stage goes by in the Reminders view and the step's Asked list. */
 export function stageLabel(stage: RequestStage | null, o: { daysLate?: number; kind?: ReminderKind } = {}): string {
   if (o.kind === "portal") return "counts";

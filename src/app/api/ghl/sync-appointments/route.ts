@@ -5,6 +5,8 @@ import { titleCase } from "@/lib/data";
 import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { ghlCalendars, ghlEvents } from "@/lib/calendarService";
 import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, bumpStatusToInterview } from "@/lib/ghlConversationTask";
+import { bookingClosesRequests } from "@/lib/bookingServer";
+import type { Booking } from "@/lib/bookingClosesRequest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -55,6 +57,7 @@ async function run(req: NextRequest) {
   const locations = await configuredLocations();
   let synced = 0;
   let skipped = 0;
+  let closed = 0;
   const errors: string[] = [];
 
   for (const locationId of locations) {
@@ -74,6 +77,9 @@ async function run(req: NextRequest) {
     // contact, not per appointment (a contact with two upcoming meetings
     // just shows the sooner one, same "one open task" spirit as messages).
     const soonestByContact = new Map<string, { startTime: string; title: string; location: string | null }>();
+    // Every live appointment per contact, with when it was booked: a booking
+    // made after we asked to meet closes that request (lib/bookingServer).
+    const bookingsByContact = new Map<string, Booking[]>();
     for (const cal of calendars) {
       let events: any[] = [];
       try {
@@ -88,6 +94,8 @@ async function run(req: NextRequest) {
         const status = String(ev.appointmentStatus ?? "").toLowerCase();
         if (status === "cancelled" || status === "invalid") continue;
         if (!ev.contactId || !ev.startTime) continue;
+        const made = [ev.dateAdded, ev.createdAt, ev.created_at].find((x) => typeof x === "string" && x) ?? null;
+        bookingsByContact.set(ev.contactId, [...(bookingsByContact.get(ev.contactId) ?? []), { start: String(ev.startTime), createdAt: made, status: ev.appointmentStatus ?? null }]);
         const existing = soonestByContact.get(ev.contactId);
         if (!existing || ev.startTime < existing.startTime) {
           // "address" is GHL's field for this even though it's usually a
@@ -110,8 +118,11 @@ async function run(req: NextRequest) {
         meeting: true,
       });
       if (taskId) synced++; else skipped++;
+      // A request to meet that this booking answers is done (Derek,
+      // 2026-10-15); a second run finds nothing left waiting.
+      closed += await bookingClosesRequests(contact, bookingsByContact.get(ghlContactId) ?? []).catch(() => 0);
     }
   }
 
-  return NextResponse.json({ ok: true, synced, skipped, errors: errors.length ? errors : undefined });
+  return NextResponse.json({ ok: true, synced, skipped, closed, errors: errors.length ? errors : undefined });
 }

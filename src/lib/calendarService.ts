@@ -13,6 +13,7 @@ import { configuredLocations, tokenForLocation } from "@/lib/ghlTokens";
 import { contactHome } from "@/lib/ghlPerson";
 import { resolveOrPromoteTrackedClient, upsertConversationTask, toPacificDate, todayPacific, bumpStatusToInterview } from "@/lib/ghlConversationTask";
 import { titleCase } from "@/lib/data";
+import { bookingClosesRequests } from "@/lib/bookingServer";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -286,12 +287,15 @@ async function contactFor(ghlContactId: string) {
 }
 
 /** The meeting's date on the client's Conversation task, as the hourly sync does. */
-async function bumpTask(ghlContactId: string, startIso: string, title: string, joinUrl: string | null) {
+async function bumpTask(ghlContactId: string, startIso: string, title: string, joinUrl: string | null, booked = false) {
   const { contact } = await contactFor(ghlContactId);
   if (!contact) return;
   contact.client_id = await resolveOrPromoteTrackedClient(contact);
   await bumpStatusToInterview(contact.client_id);
   await upsertConversationTask(contact, ghlContactId, { due: toPacificDate(startIso), title, location: joinUrl });
+  // A new booking answers a request to meet that is waiting on them (Derek,
+  // 2026-10-15: "booking might come in any place"), booked by us here too.
+  if (booked) await bookingClosesRequests(contact, [{ start: startIso, createdAt: new Date().toISOString() }]).catch(() => 0);
 }
 
 export type BookResult = { ok: true; id: string; start: string; calendarName: string } | { ok: false; error: string; status: number };
@@ -321,7 +325,7 @@ export async function bookAppointment(actor: CalendarActor, input: { calendarId:
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok || !j?.id) return { ok: false, status: res.status === 400 || res.status === 422 ? 409 : 502, error: /slot|available/i.test(String(j?.message ?? "")) ? "That time was just taken. Pick another." : `GoHighLevel didn't book it (${res.status}). ${String(j?.message ?? "").slice(0, 120)}` };
   slotCache.clear(); eventCache = null;
-  await bumpTask(input.ghlContactId, input.start, `Meeting with ${name}`, typeof j.address === "string" && /^https?:/.test(j.address) ? j.address : null).catch(() => {});
+  await bumpTask(input.ghlContactId, input.start, `Meeting with ${name}`, typeof j.address === "string" && /^https?:/.test(j.address) ? j.address : null, true).catch(() => {});
   return { ok: true, id: String(j.id), start: input.start, calendarName: found.cal.name };
 }
 

@@ -16,6 +16,8 @@ import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
 import { promoteQueueForTask } from "./queueServer";
 import { pushIfClaudeFinished } from "./push";
+import { bookedOutcome, finishBookedWait } from "./bookingClosesRequest";
+import { cancelStaleClientReminders } from "./clientReminderGuard";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -151,7 +153,7 @@ export async function stepsOnClientReply(taskId: string, match?: { stepId: strin
   // Their reply ends the wait on them: the task stops waiting and its status
   // follows the step that starts, as tickStep does.
   let status: TaskStatus | null = null;
-  return rewriteSteps(taskId, (row, first) => {
+  const ok = await rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
     // An emailed reply to a request reminder (Derek and Justin, 2026-10-15):
     // only the step it answers is done, and "<first> replied: check it", ours,
@@ -188,6 +190,43 @@ export async function stepsOnClientReply(taskId: string, match?: { stepId: strin
     out.splice(at + 1, 0, { id: newId("s_"), title: `${first} replied: what's next?`, done: false, addedFor: `next:${last}`, startedAt: now });
     return out;
   }, false, () => ({ waiting_on_client: false, ...(status ? { status } : {}) }));
+  // Their answer ends the chase at once: reminders for a step that is no
+  // longer their turn are canceled now, not at the next run.
+  if (ok) await cancelStaleClientReminders({ taskId }).catch(() => 0);
+  return ok;
+}
+
+/** The client booked a meeting (Derek, 2026-10-15): the wait it answers is
+ *  done, "<first> booked Tue, Oct 21, 10:00 AM", by the client; the next step
+ *  starts (or "<first> booked: what's next?"), the task stops waiting on
+ *  them, and that step's reminders are canceled. Only while `stepId` is still
+ *  their current wait, so a second run changes nothing. */
+export async function stepsOnClientBooked(taskId: string, stepId: string, start: string): Promise<boolean> {
+  let status: TaskStatus | null = null;
+  let finished: { first: string; title: string } | null = null;
+  const ok = await rewriteSteps(taskId, (row, first) => {
+    status = null;
+    finished = null;
+    const list = row.subtasks ?? [];
+    const made = finishBookedWait(list, stepId, { first, start, now: new Date().toISOString(), makeId: () => newId("s_") });
+    if (!made) return null;
+    const next = planSteps(made).find((x) => !x.done);
+    status = statusForStep(row.status, next ? stepStage(next, row.assignee_id) : "in_progress");
+    finished = { first, title: list.find((x) => x.id === stepId)?.title ?? "" };
+    return made;
+  }, false, () => ({ waiting_on_client: false, ...(status ? { status } : {}) }));
+  if (!ok) return false;
+  await cancelStaleClientReminders({ taskId }).catch(() => 0);
+  const f = finished as { first: string; title: string } | null;
+  if (f) {
+    await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: {
+      id: "cm_" + crypto.randomUUID(), authorId: "u_derek", at: new Date().toISOString(), kind: "event",
+      body: `${bookedOutcome(f.first, start)}, which finished "${f.title}"`,
+    } });
+    // The app skips live updates stamped with the viewer's own id.
+    await supabaseAdmin.from("tasks").update({ updated_by: null }).eq("id", taskId);
+  }
+  return true;
 }
 
 /** A long task name made short: the request becomes step 1's directions, a
@@ -402,6 +441,8 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
   }, false, () => (status ? { status } : null));
   // Claude finished and the next turn is a person's: their phone (lib/push).
   if (ok && claudeClosed) await pushIfClaudeFinished(taskId, claudeClosed);
+  // A client's wait ticked by us: its reminders are canceled now.
+  if (ok && done) await cancelStaleClientReminders({ taskId }).catch(() => 0);
   return ok || note ? note : "The step could not be saved. Try again.";
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agoWords, businessDaysBetween, chasedRequest, comingUpForClient, daysLate, expectedDoneLine, expectedMove, expectedMoveComment, expectedSentence, finishRequestStep, lastAnswerAt, openCheckIt,
   orderRequests, parseReminderId, planForClient, remindersOn, reorderedClientOrder, requestEmail, requestFromTask, requestGroup, requestRowId, requestStageToday,
-  requestStepForThread, requestSubject, readsAsThing, type ClientRequest, type StepHistory,
+  requestStepForThread, requestSubject, readsAsThing, reminderStillWanted, type ClientRequest, type StepHistory,
 } from "./clientRequests";
 import type { Subtask } from "./data";
 
@@ -256,5 +256,41 @@ describe("the email asks for the step (Derek, 2026-10-15)", () => {
       { id: "s_check", title: "Check in if Carol Lindenmuth hasn't replied", done: false, addedFor: "checkin:s_tell", finishWhen: "reply", due: FRI } as Subtask,
     ] });
     expect(r?.replyTo).toEqual({ stepTitle: "Let Carol know the changes are done", messageId: "msg_tell" });
+  });
+});
+
+describe("a reminder whose step is no longer the client's turn", () => {
+  // Jack's real reminder (2026-10-15): set to go at 8 AM after he had booked.
+  const id = "smr_req_asked_s_mv5p7nbeh_cd7e099a-428d-48a5-8ea2-1d733e6e19bd";
+  const steps = (wait: Partial<Subtask> = {}): Subtask[] => [
+    { id: "s_mv5ophbxg", title: "Email Request", done: true } as Subtask,
+    { id: "s_mv5p7nbeh", title: "Check in if Jack hasn't replied", done: false, stage: "waiting", finishWhen: "reply", due: "2026-10-19", ...wait } as Subtask,
+  ];
+  const task = (subtasks: Subtask[], more: { status?: string; deleted_at?: string | null } = {}) => ({ status: "waiting", deleted_at: null, subtasks, ...more });
+
+  it("still goes while the step is open, current and theirs", () => {
+    expect(reminderStillWanted(id, task(steps()))).toBe(true);
+    expect(reminderStillWanted("smr_step_s_mv5p7nbeh_abc", task(steps()))).toBe(true);
+  });
+  it("does not once the step is done (booked, replied, ticked by us)", () => {
+    expect(reminderStillWanted(id, task(steps({ done: true, outcome: "Jack booked Wed, Oct 21, 10:00 AM" })))).toBe(false);
+    expect(reminderStillWanted("smr_step_s_mv5p7nbeh_abc", task(steps({ done: true })))).toBe(false);
+  });
+  it("does not when the step is no longer current, no longer theirs, or gone", () => {
+    const behind = [{ id: "s_new", title: "Fix the page", done: false } as Subtask, ...steps()];
+    expect(reminderStillWanted(id, task(behind))).toBe(false);
+    expect(reminderStillWanted(id, task(steps({ finishWhen: undefined, stage: "in_progress" })))).toBe(false);
+    expect(reminderStillWanted(id, task(steps().slice(0, 1)))).toBe(false);
+  });
+  it("does not when the task is done, on hold, trashed or gone", () => {
+    expect(reminderStillWanted(id, task(steps(), { status: "done" }))).toBe(false);
+    expect(reminderStillWanted(id, task(steps(), { status: "on_hold" }))).toBe(false);
+    expect(reminderStillWanted(id, task(steps(), { deleted_at: "2026-10-15T19:00:00Z" }))).toBe(false);
+    expect(reminderStillWanted(id, null)).toBe(false);
+  });
+  it("leaves alone what is about no one step, or a task it can't read", () => {
+    expect(reminderStillWanted("smr_req_summary__abc", null)).toBe(true);
+    expect(reminderStillWanted("smr_portal_cl_x_abc", null)).toBe(true);
+    expect(reminderStillWanted(id, undefined)).toBe(true);
   });
 });
