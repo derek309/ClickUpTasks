@@ -22,7 +22,7 @@ import { draftLinkAsButton } from "./draftLink";
 import { CLAUDE_ID, toPacificDate, todayPacific, type Subtask } from "./data";
 import { REVIEW_STATUS } from "./portalReminders";
 import { reminderQueueStatus } from "./reminderSchedule";
-import { stepAsk } from "./stepReminders";
+import { stepAskWords, type AskWords } from "./stepReminders";
 import { REMINDER_MESSAGE_PREFIX } from "./reviewReminders";
 import {
   CLIENT_REMINDER_PREFIXES, REQUEST_PREFIX, comingUpForClient, expectedMove, expectedMoveComment, lastAnswerAt, openCheckIt, orderRequests, parseReminderId,
@@ -184,6 +184,23 @@ export async function runClientRequests(o: { today?: string; nowMs?: number; dry
   return { tally, previews };
 }
 
+/** The subjects of the emails our reply waits wait on, by message id. */
+async function replySubjects(requests: (ClientRequest | null | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(requests.map((r) => r?.replyTo?.messageId).filter((x): x is string => !!x))];
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabaseAdmin.from("messages").select("id, subject").in("id", ids.slice(i, i + 200));
+    for (const m of (data ?? []) as any[]) if (typeof m.subject === "string" && m.subject.trim()) out.set(m.id as string, m.subject.trim());
+  }
+  return out;
+}
+/** How a request is asked (lib/stepReminders stepAskWords): a reply wait by
+ *  its email's subject, else the title of the step that sent it. */
+function requestAsk(r: ClientRequest, clientFirst: string, subjects: Map<string, string>): AskWords {
+  const replyTo = r.replyTo ? (r.replyTo.messageId ? subjects.get(r.replyTo.messageId) : null) ?? r.replyTo.stepTitle : null;
+  return stepAskWords({ title: r.title, notes: r.notes, finishWhen: r.finishWhen, addedFor: r.addedFor }, clientFirst, r.taskTitle, { replyTo });
+}
+
 type Built = { ok: true; subject: string; body: string; to: string; clientName: string; sender: string; replyTo: string | null; status: string } | { ok: false; reason: "no_email" | "no_sender" | "gone" };
 
 /** The email for one client's request (or their summary). */
@@ -214,8 +231,9 @@ async function buildRequestEmail(st: ClientState, stage: RequestStage, request: 
   // Opens that one request in the portal (its step too, so a request already
   // answered says so and moves on to the next one).
   const link = request ? { url: `${portal}?task=${encodeURIComponent(request.taskId)}&step=${encodeURIComponent(request.stepId)}`, label: "Open it in your client portal" } : null;
+  const words = request ? requestAsk(request, clientFirst, await replySubjects([request])) : null;
   const email = requestEmail({
-    stage, firstName: first, ask: request ? stepAsk({ title: request.title, notes: request.notes }, clientFirst, request.taskTitle) : "",
+    stage, firstName: first, ask: words?.ask ?? "", subjectAsk: words?.subject,
     taskTitle: request?.taskTitle ?? "", needBy: request?.needBy ?? null, firstAsked, today: o.today, expected: task?.due ?? null,
     link, listUrl: portal, more: Math.max(0, ordered.length - 1), overdue, sender: senderFirst,
   });
@@ -335,8 +353,13 @@ export async function remindersOverview(o: { sentClientId?: string | null; sentL
   const clientIds = [...new Set([...all.map((r) => r.client_id as string), ...comingRaw.map((c) => c.clientId)])];
   const { data: clients } = clientIds.length ? await supabaseAdmin.from("clients").select("id, name").in("id", clientIds) : { data: [] as any[] };
   const nameOf = new Map(((clients ?? []) as any[]).map((c) => [c.id as string, c.name as string]));
-  // Each step's title and need by date, from the tasks they're on.
   const taskIds = [...new Set(all.map((r) => r.task_id).filter(Boolean) as string[])];
+  // Each open request's ask as the client reads it (stepAskWords).
+  const subjects = await replySubjects([...states.values()].flatMap((st) => st.requests));
+  const firstOf = (clientId: string) => String(nameOf.get(clientId) ?? "").trim().split(/\s+/)[0] ?? "";
+  const askOf = new Map<string, string>();
+  for (const st of states.values()) for (const r of st.requests) askOf.set(r.stepId, requestAsk(r, firstOf(st.clientId), subjects).title);
+  // Each step's title and need by date, from the tasks they're on.
   const steps = new Map<string, { title: string; needBy: string | null }>();
   const taskTitle = new Map<string, string>();
   for (const st of states.values()) for (const t of st.tasks) { taskTitle.set(t.id, t.title); for (const s of t.subtasks ?? []) steps.set(s.id, { title: s.title, needBy: s.due ?? null }); }
@@ -352,14 +375,14 @@ export async function remindersOverview(o: { sentClientId?: string | null; sentL
     const step = p.stepId ? steps.get(p.stepId) : undefined;
     return {
       id: r.id, clientId: r.client_id, clientName: nameOf.get(r.client_id) ?? "A client", to: toOf.get(r.client_id) ?? null,
-      taskId: r.task_id ?? null, taskTitle: r.task_id ? taskTitle.get(r.task_id) ?? null : null, stepId: p.stepId, ask: step?.title ?? null,
+      taskId: r.task_id ?? null, taskTitle: r.task_id ? taskTitle.get(r.task_id) ?? null : null, stepId: p.stepId, ask: (p.stepId ? askOf.get(p.stepId) : null) ?? step?.title ?? null,
       stage: stageOf(r.id, step?.needBy ?? null, r.scheduled_at), subject: r.subject ?? "", body: r.body ?? "", from: r.created_by ?? null, at: r.scheduled_at, status: r.status,
     };
   };
   return {
     toReview: ((review ?? []) as any[]).map(item),
     comingUp: comingRaw.sort((a, b) => a.day.localeCompare(b.day)).map((c) => ({
-      ...c, clientName: nameOf.get(c.clientId) ?? "A client", taskTitle: c.request?.taskTitle ?? null, ask: c.request?.title ?? null, stepId: c.request?.stepId ?? null,
+      ...c, clientName: nameOf.get(c.clientId) ?? "A client", taskTitle: c.request?.taskTitle ?? null, ask: c.request ? askOf.get(c.request.stepId) ?? c.request.title : null, stepId: c.request?.stepId ?? null,
     })),
     sent: ((sent ?? []) as any[]).map(item),
   };

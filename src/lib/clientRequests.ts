@@ -22,6 +22,7 @@
 
 import { addBusinessDaysIso, addDaysIso, currentStep, formatDayDate, formatDue, type ReceivedEmail, type StepRemind, type Subtask } from "./data";
 import { isClientWait } from "./afterThis";
+import { replyWaitSource } from "./stepReminders";
 import { draftLinkHtml, escapeHtml, type DraftLink } from "./draftLink";
 import { PORTAL_REMINDER_PREFIX, STEP_REMINDER_PREFIX } from "./portalReminders";
 
@@ -121,6 +122,11 @@ export type ClientRequest = {
   clientOrder: number | null;
   remind?: StepRemind;
   expectedFrom?: string | null;
+  finishWhen?: Subtask["finishWhen"];
+  addedFor?: string;
+  /** A wait on their reply to an email we sent: that email's message id, and
+   *  the title of the step that sent it (lib/stepReminders replyWaitSource). */
+  replyTo?: { messageId: string | null; stepTitle: string } | null;
 };
 
 /** A task's request, when its current step is the client's turn. */
@@ -131,6 +137,7 @@ export function requestFromTask(t: { id: string; title: string; clientId: string
     clientId: t.clientId, taskId: t.id, taskTitle: t.title, taskDue: t.due ?? null, listId: t.projectId ?? null,
     stepId: cur.id, title: cur.title, notes: cur.notes, needBy: cur.due ?? null, startedAt: cur.startedAt ?? null,
     clientOrder: typeof cur.clientOrder === "number" ? cur.clientOrder : null, remind: cur.remind, expectedFrom: cur.expectedFrom ?? null,
+    finishWhen: cur.finishWhen, addedFor: cur.addedFor, replyTo: replyWaitSource(cur, t.subtasks ?? []),
   };
 }
 
@@ -295,8 +302,8 @@ const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 const things = (n: number) => `${n} ${n === 1 ? "thing" : "things"}`;
 
 /** The subject by stage (Derek and Justin, 2026-10-15). */
-export function requestSubject(stage: RequestStage, o: { ask: string; needBy: string | null; firstAsked: string; today: string; overdue?: number }): string {
-  const ask = o.ask.trim();
+export function requestSubject(stage: RequestStage, o: { ask: string; subjectAsk?: string; needBy: string | null; firstAsked: string; today: string; overdue?: number }): string {
+  const ask = (o.subjectAsk?.trim() || o.ask).trim();
   const late = daysLate(o.needBy, o.today);
   let s: string;
   switch (stage) {
@@ -320,7 +327,11 @@ export function agoWords(from: string, today: string): string {
  *  that request in the portal, "or reply", the rest one muted line away. The
  *  button goes in as a link line; the server makes it a button. */
 export function requestEmail(o: {
-  stage: RequestStage; firstName: string | null; ask: string; taskTitle: string; needBy: string | null; firstAsked: string; today: string;
+  stage: RequestStage; firstName: string | null; ask: string;
+  /** The ask as a subject line says it, when shorter than the body's
+   *  ("your reply to “<subject>”"); the ask otherwise. */
+  subjectAsk?: string;
+  taskTitle: string; needBy: string | null; firstAsked: string; today: string;
   /** The task's due date, when it has one: "<task> is expected Oct 27". */
   expected: string | null;
   link: DraftLink | null; listUrl: string | null; more: number; overdue?: number; sender: string | null;
@@ -344,9 +355,9 @@ export function requestEmail(o: {
     : `A reminder: we still need ${ask}${when ? ` by ${when}` : ""}.`;
   const firstAsked = o.stage === "asked" ? "" : `<p>We first asked on ${escapeHtml(formatDue(o.firstAsked))}, ${agoWords(o.firstAsked, o.today)}.</p>`;
   const task = o.taskTitle.trim();
-  const holds = task && task.toLowerCase() !== o.ask.trim().toLowerCase()
-    ? `<p>It's what holds up ${escapeHtml(task)}${o.expected ? `, which is expected ${escapeHtml(formatDue(o.expected))}` : ""}.</p>`
-    : o.expected ? `<p>It's expected ${escapeHtml(formatDue(o.expected))}.</p>` : "";
+  const expected = expectedSentence(task, o.expected);
+  const holds = expected ? `<p>${escapeHtml(expected)}</p>`
+    : task && task.toLowerCase() !== o.ask.trim().toLowerCase() ? `<p>It's what holds up ${escapeHtml(task)}.</p>` : "";
   const more = o.more > 0 && o.listUrl
     ? `<p style="color:#6b7280">${o.more} more ${o.more === 1 ? "thing is" : "things are"} waiting on you. <a href="${escapeHtml(o.listUrl)}" style="color:#6b7280">See everything we need</a></p>` : "";
   return {
@@ -356,6 +367,37 @@ export function requestEmail(o: {
 }
 
 // ── Expected date ───────────────────────────────────────────────────────────
+
+/** Whether a task's name reads as a thing on its own ("Newsletter", "PPAI
+ *  flyer", "The Fall Sale page"): four words or fewer, not an action, not
+ *  plural, plain words. "November classes is expected" reads badly. */
+export function readsAsThing(title: string): boolean {
+  const t = title.trim().replace(/[.!?]+$/, "");
+  const words = t.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 4 || verbLed(t)) return false;
+  if (!/^[A-Za-z][A-Za-z'&\s]*$/.test(t)) return false;
+  const last = words[words.length - 1].toLowerCase();
+  return !(/s$/.test(last) && !/(ss|us|is)$/.test(last));
+}
+
+/** The expected line the client reads, in the email and the portal, one way
+ *  everywhere (Derek, 2026-10-15): "Your newsletter is expected Oct 27." for
+ *  a short name that reads as a thing, else "We expect to finish "November
+ *  classes" by Oct 30.". Null without a date or a name. */
+export function expectedSentence(taskTitle: string, due: string | null): string | null {
+  const title = taskTitle.trim().replace(/[.!?]+$/, "");
+  if (!due || !title) return null;
+  if (!readsAsThing(title)) return `We expect to finish "${title}" by ${formatDue(due)}.`;
+  // One plain word reads as "your newsletter"; a longer name stays as typed
+  // ("PPAI flyer"), so a name keeps its capital.
+  const named = /^[A-Za-z][a-z]+$/.test(title) ? `Your ${title.toLowerCase()}` : upperFirst(title);
+  return `${named} is expected ${formatDue(due)}.`;
+}
+
+/** Our side's line for a task whose date moved: "Expected done: November
+ *  classes, Oct 24 → Oct 27". */
+export const expectedDoneLine = (taskTitle: string, from: string, to: string): string =>
+  `Expected done: ${taskTitle.trim().replace(/[.!?]+$/, "")}, ${formatDue(from)} → ${formatDue(to)}`;
 
 /** A task waiting on a late client step: its due date moves out by the
  *  business days late, counted from where it was before the first move, so

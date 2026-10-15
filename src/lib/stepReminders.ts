@@ -58,18 +58,111 @@ export function stepReminderTurn(s: Pick<Subtask, "onClient" | "finishWhen" | "s
   return null;
 }
 
-/** What the reminder asks about, in the client's words: the step's
+/** A wait for their reply to an email we sent: the check in added after it
+ *  went ("checkin:<the sent step>"), or a step finished by their reply. */
+export const isReplyWait = (s: Partial<Pick<Subtask, "finishWhen" | "addedFor">>): boolean =>
+  s.finishWhen === "reply" || (s.addedFor ?? "").startsWith("checkin:");
+
+/** The email a reply wait waits on: the step that sent it (the check in's own
+ *  "checkin:<id>", else the nearest finished step before it holding a sent
+ *  email), its title, and the email's message id from its "mail:<id>". */
+export function replyWaitSource(step: Pick<Subtask, "id"> & Partial<Pick<Subtask, "finishWhen" | "addedFor">>, subtasks: Pick<Subtask, "id" | "title" | "done" | "holds">[]): { stepTitle: string; messageId: string | null } | null {
+  if (!isReplyWait(step)) return null;
+  const sentId = step.addedFor?.startsWith("checkin:") ? step.addedFor.slice("checkin:".length) : null;
+  const mailOf = (s: Pick<Subtask, "holds">) => [...(s.holds ?? [])].reverse().find((h) => h.startsWith("mail:")) ?? null;
+  let sent = sentId ? subtasks.find((s) => s.id === sentId) : undefined;
+  if (!sent) {
+    const at = subtasks.findIndex((s) => s.id === step.id);
+    sent = subtasks.slice(0, at < 0 ? subtasks.length : at).reverse().find((s) => s.done && !!mailOf(s));
+  }
+  if (!sent) return null;
+  const mail = mailOf(sent);
+  return { stepTitle: sent.title.trim(), messageId: mail ? mail.slice("mail:".length) : null };
+}
+
+/** Verbs a client step uses, in their base form, for "Carol signs off and
+ *  sends ...": "sign off and send ...". */
+const BASE_VERBS = new Set(["approve", "review", "send", "sign", "pick", "choose", "confirm", "answer", "fill", "upload", "share", "book", "pay", "check", "read", "look",
+  "tell", "give", "let", "add", "update", "write", "record", "call", "schedule", "reply", "provide", "complete", "decide", "select", "submit", "finish", "test", "try",
+  "forward", "email", "text", "get", "make", "take", "put", "set", "film", "shoot", "gather", "collect", "list", "mark", "note", "drop", "post", "film", "fix", "find", "write", "edit"]);
+/** "signs" to "sign", "pushes" to "push", "tries" to "try"; never a word in "ss". */
+const IRREGULAR: Record<string, string | null> = { has: "have", does: "do", goes: "go", is: null, was: null, says: "say" };
+function baseForm(word: string): string | null {
+  const w = word.toLowerCase();
+  if (w in IRREGULAR) return IRREGULAR[w];
+  if (!/^[a-z]+s$/.test(w) || /ss$/.test(w) || w.length < 4) return null;
+  if (/ies$/.test(w)) return word.slice(0, -3) + "y";
+  if (/(ch|sh|x|z|ss)es$/.test(w)) return word.slice(0, -2);
+  return word.slice(0, -1);
+}
+
+/** A client step written about them ("Carol signs off on the site and sends
+ *  her pet care details") as an ask to them ("Sign off on the site and send
+ *  your pet care details"): the leading name goes, the verb at the start of
+ *  each " and " clause takes its base form, her, his and their become your.
+ *  Anything not led by their name and a verb comes back as it was. */
+export function toTheirAsk(text: string, firstName: string): string {
+  const first = firstName.trim();
+  if (!first) return text;
+  const esc = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Their first name, maybe their last name too, then a verb in -s.
+  let m: RegExpExecArray | null = null;
+  let verb: string | null = null;
+  for (const re of [new RegExp(`^${esc}\\s+[A-Z][\\w'-]*\\s+(\\S+)(.*)$`), new RegExp(`^${esc}\\s+(\\S+)(.*)$`)]) {
+    m = re.exec(text.trim());
+    verb = m ? baseForm(m[1]) : null;
+    if (verb) break;
+  }
+  if (!m || !verb) return text;
+  const clauses = `${verb}${m[2]}`.split(/\s+and\s+/i).map((c, i) => {
+    if (i === 0) return c;
+    const [w, ...rest] = c.split(/\s+/);
+    const b = baseForm(w);
+    return b && BASE_VERBS.has(b.toLowerCase()) && rest.length ? [b, ...rest].join(" ") : c;
+  });
+  const out = clauses.join(" and ").replace(/\b(her|his|their)\b/gi, "your");
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+/** How the client is asked, in each place it shows: `ask` in an email body
+ *  ("We need <ask> by Fri, Oct 16."), `subject` in a subject line, `title` on
+ *  the portal's card. */
+export type AskWords = { ask: string; subject: string; title: string };
+
+/** The ask for a wait on their reply to our email "<subject>". */
+export function replyAskWords(subject: string): AskWords {
+  const s = subject.trim().replace(/^((re|fwd?):\s*)+/i, "");
+  return { ask: `your reply to my email “${s}”`, subject: `your reply to “${s}”`, title: `Reply to: ${s}` };
+}
+
+/** What a client step asks, in the client's words (Derek, 2026-10-15: "it
+ *  shows the task but really it's the step"). A wait on their reply to our
+ *  email asks for that reply, by the email's subject (`replyTo`: the email's
+ *  subject, else the title of the step that sent it). Otherwise the step's
  *  directions' first line, else its name without "Wait for Pam's" and the
- *  like ("your class times"), else the task's name. */
-export function stepAsk(s: Pick<Subtask, "title" | "notes">, firstName: string, taskTitle: string): string {
+ *  like ("your class times"), turned to them when it is written about them.
+ *  Never the bare task name: "your answer on <task>" when nothing else says. */
+export function stepAskWords(s: Pick<Subtask, "title" | "notes"> & Partial<Pick<Subtask, "finishWhen" | "addedFor">>, firstName: string, taskTitle: string, o: { replyTo?: string | null } = {}): AskWords {
+  const fallback = (): AskWords => { const a = `your answer on ${taskTitle.trim()}`; return { ask: a, subject: a, title: upperFirst(a) }; };
+  const plain = (a: string): AskWords => ({ ask: a, subject: a, title: upperFirst(a) });
   const line = htmlToText(s.notes ?? "").split("\n").map((x) => x.trim()).find(Boolean);
-  if (line) return line.length > 140 ? `${line.slice(0, 139).trimEnd()}…` : line.replace(/[.:]+$/, "");
   const esc = firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  let t = s.title.trim()
+  const t = line ? "" : s.title.trim()
     .replace(/^(wait(ing)? (for|on)|ask|check in( on)?|remind|get|chase)\s+/i, "")
     .replace(new RegExp(`^${esc}\\s*:\\s*`, "i"), "")
     .replace(new RegExp(`\\b${esc}'s\\b`, "gi"), "your")
     .trim();
-  if (!t || /\b(reply|replied|respond|answer)\b/i.test(t) || t.toLowerCase() === firstName.toLowerCase()) t = taskTitle.trim();
-  return t;
+  const aboutReply = !t || /\b(reply|replied|respond|answer)\b/i.test(t) || t.toLowerCase() === firstName.toLowerCase();
+  if (isReplyWait(s) && ((s.addedFor ?? "").startsWith("checkin:") || (!line && aboutReply))) {
+    return o.replyTo?.trim() ? replyAskWords(o.replyTo) : fallback();
+  }
+  if (line) return plain(toTheirAsk(line.length > 140 ? `${line.slice(0, 139).trimEnd()}…` : line.replace(/[.:]+$/, ""), firstName));
+  if (aboutReply) return fallback();
+  return plain(toTheirAsk(t, firstName));
 }
+
+/** The ask in an email body (stepAskWords). */
+export const stepAsk = (s: Pick<Subtask, "title" | "notes"> & Partial<Pick<Subtask, "finishWhen" | "addedFor">>, firstName: string, taskTitle: string, o: { replyTo?: string | null } = {}): string =>
+  stepAskWords(s, firstName, taskTitle, o).ask;
+
+const upperFirst = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);

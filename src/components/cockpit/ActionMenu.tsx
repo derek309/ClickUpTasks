@@ -16,12 +16,14 @@ export type ActionMenuItem = { label: string; onClick: () => void; danger?: bool
 /** On a phone a menu opens as a sheet at the bottom of the screen, like the
  *  client page's Contact sheet (2026-10-14): an anchored menu ran off the
  *  edge at 375px. Drawn below sm only; the backdrop closes it. */
-export function MenuSheet({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+export function MenuSheet({ label, onClose, children, everywhere = false }: { label: string; onClose: () => void; children: ReactNode;
+  /** Drawn on every screen, not only below sm (a touch only action on a tablet too). */
+  everywhere?: boolean }) {
   return (
-    <div className="sm:hidden">
+    <div className={everywhere ? undefined : "sm:hidden"}>
       <div className="fixed inset-0 z-[120] bg-black/30" onClick={onClose} />
       <div role="menu" aria-label={label}
-        className="fixed inset-x-3 bottom-3 z-[121] max-h-[75vh] overflow-y-auto rounded-[5px] bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
+        className="fixed inset-x-3 bottom-3 z-[121] sm:mx-auto sm:max-w-[420px] max-h-[75vh] overflow-y-auto rounded-[5px] bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] text-foreground shadow-[var(--shadow-md)] ring-1 ring-[var(--border)]">
         {children}
       </div>
     </div>

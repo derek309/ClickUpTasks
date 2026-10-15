@@ -14,6 +14,7 @@ import { uploadSharedFile } from "@/lib/docFileUpload";
 import { doneByMonth, doneLines, monthCount, ongoingWork, type DoneLine } from "@/lib/portalDone";
 import { doneWord, nextRequest, portalQueue, queuePosition, thanksLine, type PortalRequest, type PortalRequestKind } from "@/lib/portalRequests";
 import { FocusedRequest, RequestList } from "./PortalRequests";
+import { approveFromPortal } from "@/lib/portalApprove";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 /** queue: the list works one at a time (a queue list): Now, then in line. */
@@ -865,6 +866,30 @@ export default function WaitingView({ token }: { token: string }) {
     savePending(token, r.key, r.kind);
     void goToReview(r.taskId, kind);
   };
+  // One tap Approve (lib/portalApprove): approved here through the review's
+  // own routes, then the thanks and the next one. Comments or edits of theirs
+  // on it send them to the review page to sort out there.
+  const [approving, setApproving] = useState<string | null>(null);
+  const [approvedCount, setApprovedCount] = useState(0);
+  const approveFocused = async (r: PortalRequest, kind: string | null) => {
+    if (approving) return;
+    if (!kind) { openTask(r.taskId); return; }
+    if (kind !== "doc" && kind !== "image" && kind !== "page" && kind !== "video") { openFocusedReview(r, kind); return; }
+    setApproving(r.key);
+    setSendErrors((e) => { const n = { ...e }; delete n[r.taskId]; return n; });
+    const out = await approveFromPortal(token, r.taskId, kind);
+    if (out.ok) {
+      setAnswered((a) => ({ keys: [...a.keys, r.key], thanks: thanksLine(doneWord("review"), firstName) }));
+      focusOn(null);
+      setApproving(null);
+      // The rest of the page catches up (the task moves to Approved).
+      setApprovedCount((n) => n + 1);
+      return;
+    }
+    setApproving(null);
+    if (out.open) { openFocusedReview(r, kind); return; }
+    setSendErrors((e) => ({ ...e, [r.taskId]: out.error }));
+  };
   // Which list a new request will actually go to: the client's own pick
   // once they've touched the dropdown, else the first one — never asked at
   // all when there's only one.
@@ -946,6 +971,10 @@ export default function WaitingView({ token }: { token: string }) {
       setSendingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
     }
   };
+
+  // After a one tap Approve (approveFocused, above), the page catches up.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { if (approvedCount) void load(); }, [approvedCount]);
 
   const setTaskStatus = async (taskId: string, status: "changes_requested" | "review" | "done") => {
     setStatusBusyIds((s) => new Set(s).add(taskId));
@@ -1181,7 +1210,10 @@ export default function WaitingView({ token }: { token: string }) {
                   onRemoveFile={(id) => removeAttachment(focused.taskId, id)}
                   onAnswer={() => void answerFocused(focused)}
                   onOpenReview={() => (t?.review ? openFocusedReview(focused, t.review) : openTask(focused.taskId))}
-                  onAskChanges={() => setChangesFor(focused.key)} />
+                  approving={approving === focused.key}
+                  onApprove={() => void approveFocused(focused, t?.review ?? null)}
+                  onAskChanges={() => setChangesFor(focused.key)}
+                  onReadEmail={() => openTask(focused.taskId)} />
                 <button onClick={leaveFocus} className="mt-5 block w-full py-2 text-center text-[16px] font-semibold text-accent">See everything we need · {queue.length}</button>
               </>
             );

@@ -9,8 +9,8 @@
 // be tested; the portal page (app/waiting) renders them.
 
 import { formatDayDate, formatDue, toPacificDate, type Subtask } from "./data";
-import { GROUP_LABEL, daysLate, orderRequests, requestFromTask, requestGroup, type RequestGroup } from "./clientRequests";
-import { stepAsk } from "./stepReminders";
+import { GROUP_LABEL, daysLate, expectedSentence, orderRequests, requestFromTask, requestGroup, type RequestGroup } from "./clientRequests";
+import { stepAskWords } from "./stepReminders";
 
 /** What the client is asked to do: look something over, send files, or answer. */
 export type PortalRequestKind = "review" | "upload" | "question";
@@ -31,7 +31,13 @@ export type PortalRequest = {
   /** The task's due date: its "expected" line. */
   taskDue: string | null;
   kind: PortalRequestKind;
+  /** A wait on their reply to an email of ours: that email, to show under
+   *  the ask (its subject and first lines). */
+  replyTo?: { subject: string; preview: string } | null;
 };
+
+/** An email of ours a request can wait on, as the portal shows it. */
+export type PortalEmail = { subject: string; preview: string };
 
 /** Asks about files: "Send us your logo", "Upload the photos". */
 const FILES = /\b(upload|photos?|pictures?|images?|logos?|headshots?|files?|videos?|pdfs?|attach(ment)?s?|scans?|screenshots?)\b/i;
@@ -49,23 +55,41 @@ export function requestKind(o: { reviewOpen: boolean; ask: string }): PortalRequ
  *  on it waits on them. */
 export function portalRequestFromTask(
   t: { id: string; title: string; clientId: string; projectId: string | null; due: string | null; status: string; waitingOnClient: boolean; subtasks: Subtask[] | null },
-  o: { firstName: string; reviewOpen: boolean },
+  o: { firstName: string; reviewOpen: boolean;
+    /** Our emails a reply wait can wait on, by message id (the route reads them). */
+    emails?: Record<string, PortalEmail> },
 ): PortalRequest | null {
   if (t.status === "done" || t.status === "on_hold") return null;
   const r = requestFromTask({ id: t.id, title: t.title, clientId: t.clientId, projectId: t.projectId, due: t.due, subtasks: t.subtasks });
   if (r) {
-    const said = stepAsk({ title: r.title, notes: r.notes }, o.firstName, t.title).trim() || r.title.trim();
-    const ask = said.charAt(0).toUpperCase() + said.slice(1);
+    // The step's ask, never the task's name (lib/stepReminders stepAskWords).
+    const email = r.replyTo?.messageId ? o.emails?.[r.replyTo.messageId] ?? null : null;
+    const words = stepAskWords({ title: r.title, notes: r.notes, finishWhen: r.finishWhen, addedFor: r.addedFor }, o.firstName, t.title, { replyTo: email?.subject ?? r.replyTo?.stepTitle ?? null });
+    const reply = words.title.startsWith("Reply to: ");
     return {
-      key: r.stepId, taskId: t.id, stepId: r.stepId, ask, listId: t.projectId, needBy: r.needBy, startedAt: r.startedAt, clientOrder: r.clientOrder,
-      taskTitle: t.title, taskDue: t.due, kind: requestKind({ reviewOpen: o.reviewOpen, ask: `${r.title} ${said}` }),
+      key: r.stepId, taskId: t.id, stepId: r.stepId, ask: words.title, listId: t.projectId, needBy: r.needBy, startedAt: r.startedAt, clientOrder: r.clientOrder,
+      taskTitle: t.title, taskDue: t.due,
+      kind: reply && !o.reviewOpen ? "question" : requestKind({ reviewOpen: o.reviewOpen, ask: `${r.title} ${words.ask}` }),
+      replyTo: reply && email ? email : null,
     };
   }
   if (!t.waitingOnClient) return null;
   return {
-    key: t.id, taskId: t.id, stepId: null, ask: t.title, listId: t.projectId, needBy: t.due, startedAt: null, clientOrder: null,
+    key: t.id, taskId: t.id, stepId: null, ask: `Your answer on ${t.title.trim()}`, listId: t.projectId, needBy: t.due, startedAt: null, clientOrder: null,
     taskTitle: t.title, taskDue: null, kind: requestKind({ reviewOpen: o.reviewOpen, ask: t.title }),
   };
+}
+
+/** Our email, as the portal shows it under a reply wait: its subject, and
+ *  its first lines as plain text (`text`: the email already made text). */
+export function portalEmail(subject: string | null, text: string): PortalEmail | null {
+  const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
+  const s = (subject ?? "").trim().replace(/^((re|fwd?):\s*)+/i, "");
+  if (!s) return null;
+  // Past "Hi Carol,", the first few lines, about two sentences long.
+  const body = (/^(hi|hello|hey|dear)\b/i.test(lines[0] ?? "") ? lines.slice(1) : lines).join(" ");
+  const preview = body.length > 220 ? `${body.slice(0, 219).replace(/\s+\S*$/, "")}…` : body;
+  return { subject: s, preview };
 }
 
 /** The queue, in our order (lib/clientRequests). */
@@ -123,16 +147,8 @@ export function rowDate(needBy: string | null, today: string): { text: string; t
 export const doneWord = (kind: PortalRequestKind | "changes"): string =>
   kind === "review" ? "Approved" : kind === "question" ? "Answered" : "Sent";
 
-/** "Your newsletter is expected Oct 27.", for a task with a due date that
- *  waits on them. Kept to the date; nothing promised beyond it. */
-export function expectedLine(taskTitle: string, taskDue: string | null): string | null {
-  const title = taskTitle.trim().replace(/[.!?]+$/, "");
-  if (!taskDue || !title) return null;
-  // One plain word reads as "your newsletter"; a longer name stays as typed
-  // ("November classes", "PPAI flyer"), so a name or a month keeps its capital.
-  const named = /^[A-Za-z][a-z]+$/.test(title) ? `Your ${title.toLowerCase()}` : title.charAt(0).toUpperCase() + title.slice(1);
-  return `${named} is expected ${formatDue(taskDue)}.`;
-}
+/** The expected line under a request (lib/clientRequests expectedSentence). */
+export const expectedLine = (taskTitle: string, taskDue: string | null): string | null => expectedSentence(taskTitle, taskDue);
 
 /** "First asked Oct 15", from when it became their turn. */
 export const firstAskedLine = (startedAt: string | null): string | null => (startedAt ? `First asked ${formatDue(toPacificDate(startedAt))}` : null);

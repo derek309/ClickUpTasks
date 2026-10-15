@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  agoWords, businessDaysBetween, chasedRequest, comingUpForClient, daysLate, expectedMove, expectedMoveComment, finishRequestStep, lastAnswerAt, openCheckIt,
+  agoWords, businessDaysBetween, chasedRequest, comingUpForClient, daysLate, expectedDoneLine, expectedMove, expectedMoveComment, expectedSentence, finishRequestStep, lastAnswerAt, openCheckIt,
   orderRequests, parseReminderId, planForClient, remindersOn, reorderedClientOrder, requestEmail, requestFromTask, requestGroup, requestRowId, requestStageToday,
-  requestStepForThread, requestSubject, type ClientRequest, type StepHistory,
+  requestStepForThread, requestSubject, readsAsThing, type ClientRequest, type StepHistory,
 } from "./clientRequests";
 import type { Subtask } from "./data";
 
@@ -136,7 +136,11 @@ describe("the emails", () => {
     expect(e.body).toContain("<p>Hi Brian,</p>");
     expect(e.body).toContain("We still need you to approve the PPAI flyer. It was due Fri, Oct 16.");
     expect(e.body).toContain("We first asked on Oct 15, 3 days ago.");
-    expect(e.body).toContain("It's what holds up Newsletter, which is expected Oct 27.");
+    expect(e.body).toContain("<p>Your newsletter is expected Oct 27.</p>");
+    const long = requestEmail({ stage: "asked", firstName: "Brian", ask: "your class times", taskTitle: "November classes", needBy: null, firstAsked: THU, today: THU, expected: "2026-10-30", link: null, listUrl: null, more: 0, sender: null });
+    expect(long.body).toContain("<p>We expect to finish &quot;November classes&quot; by Oct 30.</p>");
+    const noDate = requestEmail({ stage: "asked", firstName: "Brian", ask: "your class times", taskTitle: "November classes", needBy: null, firstAsked: THU, today: THU, expected: null, link: null, listUrl: null, more: 0, sender: null });
+    expect(noDate.body).toContain("<p>It's what holds up November classes.</p>");
     expect(e.body).toContain('href="https://x/waiting/tok?task=t1"');
     expect(e.body).toContain("Or reply to this email with your answer.");
     expect(e.body).toContain("5 more things are waiting on you.");
@@ -206,5 +210,51 @@ describe("ids, replies and the expected date", () => {
     expect(expectedMove({ taskDue: null, expectedFrom: null, needBy: FRI, today: WED })).toBeNull();
     expect(expectedMove({ taskDue: "2026-10-24", expectedFrom: null, needBy: WED, today: WED })).toBeNull();
     expect(expectedMoveComment("2026-10-27", "Brian", "Approve the flyer", 3)).toBe('Expected date moved to Oct 27: Brian\'s "Approve the flyer" is 3 days late');
+  });
+});
+
+describe("the expected date line", () => {
+  it("names a short thing, and quotes anything else", () => {
+    expect(expectedSentence("Newsletter", "2026-10-27")).toBe("Your newsletter is expected Oct 27.");
+    expect(expectedSentence("PPAI flyer", "2026-10-27")).toBe("PPAI flyer is expected Oct 27.");
+    expect(expectedSentence("The Fall Sale page", "2026-10-27")).toBe("The Fall Sale page is expected Oct 27.");
+    expect(expectedSentence("November classes", "2026-10-30")).toBe('We expect to finish "November classes" by Oct 30.');
+    expect(expectedSentence("Update the menu for the fall season", "2026-10-30")).toBe('We expect to finish "Update the menu for the fall season" by Oct 30.');
+    expect(expectedSentence("Write blog post", "2026-10-30")).toBe('We expect to finish "Write blog post" by Oct 30.');
+    expect(expectedSentence("Website Upgrade 2026", "2026-10-30")).toBe('We expect to finish "Website Upgrade 2026" by Oct 30.');
+    expect(expectedSentence("Newsletter", null)).toBeNull();
+    expect(expectedSentence("  ", "2026-10-30")).toBeNull();
+  });
+  it("reads as a thing: four words or fewer, not an action, not plural", () => {
+    expect(readsAsThing("Business card")).toBe(true);
+    expect(readsAsThing("Sales flyer")).toBe(true);
+    expect(readsAsThing("Logo redesign for the spring")).toBe(false);
+    expect(readsAsThing("Photos")).toBe(false);
+    expect(readsAsThing("Approve flyer")).toBe(false);
+  });
+  it("our side says the move with the name and both dates", () => {
+    expect(expectedDoneLine("November classes", "2026-10-24", "2026-10-27")).toBe("Expected done: November classes, Oct 24 → Oct 27");
+  });
+});
+
+describe("the email asks for the step (Derek, 2026-10-15)", () => {
+  const base = { firstName: "Carol", taskTitle: "Website Upgrade 2026", needBy: FRI, firstAsked: THU, today: THU, expected: null, link: null, listUrl: null, more: 0, sender: "Derek" };
+  it("a reply wait: our email by its subject", () => {
+    const e = requestEmail({ ...base, stage: "asked", ask: "your reply to my email “Your site changes are done”", subjectAsk: "your reply to “Your site changes are done”" });
+    expect(e.body).toContain("We need your reply to my email “Your site changes are done” by Fri, Oct 16.");
+    expect(e.subject).toBe("We need your reply to “Your site changes are done” by Fri, Oct 16");
+    expect(e.body).not.toContain("We need Website Upgrade 2026");
+    expect(requestSubject("late", { ask: "x", subjectAsk: "your reply to “Your site changes are done”", needBy: FRI, firstAsked: THU, today: TUE })).toBe("Your reply to “Your site changes are done” is 2 days late");
+  });
+  it("a step written about them: you to do it", () => {
+    const e = requestEmail({ ...base, stage: "asked", ask: "Sign off on the site and send your pet care details" });
+    expect(e.body).toContain("We need you to sign off on the site and send your pet care details by Fri, Oct 16.");
+  });
+  it("the request carries the email its wait is on", () => {
+    const r = requestFromTask({ id: "t_carol", title: "Website Upgrade 2026", clientId: "cl_carol", subtasks: [
+      { id: "s_tell", title: "Let Carol know the changes are done", done: true, holds: ["mail:msg_tell"] } as Subtask,
+      { id: "s_check", title: "Check in if Carol Lindenmuth hasn't replied", done: false, addedFor: "checkin:s_tell", finishWhen: "reply", due: FRI } as Subtask,
+    ] });
+    expect(r?.replyTo).toEqual({ stepTitle: "Let Carol know the changes are done", messageId: "msg_tell" });
   });
 });

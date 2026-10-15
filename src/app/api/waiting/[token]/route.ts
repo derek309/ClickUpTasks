@@ -9,7 +9,7 @@ import { QUEUE_TASK_COLS, portalQueueMarks, queueSettings, queueTaskFromRow, typ
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 import { orderLists } from "@/lib/listOrder";
-import { portalRequestFromTask } from "@/lib/portalRequests";
+import { portalEmail, portalRequestFromTask, type PortalEmail } from "@/lib/portalRequests";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { requestFromTask } from "@/lib/clientRequests";
 
@@ -207,6 +207,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       if (!had || d.status === "with_client") reviewByTask.set(d.task_id as string, d.kind as string);
     }
 
+    // Our emails their reply waits wait on (lib/portalRequests portalEmail):
+    // only this client's, read by the ids their own steps hold.
+    const replyIds = [...new Set(rows.filter((t) => full.has(t.id)).map((t) => requestFromTask({ id: t.id, title: t.title, clientId, subtasks: ((t as Record<string, unknown>).subtasks as Subtask[] | null) ?? null })?.replyTo?.messageId).filter((x): x is string => !!x))];
+    const { data: replyRows } = replyIds.length
+      ? await supabaseAdmin.from("messages").select("id, subject, body, channel").eq("client_id", clientId).in("id", replyIds)
+      : { data: [] as { id: string; subject: string | null; body: string | null; channel: string | null }[] };
+    const emails: Record<string, PortalEmail> = {};
+    for (const m of replyRows ?? []) {
+      const e = portalEmail(m.subject as string | null, splitQuotedEmail(tidyEmailText(htmlToText((m.body as string | null) ?? ""))).visible);
+      if (e) emails[m.id as string] = e;
+    }
+
     return Promise.all(rows.map(async (t) => {
       // How often it repeats, in the app's words, for the Done tab's ongoing work.
       const repeat = t.recurrence && t.recurrence !== "none"
@@ -222,7 +234,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       const request = portalRequestFromTask({
         id: t.id, title: t.title, clientId, projectId: t.project_id ?? null, due: t.due ?? null, status: t.status,
         waitingOnClient: t.waiting_on_client === true, subtasks: ((t as Record<string, unknown>).subtasks as Subtask[] | null) ?? null,
-      }, { firstName, reviewOpen: reviewOpen.has(t.id) });
+      }, { firstName, reviewOpen: reviewOpen.has(t.id), emails });
       const threadRows = threadByTask.get(t.id) ?? [];
       const [attachments, responseAttachments, thread] = await Promise.all([
         resolveAttachments(t.attachments ?? []),

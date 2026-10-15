@@ -17,8 +17,8 @@ const REVIEW_NOUN: Record<string, string> = { doc: "document", image: "design", 
 
 /** One request, on its own, with one dark button for the answer. */
 export function FocusedRequest({
-  r, today, listName, review, body, files, uploading, sending, error, changesOpen, opening,
-  onBody, onFiles, onRemoveFile, onAnswer, onOpenReview, onAskChanges,
+  r, today, listName, review, body, files, uploading, sending, error, changesOpen, opening, approving = false,
+  onBody, onFiles, onRemoveFile, onAnswer, onOpenReview, onApprove, onAskChanges, onReadEmail,
 }: {
   r: PortalRequest;
   today: string;
@@ -32,13 +32,20 @@ export function FocusedRequest({
   error?: string;
   changesOpen: boolean;
   opening: boolean;
+  /** One tap Approve is on its way. */
+  approving?: boolean;
   onBody: (v: string) => void;
   onFiles: (f: FileList | null) => void;
   onRemoveFile: (id: string) => void;
   /** Sends what they wrote or added (the answer, or the changes). */
   onAnswer: () => void;
   onOpenReview: () => void;
+  /** Approves the review there and then (lib/portalApprove); without it,
+   *  Approve opens the review as before. */
+  onApprove?: () => void;
   onAskChanges: () => void;
+  /** Opens the conversation, where our email reads in full. */
+  onReadEmail?: () => void;
 }) {
   const word = stateWord(r.needBy, today);
   const asked = firstAskedLine(r.startedAt);
@@ -64,7 +71,16 @@ export function FocusedRequest({
       <div className="rounded-[5px] bg-surface p-4 ring-2 ring-inset ring-accent">
         {word && <div className={`text-[16px] font-bold ${TONE[word.tone]}`}>{word.text}</div>}
         <h1 className="mt-0.5 break-words text-[20px] font-bold leading-snug">{r.ask}</h1>
-        {(asked || listName) && <div className="mt-1 text-[16px] text-muted">{[asked, listName].filter(Boolean).join(" · ")}</div>}
+        {/* The task's name only ever as this small line, never the title. */}
+        <div className="mt-1 text-[16px] text-muted [overflow-wrap:anywhere]">{[r.taskTitle.trim(), listName, asked].filter(Boolean).join(" · ")}</div>
+        {r.replyTo && (
+          <div className="mt-3 rounded-[5px] bg-background px-3 py-2.5 text-[16px] ring-1 ring-inset ring-[var(--border)]">
+            <div className="text-muted">Our email</div>
+            <b className="block break-words">{r.replyTo.subject}</b>
+            {r.replyTo.preview && <p className="mt-0.5 break-words text-muted">{r.replyTo.preview}</p>}
+            {onReadEmail && <button onClick={onReadEmail} className="mt-1 font-semibold text-accent">Read the whole email ›</button>}
+          </div>
+        )}
 
         {isReview ? (
           <button onClick={onOpenReview} disabled={opening}
@@ -97,7 +113,7 @@ export function FocusedRequest({
         )}
 
         {isReview ? (
-          <button onClick={onOpenReview} disabled={opening} className={dark}>Approve</button>
+          <button onClick={onApprove ?? onOpenReview} disabled={opening || approving} className={dark}>{approving ? "Approving…" : "Approve"}</button>
         ) : (
           <button onClick={onAnswer} disabled={!canSend} className={dark}>
             {sending ? "Sending…" : r.kind === "upload" ? "Send it" : "Answer"}
@@ -151,7 +167,7 @@ export function RequestList({ queue, today, listName, onOpen }: {
                 className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3 text-left hover:bg-background ${i ? "border-t" : ""}`}>
                 <span className="min-w-0">
                   <b className="block break-words text-[17px] font-semibold">{r.ask}</b>
-                  {list && <span className="block text-[16px] text-muted">{list}</span>}
+                  <span className="block text-[16px] text-muted [overflow-wrap:anywhere]">{[r.taskTitle.trim(), list].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className={`whitespace-nowrap text-[16px] ${d ? `${TONE[d.tone]} ${d.tone === "plain" ? "" : "font-bold"}` : "text-muted"}`}>{d?.text ?? ""} <span aria-hidden className="text-muted">›</span></span>
               </button>

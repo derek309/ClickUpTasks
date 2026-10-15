@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  doneWord, expectedLine, firstAskedLine, groupedQueue, nextRequest, portalQueue, portalRequestFromTask, queuePosition, requestKind, rowDate, stateWord, thanksLine,
+  doneWord, expectedLine, portalEmail, firstAskedLine, groupedQueue, nextRequest, portalQueue, portalRequestFromTask, queuePosition, requestKind, rowDate, stateWord, thanksLine,
   type PortalRequest,
 } from "./portalRequests";
 import { orderRequests, type ClientRequest } from "./clientRequests";
@@ -77,7 +77,7 @@ describe("the words", () => {
     expect(doneWord("question")).toBe("Answered");
     expect(expectedLine("Newsletter", "2026-10-27")).toBe("Your newsletter is expected Oct 27.");
     expect(expectedLine("PPAI flyer", "2026-10-27")).toBe("PPAI flyer is expected Oct 27.");
-    expect(expectedLine("November classes", "2026-10-30")).toBe("November classes is expected Oct 30.");
+    expect(expectedLine("November classes", "2026-10-30")).toBe('We expect to finish "November classes" by Oct 30.');
     expect(expectedLine("your website", "2026-10-30")).toBe("Your website is expected Oct 30.");
     expect(expectedLine("The Fall Sale page", "2026-10-27")).toBe("The Fall Sale page is expected Oct 27.");
     expect(expectedLine("Newsletter", null)).toBeNull();
@@ -98,7 +98,7 @@ describe("a task's request", () => {
     const t = task([step({ id: "s0", title: "Write it", done: true }), step({ id: "s1", title: "Brian: approve the PPAI flyer", finishWhen: "reply", stage: "waiting", due: "2026-10-16", startedAt: "2026-10-15T15:00:00.000Z", clientOrder: 2 })]);
     expect(portalRequestFromTask(t, { firstName: "Brian", reviewOpen: true })).toEqual({
       key: "s1", taskId: "t1", stepId: "s1", ask: "Approve the PPAI flyer", listId: "p1", needBy: "2026-10-16", startedAt: "2026-10-15T15:00:00.000Z",
-      clientOrder: 2, taskTitle: "Newsletter", taskDue: "2026-10-27", kind: "review",
+      clientOrder: 2, taskTitle: "Newsletter", taskDue: "2026-10-27", kind: "review", replyTo: null,
     });
   });
   it("is an upload when it asks for files, a question otherwise", () => {
@@ -111,9 +111,46 @@ describe("a task's request", () => {
   });
   it("is the task itself when it waits on them with no client step, and nothing when it doesn't", () => {
     const legacy = portalRequestFromTask(task([step({ title: "Our step" })], { waitingOnClient: true }), { firstName: "Brian", reviewOpen: false });
-    expect(legacy).toMatchObject({ key: "t1", stepId: null, ask: "Newsletter", needBy: "2026-10-27", taskDue: null });
+    expect(legacy).toMatchObject({ key: "t1", stepId: null, ask: "Your answer on Newsletter", needBy: "2026-10-27", taskDue: null });
     expect(portalRequestFromTask(task([step({ title: "Our step" })]), { firstName: "Brian", reviewOpen: false })).toBeNull();
     expect(portalRequestFromTask(task([step({ finishWhen: "reply" })], { status: "done" }), { firstName: "Brian", reviewOpen: false })).toBeNull();
     expect(portalRequestFromTask(task([step({ finishWhen: "reply" })], { status: "on_hold" }), { firstName: "Brian", reviewOpen: false })).toBeNull();
+  });
+});
+
+describe("what the portal asks: the step, never the task's name", () => {
+  // Carol's task as it stood on 2026-10-15: our email went, and the check in waits on her reply.
+  const carol = (more: Partial<Subtask> = {}): Subtask[] => [
+    { id: "s_tell", title: "Let Carol know the changes are done", done: true, holds: ["mail:msg_tell"], addedFor: "tell:s_x" } as Subtask,
+    { id: "s_check", title: "Check in if Carol Lindenmuth hasn't replied", done: false, stage: "waiting", addedFor: "checkin:s_tell", due: "2026-10-16", finishWhen: "reply", startedAt: "2026-10-15T13:50:29.310Z", ...more } as Subtask,
+    { id: "s_live", title: "Go live", done: false } as Subtask,
+  ];
+  const task = (subtasks: Subtask[]) => ({ id: "t_carol", title: "Website Upgrade 2026", clientId: "cl_carol", projectId: "p_web", due: null, status: "waiting", waitingOnClient: false, subtasks });
+  const email = { subject: "Your site changes are done", preview: "Done, as you asked: the town list is gone from the search box." };
+
+  it("a reply wait is a reply to our email, with the email under it", () => {
+    const r = portalRequestFromTask(task(carol()), { firstName: "Carol", reviewOpen: false, emails: { msg_tell: email } })!;
+    expect(r.ask).toBe("Reply to: Your site changes are done");
+    expect(r.replyTo).toEqual(email);
+    expect(r.kind).toBe("question");
+    expect(r.taskTitle).toBe("Website Upgrade 2026");
+  });
+  it("without the email, the step that sent it names it", () => {
+    const r = portalRequestFromTask(task(carol()), { firstName: "Carol", reviewOpen: false })!;
+    expect(r.ask).toBe("Reply to: Let Carol know the changes are done");
+    expect(r.replyTo).toBeNull();
+  });
+  it("a step written about them asks them", () => {
+    const steps = [{ id: "s1", title: "Carol signs off on the site and sends her pet care details", done: false, finishWhen: "reply", due: "2026-10-16" } as Subtask];
+    expect(portalRequestFromTask(task(steps), { firstName: "Carol", reviewOpen: false })!.ask).toBe("Sign off on the site and send your pet care details");
+  });
+  it("never the bare task name", () => {
+    const steps = [{ id: "s1", title: "Wait for Carol's reply", done: false, onClient: true, due: "2026-10-16" } as Subtask];
+    expect(portalRequestFromTask(task(steps), { firstName: "Carol", reviewOpen: false })!.ask).toBe("Your answer on Website Upgrade 2026");
+  });
+  it("our email reads past the greeting, short", () => {
+    expect(portalEmail("Re: Your site changes are done", "Hi Carol,\nDone, as you asked:\nThe town list is gone.")).toEqual({ subject: "Your site changes are done", preview: "Done, as you asked: The town list is gone." });
+    expect(portalEmail("", "Hi")).toBeNull();
+    expect(portalEmail("S", "x ".repeat(200))!.preview.length).toBeLessThanOrEqual(220);
   });
 });

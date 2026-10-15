@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { businessDayBefore, clientStepReminderDue, stepAsk, stepReminderTurn, teammateStepReminderDue, weekdayOnOrBefore } from "./stepReminders";
+import { businessDayBefore, clientStepReminderDue, replyWaitSource, stepAsk, stepAskWords, toTheirAsk, stepReminderTurn, teammateStepReminderDue, weekdayOnOrBefore } from "./stepReminders";
 import { stepReminderEmail } from "./portalReminders";
 
 // Thu Oct 15 2026, Fri 16, Sat 17, Sun 18, Mon 19, Tue 20, Wed 21.
@@ -62,7 +62,7 @@ describe("whose step reminder and what it asks", () => {
   });
   it("asks in the client's words", () => {
     expect(stepAsk({ title: "Wait for Pam's class times" }, "Pam", "Facebook ad")).toBe("your class times");
-    expect(stepAsk({ title: "Wait for Pam's reply" }, "Pam", "Facebook ad")).toBe("Facebook ad");
+    expect(stepAsk({ title: "Wait for Pam's reply" }, "Pam", "Facebook ad")).toBe("your answer on Facebook ad");
     expect(stepAsk({ title: "Ask Pam: the logo files" }, "Pam", "Website")).toBe("the logo files");
     expect(stepAsk({ title: "Wait", notes: "<p>The exact class dates and times.</p><p>More</p>" }, "Pam", "Ad")).toBe("The exact class dates and times");
   });
@@ -75,5 +75,38 @@ describe("whose step reminder and what it asks", () => {
     expect(e.body).toContain("Please answer there rather than replying to this email.");
     expect(e.body).not.toMatch(/thing/);
     expect(e.subject + e.body).not.toMatch(/ - | – | — /);
+  });
+});
+
+describe("the ask is the step, never the task (Derek, 2026-10-15)", () => {
+  const steps = [
+    { id: "s_tell", title: "Let Carol know the changes are done", done: true, holds: ["mail:msg_tell"] },
+    { id: "s_check", title: "Check in if Carol Lindenmuth hasn't replied", done: false, addedFor: "checkin:s_tell", finishWhen: "reply" as const },
+  ];
+  it("a check in waits on the email its step sent", () => {
+    expect(replyWaitSource(steps[1], steps)).toEqual({ stepTitle: "Let Carol know the changes are done", messageId: "msg_tell" });
+    // A reply wait with no checkin: the nearest sent email before it.
+    expect(replyWaitSource({ id: "s_check", finishWhen: "reply" }, steps)).toEqual({ stepTitle: "Let Carol know the changes are done", messageId: "msg_tell" });
+    expect(replyWaitSource({ id: "s_x" }, steps)).toBeNull();
+  });
+  it("a reply wait asks for the reply to that email", () => {
+    expect(stepAskWords(steps[1], "Carol", "Website Upgrade 2026", { replyTo: "Your site changes are done" })).toEqual({
+      ask: "your reply to my email “Your site changes are done”", subject: "your reply to “Your site changes are done”", title: "Reply to: Your site changes are done",
+    });
+    expect(stepAsk(steps[1], "Carol", "Website Upgrade 2026", { replyTo: "Let Carol know the changes are done" })).toBe("your reply to my email “Let Carol know the changes are done”");
+    // Nothing better: never the bare task name.
+    expect(stepAsk(steps[1], "Carol", "Website Upgrade 2026")).toBe("your answer on Website Upgrade 2026");
+  });
+  it("a step written about them becomes an ask to them", () => {
+    expect(toTheirAsk("Carol signs off on the site and sends her pet care details", "Carol")).toBe("Sign off on the site and send your pet care details");
+    expect(toTheirAsk("Carol approves the flyer and sends his logo", "Carol")).toBe("Approve the flyer and send your logo");
+    expect(toTheirAsk("Carol Lindenmuth approves the menu", "Carol")).toBe("Approve the menu");
+    expect(toTheirAsk("Carol pushes the button and finishes their form", "Carol")).toBe("Push the button and finish your form");
+    // Not a verb in -s (a word in "ss", "is"), or not about them: as it was.
+    expect(toTheirAsk("Carol is away", "Carol")).toBe("Carol is away");
+    expect(toTheirAsk("Carol access codes", "Carol")).toBe("Carol access codes");
+    expect(toTheirAsk("The logo and photos", "Carol")).toBe("The logo and photos");
+    expect(toTheirAsk("Carol sends the logo and photos of the shop", "Carol")).toBe("Send the logo and photos of the shop");
+    expect(stepAsk({ title: "Carol signs off on the site and sends her pet care details" }, "Carol", "Website Upgrade 2026")).toBe("Sign off on the site and send your pet care details");
   });
 });
