@@ -10,6 +10,7 @@ import * as React from "react";
 import { type ChecklistChange } from "./checklistChange";
 import { type ConfirmSpec } from "./modals";
 import { newId } from "./ui";
+import { taskFromEmail } from "@/lib/emailToTask";
 import { PRIORITY_META, STATUS_META, todayIso, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, closeOpenSteps, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 import { queueEntry, queueExit, queuePromotions, queueSettings, type QPatch } from "../../../mcp/queue.mjs";
@@ -507,6 +508,22 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     pushToast(`"${sub.title}" is its own task now`, { label: "Open it", run: () => setOpenTaskId(made.id) });
   };
 
+  // Make it a task, from a client's email on a step (Derek, 2026-10-15): a
+  // new task for the same client and list, the email its step 1 (copied, it
+  // stays here too), linked both ways. The new task opens.
+  const emailToTask = (id: string, stepId: string) => {
+    const src = tasksRef.current.find((x) => x.id === id);
+    if (!src) return;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const made = taskFromEmail(src, stepId, me.id, new Date().toISOString(), newId, `${origin}/?task=${src.id}`);
+    if (!made) return;
+    setTasks((ts) => [...ts, made]);
+    upsertTask(made, me.id);
+    addComment(id, `Made a new task from this email: "${made.title}" ${origin}/?task=${made.id}`);
+    setOpenTaskId(made.id);
+    pushToast(`"${made.title}" is its own task now`, { label: "Back", run: () => setOpenTaskId(id) });
+  };
+
   const deleteTask = (id: string) => {
     setConfirmDialog({
       title: "Delete this task?", message: "Moves to Trash — restorable there for 30 days.", confirmLabel: "Delete",
@@ -547,5 +564,5 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
       notify(t.assigneeId, `${me.name} commented on “${t.title}”`, id, { kind: "message" });
     }
   };
-  return { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask, applyQueuePatches };
+  return { patchTask, clearNeedsYou, update, clearSelection, finishHandoffInstead, toggleTaskSelection, bulkPatch, bulkDelete, deleteTask, addComment, duplicateTask, deleteComment, stepToTask, emailToTask, applyQueuePatches };
 }
