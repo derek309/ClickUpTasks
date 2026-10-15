@@ -158,9 +158,10 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
               if (whatsNext && !typed && suggestion && onAcceptSuggestion) onAcceptSuggestion();
               e.currentTarget.blur();
             }}
-            className="-mx-1 min-w-0 rounded-[5px] bg-transparent px-1 py-0.5 text-[17px] font-bold outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
+            className="-mx-1 min-w-0 rounded-[5px] bg-transparent px-1 py-0.5 text-[20px] font-bold leading-snug outline-none placeholder:font-semibold placeholder:text-muted hover:bg-background focus:bg-background" />
         ) : showName && (
-          <div className="text-[17px] font-bold leading-snug [overflow-wrap:anywhere]">
+          // Bigger than the lines under it, so the step reads first (Derek, 2026-10-15).
+          <div className="text-[20px] font-bold leading-snug [overflow-wrap:anywhere]">
             <span className="mr-1.5 tabular-nums text-muted">{number}.</span>{sub.title}
           </div>
         )}
