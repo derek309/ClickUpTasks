@@ -8,7 +8,8 @@
 import { stepsOnClientEmail } from "./stepsServer";
 import { emailMessageKey } from "./emailFiles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { titleCase, todayPacific } from "@/lib/data";
+import { clientEmailText, titleCase, todayPacific } from "@/lib/data";
+import { requestStepForReply } from "@/lib/clientRequestsServer";
 import { SAFE_CONTACT_ID, closeAnsweredReplyTask, isClosedReplyTask } from "@/lib/ghlConversationTask";
 import { sendGmailAs, googleConfigured } from "@/lib/googleMail";
 import { APP_URL } from "@/lib/appUrl";
@@ -352,11 +353,21 @@ export async function ingestInboundMessage(opts: {
   if (taskId) await supabaseAdmin.from("tasks").update({ due: todayPacific(), updated_by: null }).eq("id", taskId);
   else if (raiseReplyTasks()) taskId = await upsertConversationTask(contact, opts.ghlContactId ?? null);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
+  // A reply in the thread of a request reminder answers that one step
+  // (Derek and Justin, 2026-10-15): it finishes, and a "check it" step holding
+  // this email starts after it (lib/clientRequests). Otherwise every wait on
+  // their reply finishes, as before.
+  const fileKey = emailMessageKey({ id: messageId, rfc822_message_id: opts.rfc822, gmail_message_id: opts.gmailMessageId });
+  const asked = channel === "email" && taskId ? await requestStepForReply(contact.id, opts.gmailThreadId).catch(() => null) : null;
+  const match = asked && (!asked.taskId || asked.taskId === taskId)
+    ? { stepId: asked.stepId, email: { messageId, from: (opts.fromName || contact.name || "").trim(), subject: (subject ?? "").trim(), body: clientEmailText(body ?? "", opts.fromName || contact.name).slice(0, 6000), at: opts.at ?? new Date().toISOString(), fileKey } }
+    : null;
   // Whatever they sent lands on the task too (Derek, 2026-10-09).
-  await clientAnsweredOnTask(taskId, "reply");
+  await clientAnsweredOnTask(taskId, "reply", match);
   // A client's email is work to answer: a "Reply to …" step on a task with
   // steps (Derek, 2026-10-12), after the reply above finished any check-in.
-  if (channel === "email" && taskId) await stepsOnClientEmail(taskId, { id: messageId, subject: subject ?? null, body, at: opts.at ?? new Date().toISOString(), from: opts.fromName || contact.name, fileKey: emailMessageKey({ id: messageId, rfc822_message_id: opts.rfc822, gmail_message_id: opts.gmailMessageId }) }).catch(() => false);
+  // An email already on a "check it" step makes no second step (addReplyStep).
+  if (channel === "email" && taskId) await stepsOnClientEmail(taskId, { id: messageId, subject: subject ?? null, body, at: opts.at ?? new Date().toISOString(), from: opts.fromName || contact.name, fileKey }).catch(() => false);
   // With reply tasks off, a message on no task is news only in the Inbox:
   // no bell and no email about it.
   if (!taskId && !raiseReplyTasks()) return true;

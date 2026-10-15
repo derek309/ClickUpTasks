@@ -9,8 +9,9 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
-  todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type StepTodo, type Subtask, type TaskStatus,
+  todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type ReceivedEmail, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
+import { finishRequestStep } from "./clientRequests";
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
 import { promoteQueueForTask } from "./queueServer";
@@ -146,12 +147,24 @@ export async function stepsOnReviewApproved(taskId: string, kind: ReviewKindKey,
 
 /** The client wrote back: a current step waiting on their reply ("Check in
  *  if they haven't replied") is done. */
-export async function stepsOnClientReply(taskId: string): Promise<boolean> {
+export async function stepsOnClientReply(taskId: string, match?: { stepId: string; email: ReceivedEmail } | null): Promise<boolean> {
   // Their reply ends the wait on them: the task stops waiting and its status
   // follows the step that starts, as tickStep does.
   let status: TaskStatus | null = null;
   return rewriteSteps(taskId, (row, first) => {
     const list = row.subtasks ?? [];
+    // An emailed reply to a request reminder (Derek and Justin, 2026-10-15):
+    // only the step it answers is done, and "<first> replied: check it", ours,
+    // holding their email, starts after it (lib/clientRequests). Their other
+    // waits stay open, and nothing more is asked of them until it is ticked.
+    if (match) {
+      const made = finishRequestStep(list, match.stepId, { first, email: match.email, now: new Date().toISOString(), today: todayPacific(), makeId: () => newId("s_") });
+      if (made) {
+        const next = planSteps(made).find((x) => !x.done);
+        status = statusForStep(row.status, next ? stepStage(next, row.assignee_id) : "in_progress");
+        return made;
+      }
+    }
     // Any open step waiting on their reply, current or not: a changes step
     // their answer just made can sit in front of it.
     // Only a wait that has begun (or is the current step): a reply step later

@@ -29,10 +29,10 @@ describe("After this", () => {
     expect(list.map((x) => x.id)).toEqual(["a", "n1", "z"]);
     expect(list[1]).toMatchObject({ title: "Wait for Pam", done: false, finishWhen: "reply" });
   });
-  it("suggests waiting for the client's reply after an email to them, two business days out", () => {
-    // Thursday Oct 15: the check in is Monday Oct 19.
+  it("suggests waiting for the client's reply after an email to them, need by three business days out", () => {
+    // Thursday Oct 15: the need by date is Tuesday Oct 20.
     expect(suggestedAfter(step({ id: "a", title: "Reply to Pamela: class times", fromEmails: [{ messageId: "m", from: "Pam", subject: "x", body: "", at: NOW }] }), "Pamela", "2026-10-15"))
-      .toEqual({ title: "Wait for Pamela's reply", finishWhen: "reply", stage: "waiting", due: "2026-10-19" });
+      .toEqual({ title: "Wait for Pamela's reply", finishWhen: "reply", stage: "waiting", due: "2026-10-20" });
     expect(suggestedAfter(step({ id: "a", title: "Email Pamela" }), "Pamela", "2026-10-15")?.title).toBe("Wait for Pamela's reply");
     expect(suggestedAfter(step({ id: "a", title: "Design the page" }), "Pamela", "2026-10-15")).toBeNull();
     expect(suggestedAfter(step({ id: "a", title: "Email Pamela", assigneeId: CLAUDE_ID }), "Pamela", "2026-10-15")).toBeNull();
@@ -53,6 +53,11 @@ describe("After this", () => {
     expect(patchForWho({ remind: { every: 2 }, due: "2026-10-19" }, CLAUDE_ID, o)).toMatchObject({ assigneeId: CLAUDE_ID, due: undefined, remind: undefined });
     expect(patchForWho({ remind: { at: "morning" } }, "u_justin", o)).not.toHaveProperty("remind");
     expect(patchForWho({ remind: { at: "morning" } }, "u_derek", o)).toMatchObject({ remind: undefined });
+    // The client's turn: a need by date 3 business days out when it has none, kept when it has one; Off stays off.
+    expect(patchForWho({}, "client", { ...o, today: "2026-10-15" })).toMatchObject({ due: "2026-10-20" });
+    expect(patchForWho({ due: "2026-10-30" }, "client", { ...o, today: "2026-10-15" })).not.toHaveProperty("due");
+    expect(patchForWho({ remind: { off: true } }, "client", o)).not.toHaveProperty("remind");
+    expect(remindWord({ off: true }, "Pamela")).toBe("reminders off");
   });
   it("a reminder only for someone else's turn, and how it reads", () => {
     const o = { ownerId: "u_derek", meId: "u_derek" };

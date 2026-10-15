@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/serverAuth";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
-import { resolveContact, sendScheduledMessageNow } from "@/lib/sendMessageServer";
+import { resolveContact } from "@/lib/sendMessageServer";
+import { sendReviewedReminder } from "@/lib/clientRequestsServer";
 import { PORTAL_REMINDER_PREFIX, REVIEW_STATUS } from "@/lib/portalReminders";
 import { buildPortalReminder } from "@/lib/portalReminderServer";
 
@@ -77,23 +78,10 @@ export async function POST(req: NextRequest) {
     return data?.length ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
   }
   if (b.action === "send") {
-    // Claimed first, so two people pressing Send at once send it once.
-    const { data: claimed } = await supabaseAdmin.from("scheduled_messages").update({ status: "sending" }).eq("id", b.id).eq("status", REVIEW_STATUS).select(COLS);
-    const row = (claimed ?? [])[0] as any;
-    if (!row) return NextResponse.json({ error: "It was already sent or dropped." }, { status: 409 });
-    const result = await sendScheduledMessageNow({
-      id: row.id, clientId: row.client_id, taskId: row.task_id, channel: row.channel,
-      subject: row.subject, body: row.body ?? "", cc: row.cc ?? [], bcc: row.bcc ?? [],
-      fromEmail: row.from_email, attachments: row.attachments ?? [], createdBy: row.created_by,
-      replyToMessageId: row.reply_to_message_id,
-    });
-    if (!result.ok) {
-      // Back to waiting, so it can be fixed and sent again.
-      await supabaseAdmin.from("scheduled_messages").update({ status: REVIEW_STATUS, error: result.error }).eq("id", row.id);
-      return NextResponse.json({ error: result.error }, { status: 502 });
-    }
-    await supabaseAdmin.from("scheduled_messages").update({ status: "sent", sent_message_id: result.messageId, scheduled_at: new Date().toISOString() }).eq("id", row.id);
-    return NextResponse.json({ ok: true });
+    // The same send as Approve in Reminders: claimed first, in the sender's
+    // name, a request reminder in its step's thread (lib/clientRequestsServer).
+    const r = await sendReviewedReminder(b.id);
+    return r.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: r.error }, { status: r.status });
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }

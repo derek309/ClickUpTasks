@@ -4,6 +4,8 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { sendScheduledMessageNow } from "@/lib/sendMessageServer";
 import { MAX_REMINDERS, REMINDER_MESSAGE_PREFIX } from "@/lib/reviewReminders";
+import { runClientRequests, threadRequestRow } from "@/lib/clientRequestsServer";
+import { isFollowOnHour } from "@/lib/clientRequests";
 
 // Fires due scheduled sends (supabase/scheduled-messages.sql). Runs for
 // Vercel's cron or an admin session, see cronAuth.ts.
@@ -63,6 +65,14 @@ async function run(req: NextRequest) {
     .select("client_id, task_id, channel, created_by");
   for (const row of stuck ?? []) await tellAuthor(row, "stopped partway through sending. Check the client's messages before sending it again.");
 
+  // Through the working day, a client's new request (or the next one, about
+  // 10 minutes after they answered) is asked without waiting for 8 AM
+  // tomorrow; queued for review like the rest (lib/clientRequestsServer).
+  let followOn: unknown = null;
+  if (isFollowOnHour(Date.now())) {
+    followOn = await runClientRequests({ dry: false, mode: "follow-on" }).then((r) => r.tally, (e) => ({ error: e instanceof Error ? e.message : String(e) }));
+  }
+
   const { data: due, error } = await supabaseAdmin
     .from("scheduled_messages")
     .select("id, client_id, task_id, channel, subject, body, cc, bcc, from_email, attachments, created_by, reply_to_message_id, attempts")
@@ -80,11 +90,13 @@ async function run(req: NextRequest) {
       .from("scheduled_messages").update({ status: "sending" })
       .eq("id", row.id).eq("status", "pending").select("id");
     if (!claimed?.length) continue;
+    // A request reminder answers the first one sent for its step (one thread).
+    const thread = await threadRequestRow(row);
     const result = await sendScheduledMessageNow({
       id: row.id, clientId: row.client_id, taskId: row.task_id, channel: row.channel,
-      subject: row.subject, body: row.body ?? "", cc: row.cc ?? [], bcc: row.bcc ?? [],
+      subject: thread.subject, body: row.body ?? "", cc: row.cc ?? [], bcc: row.bcc ?? [],
       fromEmail: row.from_email, attachments: row.attachments ?? [], createdBy: row.created_by,
-      replyToMessageId: row.reply_to_message_id,
+      replyToMessageId: thread.replyTo,
     });
     if (result.ok) {
       sent++;
@@ -104,5 +116,5 @@ async function run(req: NextRequest) {
       if (tryAgain) { retried++; } else { failed++; await tellAuthor(row, `didn't send: ${result.error}${reminderNote}`); }
     }
   }
-  return NextResponse.json({ ok: true, sent, failed, retried, stuck: stuck?.length ?? 0, checked: (due ?? []).length });
+  return NextResponse.json({ ok: true, sent, failed, retried, stuck: stuck?.length ?? 0, checked: (due ?? []).length, ...(followOn ? { requests: followOn } : {}) });
 }

@@ -78,6 +78,23 @@ describe("steps added on the server", () => {
     expect(steps()[0]).toMatchObject({ done: true, outcome: "Brian replied" });
   });
 
+  it("an emailed reply to a request reminder finishes only that step and starts check it with their email", async () => {
+    setup([
+      { id: "w1", title: "Wait for Brian's flyer approval", done: false, finishWhen: "reply", stage: "waiting", startedAt: "2026-10-10T00:00:00Z" },
+      { id: "w2", title: "Wait for Brian's logo", done: false, finishWhen: "reply", startedAt: "2026-10-10T00:00:00Z" },
+    ]);
+    Object.assign(db.tasks[0], { status: "waiting", waiting_on_client: true });
+    const email = { messageId: "msg_9", from: "Brian", subject: "Re: flyer", body: "Approved", at: "2026-10-20T18:00:00Z", fileKey: "k9" };
+    expect(await stepsOnClientReply("t1", { stepId: "w1", email })).toBe(true);
+    expect(steps().map((s) => [s.title, s.done])).toEqual([["Wait for Brian's flyer approval", true], ["Brian replied: check it", false], ["Wait for Brian's logo", false]]);
+    expect(steps()[1]).toMatchObject({ addedFor: "checkit:w1", fromEmails: [email] });
+    expect(db.tasks[0]).toMatchObject({ waiting_on_client: false, status: "in_progress" });
+    // No step to match: every started wait finishes, as before.
+    setup([{ id: "w1", title: "Wait", done: false, finishWhen: "reply", startedAt: "x" }, { id: "w2", title: "Wait 2", done: false, finishWhen: "reply", startedAt: "x" }]);
+    expect(await stepsOnClientReply("t1", { stepId: "gone", email })).toBe(true);
+    expect(steps().filter((s) => s.done).map((s) => s.id)).toEqual(["w1", "w2"]);
+  });
+
   it("a reply leaves a reply step that never started", async () => {
     setup([{ id: "a", title: "Make the ads", done: false, startedAt: "2026-10-10T00:00:00Z" }, { id: "r", title: "Review Ads", done: false, finishWhen: "reply" }]);
     expect(await stepsOnClientReply("t1")).toBe(false);

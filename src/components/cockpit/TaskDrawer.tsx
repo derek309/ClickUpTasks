@@ -3806,9 +3806,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onWho={(key) => {
           const n = curNext();
           if (!n) return;
-          const p = patchForWho(n, key, { ownerId: task.assigneeId ?? null, meId: meId ?? null });
-          // The client's turn needs a check in: two business days out.
-          patchNext(key === "client" && !n.due ? { ...p, due: addBusinessDaysIso(TODAY, 2) } : p);
+          // The client's turn gets a need by date 3 business days out when it has none.
+          patchNext(patchForWho(n, key, { ownerId: task.assigneeId ?? null, meId: meId ?? null, today: TODAY }));
         }}
         onDue={(v) => patchNext({ due: v })}
         onAction={(a) => patchNext(patchForAction(a))}

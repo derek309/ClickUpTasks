@@ -1000,10 +1000,20 @@ export interface Subtask {
    *  the morning it is due. Sent by the 8 AM job (lib/stepReminders); it
    *  never sets a follow up. */
   remind?: StepRemind;
+  /** On a client's step: where it sits in "What we need from <client>"
+   *  within its date group, set by dragging there (Derek and Justin,
+   *  2026-10-15, lib/clientRequests). Lower comes first; none goes last. */
+  clientOrder?: number;
+  /** On a client's step that is late: the task's due date before the late
+   *  step first moved it, so each day's move counts from there and never
+   *  piles up (lib/clientRequests expectedMove). */
+  expectedFrom?: string;
 }
 
-/** See Subtask.remind. */
-export type StepRemind = { every: "once" | 2 | 3 | 5 } | { at: "day_before" | "morning" };
+/** See Subtask.remind. A client's step with a need by date reminds by
+ *  default (lib/clientRequests): { off: true } is the one way to stop it;
+ *  "once" and every N are the older explicit choices, still honoured. */
+export type StepRemind = { every: "once" | 2 | 3 | 5 } | { at: "day_before" | "morning" } | { off: true };
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
   /** On a client's to-do: when it was written onto the step (see Subtask.at). */

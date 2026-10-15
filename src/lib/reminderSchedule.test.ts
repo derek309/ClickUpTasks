@@ -5,9 +5,10 @@ import { isReminderDay, reminderLine, reminderQueueStatus, reminderSettings } fr
 const MON = "2026-10-12", TUE = "2026-10-13", WED = "2026-10-14", THU = "2026-10-15", FRI = "2026-10-16", SAT = "2026-10-17", SUN = "2026-10-18", NEXT_MON = "2026-10-19", NEXT_TUE = "2026-10-20";
 
 describe("which day a client is reminded", () => {
-  it("is Mondays when nothing is chosen", () => {
-    expect(isReminderDay(null, MON, null)).toBe(true);
-    expect(isReminderDay(null, TUE, null)).toBe(false);
+  it("is off when nothing is chosen (since 2026-10-15), Mondays when Mondays are chosen", () => {
+    expect(isReminderDay(null, MON, null)).toBe(false);
+    expect(isReminderDay({ schedule: "monday", auto: false }, MON, null)).toBe(true);
+    expect(isReminderDay({ schedule: "monday", auto: false }, TUE, null)).toBe(false);
     expect(isReminderDay(undefined, FRI, null)).toBe(false);
     expect(isReminderDay({ schedule: "monday", auto: false }, NEXT_MON, MON)).toBe(true);
   });
@@ -49,20 +50,24 @@ describe("which day a client is reminded", () => {
 
 describe("how it goes and what the card says", () => {
   it("auto sends on its own, otherwise waits for review", () => {
-    expect(reminderQueueStatus({ schedule: "monday", auto: true }, "review")).toBe("pending");
+    expect(reminderQueueStatus({ schedule: "monday", auto: true }, "review", false)).toBe("pending");
+    // Everything waits for review while REMINDERS_REVIEW_ALL is on.
+    expect(reminderQueueStatus({ schedule: "monday", auto: true }, "review")).toBe("review");
     expect(reminderQueueStatus({ schedule: "monday", auto: false }, "review")).toBe("review");
     expect(reminderQueueStatus(null, "review")).toBe("review");
   });
   it("reads saved settings safely", () => {
-    expect(reminderSettings(null)).toEqual({ schedule: "monday", auto: false });
+    expect(reminderSettings(null)).toEqual({ schedule: "off", auto: false });
     expect(reminderSettings({ schedule: "every", every: 40, auto: "yes" })).toEqual({ schedule: "every", every: 3, auto: false });
     expect(reminderSettings({ schedule: "days", days: [5, 1, 1, 9], auto: true })).toEqual({ schedule: "days", days: [1, 5], auto: true });
     expect(reminderSettings({ schedule: "days", days: [1], auto: false })).toEqual({ schedule: "monday", auto: false });
     expect(reminderSettings({ schedule: "weekly" }).schedule).toBe("monday");
   });
   it("says when and how in one line", () => {
-    expect(reminderLine(null)).toBe("Reminds Mondays · for review");
-    expect(reminderLine({ schedule: "every", every: 3, auto: true })).toBe("Reminds every 3 business days · sends itself");
+    expect(reminderLine(null)).toBe("Reminders off");
+    expect(reminderLine({ schedule: "monday", auto: false })).toBe("Reminds Mondays · for review");
+    // Sends itself only once REMINDERS_REVIEW_ALL is turned off.
+    expect(reminderLine({ schedule: "every", every: 3, auto: true })).toBe("Reminds every 3 business days · for review");
     expect(reminderLine({ schedule: "days", days: [1, 3, 5], auto: false })).toBe("Reminds Mondays, Wednesdays and Fridays · for review");
     expect(reminderLine({ schedule: "off", auto: true })).toBe("Reminders off");
   });

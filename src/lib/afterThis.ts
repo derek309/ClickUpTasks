@@ -25,6 +25,11 @@ export const afterThisFilled = (s: Pick<Subtask, "title" | "done" | "addedFor"> 
  *  is empty: filled, the next step simply starts (Derek, 2026-10-15). */
 export const finishOpensWhatsNext = (subtasks: Subtask[], doneId: string): boolean => !afterThisFilled(afterThisOf(subtasks, doneId));
 
+/** Business days from the day a step becomes the client's turn to its need
+ *  by date, when nobody picked one (Derek and Justin, 2026-10-15). */
+export const NEED_BY_BUSINESS_DAYS = 3;
+export const defaultNeedBy = (today: string): string => addBusinessDaysIso(today, NEED_BY_BUSINESS_DAYS);
+
 /** A wait on the client: the client's turn. */
 export const isClientWait = (s: Pick<Subtask, "onClient" | "finishWhen" | "stage">): boolean =>
   !!s.onClient || s.finishWhen === "reply" || s.stage === "waiting";
@@ -39,10 +44,13 @@ export function afterThisWho(s: Pick<Subtask, "onClient" | "finishWhen" | "stage
  *  is a wait that ends on their reply (its date the check in); Claude's has no
  *  date (always today when it starts) and no reminder; a person's keeps its
  *  date. A reminder that no longer fits the turn comes off. */
-export function patchForWho(s: Partial<Subtask>, who: string | null, o: { ownerId: string | null; meId: string | null }): Partial<Subtask> {
-  const clientRemind = !!s.remind && "every" in s.remind;
+export function patchForWho(s: Partial<Subtask>, who: string | null, o: { ownerId: string | null; meId: string | null; today?: string }): Partial<Subtask> {
+  const clientRemind = !!s.remind && ("every" in s.remind || "off" in s.remind);
   const teamRemind = !!s.remind && "at" in s.remind;
-  if (who === "client") return { finishWhen: "reply", stage: "waiting", assigneeId: undefined, makes: undefined, draftMessage: undefined, ...(clientRemind ? {} : { remind: undefined }) };
+  // The client's turn gets a need by date 3 business days out when it has
+  // none (Derek and Justin, 2026-10-15), and with it reminders on by default.
+  if (who === "client") return { finishWhen: "reply", stage: "waiting", assigneeId: undefined, makes: undefined, draftMessage: undefined, ...(clientRemind ? {} : { remind: undefined }),
+    ...(!s.due && o.today ? { due: defaultNeedBy(o.today) } : {}) };
   const base: Partial<Subtask> = { finishWhen: undefined, stage: undefined, assigneeId: who ?? undefined };
   if (who === CLAUDE_ID) return { ...base, due: undefined, remind: undefined };
   const mine = !who || who === o.meId || (who === o.ownerId && !o.meId);
@@ -81,6 +89,7 @@ export function remindKind(who: string | null, o: { ownerId: string | null; meId
  *  before", "remind Justin the morning it's due". `checkIn` is the check in
  *  date as words. */
 export function remindWord(r: StepRemind, name: string, checkIn?: string | null): string {
+  if ("off" in r) return "reminders off";
   if ("every" in r) return r.every === "once" ? (checkIn ? `email ${name} on ${checkIn}` : `email ${name} at check in`) : `remind ${name} every ${r.every} days`;
   return r.at === "day_before" ? `remind ${name} the day before` : `remind ${name} the morning it's due`;
 }
@@ -117,7 +126,7 @@ export function suggestedAfter(cur: Pick<Subtask, "title" | "done" | "onClient" 
   if (cur.done || cur.onClient || cur.finishWhen === "reply" || cur.assigneeId === CLAUDE_ID) return null;
   const talks = !!cur.fromEmails?.length || (cur.holds ?? []).includes("email") || TALKS.test(cur.title.trim());
   if (!talks) return null;
-  return { title: `Wait for ${firstName}'s reply`, finishWhen: "reply", stage: "waiting", due: addBusinessDaysIso(today, 2) };
+  return { title: `Wait for ${firstName}'s reply`, finishWhen: "reply", stage: "waiting", due: defaultNeedBy(today) };
 }
 
 /** Done's words with After this filled: what happens next (Derek, 2026-10-15):

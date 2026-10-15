@@ -8,11 +8,13 @@
 // whether or not anyone is watching.
 import { stepsOnClientReply } from "./stepsServer";
 import { supabaseAdmin } from "./supabaseAdmin";
-import { todayPacific } from "./data";
+import { todayPacific, type ReceivedEmail } from "./data";
 
 /** `what` is the watch the answer satisfies, as stored in
  *  task_actions.next_step_watch: "reply", or "approved:<kind>". */
-export async function clientAnsweredOnTask(taskId: string | null, what: string): Promise<void> {
+/** `match`: an emailed reply that answers one request reminder's step; only
+ *  that step finishes (stepsOnClientReply). */
+export async function clientAnsweredOnTask(taskId: string | null, what: string, match?: { stepId: string; email: ReceivedEmail } | null): Promise<void> {
   if (!taskId) return;
   // The open follow up is the newest step not yet ticked (data.ts openNextStep).
   const { data: steps } = await supabaseAdmin
@@ -30,5 +32,5 @@ export async function clientAnsweredOnTask(taskId: string | null, what: string):
   await supabaseAdmin.from("tasks").update({ follow_up_at: today, updated_by: null }).eq("id", taskId).gt("follow_up_at", today);
   // Any answer from them (a reply, an approval, sent changes) finishes a step
   // waiting on their reply ("Check in if they haven't replied").
-  await stepsOnClientReply(taskId).catch(() => false);
+  await stepsOnClientReply(taskId, match).catch(() => false);
 }

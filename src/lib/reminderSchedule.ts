@@ -2,8 +2,7 @@
 // 2026-10-14: "a remind every X business days or set custom, can you pick
 // days of the week ... then we can set by client"). Set on the client page's
 // waiting card (ClientNeeds), saved in clients.reminders
-// (supabase/client-reminders.sql). Nothing chosen is what it always was:
-// Mondays, written for review and sent by a person. Pure, so the 8 AM job
+// (supabase/client-reminders.sql). Nothing chosen is off since 2026-10-15. Pure, so the 8 AM job
 // and the card's line agree and the decision can be tested.
 
 import { addBusinessDaysIso } from "./data";
@@ -24,7 +23,15 @@ export type ClientReminders = {
   since?: string;
 };
 
-export const DEFAULT_REMINDERS: ClientReminders = { schedule: "monday", auto: false };
+/** Nothing chosen is off (Derek and Justin, 2026-10-15: the Monday counts
+ *  email to clients goes; the request reminders in lib/clientRequests chase
+ *  one thing at a time instead). A client's saved schedule still works. */
+export const DEFAULT_REMINDERS: ClientReminders = { schedule: "off", auto: false };
+
+/** Every reminder to a client waits for someone to approve it in Reminders,
+ *  whatever the client is set to (Derek, 2026-10-15: "nothing goes out
+ *  unseen"). false brings back clients.reminders.auto, "sends itself". */
+export const REMINDERS_REVIEW_ALL = true;
 /** The choices the card offers for "every"; any 2 to 10 saved still works. */
 export const EVERY_CHOICES = [2, 3, 5] as const;
 const DEFAULT_EVERY = 3;
@@ -81,7 +88,7 @@ export function isReminderDay(raw: unknown, today: string, lastReminder: string 
 
 /** Where the 8 AM job queues it: "pending" the 15 minute sender sends,
  *  `reviewStatus` waits for a person. */
-export const reminderQueueStatus = (raw: unknown, reviewStatus: string): string => (reminderSettings(raw).auto ? "pending" : reviewStatus);
+export const reminderQueueStatus = (raw: unknown, reviewStatus: string, reviewAll: boolean = REMINDERS_REVIEW_ALL): string => (!reviewAll && reminderSettings(raw).auto ? "pending" : reviewStatus);
 
 /** The card's line: "Reminds Mondays · for review", "Reminds every 3
  *  business days · sends itself", "Reminders off". */
@@ -91,7 +98,7 @@ export function reminderLine(raw: unknown): string {
   const when = s.schedule === "monday" ? "Mondays"
     : s.schedule === "every" ? `every ${s.every} business days`
     : listWords((s.days ?? []).map((d) => WEEKDAY_PLURAL[d - 1]));
-  return `Reminds ${when} · ${s.auto ? "sends itself" : "for review"}`;
+  return `Reminds ${when} · ${s.auto && !REMINDERS_REVIEW_ALL ? "sends itself" : "for review"}`;
 }
 
 const listWords = (xs: string[]) => xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
