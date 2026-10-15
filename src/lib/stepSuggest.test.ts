@@ -39,9 +39,9 @@ describe("suggestStepActions", () => {
     expect(labels("Edit the video")).toEqual(["Make the video"]);
     expect(labels("New images for the gallery")).toEqual(["Make the image"]);
   });
-  it("reads a page as the HTML review to build, and a checklist", () => {
-    expect(labels("Design the landing page")).toEqual(["Build the HTML review"]);
-    expect(labels("Update the website")).toEqual(["Build the HTML review"]);
+  it("reads a page as the page review to build, and a checklist", () => {
+    expect(labels("Design the landing page")).toEqual(["Build the page review"]);
+    expect(labels("Update the website")).toEqual(["Build the page review"]);
     expect(labels("Launch checklist")).toEqual(["Add a checklist"]);
   });
   it("suggests nothing new for a call, or for a name with no hint", () => {
@@ -53,14 +53,14 @@ describe("suggestStepActions", () => {
     expect(kinds("Check the context of the listing")).toEqual([]);
     expect(kinds("Copy the files over")).toEqual([]);
   });
-  it("reads a newsletter as the HTML review only, never an email to the client", () => {
-    expect(labels("Newsletter for October")).toEqual(["Build the HTML review"]);
-    expect(labels("Create newsletter")).toEqual(["Build the HTML review"]);
-    expect(labels("Send the October newsletter")).toEqual(["Build the HTML review"]);
+  it("reads a newsletter as the email review only, never an email to the client", () => {
+    expect(labels("Newsletter for October")).toEqual(["Build the email review"]);
+    expect(labels("Create newsletter")).toEqual(["Build the email review"]);
+    expect(labels("Send the October newsletter")).toEqual(["Build the email review"]);
   });
-  it("reads a blast or a campaign as the HTML review, never an email to the client, unless it is a text", () => {
-    expect(kinds("Spring blast")).toEqual(["page"]);
-    expect(kinds("Holiday campaign")).toEqual(["page"]);
+  it("reads a blast or a campaign as the email review, never an email to the client, unless it is a text", () => {
+    expect(kinds("Spring blast")).toEqual(["page:email"]);
+    expect(kinds("Holiday campaign")).toEqual(["page:email"]);
     expect(kinds("Text blast")).toEqual(["text"]);
   });
   it("reads a post, a blog and an article as a document", () => {
@@ -76,10 +76,10 @@ describe("suggestStepActions", () => {
     expect(labels("Facebook ads for spring")).toEqual(["Make the ad"]);
     expect(kinds("Add the address")).toEqual([]);
   });
-  it("reads a landing, a site and a website as the HTML review", () => {
-    expect(labels("Landing for the offer")).toEqual(["Build the HTML review"]);
-    expect(kinds("Fix the site")).toEqual(["page"]);
-    expect(kinds("New website")).toEqual(["page"]);
+  it("reads a landing, a site and a website as the page review", () => {
+    expect(labels("Landing for the offer")).toEqual(["Build the page review"]);
+    expect(kinds("Fix the site")).toEqual(["page:page"]);
+    expect(kinds("New website")).toEqual(["page:page"]);
   });
   it("reads a reel and a clip as that video", () => {
     expect(labels("Instagram reel")).toEqual(["Make the reel"]);
@@ -102,7 +102,7 @@ describe("suggestStepActions", () => {
 describe("a mass send is not an email to the client (Derek, 2026-10-14)", () => {
   const brian = (t: string) => suggestStepActions(t, "Brian").map((s) => s.label);
   it("campaign, blast, newsletter and bulk never suggest Email Brian", () => {
-    expect(brian("Schedule Campaign to bulk customers")).toEqual(["Build the HTML review"]);
+    expect(brian("Schedule Campaign to bulk customers")).toEqual(["Build the email review"]);
     expect(brian("Schedule email to bulk customers")).not.toContain("Email Brian");
     expect(brian("Send the newsletter")).not.toContain("Email Brian");
     expect(brian("Bulk customers blast")).not.toContain("Email Brian");

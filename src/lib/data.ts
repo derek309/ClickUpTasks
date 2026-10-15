@@ -929,6 +929,9 @@ export interface Subtask {
   /** Client work this step made: where it goes back to when it is taken off
    *  a later step (Derek, 2026-10-11). */
   madeHere?: string[];
+  /** The HTML review picked on this step is an Email review or a Page review
+   *  (htmlReview.ts): the review takes it when it is made from here. */
+  pageKind?: "email" | "page";
   /** The teammate who added this step to someone else's task: shown as
    *  theirs without handing the task to them. */
   addedBy?: string;
@@ -3690,6 +3693,9 @@ export function pickStepTitle(key: string, clientFirst: string): string | null {
   if (key === "email") return `Email ${clientFirst}`;
   if (key === "text") return `Text ${clientFirst}`;
   if (key === "chat") return `Chat with ${clientFirst}`;
+  // The HTML review's two kinds (htmlReview.ts PAGE_ACTIONS).
+  if (key === "page:email") return "Create Email Review";
+  if (key === "page:page") return "Create Page Review";
   return quickStepName(key as DeliverableKey);
 }
 

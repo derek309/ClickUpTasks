@@ -70,6 +70,7 @@ import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { TaskBrief } from "./TaskBrief";
 import { buildReviewEmail, greetingHtml, type ReviewEmailInput } from "@/lib/reviewEmail";
 import { type FileKind } from "@/lib/reviewKinds";
+import { isPageAction, pageKindFromName, pageKindLabel, pageKindOfAction, type PageKind } from "@/lib/htmlReview";
 import { QuickLinksBar } from "./ClientLinks";
 import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
@@ -813,17 +814,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [autoDone, setAutoDone] = useState<{ taskId: string; text: string } | null>(null);
   // The task's reviews and where they stand, for steps that wait on an
   // approval and for suggesting what comes next.
-  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number; clientViewedAt?: string | null }>> }>({ taskId: "", reviews: {} });
+  const [reviewStates, setReviewStates] = useState<{ taskId: string; reviews: Partial<Record<"doc" | "image" | "page" | "video", { id: string; title: string; status: string; approvedAt: string | null; version: number; clientViewedAt?: string | null; pageKind?: PageKind }>> }>({ taskId: "", reviews: {} });
   // Also when the task changes or logs something: approving or sending a
   // document does both, so its new status is read back at once.
   // A document reports its stage as it changes (TaskDocument onStage), so the
   // steps see a change made inside its window at once.
-  const reportStage = (k: "doc" | "image" | "page" | "video") => (d: { id: string; title: string; status: string; version: number; approvedAt: string | null; clientViewedAt?: string | null }) =>
+  const reportStage = (k: "doc" | "image" | "page" | "video") => (d: { id: string; title: string; status: string; version: number; approvedAt: string | null; clientViewedAt?: string | null; pageKind?: PageKind }) =>
     setReviewStates((p) => {
       if (p.taskId !== task.id) return p;
       const cur = p.reviews[k];
-      if (cur && cur.status === d.status && cur.version === d.version && cur.id === d.id) return p;
-      return { taskId: p.taskId, reviews: { ...p.reviews, [k]: { ...d, clientViewedAt: d.clientViewedAt ?? cur?.clientViewedAt ?? null } } };
+      if (cur && cur.status === d.status && cur.version === d.version && cur.id === d.id && (d.pageKind ?? cur.pageKind) === cur.pageKind && d.title === cur.title) return p;
+      return { taskId: p.taskId, reviews: { ...p.reviews, [k]: { ...d, clientViewedAt: d.clientViewedAt ?? cur?.clientViewedAt ?? null, pageKind: d.pageKind ?? cur?.pageKind } } };
     });
   const [docNonce, setDocNonce] = useState(0);
   // Every kind's deleted reviews in one "N deleted · Restore" (Derek, 2026-10-11).
@@ -1124,6 +1125,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Ticking asks what happens next right in the card.
   const stepDate = stepDateLabel(followUp);
   const reviews = reviewStates.taskId === task.id ? reviewStates.reviews : {};
+  // The task's HTML review is an Email review or a Page review (htmlReview.ts):
+  // its menus name it so, and offer the two kinds while there is none.
+  const pageKindNow: PageKind | null = reviews.page ? (reviews.page.pageKind ?? pageKindFromName(reviews.page.title)) : null;
   // A review's own files, as it stands now (Derek, 2026-10-14): an image
   // review's first picture for its card, and every file of the version to
   // download once approved. Read again when its version or stage changes.
@@ -1311,11 +1315,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const sub = taskRef.current.subtasks.find((x) => x.id === sid);
     const sg = sub ? suggestionFor(sub) : null;
     if (!sub || !sg) return;
-    const key = (["doc", "image", "page", "video", "email"] as string[]).includes(sg.kind ?? "") ? sg.kind as DeliverableKey : null;
+    // An Email review or a Page review is the HTML review with its kind kept on
+    // the step; a suggestion kept from before the two says "page", and its name decides.
+    const pageKind = pageKindOfAction(sg.kind) ?? (sg.kind === "page" ? pageKindFromName(sg.name) : null);
+    const kindKey = pageKind ? "page" : sg.kind ?? "";
+    const key = (["doc", "image", "page", "video", "email"] as string[]).includes(kindKey) ? kindKey as DeliverableKey : null;
     let list = taskRef.current.subtasks;
     if (key) {
       const made = !deliverablePresent(key);
-      list = holdOnStep(list, sid, key).map((x) => (x.id === sid && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
+      list = holdOnStep(list, sid, key).map((x) => (x.id === sid && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])], ...(pageKind ? { pageKind } : {}) } : x));
     }
     onPatch({ subtasks: answerWhatsNext(list, sid, sg.name) });
     if (key === "email" && !deliverablePresent("email")) setPendingStart("email");
@@ -1367,7 +1375,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       email: [`Email ${firstName}`, "Write an email on this step, to read and send."],
       text: [`Text ${firstName}`, "Write a text on this step, to read and send."],
       doc: ["Write a document", `A document on this step, for ${firstName} to review.`],
-      page: ["Build an HTML review", `An HTML page on this step, for ${firstName} to review.`],
+      "page:email": ["Build an email review", `An email on this step, for ${firstName} to review.`],
+      "page:page": ["Build a page review", `A web page on this step, for ${firstName} to review.`],
       // Meet now picked here turns this step into "Meet with <first>" (meetNow.ts withMeetNowSteps).
       meetnow: ["Start a meeting now", `A link to join, sent to ${firstName} now; this step becomes the meeting.`],
     };
@@ -2397,15 +2406,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // A quick step from the end of the Add step bar (Derek, 2026-10-11: "quick
   // step"): a new step named after the work, holding it (the one already made,
   // or a new one started).
-  const quickStep = (key: DeliverableKey) => {
+  const quickStep = (key: DeliverableKey, pageKind?: PageKind) => {
     const id = newId("s_");
-    const list = holdOnStep([...taskRef.current.subtasks, { id, title: quickStepName(key) ?? KIND_LABEL[key], done: false, ...(deliverablePresent(key) ? {} : { madeHere: [key] }), ...stepOwnerFields() }], id, key);
+    const kindOn = key === "page" && pageKind ? { pageKind } : {};
+    const title = (key === "page" && pageKind ? pickStepTitle(`page:${pageKind}`, firstName) : quickStepName(key)) ?? KIND_LABEL[key];
+    const list = holdOnStep([...taskRef.current.subtasks, { id, title, done: false, ...(deliverablePresent(key) ? {} : { madeHere: [key] }), ...kindOn, ...stepOwnerFields() }], id, key);
     if (asking) setAskNext(null);
     onPatch({ subtasks: list });
     // The step first, set up, the work shown on it; a tap on it opens the
     // editor (Derek, 2026-10-14: "set the step up first before we start
     // taking action").
-    openSetup(id, { preset: key });
+    openSetup(id, { preset: key === "page" ? `page:${pageKind ?? pageKindNow ?? "page"}` : key });
   };
   // Who a new step is on: whoever added it, when that is the task's owner (or
   // it has none). A teammate's step on someone else's task is noted as theirs
@@ -2672,10 +2683,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...(mayContactClient ? [{ key: "toclient", group: "handoff" as const, label: `Delegate to ${firstName} (client)`, disabled: false, note: "emails them what you need", onPick: clientStep }] : []),
     ...(noClient ? [] : [{ key: "followup", group: "handoff" as const, label: `Wait for ${firstName}'s reply`, disabled: false, onPick: followUpStep }]),
   ];
-  const MAKE_LABEL: Record<"doc" | "image" | "page" | "video", string> = { doc: "Document", image: "Image", page: "HTML review", video: "Video" };
-  const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : (["doc", "image", "page", "video"] as const).map((k) => ({
-    key: k, group: "make" as const, label: MAKE_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k),
-  }));
+  const MAKE_LABEL: Record<"doc" | "image" | "video", string> = { doc: "Document", image: "Image", video: "Video" };
+  // The HTML review as its two kinds, or the one it is once made.
+  const pageKindsOffered: PageKind[] = pageKindNow ? [pageKindNow] : ["email", "page"];
+  const quickStepOptions = (): QuickOption[] => !canHaveDocument ? [] : [
+    ...(["doc", "image"] as const).map((k) => ({ key: k, group: "make" as const, label: MAKE_LABEL[k], disabled: false, note: deliverablePresent(k) ? "made" : undefined, onPick: () => quickStep(k) })),
+    ...pageKindsOffered.map((pk) => ({ key: `page:${pk}`, group: "make" as const, label: pageKindLabel(pk), disabled: false, note: deliverablePresent("page") ? "made" : undefined, onPick: () => quickStep("page", pk) })),
+    { key: "video", group: "make" as const, label: MAKE_LABEL.video, disabled: false, note: deliverablePresent("video") ? "made" : undefined, onPick: () => quickStep("video") },
+  ];
   // ── + Add step (Derek, 2026-10-14): one flow for a new step, the same set
   // up as everywhere. The name is optional: an action picked with it empty
   // names the step as Quick step did ("Email Pam", "Create Document Review",
@@ -2692,6 +2707,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (key === "text") return `Text ${firstName}`;
     if (key === "chat") return `Chat with ${firstName}`;
     if (key === "doc" || key === "image" || key === "page" || key === "video") return quickStepName(key) ?? KIND_LABEL[key];
+    if (isPageAction(key)) return pickStepTitle(key, firstName) ?? KIND_LABEL.page;
     if (key === "checklist") return "Checklist";
     if (key === "followup") return `Follow up with ${firstName}`;
     if (key === "delegate") return "Hand off";
@@ -2725,6 +2741,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, step] });
     // The work goes on it, shown, not opened (a tap on it opens its editor).
     if (key === "doc" || key === "image" || key === "page" || key === "video") stepAddOptions(step).find((o) => o.key === key)?.onPick();
+    // An Email review or a Page review; once the task has its HTML review, the one it is.
+    if (isPageAction(key)) (stepAddOptions(step).find((o) => o.key === key) ?? stepAddOptions(step).find((o) => isPageAction(o.key)))?.onPick();
     applySetup(id, { who, when: a.when });
     if (key === "checklist" || key === "directions") setOpenStepPage({ taskId: task.id, id, full: false, [key]: true });
     // The new row comes into view, nothing else moves.
@@ -2738,7 +2756,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const options: SetupAction[] = [
       ...act("directions", "Directions"), ...act("checklist", "To dos"),
       ...act("email", `Email ${firstName}`, hasMessaging), ...act("text", `Text ${firstName}`, !!messageDest?.phone), ...act("chat", "Chat in the portal", hasMessaging),
-      ...(canHaveDocument ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
+      ...(canHaveDocument ? [...act("doc", "Document"), ...act("image", "Image"), ...pageKindsOffered.flatMap((pk) => act(`page:${pk}`, pageKindLabel(pk))), ...act("video", "Video")] : []),
     ];
     const more: SetupAction[] = [
       ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
@@ -3503,7 +3521,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // startReviewEmail so they never read it before it exists.
   const reviewBlock = (kind: FileKind, onCurrentStep = false) => !canHaveDocument ? null : (
     <TaskDocument key={`${kind}-${task.id}-${docNonce}`} kind={kind} task={task} onDeletedCount={countDeleted(kind)} deletedOpenNonce={deletedOpen} onPatch={onPatch} pushToast={pushToast} canAdmin={!!canAdmin} meId={meId} onSent={followUpOnReview} onReminders={reportReminders(kind)}
-      onEmailClient={startReviewEmail}
+      onEmailClient={startReviewEmail} clientFirst={firstName}
       startNonce={reviewStartNonce[kind]} sendNonce={reviewSendNonce[kind]} showOpenComments={onCurrentStep} onStage={reportStage(kind)} onStageSet={stageSetFor(kind)}
       onPresence={(exists) => setReviewPresence((p) => {
         const kinds = p.taskId === task.id ? p.kinds : [];
@@ -3548,7 +3566,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // deliverable block is drawn once, on its step or under Deliverables.
   const DELIVERABLE_KEYS: DeliverableKey[] = ["doc", "brief", "image", "page", "video", "email"];
   const WORK_ICON: Record<DeliverableKey, string> = { doc: "📄", image: "🖼", page: "🌐", video: "🎬", brief: "📋", email: "✉" };
-  const KIND_LABEL: Record<DeliverableKey, string> = { doc: "Client document", image: "Image review", page: "HTML review", video: "Video review", brief: "Project instructions", email: "Draft email" };
+  const KIND_LABEL: Record<DeliverableKey, string> = { doc: "Client document", image: "Image review", page: pageKindNow ? pageKindLabel(pageKindNow) : "HTML review", video: "Video review", brief: "Project instructions", email: "Draft email" };
   const deliverableBlock = (key: DeliverableKey, onCurrentStep: boolean) =>
     key === "doc" ? documentBlock(onCurrentStep) : key === "brief" ? briefBlock : key === "email" ? draftEmailBlock : reviewBlock(key, onCurrentStep);
   const deliverablePresent = (key: DeliverableKey) =>
@@ -3871,24 +3889,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
-    const pick = (key: DeliverableKey) => {
+    const pick = (key: DeliverableKey, pageKind?: PageKind) => {
       // A step holding the client's email: Email is its Reply (2026-10-14).
       const waiting = key === "email" && !deliverablePresent("email") && sub.fromEmails?.length && !sub.done ? sub.fromEmails[sub.fromEmails.length - 1] : null;
       if (waiting) { replyToEmail(sub, waiting); return; }
       // A step still named "…: what's next?" takes the name of what it makes,
       // and its choices are gone until Change (Derek, 2026-10-14).
       const asking = asksWhatsNext(sub);
-      const title = asking ? pickStepTitle(key, firstName) : namedForWork(sub, key);
+      const title = asking ? pickStepTitle(key === "page" && pageKind ? `page:${pageKind}` : key, firstName) : namedForWork(sub, key);
       const made = !deliverablePresent(key);
+      // An Email review or a Page review: the kind waits on the step until the review is made.
       const list = holdOnStep(taskRef.current.subtasks, sub.id, key)
-        .map((x) => (x.id === sub.id && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])] } : x));
+        .map((x) => (x.id === sub.id && made ? { ...x, madeHere: [...new Set([...(x.madeHere ?? []), key])], ...(pageKind ? { pageKind } : {}) } : x));
       onPatch({ subtasks: asking ? answerWhatsNext(list, sub.id, title) : title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
       // Shown on the step, not opened: a tap on it opens the editor (Derek,
       // 2026-10-14). An email is the exception, its window is the work.
       if (key === "email" && !deliverablePresent(key)) setPendingStart(key);
     };
-    const kinds: { key: DeliverableKey; label: string }[] = [
-      ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML review" }, { key: "video" as const, label: "Video" }] : []),
+    const kinds: { key: DeliverableKey; label: string; pageKind?: PageKind }[] = [
+      ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" },
+        ...pageKindsOffered.map((pk) => ({ key: "page" as const, label: pageKindLabel(pk), pageKind: pk })), { key: "video" as const, label: "Video" }] : []),
       // An email drafted on the step, to read and send (Derek, 2026-10-12);
       // quick messages still go through the conversation.
       // Not on a step holding the client's email: Reply on it is the way (Derek, 2026-10-15).
@@ -3901,7 +3921,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const r = x.key === "doc" || x.key === "image" || x.key === "page" || x.key === "video" ? reviews[x.key] : null;
       // It already exists: the button names it, in its stage's color, and
       // adds that one to this step, never a second (Derek, 2026-10-11).
-      return { key: x.key, label: made ? deliverableName(x.key) : x.label, disabled: here, onPick: () => pick(x.key),
+      return { key: x.pageKind ? `page:${x.pageKind}` : x.key, label: made ? deliverableName(x.key) : x.label, disabled: here, onPick: () => pick(x.key, x.pageKind),
         tone: made && r ? reviewTone(r.status) : undefined,
         note: here ? "on this step" : on ? `on ${on.length > 16 ? `${on.slice(0, 16)}…` : on}` : undefined };
     }),

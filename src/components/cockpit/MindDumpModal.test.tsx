@@ -216,6 +216,6 @@ describe("the box with no client (Derek, 2026-10-14)", () => {
     expect([...owner.options].some((o) => o.value === "client")).toBe(false);
     expect(host.textContent).toContain("Whose turn");
     click(button("More ▾"));
-    expect(host.textContent).toContain("HTML review");
+    expect(host.textContent).toContain("Email review");
   });
 });

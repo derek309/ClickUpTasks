@@ -60,6 +60,14 @@ describe("step 1 holding the action", () => {
     expect(r.subtasks[0]).toMatchObject({ assigneeId: "u_justin", due: "2026-10-20", holds: ["page"] });
   });
 
+  it("an Email review or a Page review is the HTML review, its kind kept on the step", () => {
+    const r = applyStepOne([], { ...base, setup: setup({ action: "page:email" }) });
+    expect(r.subtasks[0]).toMatchObject({ holds: ["page"], madeHere: ["page"], pageKind: "email" });
+    expect(r.open).toBeNull();
+    const p = applyStepOne([], { ...base, setup: setup({ action: "page:page" }) });
+    expect(p.subtasks[0]).toMatchObject({ holds: ["page"], pageKind: "page" });
+  });
+
   it("the client's turn opens the ask", () => {
     const r = applyStepOne([], { ...base, setup: setup({ who: "client" }) });
     expect(r.open).toBe("ask");

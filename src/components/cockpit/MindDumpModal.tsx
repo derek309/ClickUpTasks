@@ -327,7 +327,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const options: SetupAction[] = [
     ...act("directions", "Directions"), ...act("checklist", "To dos"),
     ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
-    ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page", "HTML review"), ...act("video", "Video")] : []),
+    ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page:email", "Email review"), ...act("page:page", "Page review"), ...act("video", "Video")] : []),
   ];
   const lead = suggestStepActions(text, first).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
   const grouped = addRowsOf(options, first, new Set(lead.map((x) => x.key)));

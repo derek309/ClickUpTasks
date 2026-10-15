@@ -28,11 +28,12 @@ import { ActionMenu } from "./ActionMenu";
 export const ADD_ROWS = [
   { row: "write", keys: ["directions", "checklist"] },
   { row: "talk", keys: ["email", "text", "chat"] },
-  { row: "make", keys: ["doc", "image", "page", "video"] },
+  // An HTML review is offered as its two kinds, five in the row (Derek, 2026-10-15).
+  { row: "make", keys: ["doc", "image", "page:email", "page:page", "video"] },
 ] as const;
 export const ADD_SHORT: Record<string, string> = {
   directions: "Directions", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
-  doc: "Document", image: "Image", page: "HTML review", video: "Video",
+  doc: "Document", image: "Image", page: "HTML review", "page:email": "Email review", "page:page": "Page review", video: "Video",
 };
 // ui's icons have no image, HTML review or video; these match their stroke.
 const rowIcon = (d: React.ReactNode) => function RowIcon(p: { className?: string }) {
@@ -42,6 +43,8 @@ export const ADD_ICON: Record<string, (p: { className?: string }) => React.React
   directions: I.pencil, checklist: I.list, email: I.mail, text: I.mobile, chat: I.chatBubbles, doc: I.note,
   image: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>),
   page: rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01" /></>),
+  "page:page": rowIcon(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M6.5 6.5h.01M9.5 6.5h.01" /></>),
+  "page:email": rowIcon(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3.5 6.5l8.5 6.5 8.5-6.5" /></>),
   video: rowIcon(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M10 9.5v5l4.5-2.5z" /></>),
   claude: I.bolt,
 };

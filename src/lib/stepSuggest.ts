@@ -9,7 +9,9 @@
  *  Pure: words in the title only. The step page shows it as a button that does
  *  what picking the same item from + Add does, and hides it once the step
  *  holds that kind of work. A call needs nothing made, so it suggests nothing. */
-export type StepSuggestKind = "email" | "text" | "doc" | "image" | "page" | "video" | "checklist";
+// An HTML review is offered as the Email review (a newsletter, campaign or
+// blast) or the Page review (a page, landing or site): htmlReview.ts.
+export type StepSuggestKind = "email" | "text" | "doc" | "image" | "page:email" | "page:page" | "video" | "checklist";
 export type StepSuggestion = { kind: StepSuggestKind; label: string };
 
 // "Draft an email", "write a text": the thing written is the message, not a document.
@@ -82,7 +84,9 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
   // "Design the landing page" is the page; "design" alone is an image.
   const image = IMAGE_WORD.exec(raw) ?? (pageAt < 0 && !video ? DESIGN_WORD.exec(raw) : null);
   if (image) add("image", image.index, `Make the ${singular(image[1])}`);
-  add("page", pageAt, "Build the HTML review");
+  // A send to the client's customers is an email to review; a page or a site is a page.
+  const emailPage = pageAt >= 0 && MASS.test(raw);
+  add(emailPage ? "page:email" : "page:page", pageAt, emailPage ? "Build the email review" : "Build the page review");
   if (video) add("video", video.index, `Make the ${singular(video[1])}`);
   add("checklist", at(CHECKLIST_WORD, raw), "Add a checklist");
 

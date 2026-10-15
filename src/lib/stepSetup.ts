@@ -122,7 +122,7 @@ export const SETUP_FALLBACKS = ["directions", "checklist", "claude"] as const;
 export function actionGroup(key: string): "write" | "talk" | "make" | "other" {
   if (key === "directions" || key === "checklist") return "write";
   if (key === "email" || key === "text" || key === "chat" || key === "reviewemail") return "talk";
-  if (key === "doc" || key === "image" || key === "page" || key === "video") return "make";
+  if (key === "doc" || key === "image" || key === "page" || key === "page:email" || key === "page:page" || key === "video") return "make";
   return "other";
 }
 
@@ -131,15 +131,16 @@ export function actionGroup(key: string): "write" | "talk" | "make" | "other" {
 export type HistoryStep = { words: string[]; kinds: string[] };
 
 /** What a step held, as action keys: its deliverables, a to-do list, a text. */
-export function stepKinds(sub: Pick<Subtask, "holds" | "todos" | "draftMessage">): string[] {
+export function stepKinds(sub: Pick<Subtask, "holds" | "todos" | "draftMessage" | "pageKind">): string[] {
   const keys = ["doc", "image", "page", "video", "email"];
-  const out = (sub.holds ?? []).filter((h) => keys.includes(h));
+  // An HTML review is offered as its two kinds (htmlReview.ts PAGE_ACTIONS).
+  const out = (sub.holds ?? []).filter((h) => keys.includes(h)).map((h) => (h === "page" ? `page:${sub.pageKind ?? "page"}` : h));
   if ((sub.todos?.length ?? 0) > 0) out.push("checklist");
   if (sub.draftMessage?.channel === "sms") out.push("text");
   return [...new Set(out)];
 }
 
-type HistoryTask = { id: string; clientId: string; createdAt?: string; subtasks: Pick<Subtask, "title" | "assigneeId" | "holds" | "todos" | "draftMessage">[] };
+type HistoryTask = { id: string; clientId: string; createdAt?: string; subtasks: Pick<Subtask, "title" | "assigneeId" | "holds" | "todos" | "draftMessage" | "pageKind">[] };
 /** The steps history reads, from the tasks already loaded: this client's
  *  other tasks (any step) and your own steps anywhere, the newest tasks first,
  *  only the steps that held something. Built once per task, not per letter. */

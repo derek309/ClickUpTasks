@@ -132,7 +132,12 @@ describe("history", () => {
       T("t_mine", "cl_b", "2026-09-01", [{ title: "Flyer for Pam", holds: ["doc"], assigneeId: "u_me" }, { title: "Flyer", holds: ["video"], assigneeId: "u_other" }]),
     ];
     const h = setupHistory(tasks, { id: "t_self", clientId: "cl_a" }, "u_me");
-    expect(h.map((x) => x.kinds[0])).toEqual(["page", "doc", "image"]);
+    expect(h.map((x) => x.kinds[0])).toEqual(["page:page", "doc", "image"]);
+  });
+  it("reads an HTML review as the kind it was made as", () => {
+    expect(stepKinds({ holds: ["page"], pageKind: "email" })).toEqual(["page:email"]);
+    expect(stepKinds({ holds: ["page"] })).toEqual(["page:page"]);
+    expect(actionGroup("page:email")).toBe("make");
   });
   it("ranks kinds by how many words the names share", () => {
     const h = [

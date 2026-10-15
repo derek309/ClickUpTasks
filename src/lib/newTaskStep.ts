@@ -56,9 +56,12 @@ export function applyStepOne(subtasks: Subtask[], o: {
   if (s.when && !step.due) edit((x) => ({ ...x, due: s.when! }));
   const a = s.action;
   let open: StepOneOpen | null = null;
-  if (a && DELIVERABLES.has(a)) {
-    list = holdOnStep(list, id, a);
-    edit((x) => ({ ...x, madeHere: [...new Set([...(x.madeHere ?? []), a])] }));
+  // An Email review or a Page review is the HTML review with its kind kept on the step.
+  const pageKind = a === "page:email" ? "email" as const : a === "page:page" ? "page" as const : null;
+  const held = pageKind ? "page" : a;
+  if (held && DELIVERABLES.has(held)) {
+    list = holdOnStep(list, id, held);
+    edit((x) => ({ ...x, madeHere: [...new Set([...(x.madeHere ?? []), held])], ...(pageKind ? { pageKind } : {}) }));
   } else if (a === "email") {
     list = holdOnStep(list, id, "email");
     edit((x) => ({ ...x, due: o.today }));
