@@ -41,10 +41,12 @@ import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode,
 import { VIDEO_WARN_BYTES, formatFileSize, isPreviewableImage, isReviewVideo } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
-import { deviceForWidth, type PageDevice } from "./PageReviewFrame";
+import { type PageDevice } from "./PageReviewFrame";
 import { PageReviewStack } from "./PageReviewStack";
 import { VideoVersion } from "./ReviewVideo";
 import { ActionMenu } from "./ActionMenu";
+import { InboxHeader, ModeBar, PreviewBar, ReviewFields, TurnLine, ghostButton } from "./HtmlReviewBars";
+import { htmlReviewTurn, pageKindLabel, pageKindInSentence, pageKindNewName, pageKindOf, type PageKind, type ReviewMeta } from "@/lib/htmlReview";
 import {
   CommentThread, FileDropLine, ImageLightbox, ImagePinBoard, ImageThumbGrid, WorkItemBadge, WorkItemRow, WorkItemWindow,
   commentsFor, nextPin, quietButton as quiet, type PreviewImage,
@@ -87,7 +89,7 @@ export type ReviewReminders = {
   setEvery: (every: number) => void; restart: () => void; open: () => void;
 };
 
-export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, sendNonce = 0, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onStageSet, onDeletedCount, deletedOpenNonce = 0 }: {
+export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin, startNonce, sendNonce = 0, onPresence, meId, onEmailClient, onSent, onReminders, showCopyCode, showOpenComments, onStage, onStageSet, onDeletedCount, deletedOpenNonce = 0, clientFirst = "" }: {
   task: Task;
   /** "image" for the task's image review, "page" for its web page review. */
   kind?: TaskDocumentKind;
@@ -127,28 +129,34 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   showOpenComments?: boolean;
   /** Its stage, each time it changes: the task's steps follow it (Derek,
    *  2026-10-11). Changing it here does not change the task itself. */
-  onStage?: (s: { id: string; title: string; status: string; version: number; approvedAt: string | null }) => void;
+  onStage?: (s: { id: string; title: string; status: string; version: number; approvedAt: string | null; pageKind?: PageKind }) => void;
   /** The team picked a stage here and it saved: the steps the server moved
    *  with it come along. Approved closes this window back to the task, where
    *  What's next asks (Derek, 2026-10-14). */
   onStageSet?: (status: string, r: { document: Record<string, unknown>; subtasks?: Subtask[] | null }) => void;
+  /** The client's first name, for an HTML review's status sentence and its one button. */
+  clientFirst?: string;
 }) {
   const image = kind === "image";
   const page = kind === "page";
   const video = kind === "video";
   const versioned = isFileKind(kind);
   const what = kindWhat(kind);
-  const title = kind === "doc" ? "Document" : kindTitle(kind);
-  const titleInSentence = kind === "doc" ? "document" : kindInSentence(kind);
   const api = (path: string, init?: RequestInit) => docApi(task.id, kind, path, init);
   const pageApi = (query: string, init?: RequestInit) =>
     authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/document/page${kindQuery("page")}${query}`, init);
   const [doc, setDoc] = useState<Doc | null>(null);
+  // An HTML review is an Email review or a Page review (htmlReview.ts): stored on
+  // it, else its name says. The kind picked on its step goes on a new one.
+  const pageKindNow: PageKind | null = page && doc ? pageKindOf(doc.meta, doc.title) : null;
+  const stepPageKind = page ? (task.subtasks.find((x) => x.pageKind && (x.holds ?? []).includes("page")) ?? task.subtasks.find((x) => x.pageKind))?.pageKind ?? null : null;
+  const title = kind === "doc" ? "Document" : pageKindNow ? pageKindLabel(pageKindNow) : kindTitle(kind);
+  const titleInSentence = kind === "doc" ? "document" : pageKindNow ? pageKindInSentence(pageKindNow) : kindInSentence(kind);
   const onStageRef = useRef(onStage);
   useEffect(() => { onStageRef.current = onStage; });
   useEffect(() => {
-    if (doc) onStageRef.current?.({ id: doc.id, title: doc.title, status: doc.status, version: doc.version, approvedAt: doc.approvedAt ?? null });
-  }, [doc?.id, doc?.status, doc?.version]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (doc) onStageRef.current?.({ id: doc.id, title: doc.title, status: doc.status, version: doc.version, approvedAt: doc.approvedAt ?? null, ...(pageKindNow ? { pageKind: pageKindNow } : {}) });
+  }, [doc?.id, doc?.status, doc?.version, doc?.title, pageKindNow]); // eslint-disable-line react-hooks/exhaustive-deps
   const [loaded, setLoaded] = useState(false);
   const [link, setLink] = useState<{ live: boolean; copyable: boolean } | null>(null);
   const [files, setFiles] = useState<TaskDocumentFile[]>([]);
@@ -177,9 +185,11 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   // version's words for the History diff. frameNonce reloads every page's frame.
   const [frameNonce, setFrameNonce] = useState(0);
   const [pageMode, setPageMode] = useState<FrameMode>("comment");
-  const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
   const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
+  // An HTML review's Preview: the page full size, every link working, at a width picked here.
+  const [previewing, setPreviewing] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<PageDevice>("desktop");
   // A moment the player has been asked to jump to, from the comment rail.
   const [videoSeek, setVideoSeek] = useState<{ t: number; nonce: number } | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -349,7 +359,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   const create = async (): Promise<Doc | null> => {
     setBusy("create");
-    const res = await api("", { method: "POST", body: "{}" });
+    const res = await api("", { method: "POST", body: JSON.stringify(page && stepPageKind ? { pageKind: stepPageKind } : {}) });
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? `Could not start the ${titleInSentence}.`); return null; }
@@ -422,13 +432,14 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     setDoc(rowToTaskDocument(j.document));
   };
 
-  // After a new version file became the one to send next.
-  const afterNewVersion = async (document: unknown, message: string) => {
+  // After a new version file became the one to send next: the review as it is now.
+  const afterNewVersion = async (document: unknown, message: string): Promise<Doc | null> => {
     setDoc(rowToTaskDocument(document));
     setViewingVersion(null);
     setPinDraft(null);
-    await load();
+    const fresh = await load();
     pushToast(message);
+    return fresh;
   };
 
   // A working copy holds up to 10 images or pages, shown stacked (Derek, 2026-09-14:
@@ -570,15 +581,15 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   // server as a new version.
   const shownEdits: PageEditsByFile = pageEdits.body === shownFileId ? pageEdits.edits : {};
   const shownEditCount = countEdits(shownEdits);
-  const savePageEdits = async () => {
-    if (!doc || !shownFileId || !shownEditCount) return;
+  const savePageEdits = async (): Promise<Doc | null> => {
+    if (!doc || !shownFileId || !shownEditCount) return null;
     setBusy("page-edits");
     const res = await pageApi("", { method: "POST", body: JSON.stringify({ baseBody: shownFileId, edits: shownEdits }), headers: { "Content-Type": "application/json" } });
     const j = await readJson(res);
     setBusy(null);
-    if (!res.ok) { pushToast((j.error as string) ?? "Could not save the text changes."); return; }
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not save the text changes."); return null; }
     setPageEdits({ body: "", edits: {} });
-    await afterNewVersion(j.document, "Text changes saved as a new version. Send it when you're ready.");
+    return afterNewVersion(j.document, "Text changes saved as a new version. Send it when you're ready.");
   };
   const undoPageEdits = () => {
     setPageEdits({ body: "", edits: {} });
@@ -661,28 +672,31 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     return { text: "", changes: (before !== null && after !== null ? summarizeTextChanges(before, after) : null) ?? generic };
   };
 
-  const send = async () => {
-    if (!doc) return;
+  // fresh: the review as just saved, when the caller saved something first
+  // (an HTML review's text changes) and this render's copy is behind.
+  const send = async (fresh0?: Doc | null) => {
+    const d = fresh0 ?? doc;
+    if (!d) return;
     commit.flush();
     titleCommit.flush();
     await saving.current;
     setBusy("send");
-    const res = await api("/send", { method: "POST", body: JSON.stringify({ baseVersion: doc.version }) });
+    const res = await api("/send", { method: "POST", body: JSON.stringify({ baseVersion: d.version }) });
     const j = await readJson(res);
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? "Could not send."); if (res.status === 409) void load(); return; }
-    const sentBody = doc.body;
+    const sentBody = d.body;
     // The last version the client saw, to say what this send changed.
-    const previousBody = doc.version > 0 ? versions[0]?.body : undefined;
+    const previousBody = d.version > 0 ? versions[0]?.body : undefined;
     const earlier = publishedFiles(versions).length;
     const fresh = await load();
     // The review's own name, as typed or as saved now (the AI names a review on
     // the server as it first gets content, after this line may have loaded it),
     // else the task's title (reviewEmailName).
-    const name = reviewEmailName([titleDraft, fresh ? fresh.title : doc.title], task.title);
+    const name = reviewEmailName([titleDraft, fresh ? fresh.title : d.title], task.title);
     // The drawer moves the task to Waiting and sets the follow up in one edit;
     // anywhere else the task is only moved.
-    if (onSent) onSent(kind, name, doc.reminderEveryDays);
+    if (onSent) onSent(kind, name, d.reminderEveryDays);
     else if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
     const copied = !!url && await copy(url);
@@ -806,6 +820,36 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     if (!res.ok) { pushToast((j.error as string) ?? "Could not save the pick."); return; }
     setDoc(rowToTaskDocument(j.document));
   };
+  // An HTML review's kind and the fields on top of it (htmlReview.ts), saved as each is left.
+  const setMeta = async (change: ReviewMeta, done?: string) => {
+    if (!doc) return;
+    const res = await api("", { method: "PATCH", body: JSON.stringify({ meta: change }) });
+    const j = await readJson(res);
+    if (!res.ok) { pushToast((j.error as string) ?? "Could not save that."); return; }
+    setDoc(rowToTaskDocument(j.document));
+    if (done) pushToast(done);
+  };
+  // Send me a test: the email to your own inbox, never the client's (test-email route).
+  const sendTest = async (fileId: string | undefined) => {
+    setBusy("test");
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/document/test-email${kindQuery("page")}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: fileId ?? null }),
+    });
+    const j = await readJson(res);
+    setBusy(null);
+    pushToast(res.ok ? `Test sent to ${(j.to as string) ?? "you"}.` : (j.error as string) ?? "Could not send the test.");
+  };
+  // A page review's page in a tab of its own, still sandboxed by /page-frame's header.
+  const openInTab = async (fileId: string | undefined) => {
+    if (!fileId) return;
+    const w = window.open("", "_blank");
+    if (!w) { pushToast("Your browser blocked the new tab. Allow pop ups for this site."); return; }
+    const url = await loadFrame(fileId);
+    if (!url) { w.close(); pushToast("Could not open the page."); return; }
+    w.opener = null;
+    w.location.href = url;
+  };
+
   const setStage = async (status: TaskDocumentStatus) => {
     if (!doc || status === doc.status) return;
     commit.flush();
@@ -886,8 +930,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       return;
     }
     if (!page) return;
-    const width = comments.find((c) => c.id === id)?.pin?.anchor?.width;
-    if (width) setPageDevice(deviceForWidth(width));
+    // Pins sit on the page's elements, so the editing width finds them all.
+    setPreviewing(false);
     setPageFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
   };
 
@@ -1105,9 +1149,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     `Edited ${timeAgo(doc.updatedAt)}`,
   ].filter(Boolean).join(" · ");
 
-  const icon = KIND_ICON[kind];
+  const icon = pageKindNow === "email" ? "✉️" : KIND_ICON[kind];
   const row = (
-    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || kindNewName(kind)} badge={badge} meta={meta} actions={copyCodeButton}
+    <WorkItemRow tone={kind} wash={tone} icon={icon} title={doc.title.trim() || (pageKindNow ? pageKindNewName(pageKindNow) : kindNewName(kind))} badge={badge} meta={meta} actions={copyCodeButton}
       // The client's link is rare on the row (Derek, 2026-10-12): copying it,
       // turning it off or making a new one are in the ⋯ menu, and the review
       // itself still has Copy link.
@@ -1177,7 +1221,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       onChange={(e) => { const value = e.target.value.replace(/\s*\n\s*/g, " "); setTitleDraft(value); titleCommit.schedule(() => { void saveTitle(value); }); }}
       onBlur={() => titleCommit.flush()}
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
-      placeholder={kindNewName(kind)} aria-label={`${title} name`} maxLength={200}
+      placeholder={pageKindNow ? pageKindNewName(pageKindNow) : kindNewName(kind)} aria-label={`${title} name`} maxLength={200}
       className="block w-full resize-none rounded-[5px] bg-transparent px-1 py-0.5 text-[22px] font-bold leading-tight outline-none [field-sizing:content] placeholder:text-foreground hover:bg-background focus:bg-background sm:overflow-hidden sm:leading-normal sm:[white-space:pre]" />
   );
 
@@ -1269,17 +1313,20 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       pages={shownItems.map((item, i) => ({ fileId: item.file, label: itemLabel(shownItems, i) }))}
       loadFrame={loadFrame}
       onLoadError={() => pushToast("Could not show the page.")}
-      mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
+      // Comment, Edit and Preview are the review's own bar (HtmlReviewBars); Preview is
+      // the page full size at the width picked there, with no pins on it.
+      toolbar={false}
+      mode={previewing ? "browse" : pageMode} onMode={setPageMode} device={previewing ? previewDevice : "desktop"} onDevice={setPreviewDevice}
       canEdit={!locked} canComment={!locked}
-      pinsFor={(fileId) => comments.flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
+      pinsFor={(fileId) => previewing ? [] : comments.flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
         ? [{ id: c.id, number: c.pin.number, x: c.pin.x, y: c.pin.y, anchor: c.pin.anchor, done: !!c.completedAt, active: c.id === focusedComment }]
         : []))}
-      pending={spotDraft}
+      pending={previewing ? null : spotDraft}
       focus={pageFocus} edits={shownEdits}
       onPlace={(fileId, place) => setPinDraft({ fileId, ...place, t: null, number: nextPin(comments, fileId) })}
       onPinClick={setFocusedComment}
       onEdit={(fileId, edit) => setPageEdits((st) => ({ body: shownFileId, edits: withPageEdit(st.body === shownFileId ? st.edits : {}, fileId, edit) }))}
-      header={(_, i) => setItemHeader(shownItems[i], i)}
+      header={(pg, i) => previewing ? (shownItems.length > 1 ? <h3 className="mb-2 text-[18px] font-semibold">{pg.label}</h3> : null) : setItemHeader(shownItems[i], i)}
       dim={(fileId) => !!doc?.pick && doc.pick !== fileId && shownItems.some((x) => x.file === doc.pick)} />
   );
 
@@ -1458,7 +1505,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
         </button>
         {moreActions}
         {needsSend && (
-          <button onClick={send} disabled={busy !== null}
+          <button onClick={() => void send()} disabled={busy !== null}
             className="rounded-[5px] bg-accent px-5 py-1.5 text-[16px] font-semibold text-white disabled:opacity-50">
             {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
@@ -1527,7 +1574,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       {!reviewBar && (
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {needsSend && (
-          <button onClick={send} disabled={busy !== null}
+          <button onClick={() => void send()} disabled={busy !== null}
             className="rounded-[5px] bg-accent px-6 py-2.5 text-[16px] font-semibold text-white disabled:opacity-50">
             {busy === "send" ? "Sending…" : doc.version === 0 ? "Send for review" : "Send changes"}
           </button>
@@ -1591,11 +1638,165 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     </>
   );
 
+  // ── An HTML review's own window (Derek, 2026-10-15, html-review-mockup.html):
+  // the status as a sentence at the top, one dark button that follows the turn,
+  // everything rarer under ⋯, Comment (the default), Edit and ▶ Preview, the
+  // fields on top for its kind, and the comments as the client's change list.
+  const pageWindow = (() => {
+    if (!page || !full) return null;
+    const pk: PageKind = pageKindNow ?? "page";
+    const first = clientFirst.trim().split(/\s+/)[0] ?? "";
+    const firstName = first || "the client";
+    const lastSentIds = sent.length ? imagesOf(sent[sent.length - 1]) : [];
+    const sentAt = lastSent?.createdAt ?? null;
+    const top = (c: TaskDocumentComment) => !(c as { parentId?: string | null }).parentId;
+    // The client's comments on the version they were last sent: their changes.
+    const round = comments.filter((c) => c.fromClient && top(c) && (c.pin ? lastSentIds.includes(c.pin.fileId) : !sentAt || Date.parse(c.createdAt) >= Date.parse(sentAt)));
+    const roundDone = round.filter((c) => !!c.completedAt).length;
+    const waitStep = task.subtasks.find((x) => !x.done && x.onClient && x.waitsOn === "page");
+    const turn = htmlReviewTurn({
+      status: doc.status, sent: sent.length, needsSend, first, changes: round.length,
+      needBy: waitStep?.due ?? null, approvedAt: doc.approvedAt, approvedByTeam: !!doc.approvedBy, kind: pk,
+    });
+    // The working copy shows the changes asked for on the version before it too,
+    // so they stay a list to work through once a new version is made.
+    const onWorkingCopy = shownFileId === doc.body;
+    const thread = comments.filter((c) => !c.pin || shownIds.includes(c.pin.fileId) || (onWorkingCopy && lastSentIds.includes(c.pin.fileId)));
+    const firstPage = shownItems[0]?.file;
+    const onTurn = async () => {
+      if (!turn.button) return;
+      if (turn.button.action === "send") {
+        // Words changed in Edit and not saved yet go into the version first.
+        const fresh = shownEditCount > 0 ? await savePageEdits() : doc;
+        if (!fresh) return;
+        const ready = !fresh.approvedAt && !!fresh.body && (fresh.version === 0 || fresh.draftDirty);
+        if (!ready) {
+          setPreviewing(false);
+          setPageMode("edit");
+          pushToast("Make the changes first: click Edit to change the words, or add the new page under ⋯.");
+          return;
+        }
+        await send(fresh);
+      } else if (turn.button.action === "schedule") {
+        // Nothing here sends a newsletter: the task's What's next says how it goes out.
+        switchView({ full: false });
+        pushToast(`${first ? `${first} approved it` : "Approved"}. What's next on the task picks how it goes out.`);
+      } else {
+        await setStage("completed");
+        switchView({ full: false });
+      }
+    };
+    const other: PageKind = pk === "email" ? "page" : "email";
+    const menu = (
+      <ActionMenu label="⋯" title="More actions" sheet triggerClassName={`${ghostButton} w-10 justify-center`} items={[
+        editingSet && shownItems.length < MAX_SET_IMAGES && { label: adding ? "Adding…" : "Add a page", disabled: adding, onClick: () => { setPreviewing(false); openPaste(null); } },
+        { label: historyOpen ? "Hide history" : `History${timeline.length ? ` · ${timeline.length}` : ""}`, onClick: () => { setPreviewing(false); setHistoryOpen((o) => !o); } },
+        link?.live && link.copyable && { label: "Copy the review link", disabled: busy !== null, onClick: () => void copyLink() },
+        onEmailClient && doc.version > 0 && { label: `Email ${firstName}`, disabled: busy !== null, onClick: () => void emailClient() },
+        !locked && doc.version > 0 && { label: "Approve it myself", onClick: () => void approveMyself() },
+        locked && { label: "Reopen for changes", onClick: () => void patchDoc({ reopen: true }, "Reopened. Send your changes when they're ready.") },
+        !!shownFileId && !locked && goingIds.length > 0 && { label: busy === "remove" ? "Removing…" : "Remove this version", danger: true, disabled: adding || busy !== null, onClick: () => void removeVersion(shownFileId, goingIds, removeMessage) },
+        { label: `Switch to ${pageKindLabel(other)}`, divider: true, onClick: () => void setMeta({ pageKind: other }, `Now a ${pageKindInSentence(other)}.`) },
+        { label: busy === "delete" ? "Deleting…" : "Delete this review", danger: true, disabled: busy !== null, onClick: () => void deleteDocument() },
+      ]} />
+    );
+    const dark = turn.button && (
+      <button onClick={() => void onTurn()} disabled={busy !== null || adding}
+        className="h-10 shrink-0 whitespace-nowrap rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white disabled:opacity-50">
+        {busy === "send" ? "Sending…" : busy === "page-edits" ? "Saving…" : turn.button.label}
+      </button>
+    );
+    const previewBody = (
+      <>
+        <PreviewBar onBack={() => setPreviewing(false)} device={previewDevice} onDevice={setPreviewDevice}
+          devices={pk === "email" ? ["desktop", "mobile"] : ["desktop", "tablet", "mobile"]}
+          extra={pk === "email"
+            ? <button onClick={() => void sendTest(firstPage)} disabled={busy !== null} className={ghostButton}><span aria-hidden>✉</span> {busy === "test" ? "Sending…" : "Send me a test"}</button>
+            : <button onClick={() => void openInTab(firstPage)} className={ghostButton}>Open in a new tab</button>} />
+        {pk === "email" && <InboxHeader subject={doc.meta.subject ?? ""} previewText={doc.meta.previewText ?? ""} />}
+        {pageStack}
+      </>
+    );
+    const editBody = (
+      <>
+        {historyPanel && <div className="mb-4">{historyPanel}</div>}
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-w-0">
+            {clientCrossed && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] border border-accent/40 bg-accent-soft/40 px-4 py-3 text-[16px]">
+                <span className="min-w-0 flex-1">{clientCrossed.authorLabel ?? "The client"} sent changes while you had unsent edits.</span>
+                <button onClick={() => void patchDoc({ restoreVersion: clientCrossed.version }, "Their version is in. Send it when it's ready.")} className="font-semibold text-accent hover:underline">Use their version</button>
+                <button onClick={() => setClientCrossed(null)} className="font-medium text-muted hover:underline">Keep mine</button>
+              </div>
+            )}
+            {doc.status === "with_client" && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[5px] border bg-surface px-4 py-2.5 text-[16px]">
+                <span className="min-w-0 flex-1 basis-full text-muted sm:basis-0">{reminderLine}</span>
+                <select value={doc.reminderEveryDays} aria-label="How often to remind the client" onChange={(e) => setReminderEvery(Number(e.target.value))}
+                  className="cursor-pointer rounded-[5px] border bg-surface px-2.5 py-1 text-[16px] outline-none focus:border-accent">
+                  <option value={1}>Every business day</option>
+                  <option value={2}>Every 2 business days</option>
+                  <option value={0}>Off</option>
+                </select>
+                {reminders?.canRestart && <button onClick={restartReminders} className={quiet}>Restart reminders</button>}
+              </div>
+            )}
+            <ReviewFields kind={pk} meta={doc.meta} onSave={(change) => void setMeta(change)} />
+            {doc.body && (
+              <div className="flex flex-wrap items-start gap-x-3">
+                <div className="min-w-0 flex-1"><ModeBar mode={pageMode} onMode={setPageMode} canEdit={!locked} canComment={!locked} onPreview={() => { setPinDraft(null); setPreviewing(true); }} /></div>
+                {versionOptions.length > 1 && (
+                  <select value={shownFileId ?? ""} onChange={(e) => { setViewingVersion(e.target.value); setPinDraft(null); }} aria-label="Version shown"
+                    className="mb-3 h-10 cursor-pointer rounded-[5px] border bg-surface px-3 text-[16px] font-semibold outline-none focus:border-accent">
+                    {versionOptions.map((o) => <option key={o.fileId} value={o.fileId}>{o.label}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            {versionArticle}
+          </div>
+          <div className="min-w-0 space-y-3">
+            <CommentThread title={round.length ? `${first ? `${first}'s` : "The client's"} changes · ${roundDone} of ${round.length} done` : "Notes"}
+              countLabel={null} ticks showDoneFirst={!onWorkingCopy || thread.every((c) => !!c.completedAt)}
+              onReply={postReply} comments={thread} onPost={postComment} when={timeAgo} viewer="team"
+              pinLabel={imagePlace} pinGroups={shownItems.length > 1 ? shownItems.map((_, i) => itemLabel(shownItems, i)) : undefined}
+              alignGroup={(label) => {
+                const i = shownItems.findIndex((_, n) => itemLabel(shownItems, n) === label);
+                return i < 0 ? null : document.querySelector<HTMLElement>(`[data-page-anchor="${shownItems[i].file}"]`);
+              }} pinDraftLabel={pinDraft ? imagePlace(pinDraft.fileId) : null}
+              isMine={(c) => !!meId && comments.find((x) => x.id === c.id)?.authorId === meId}
+              canDelete={() => true}
+              onEdit={(id, body) => changeComment(id, { body })}
+              onToggleDone={(id, done) => changeComment(id, { done })}
+              onDelete={removeComment}
+              quote={null} pinDraft={pinDraft?.number ?? null}
+              onClearQuote={() => { setQuoteDraft(null); setPinDraft(null); }}
+              placeholder="Reply or add a note…"
+              onAttach={locked ? undefined : attachFile} renderAttachment={renderAttachment}
+              focusedId={focusedComment} onQuoteClick={focusComment} />
+            {turn.state === "changes" && round.length > 0 && (
+              <p className="px-1 text-[16px] text-muted">Tick each change as you make it, then send version {sent.length + 1}.</p>
+            )}
+          </div>
+        </div>
+      </>
+    );
+    return (
+      <WorkItemWindow backTo={task.title} backOnly icon={icon} title={titleInput}
+        badge={<TurnLine who={turn.who} rest={turn.rest} dot={turn.dot} className="basis-full sm:order-last 2xl:order-none 2xl:basis-auto" />}
+        actions={<span className="flex shrink-0 items-center gap-2">{menu}{dark}</span>}
+        onClose={() => { setPreviewing(false); switchView({ full: false }); }}>
+        {previewing && doc.body ? previewBody : editBody}
+      </WorkItemWindow>
+    );
+  })();
+
   return (
     <>
       {row}
       {deletedLine}
-      {full && (
+      {pageWindow}
+      {full && !page && (
         <WorkItemWindow backTo={task.title} icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}

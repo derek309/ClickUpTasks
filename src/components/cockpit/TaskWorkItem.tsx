@@ -186,7 +186,13 @@ function PinNumber({ number, color }: { number: number; color?: string }) {
  *  box like a task, and its author can edit it ("edit, delete and mark a comment
  *  complete like a task"). A comment can carry a file, and on an image review it
  *  can sit on a numbered pin (Derek, 2026-09-12). */
-export function CommentThread({ showDoneFirst = false, comments: allComments, onReply, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
+export function CommentThread({ title = "Comments", countLabel, ticks = false, showDoneFirst = false, comments: allComments, onReply, onPost, when, viewer, buttonStyle, isMine, canDelete, onEdit, onDelete, onToggleDone, quote, onClearQuote, focusedId, onQuoteClick, pinDraft, pinDraftLabel, pinLabel, pinGroups, alignGroup, pinTone, hoverId, onHover, placeholder, onAttach, renderAttachment }: {
+  /** The panel's name: an HTML review calls it the client's changes, or Notes (2026-10-15). */
+  title?: string;
+  /** In place of "N open" beside the name; null hides it. */
+  countLabel?: string | null;
+  /** A tick box per comment in place of the Resolve word: the comments are a change list. */
+  ticks?: boolean;
   /** Resolved comments open rather than folded: an older version, or one
    *  with nothing left open (Derek, 2026-10-13: "I want to see all the
    *  comments that have been resolved so that I can check it"). */
@@ -429,10 +435,13 @@ export function CommentThread({ showDoneFirst = false, comments: allComments, on
             {chip && <span className="shrink-0 rounded-[5px] bg-background px-2 text-[16px] text-muted">{place}</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">
               {/* Said in words, so what it does is plain (Derek, 2026-09-14 redesign). */}
-              <button aria-pressed={done} title={done ? `Resolved${c.completedBy ? ` by ${c.completedBy}` : ""}. Click to open it again` : "Mark it resolved"}
+              <button aria-pressed={done} title={done ? `Resolved${c.completedBy ? ` by ${c.completedBy}` : ""}. Click to open it again` : ticks ? "Tick it done" : "Mark it resolved"}
+                aria-label={ticks ? (done ? "Done. Untick to open it again" : "Tick it done") : undefined}
                 onClick={() => void act(c.id, async () => { const ok = await onToggleDone(c.id, !done); if (ok && !done) setJustDone((j) => [...j, c.id]); return ok; })} disabled={busy}
-                className={`whitespace-nowrap rounded-[5px] px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
-                {done ? "Resolved ✓" : "Resolve"}
+                className={ticks
+                  ? `flex h-7 w-7 items-center justify-center rounded-[5px] text-[16px] font-bold transition disabled:opacity-50 ${done ? "bg-success text-white" : "text-transparent ring-2 ring-inset ring-accent hover:text-accent"}`
+                  : `whitespace-nowrap rounded-[5px] px-3 py-0.5 text-[16px] transition disabled:opacity-50 ${done ? "bg-success-soft font-semibold text-success" : "border text-muted hover:border-success hover:text-success"}`}>
+                {ticks ? "✓" : done ? "Resolved ✓" : "Resolve"}
               </button>
               {!isEditing && (mine || canDelete(c)) && (
                 <ActionMenu label={<I.dots />} title="More actions"
@@ -509,8 +518,8 @@ export function CommentThread({ showDoneFirst = false, comments: allComments, on
   const header = (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[16px] font-semibold">Comments</h3>
-        {comments.length > 0 && (
+        <h3 className="text-[16px] font-semibold">{title}</h3>
+        {countLabel !== undefined ? countLabel && <span className="rounded-[5px] bg-background px-2.5 py-0.5 text-[16px] text-muted">{countLabel}</span> : comments.length > 0 && (
           <span className="rounded-[5px] bg-background px-2.5 py-0.5 text-[16px] text-muted">{openOnes.length ? `${openOnes.length} open` : "All done"}</span>
         )}
         {viewer === "team" && (
