@@ -993,7 +993,17 @@ export interface Subtask {
   /** Meet now's two steps: a booked meeting's sync (withMeetingSteps) leaves
    *  them be. */
   meetNow?: boolean;
+  /** A reminder while this step is someone else's turn, set from After this
+   *  (Derek, 2026-10-15; off unless picked). The client's turn: an email about
+   *  this one item, once at the check in or every 2, 3 or 5 business days. A
+   *  teammate's turn: a notification the business day before it is due, or
+   *  the morning it is due. Sent by the 8 AM job (lib/stepReminders); it
+   *  never sets a follow up. */
+  remind?: StepRemind;
 }
+
+/** See Subtask.remind. */
+export type StepRemind = { every: "once" | 2 | 3 | 5 } | { at: "day_before" | "morning" };
 
 export type StepTodo = { id: string; title: string; done: boolean; fromClient?: boolean; commentId?: string;
   /** On a client's to-do: when it was written onto the step (see Subtask.at). */

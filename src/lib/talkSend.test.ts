@@ -41,3 +41,29 @@ describe("talkSendPatch", () => {
     expect(out.patch.subtasks![0]).toMatchObject({ draftMessage: undefined, followUps: [{ via: "sms", at: NOW }] });
   });
 });
+
+describe("talkSendPatch with After this filled", () => {
+  it("a wait on the client: the send joins it with its own check in date, no check in step added", () => {
+    const subs = [step({ id: "a", title: "Reply to Pamela", holds: ["email"] }), step({ id: "b", title: "Wait for Pam's class times", finishWhen: "reply", stage: "waiting", due: "2026-10-20" })];
+    const plan = talkStepPlan(subs, null, "email", "2026-10-14")!;
+    expect(plan.after?.id).toBe("b");
+    expect(plan.due).toBe("2026-10-20");
+    const out = talkSendPatch({ subtasks: subs, status: "in_progress", due: null, assigneeId: null }, plan, "email", "Pamela", makeId, NOW)!;
+    const list = out.patch.subtasks!;
+    expect(list).toHaveLength(2);
+    expect(list[0]).toMatchObject({ done: true, outcome: "Email sent to Pamela" });
+    expect(list[1]).toMatchObject({ id: "b", due: "2026-10-20", startedAt: NOW, followUps: [{ via: "email", at: NOW }] });
+    expect(out.patch.followUpAt).toBe("2026-10-20");
+  });
+  it("a step of ours: the send finishes this step and starts that one, no check in", () => {
+    const subs = [step({ id: "a", title: "Reply to Pamela", holds: ["email"] }), step({ id: "b", title: "Build the ad", makes: "page" })];
+    const plan = talkStepPlan(subs, null, "email", "2026-10-14")!;
+    const out = talkSendPatch({ subtasks: subs, status: "waiting", due: null, assigneeId: null }, plan, "email", "Pamela", makeId, NOW)!;
+    const list = out.patch.subtasks!;
+    expect(list).toHaveLength(2);
+    expect(list[0]).toMatchObject({ done: true, outcome: "Email sent to Pamela" });
+    expect(list[1]).toMatchObject({ id: "b", startedAt: NOW, done: false });
+    expect(out.patch.followUpAt).toBeUndefined();
+    expect(out.patch.status).toBe("in_progress");
+  });
+});
