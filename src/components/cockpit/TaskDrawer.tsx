@@ -17,6 +17,8 @@ import { usePersisted } from "@/lib/usePersisted";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
+import { meetingTimesCopy } from "@/lib/meetingTimes";
+import { theirTimeZone } from "@/lib/theirTimeZone";
 import { nextStepFromContext, taskForAsk, whatsNextContext } from "@/lib/nextStepSuggest";
 import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { ActionDock } from "./ActionDock";
@@ -2540,6 +2542,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }
     const id = newId("s_");
     if (asking) setAskNext(null);
+    // Their time zone, asked alongside the open times (Derek, 2026-10-15).
+    const theirTz = theirTimeZone(messageDest);
     const links = await loadBookingLinks().catch(() => [] as BookingLink[]);
     const mine = links.filter((l) => l.memberId === meId);
     const link = mine[0] ?? links.find((l) => l.shared) ?? links[0] ?? null;
@@ -2551,10 +2555,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         times = pickThreeTimes(j.slots ?? [], new Date().getTime());
       } catch { /* the link alone still works */ }
     }
-    const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const copy = meetingTimesCopy(times, await theirTz);
     const title = `Request a meeting with ${firstName}`;
     if (channel === "sms") {
-      const body = [`Hi ${firstName}, do you have time to meet this week about ${task.title}?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", link ? `Or pick any time here: ${link.url}` : ""].filter(Boolean).join(" ");
+      const body = [`Hi ${firstName}, do you have time to meet this week about ${task.title}?`, copy.smsSentence, link ? `Or pick any time here: ${link.url}` : ""].filter(Boolean).join(" ");
       onPatch({ subtasks: [...taskRef.current.subtasks, { id, title, done: false, due: TODAY, draftMessage: { channel: "sms", body }, ...stepOwnerFields() }] });
       talkReturn.current = id;
       setOpenStepPage({ taskId: task.id, id, full: false });
@@ -2565,8 +2569,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         subtasks: holdOnStep([...taskRef.current.subtasks, { id, title, done: false, due: TODAY, ...stepOwnerFields() }], id, "email"),
         draftEmail: {
           subject: `Time to meet about ${task.title}?`.slice(0, 120),
-          body: `${greetingHtml(messageDest?.name)}<p>Do you have time to meet this week about <strong>${esc(task.title)}</strong>?${times.length ? " Here are a few times that work for me (Pacific):" : ""}</p>`
-            + (times.length ? `<ul>${times.map((t) => `<li><p>${esc(fmt(t))}</p></li>`).join("")}</ul>` : "")
+          body: `${greetingHtml(messageDest?.name)}<p>Do you have time to meet this week about <strong>${esc(task.title)}</strong>?${times.length ? ` ${copy.emailIntro}` : ""}</p>`
+            + (times.length ? `<ul>${copy.lines.map((t) => `<li><p>${esc(t)}</p></li>`).join("")}</ul>` : "")
             + (link ? `<p>Or pick any time that works for you here: <a href="${esc(link.url)}">book a time</a>. It goes straight on my calendar.</p>` : "<p>[booking link]</p>"),
           replyTo: null, createdAt: now, updatedAt: now,
         },

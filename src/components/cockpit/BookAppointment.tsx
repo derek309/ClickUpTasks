@@ -8,6 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { authedFetch } from "@/lib/supabase";
 import type { BookingLink } from "./useCalendar";
+import { dayTimesCopy, meetingTimesCopy } from "@/lib/meetingTimes";
+import { theirTimeZone } from "@/lib/theirTimeZone";
 
 const TZ = "America/Los_Angeles";
 const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -54,6 +56,16 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   const [openedAt] = useState(() => Date.now());
   const [picks, setPicks] = useState<string[]>([]);
   const startUsed = useRef(false);
+  // Their time zone, for copied times in my time and theirs (Derek, 2026-10-15).
+  // Null (Pacific only) until it is known, or when it can't be.
+  const [theirTz, setTheirTz] = useState<string | null>(null);
+  const bookingContact = target.kind === "book" ? target.ghlContactId : null;
+  useEffect(() => {
+    if (!bookingContact) return;
+    let live = true;
+    theirTimeZone({ ghlContactId: bookingContact }).then((tz) => { if (live) setTheirTz(tz); });
+    return () => { live = false; };
+  }, [bookingContact]);
 
   // The calendars this person can be booked on, yours first, one row each.
   useEffect(() => {
@@ -138,14 +150,16 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   };
   const copyDays = async (days: string[][]) => {
     const url = calendars?.find((c) => c.calendarId === calendarId)?.url;
-    const text = [`Hi ${first}, here are my open times (Pacific):`, ...days.map((d) => `${dayWord(d[0])}: ${d.map(timeOf).join(", ")}`), url ? `Book one here: ${url}` : "Which works best for you?"].join("\n");
+    const copy = dayTimesCopy(days.flat(), theirTz);
+    const text = [`Hi ${first}, ${copy.header}`, ...days.map((d) => `${dayWord(d[0])}: ${d.map(copy.time).join(", ")}`), url ? `Book one here: ${url}` : "Which works best for you?"].join("\n");
     try { await navigator.clipboard.writeText(text); pushToast("Copied. Paste it in a chat or a text."); }
     catch { window.prompt("Copy this:", text); }
   };
   // The text: their first name, the times on their own lines, and the booking link.
   const copyTimes = async () => {
     const url = calendars?.find((c) => c.calendarId === calendarId)?.url;
-    const text = [`Hi ${first}, here are a few times that work for me (Pacific):`, ...picks.map((s) => `${dayName(s)}, ${timeOf(s)}`), url ? `Pick one, or book any open time here: ${url}` : "Which works best for you?"].join("\n");
+    const copy = meetingTimesCopy(picks, theirTz);
+    const text = [`Hi ${first}, ${copy.emailIntro.replace(/^Here/, "here")}`, ...copy.lines, url ? `Pick one, or book any open time here: ${url}` : "Which works best for you?"].join("\n");
     try { await navigator.clipboard.writeText(text); pushToast("Copied. Paste it in a text."); onClose(); }
     catch { window.prompt("Copy this:", text); }
   };

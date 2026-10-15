@@ -115,6 +115,8 @@ import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, waiti
 import { TextWindow } from "./cockpit/TextWindow";
 import { loadBookingLinks } from "./cockpit/useCalendar";
 import { pickThreeTimes } from "@/lib/improveText";
+import { meetingTimesCopy } from "@/lib/meetingTimes";
+import { theirTimeZone } from "@/lib/theirTimeZone";
 
 // Read when a click needs the time, never while rendering.
 const nowMs = () => Date.now();
@@ -766,6 +768,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // that opens for you to check. Nothing is booked until they pick.
   const requestMeeting = async (clientId: string, channel: "email" | "sms", defaultCalendarId: string | null) => {
     const first = clientFirstName(contactForClient(clientId), clientById(clientId)?.name, "there");
+    // Their time zone is asked for at the same time as the open times (Derek,
+    // 2026-10-15: "my time and their time"), so it adds no wait of its own.
+    const theirTz = theirTimeZone(contactForClient(clientId));
     const links = await loadBookingLinks();
     const cal = links.find((l) => l.calendarId === defaultCalendarId) ?? links.find((l) => l.memberId === me.id) ?? links[0];
     if (!cal) { pushToast("No GoHighLevel calendar found to offer times from."); return; }
@@ -775,20 +780,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       const j = await r.json().catch(() => ({}));
       times = pickThreeTimes(j.slots ?? [], nowMs());
     } catch { /* the link alone still works */ }
-    const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const copy = meetingTimesCopy(times, await theirTz);
     if (channel === "sms") {
-      const body = [`Hi ${first}, do you have time to meet this week?`, times.length ? `I'm open ${times.map(fmt).join(", or ")} (Pacific).` : "", `Or pick any time here: ${cal.url}`].filter(Boolean).join(" ");
+      const body = [`Hi ${first}, do you have time to meet this week?`, copy.smsSentence, `Or pick any time here: ${cal.url}`].filter(Boolean).join(" ");
       openClientText(clientId, body);
       return;
     }
     const link = { url: cal.url, label: "Pick a time that works for you" };
     openClientEmail(clientId, {
       subject: "Time to meet?",
-      body: `<p>Hi ${escapeHtml(first)},</p><p>Do you have time to meet this week?${times.length ? " Here are a few times that work for me (Pacific):" : ""}</p>`
-        + (times.length ? `<ul>${times.map((t) => `<li><p>${escapeHtml(fmt(t))}</p></li>`).join("")}</ul>` : "")
+      body: `<p>Hi ${escapeHtml(first)},</p><p>Do you have time to meet this week?${times.length ? ` ${copy.emailIntro}` : ""}</p>`
+        + (times.length ? `<ul>${copy.lines.map((t) => `<li><p>${escapeHtml(t)}</p></li>`).join("")}</ul>` : "")
         + `${draftLinkHtml(link)}<p>Thanks!</p>`,
       link,
-      aiContext: `Asking the client to meet. Offered times (Pacific): ${times.map(fmt).join("; ") || "none, just the booking link"}. Booking link: ${cal.url}`,
+      aiContext: `Asking the client to meet. ${copy.aiTimes} Booking link: ${cal.url}`,
     });
   };
   // The mind-dump composer. Null when closed; otherwise the group its plus
