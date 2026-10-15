@@ -20,7 +20,9 @@
 // Every string here is client facing: 16px or larger, and no dashes.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RichTextEditor } from "@/components/cockpit/RichTextEditor";
-import { deviceForWidth, type PageDevice } from "@/components/cockpit/PageReviewFrame";
+import { type PageDevice } from "@/components/cockpit/PageReviewFrame";
+import { InboxHeader, ModeBar, PreviewBar, TurnLine, ghostButton } from "@/components/cockpit/HtmlReviewBars";
+import { addedPhrases, clientTurnSentence, type PageKind } from "@/lib/htmlReview";
 import { PageReviewStack } from "@/components/cockpit/PageReviewStack";
 import { VideoVersion } from "@/components/cockpit/ReviewVideo";
 import { addDocFiles, uploadSharedFile } from "@/lib/docFileUpload";
@@ -48,6 +50,12 @@ type DocData = {
   versionFiles: { body: string; fileId: string; name: string; number: number; fromClient: boolean; images: { fileId: string; name: string; label: string }[] }[];
   /** The option they (or the team) chose, when the newest version holds several. */
   pick?: string | null;
+  /** An HTML review: an Email review or a Page review, an email's subject and
+   *  preview text, and the date the team needs it by (htmlReview.ts). */
+  pageKind?: PageKind;
+  subject?: string;
+  previewText?: string;
+  needBy?: string | null;
 };
 type Notice = { tone: "good" | "info" | "warn"; text: string } | null;
 /** The comment being placed but not posted: a spot on an image or page (x and y),
@@ -114,6 +122,12 @@ export default function DocReviewView({ token, back = null }: { token: string; b
   const [frameNonce, setFrameNonce] = useState(0);
   const [pageMode, setPageMode] = useState<FrameMode>("comment");
   const [pageDevice, setPageDevice] = useState<PageDevice>("desktop");
+  // Preview (Derek, 2026-10-15): the page full size, every link working, ending
+  // with Make changes and Approve. And on version 2, the words new since they
+  // last looked, marked on the page until they hide them.
+  const [previewing, setPreviewing] = useState(false);
+  const [hideMarks, setHideMarks] = useState(false);
+  const [marks, setMarks] = useState<{ key: string; byFile: Record<string, string[]> }>({ key: "", byFile: {} });
   const [pageEdits, setPageEdits] = useState<{ body: string; edits: PageEditsByFile }>({ body: "", edits: {} });
   const [pageFocus, setPageFocus] = useState<{ id: string; n: number } | null>(null);
   // A moment the player has been asked to jump to, from the comment rail.
@@ -459,15 +473,16 @@ export default function DocReviewView({ token, back = null }: { token: string; b
       return;
     }
     if (!page) return;
-    const width = data?.comments.find((c) => c.id === id)?.pin?.anchor?.width;
-    if (width) setPageDevice(deviceForWidth(width));
+    // Pins sit on the page's elements, so the page at full width finds them all.
+    setPreviewing(false);
+    setPageDevice("desktop");
     setPageFocus((f) => ({ id, n: (f?.n ?? 0) + 1 }));
   };
 
   // One action card for every kind (Derek, 2026-09-13: image and HTML reviews "need
   // to be the same as doc"); only how the client comments or changes it differs.
   const how = page
-    ? "leave comments on any spot you click, change the wording with Edit text"
+    ? "leave a note on any spot you click, change the words with Edit, and see it full size with Preview"
     : image ? "leave comments on any spot you click"
       : video ? "pause anywhere and comment on that moment"
         : "leave comments on any words you select, edit anything you like";
@@ -477,10 +492,49 @@ export default function DocReviewView({ token, back = null }: { token: string; b
   const hasChanges = dirty || openNotes > 0;
   const approveHint = image
     ? "Want something changed? Click a spot on the image to leave a comment."
-    : page ? "Want something changed? Click a spot to comment, or use Edit text."
+    : page ? "Want something changed? Click a spot to leave a note, or use Edit."
       : video ? "Want something changed? Pause the video where it is wrong and leave a comment there."
         : "Want something changed? Select words to comment on them, or edit the text.";
   const changesHint = image || video ? "To approve instead, delete your comments." : "To approve instead, delete your comments and undo your edits.";
+
+  // ── An HTML review's version 2 and on: what changed since they last looked.
+  // The version before is the last one they commented on, else the one before
+  // the newest; page by page in order, its words against the newest's.
+  const newestVersion = versionFiles.at(-1) ?? null;
+  const earlierVersions = versionFiles.slice(0, -1);
+  const comments = data?.comments ?? [];
+  const pinnedOn = (v: (typeof versionFiles)[number]) => v.images.some((img) => comments.some((c) => c.fromClient && c.pin?.fileId === img.fileId));
+  const lastLooked = page ? [...earlierVersions].reverse().find(pinnedOn) ?? earlierVersions.at(-1) ?? null : null;
+  const lookedIds = lastLooked ? lastLooked.images.map((img) => img.fileId) : [];
+  const myChanges = lastLooked ? comments.filter((c) => c.fromClient && !c.parentId && c.pin && lookedIds.includes(c.pin.fileId)) : [];
+  const myDone = myChanges.filter((c) => !!c.completedAt).length;
+  const markKey = page && newestVersion && lastLooked ? `${lastLooked.body}>${newestVersion.body}` : "";
+  useEffect(() => {
+    if (!markKey || !newestVersion || !lastLooked || marks.key === markKey) return;
+    let cancelled = false;
+    const text = async (fileId: string) => {
+      const res = await fetch(`/api/doc/${encodeURIComponent(token)}/page?fileId=${encodeURIComponent(fileId)}&as=text`, { cache: "no-store" });
+      if (!res.ok) throw new Error("unreadable");
+      return ((await res.json()) as { text?: string }).text ?? "";
+    };
+    void (async () => {
+      const byFile: Record<string, string[]> = {};
+      for (const [i, img] of newestVersion.images.entries()) {
+        const before = lastLooked.images[i]?.fileId;
+        if (!before || before === img.fileId) continue;
+        // A page that can't be read or compared is simply shown without marks.
+        try { byFile[img.fileId] = addedPhrases(await text(before), await text(img.fileId)); } catch { /* no marks */ }
+      }
+      if (!cancelled) setMarks({ key: markKey, byFile });
+    })();
+    return () => { cancelled = true; };
+  }, [markKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shownMarks = !hideMarks && marks.key === markKey && onNewest ? marks.byFile : {};
+  const anyMarks = Object.values(marks.key === markKey ? marks.byFile : {}).some((list) => list.length > 0);
+  const turn = data && page ? clientTurnSentence({
+    status: data.status, version: newestVersion?.number ?? 1, changes: openNotes, needBy: data.needBy ?? null, approvedAt: data.approvedAt, closed: data.closed,
+  }) : null;
+  const pageKindNow: PageKind = data?.pageKind ?? "page";
 
   return (
     <div className="min-h-[100dvh] bg-background text-foreground">
@@ -515,6 +569,7 @@ export default function DocReviewView({ token, back = null }: { token: string; b
         {state === "ready" && data && (
           <>
             <h1 className="text-[30px] font-bold leading-tight">{data.title}</h1>
+            {turn && !noVersion && <TurnLine who={turn.who} rest={turn.rest} dot={turn.dot} className="mt-2" />}
             {!locked && !noVersion && <p className="mt-2 text-[18px] text-muted">{intro}</p>}
 
             {/* Done here: straight back to the rest of their tasks. */}
@@ -616,9 +671,26 @@ export default function DocReviewView({ token, back = null }: { token: string; b
                       <span className="text-[16px] text-muted">{picked ? "You can change your mind below. Comment on it if anything should change." : "Press Choose this one on your favorite, then comment on it if anything should change."}</span>
                     </div>
                   )}
+                  {shownFileId && page && onNewest && lastLooked && !locked && (
+                    <div className="mb-4 rounded-[5px] border border-[#f0d49b] bg-[#fdf4e3] px-4 py-3 text-[17px]">
+                      {myChanges.length > 0 && <b>{myDone} of your {myChanges.length} {myChanges.length === 1 ? "change is" : "changes are"} done. </b>}
+                      {anyMarks
+                        ? <>{hideMarks ? "New words are not highlighted. " : "New words are highlighted. "}
+                          <button onClick={() => setHideMarks((h) => !h)} className="font-semibold underline underline-offset-4" style={{ color: NAVY }}>{hideMarks ? "Show highlights" : "Hide highlights"}</button></>
+                        : myChanges.length === 0 && "This is a new version."}
+                    </div>
+                  )}
+                  {shownFileId && page && (previewing ? (
+                    <PreviewBar onBack={() => setPreviewing(false)} backLabel="‹ Back" color={NAVY} device={pageDevice} onDevice={setPageDevice}
+                      devices={pageKindNow === "email" ? ["desktop", "mobile"] : ["desktop", "tablet", "mobile"]} />
+                  ) : (
+                    <ModeBar mode={pageMode} onMode={setPageMode} canEdit={!locked && onNewest} canComment={!data.closed && onNewest} color={NAVY}
+                      onPreview={() => { setPinDraft(null); setPreviewing(true); }} />
+                  ))}
+                  {shownFileId && page && previewing && pageKindNow === "email" && <InboxHeader subject={data.subject ?? ""} previewText={data.previewText ?? ""} />}
                   {shownFileId && page && (
                     // Stacked under one toolbar, each page with its own pins and rewording (Derek, 2026-09-16: two emails in one review).
-                    <PageReviewStack key={`${shownFileId}:${frameNonce}`}
+                    <PageReviewStack key={`${shownFileId}:${frameNonce}`} toolbar={false} highlights={previewing || pageMode === "comment" ? shownMarks : {}}
                       header={choosing ? (pg) => (
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <h2 className="min-w-0 flex-1 text-[18px] font-semibold">{pg.label}</h2>
@@ -639,16 +711,27 @@ export default function DocReviewView({ token, back = null }: { token: string; b
                       pages={shownImages.map((img) => ({ fileId: img.fileId, label: img.label }))}
                       loadFrame={loadFrame}
                       onLoadError={() => setNotice({ tone: "warn", text: "We couldn't show the page. Please reload." })}
-                      mode={pageMode} onMode={setPageMode} device={pageDevice} onDevice={setPageDevice}
+                      mode={previewing ? "browse" : pageMode} onMode={setPageMode} device={previewing ? pageDevice : "desktop"} onDevice={setPageDevice}
                       canEdit={!locked && onNewest} canComment={!data.closed && onNewest} color={NAVY}
-                      pinsFor={(fileId) => (data.comments ?? []).flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
+                      pinsFor={(fileId) => previewing ? [] : (data.comments ?? []).flatMap((c) => (c.pin && c.pin.fileId === fileId && c.pin.x !== null && c.pin.y !== null
                         ? [{ id: c.id, number: c.pin.number, x: c.pin.x, y: c.pin.y, anchor: c.pin.anchor ?? null, done: !!c.completedAt, active: c.id === focusedComment }]
                         : []))}
-                      pending={spotDraft}
+                      pending={previewing ? null : spotDraft}
                       focus={pageFocus} edits={onNewest ? newestEdits : {}}
                       onPlace={(fileId, place) => setPinDraft({ fileId, ...place, t: null, number: nextPin(data.comments ?? [], fileId) })}
                       onPinClick={setFocusedComment}
                       onEdit={(fileId, edit) => setPageEdits((s) => ({ body: data.body, edits: withPageEdit(s.body === data.body ? s.edits : {}, fileId, edit) }))} />
+                  )}
+                  {/* Preview ends with their two choices: back to Comment, or approve
+                      (Submit changes once they have notes or edits, one dark button). */}
+                  {shownFileId && page && previewing && !locked && onNewest && (
+                    <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t pt-4">
+                      <button onClick={() => { setPreviewing(false); setPageMode("comment"); }} className={ghostButton}>Make changes</button>
+                      <button onClick={() => void publish(hasChanges ? "submit" : "approve")} disabled={busy !== null}
+                        className="h-10 rounded-[5px] px-5 text-[16px] font-bold text-white disabled:opacity-60" style={{ background: NAVY }}>
+                        {busy === "send" ? "Sending…" : busy === "approve" ? "Approving…" : hasChanges ? "Submit changes" : "Approve"}
+                      </button>
+                    </div>
                   )}
                 </article>
               ) : (
@@ -666,7 +749,8 @@ export default function DocReviewView({ token, back = null }: { token: string; b
                   Files, in place of a bar fixed to the bottom of the screen. */}
               <aside className={`space-y-4 ${versioned && shownImages.length > 1 ? "" : "lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto"}`}>
                 {/* Nothing to approve or change while no version is up for review. */}
-                {!locked && !noVersion && (
+                {/* Preview has its own Approve at its foot: one dark button at a time. */}
+                {!locked && !noVersion && !(page && previewing) && (
                   <div className="rounded-2xl border bg-surface p-4 shadow-sm">
                     {/* One button at a time: Submit changes once the client has
                         commented or edited, Approve while there is nothing to change. */}
@@ -721,6 +805,19 @@ export default function DocReviewView({ token, back = null }: { token: string; b
                       </ul>
                     )}
                   </FileDropLine>
+                )}
+                {page && onNewest && myChanges.length > 0 && (
+                  <div className="rounded-[5px] border bg-surface p-4">
+                    <h3 className="text-[16px] font-semibold">Your changes · {myDone} of {myChanges.length} done</h3>
+                    <ul className="mt-2 divide-y">
+                      {myChanges.map((c) => (
+                        <li key={c.id} className="flex gap-3 py-2 text-[16px]">
+                          <span aria-label={c.completedAt ? "Done" : "Not done yet"} className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] font-bold ${c.completedAt ? "bg-success text-white" : "ring-2 ring-inset ring-[#1b3a5c] text-transparent"}`}>✓</span>
+                          <span className={`min-w-0 break-words ${c.completedAt ? "text-muted line-through" : ""}`}>{c.body}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
                 <CommentThread onReply={data.closed ? undefined : postReply} comments={versioned ? commentsFor(data.comments ?? [], shownIds) : data.comments ?? []}
                   pinLabel={versioned ? imagePlace : undefined} pinGroups={versioned && shownImages.length > 1 ? shownImages.map((img) => img.label) : image ? shownImages.map((img) => img.label) : undefined}
