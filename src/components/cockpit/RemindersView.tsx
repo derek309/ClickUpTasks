@@ -84,6 +84,19 @@ export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial 
     load();
   };
 
+  // The 8 AM run on demand (Derek, 2026-10-15: "send new reminders to
+  // review"): what is due today is queued here for Approve; nothing is sent.
+  const makeNow = async () => {
+    if (initial) return;
+    setBusy("make");
+    const r = await authedFetch("/api/cron/portal-reminders?force=1", { method: "POST" }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setBusy(null);
+    if (!r?.ok) { pushToast(j.error ?? "That didn't work. Try again."); return; }
+    const made = (Number(j.requests?.queued) || 0) + (Number(j.queued) || 0);
+    pushToast(made ? `${made} new to review` : "Nothing new is due today");
+    load();
+  };
   const groups = useMemo(() => {
     const m = new Map<string, ReminderRow[]>();
     for (const r of data?.toReview ?? []) m.set(r.clientId, [...(m.get(r.clientId) ?? []), r]);
@@ -103,7 +116,10 @@ export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial 
   return (
     <div className="mx-auto flex w-full max-w-[1280px] min-w-0 flex-col gap-6 px-4 py-4 sm:px-6">
       <section aria-label="To review" className="flex min-w-0 flex-col gap-3">
-        <h2 className={head}>To review <span className="text-[16px] font-semibold text-muted">{data.toReview.length ? `${data.toReview.length} waiting for you` : "Nothing waiting"}</span></h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className={head}>To review <span className="text-[16px] font-semibold text-muted">{data.toReview.length ? `${data.toReview.length} waiting for you` : "Nothing waiting"}</span></h2>
+          <button disabled={busy === "make"} onClick={() => void makeNow()} title="Queues what is due today for review. Nothing is sent." className={btn}>{busy === "make" ? "Making…" : "Make today's reminders now"}</button>
+        </div>
         {!data.toReview.length && <p className="text-[16px] text-muted">Every reminder waits here for Approve before it goes. New ones come at 8 AM, and when a client answers one, the next one about 10 minutes later.</p>}
         {groups.map((rows) => (
           <div key={rows[0].clientId} className="min-w-0 overflow-hidden rounded-[5px] ring-1 ring-inset ring-[var(--border)]">
