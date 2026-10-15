@@ -41,6 +41,7 @@ import { countEdits, withPageEdit, PAGE_MAX_BYTES, PAGE_TOO_BIG, type FrameMode,
 import { VIDEO_WARN_BYTES, formatFileSize, isPreviewableImage, isReviewVideo } from "@/lib/uploadTypes";
 import { RichTextEditor } from "./RichTextEditor";
 import { useDebouncedCommit } from "./useDebouncedCommit";
+import { reviewLeftEmpty } from "@/lib/undoAction";
 import { type PageDevice } from "./PageReviewFrame";
 import { PageReviewStack } from "./PageReviewStack";
 import { VideoVersion } from "./ReviewVideo";
@@ -357,6 +358,8 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     setFull(next.full);
   };
 
+  // The last create made a new one, not one there already.
+  const createdFresh = useRef(false);
   const create = async (): Promise<Doc | null> => {
     setBusy("create");
     const res = await api("", { method: "POST", body: JSON.stringify(page && stepPageKind ? { pageKind: stepPageKind } : {}) });
@@ -364,6 +367,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     setBusy(null);
     if (!res.ok) { pushToast((j.error as string) ?? `Could not start the ${titleInSentence}.`); return null; }
     const created = rowToTaskDocument(j.document);
+    createdFresh.current = j.created === true;
     versionRef.current = created.version;
     setDoc(created);
     setLoaded(true);
@@ -372,14 +376,45 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
 
   // The chip: show the document, making it first when there is none.
   const startSeen = useRef(startNonce);
+  // The one made by that tap, and its name then: left empty, it goes again.
+  const madeNow = useRef<{ id: string; title: string } | null>(null);
   useEffect(() => {
     if (startNonce === startSeen.current) return;
     startSeen.current = startNonce;
     void (async () => {
-      const d = doc ?? await create();
+      const made = doc ? null : await create();
+      const d = doc ?? made;
+      if (made && createdFresh.current) madeNow.current = { id: made.id, title: made.title };
       if (d) switchView({ full: true }, d);
     })();
   }, [startNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Closing the window (Escape, the back link). One made by opening it and
+  // left with nothing in it is deleted again (Derek, 2026-10-15: "we hit Esc
+  // and never enter anything, cancel and remove it"), through the same
+  // delete as Delete this review, without its question.
+  const closeWindow = () => {
+    const made = madeNow.current;
+    madeNow.current = null;
+    if (made && doc?.id === made.id && reviewLeftEmpty({
+      version: doc.version, body: doc.body, title: titleDraft || doc.title, madeTitle: made.title, typed: latestHtml.current,
+      files: files.length, comments: comments.length,
+      busy: busy !== null || adding || uploadShare !== null || !!pasteDraft.trim() || countEdits(pageEdits.edits) > 0 || saveState === "unsaved" || saveState === "saving",
+    })) { void takeBackEmpty(); return; }
+    switchView({ full: false });
+  };
+  const takeBackEmpty = async () => {
+    setFull(false);
+    setPreviewing(false);
+    const res = await api("", { method: "DELETE" });
+    if (!res.ok) return;
+    versionRef.current = null;
+    setDoc(null);
+    setFiles([]);
+    setComments([]);
+    setLink(null);
+    void fetchDeletedTaskDocuments(task.id, kind).then(setDeletedDocs);
+    pushToast("Canceled");
+  };
 
   const save = (html: string): Promise<boolean> => {
     setSaveState("saving");
@@ -1785,7 +1820,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       <WorkItemWindow backTo={task.title} backOnly icon={icon} title={titleInput}
         badge={<TurnLine who={turn.who} rest={turn.rest} dot={turn.dot} className="basis-full sm:order-last 2xl:order-none 2xl:basis-auto" />}
         actions={<span className="flex shrink-0 items-center gap-2">{menu}{dark}</span>}
-        onClose={() => { setPreviewing(false); switchView({ full: false }); }}>
+        onClose={() => { setPreviewing(false); closeWindow(); }}>
         {previewing && doc.body ? previewBody : editBody}
       </WorkItemWindow>
     );
@@ -1797,7 +1832,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
       {deletedLine}
       {pageWindow}
       {full && !page && (
-        <WorkItemWindow backTo={task.title} icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={() => switchView({ full: false })}>
+        <WorkItemWindow backTo={task.title} icon={icon} title={titleInput} badge={stageSelect} actions={headerActions} onClose={closeWindow}>
           {content}
           {/* Deleting lives only here, small and at the very end (Derek, 2026-09-11). */}
           <div className="mt-12 flex justify-end border-t pt-4">

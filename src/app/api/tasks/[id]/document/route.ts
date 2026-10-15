@@ -26,7 +26,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!access.ok) return access.res;
   // An HTML review can start as an Email review or a Page review: { pageKind }.
   const body = await req.json().catch(() => null) as { pageKind?: unknown } | null;
-  return answer(await createReview(access.task, kindOf(req), teamActor(access.user), body && typeof body === "object" ? { pageKind: body.pageKind as never } : null));
+  // created: false when one was there already (made a moment ago elsewhere).
+  const r = await createReview(access.task, kindOf(req), teamActor(access.user), body && typeof body === "object" ? { pageKind: body.pageKind as never } : null);
+  return r.ok ? json({ document: r.document, created: r.created }) : json({ error: r.error }, r.status);
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

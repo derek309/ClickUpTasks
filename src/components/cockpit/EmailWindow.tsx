@@ -142,8 +142,13 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
 
 export function EmailWindow({
   draft, save, onClose, onDiscard, onSend, onSchedule, toEmail, toName, heading, subheading, subjectFallback,
-  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp, sendNote,
+  ccContacts, onUpload, onAiDraft, taskItems, scheduled, onCancelScheduled, pushToast, followUp, sendNote, onLeave,
 }: {
+  /** Leaving without sending (Escape, the back link, Discard), with the
+   *  draft as the window holds it, typing not saved yet included: true when
+   *  the action that wrote it was taken back because nothing was entered
+   *  (lib/undoAction). Nothing is saved after that. */
+  onLeave?: (latest: EmailDraft) => boolean;
   /** One line under Send: the step it finishes and when it checks in. */
   sendNote?: (followUpDate: string | null) => string | null;
   /** On a task: offer Follow up in X days beside Send. */
@@ -371,7 +376,16 @@ export function EmailWindow({
     onDiscard();
     onClose();
   };
+  // Left as the action wrote it: the action is taken back and nothing more is saved.
+  const tookBack = () => {
+    if (!onLeave?.({ ...draftRef.current, ...pending.current, subject, attachments, cc, bcc })) return false;
+    finished.current = true;
+    pending.current = {};
+    return true;
+  };
+  const leave = () => { tookBack(); onClose(); };
   const discard = () => {
+    if (tookBack()) { onClose(); return; }
     if (!window.confirm("Discard this email?")) return;
     finished.current = true;
     pending.current = {};
@@ -394,7 +408,7 @@ export function EmailWindow({
       {/* The title is the email itself, and the back link is the way out
           (Derek, 2026-10-14): no "Not sent" badge, no Close. Back and Escape
           both run onClose, which lands the draft and goes where Close went. */}
-      <WorkItemWindow icon="✉️" onClose={onClose} backTo={subheading} backOnly
+      <WorkItemWindow icon="✉️" onClose={leave} backTo={subheading} backOnly
         title={<p className="break-words px-1 text-[22px] font-bold leading-tight">{emailWindowTitle(toName, toEmail, subject, heading)}</p>}>
         {/* Attachments sit in a right column beside the email, like the client document. */}
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">

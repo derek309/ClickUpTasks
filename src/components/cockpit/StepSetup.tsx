@@ -77,7 +77,7 @@ const TILE_ON = `${TILE} bg-accent-soft text-accent ring-2 ring-accent`;
 const TILE_WORD: Record<string, string> = { chat: "Chat" };
 const tileWord = (key: string, label: string) => TILE_WORD[key] ?? ADD_SHORT[key] ?? label;
 
-export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, autoFocus = false, enterSubmits = false, onAnswer, hide = [], skip = true, stepName = "", context, history, submit, longHint = false }: {
+export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInitial, today, meId, lead = [], rows, more = [], preset, onDone, onEscape, autoFocus = false, enterSubmits = false, onAnswer, hide = [], skip = true, stepName = "", context, history, submit, longHint = false }: {
   /** What's next: the next step's name, above the three rows. */
   name?: React.ReactNode;
   who: SetupWho[];
@@ -99,6 +99,9 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   preset?: string | null;
   /** Set the step up with these answers, then do the action (if one). */
   onDone: (answer: SetupAnswer, run?: () => void) => void;
+  /** Escape, asked first: true when it cancelled the step just made with
+   *  nothing picked (Derek, 2026-10-15), so it is not skipped into place. */
+  onEscape?: () => boolean;
   autoFocus?: boolean;
   /** Enter in the name box sets it up with what is picked (+ Add step). */
   enterSubmits?: boolean;
@@ -199,7 +202,14 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   const claudeActs = forClaude ? ["directions", "checklist"].flatMap((k) => { const a = pool.find((x) => x.key === k && !x.disabled); return a ? [a] : []; }) : [];
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    if (e.key === "Escape") { if (!skip) return; e.preventDefault(); e.stopPropagation(); onDone(answer()); return; }
+    if (e.key === "Escape") {
+      if (!skip) return;
+      e.preventDefault(); e.stopPropagation();
+      // A pick changed here is something entered: that skips as before.
+      const untouched = whoPick === whoInitial && when === whenInitial;
+      if (!(untouched && onEscape?.())) onDone(answer());
+      return;
+    }
     if (enterSubmits && e.key === "Enter" && !e.nativeEvent.isComposing && t.matches("input[data-name]")) { e.preventDefault(); onDone(answer()); return; }
     if (t.closest("input, textarea, [contenteditable=true]") || e.metaKey || e.ctrlKey || e.altKey) return;
     const row = [0, 1, 2].findIndex((i) => !!rowEl(i)?.contains(t));

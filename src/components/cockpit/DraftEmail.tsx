@@ -14,7 +14,7 @@ import { STATUS_META, timeAgo, type Attachment, type Contact, type Message, type
 import { WorkItemBadge, WorkItemRow } from "./TaskWorkItem";
 import { EmailWindow, sentEmailFor, type OutgoingEmail } from "./EmailWindow";
 
-export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, toName, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft }: {
+export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, toName, onSend, onSchedule, onUpload, ccContacts, messages, openNonce, startOpen, pushToast, onAiDraft, onLeave }: {
   task: Task;
   onPatch: (patch: Partial<Task>) => void;
   /** Said under Send: the step it will finish and when it checks in. */
@@ -38,6 +38,9 @@ export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, toName, o
   pushToast: (text: string, action?: { label: string; run: () => void }) => void;
   /** Writes the email with AI from an instruction and the draft's own context. */
   onAiDraft?: (instruction: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
+  /** The window left without sending: true when the action that wrote the
+   *  draft was taken back (EmailWindow onLeave). */
+  onLeave?: (latest: NonNullable<Task["draftEmail"]>) => boolean;
 }) {
   const draft = task.draftEmail ?? null;
   const [full, setFull] = useState(!!startOpen);
@@ -74,7 +77,7 @@ export function DraftEmail({ task, onPatch, sendNote, onSent, toEmail, toName, o
         <EmailWindow key={draft.createdAt} draft={draft} heading="Draft email" subheading={task.title} subjectFallback={task.title}
           save={(next) => onPatch({ draftEmail: next })} onDiscard={() => onPatch({ draftEmail: null })} onClose={close}
           onSend={onSend} onSchedule={onSchedule} toEmail={toEmail} toName={toName} ccContacts={ccContacts} onUpload={onUpload}
-          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp sendNote={sendNote} />
+          onAiDraft={onAiDraft} taskItems={task.attachments} pushToast={pushToast} followUp sendNote={sendNote} onLeave={onLeave} />
       )}
     </>
   );

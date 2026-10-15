@@ -7,6 +7,8 @@
 // window's Send does (TaskDrawer sendDraft): the step finishes and After this
 // starts. Full window ↗ opens the window on the same draft for Cc, the task's
 // files and the rest. While it is open, Send is the page's one dark button.
+// Left as Reply wrote it (clicking away, Escape, Discard), the reply takes
+// itself back (onLeave, lib/undoAction).
 import { useEffect, useRef, useState } from "react";
 import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "@/lib/uploadTypes";
 import { plainTextToHtml, type Attachment } from "@/lib/data";
@@ -15,7 +17,7 @@ import { I } from "./ui";
 
 export type ReplyDraft = { subject: string; body: string; attachments?: Attachment[] };
 
-export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onFull, onDiscard, note, pushToast }: {
+export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onFull, onDiscard, onLeave, note, pushToast }: {
   toName: string;
   draft: ReplyDraft;
   /** Saves the draft (called a moment after typing stops, and before Send). */
@@ -27,6 +29,8 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
   /** The full email window, on this same draft. */
   onFull: () => void;
   onDiscard: () => void;
+  /** Focus left the box (anything typed is saved first). */
+  onLeave?: () => void;
   /** Under Send: what sending does to the steps. */
   note?: string | null;
   pushToast: (text: string) => void;
@@ -37,6 +41,13 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
   const [aiBusy, setAiBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLElement>(null);
+  // Clicking away from the box: not into it, and not to another window.
+  const left = () => setTimeout(() => {
+    if (!onLeave || !document.hasFocus() || boxRef.current?.contains(document.activeElement)) return;
+    flush();
+    onLeave();
+  }, 0);
   const flush = () => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     if (pending.current) { const p = pending.current; pending.current = null; onSave(p); }
@@ -76,7 +87,11 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
   };
   const link = "inline-flex min-h-9 items-center gap-1 rounded-[5px] px-1 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50";
   return (
-    <section aria-label={`Reply to ${toName}`} className="overflow-hidden rounded-[5px] bg-surface ring-2 ring-inset ring-accent">
+    <section ref={boxRef} aria-label={`Reply to ${toName}`} className="overflow-hidden rounded-[5px] bg-surface ring-2 ring-inset ring-accent"
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) left(); }}
+      // Escape: what was typed is saved first, then the key goes on (the
+      // task drawer takes the reply back when nothing was).
+      onKeyDown={(e) => { if (e.key === "Escape") flush(); }}>
       <div className="border-b px-3 py-2 text-[16px] text-muted [overflow-wrap:anywhere]">
         To <span className="font-semibold text-foreground">{toName}</span>
         <span aria-hidden> · </span>

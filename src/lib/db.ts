@@ -2,7 +2,7 @@
 // domain types, seeds demo data on first run, and exposes upsert/delete helpers.
 
 import { supabase, authedFetch } from "./supabase";
-import { isLongTitle, longStepsNamed } from "./data";
+import { htmlToText, isLongTitle, longStepsNamed } from "./data";
 import { queueSettings } from "../../mcp/queue.mjs";
 import { noteTaskWrite } from "./localTaskWrites";
 import { sumStoredVideo } from "./videoStorage";
@@ -966,10 +966,13 @@ export const fetchTaskDocument = async (taskId: string, kind: TaskDocumentKind =
 export type DeletedTaskDocument = { id: string; title: string; version: number; deletedAt: string };
 export const fetchDeletedTaskDocuments = async (taskId: string, kind: TaskDocumentKind = "doc"): Promise<DeletedTaskDocument[]> => {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const { data, error } = await supabase.from("task_documents").select("id, title, version, deleted_at")
+  const { data, error } = await supabase.from("task_documents").select("id, title, version, body, deleted_at")
     .eq("task_id", taskId).eq("kind", kind).gt("deleted_at", since).order("deleted_at", { ascending: false });
   if (error) { logErr({ error }); return []; }
-  return (data ?? []).map((r: any) => ({ id: r.id, title: r.title ?? "", version: r.version ?? 0, deletedAt: r.deleted_at }));
+  // One opened and left empty (deleted again as its window closed,
+  // lib/undoAction reviewLeftEmpty) has nothing to bring back: not listed.
+  return (data ?? []).filter((r: any) => (r.version ?? 0) > 0 || !!String(r.title ?? "").trim() || !!htmlToText(r.body ?? "").trim())
+    .map((r: any) => ({ id: r.id, title: r.title ?? "", version: r.version ?? 0, deletedAt: r.deleted_at }));
 };
 // Files on the document and the team's saved drafts between sends (see
 // supabase/task-document-files.sql). Read the same way, written by the server.

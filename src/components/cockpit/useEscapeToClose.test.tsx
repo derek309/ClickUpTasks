@@ -93,3 +93,15 @@ describe("useEscapeToClose", () => {
     expect(close).not.toHaveBeenCalled();
   });
 });
+
+describe("useEscapeToClose passing the key down", () => {
+  it("hands the same press to the overlay under one that returns PASS_ESCAPE", async () => {
+    const { PASS_ESCAPE } = await import("./useEscapeToClose");
+    const drawer = vi.fn();
+    const pending = vi.fn(() => PASS_ESCAPE);
+    mount(<><Overlay onClose={drawer} /><Overlay onClose={pending} /></>);
+    pressEscape();
+    expect(pending).toHaveBeenCalledTimes(1);
+    expect(drawer).toHaveBeenCalledTimes(1);
+  });
+});

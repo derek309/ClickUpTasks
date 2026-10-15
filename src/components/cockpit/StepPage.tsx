@@ -42,6 +42,8 @@ export type StepSetupProps = {
   context?: string | null;
   history?: HistoryStep[];
   submit?: string;
+  /** Escape before Skip: true when it took the just made step back. */
+  onEscape?: () => boolean;
 };
 
 /** The end of every step (Derek, 2026-10-13: "more guidance at the end of
@@ -216,7 +218,9 @@ export function useStepDirections({ sub, onPatchSub, startEditing = false, inlin
       )}
     </>
   );
-  return { open, start, node };
+  // Typing not saved yet (it saves a moment after it stops, or as the page closes).
+  const dirty = () => !!dirTimer.current;
+  return { open, start, node, dirty };
 }
 
 /** A step's to dos, the same on its page and on the task page: tick, add,
@@ -324,7 +328,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
       </div>
     </section>
   );
-  return { todos, show, showTodos, setShowTodos, ref, node };
+  return { todos, show, showTodos, setShowTodos, ref, node, typing: todoDraft };
 }
 
 /** How a step ends, the same on its page and on the task page: Done (its
@@ -364,7 +368,9 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   isCurrent: boolean;
   full: boolean;
   onToggleFull: () => void;
-  onClose: () => void;
+  /** dirty: something typed on the page is not saved yet (it saves as the
+   *  page closes), so a step just made is kept. */
+  onClose: (left?: { dirty: boolean }) => void;
   onRename: (title: string) => void;
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
@@ -483,7 +489,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** The reply box is open under the email: its Send is the dark button. */
   replyOpen?: boolean;
 }) {
-  useEscapeToClose(onClose);
+  const close = () => onClose({ dirty: dir.dirty() || !!todo.typing.trim() || !!draft.trim() });
+  useEscapeToClose(close);
   const pageRef = useRef<HTMLDivElement>(null);
   // ← and → step through, unless typing.
   useEffect(() => {
@@ -730,7 +737,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   if (typeof document === "undefined") return null;
   return createPortal(
     <>
-      {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={onClose} />}
+      {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={close} />}
       <div ref={pageRef} role="dialog" aria-label={`Step: ${sub.title}`}
         className={`safe-y fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
         {/* One line: a long task name shortens instead of pushing × down. */}
@@ -738,7 +745,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
             in a row pushed the back link to nothing and the rest off screen
             (Derek, 2026-10-13). */}
         <div className="flex items-center gap-x-2 border-b px-2 py-2 text-[16px] sm:gap-x-3 sm:px-4">
-          <button onClick={onClose} title={task.title} className="min-w-[3.5rem] flex-1 truncate rounded-[5px] px-2 py-1.5 text-left text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
+          <button onClick={close} title={task.title} className="min-w-[3.5rem] flex-1 truncate rounded-[5px] px-2 py-1.5 text-left text-muted hover:bg-background hover:text-foreground">‹ {task.title}</button>
           {stepNo && stepNo.total > 1 && (
             <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted">
               <button onClick={onPrev} disabled={!onPrev} title="Step before (←)" aria-label="Step before" className="rounded-lg p-1.5 hover:bg-background hover:text-foreground disabled:opacity-30"><I.chevron className="h-4 w-4" /></button>
@@ -763,7 +770,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           {onCopyForClaude && <button onClick={onCopyForClaude} title="Copy this step for Claude" aria-label="Copy this step for Claude" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[18px] text-muted hover:bg-background hover:text-foreground"><span aria-hidden>✳</span></button>}
           <button onClick={onToggleFull} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-semibold text-muted hover:bg-background hover:text-foreground">{full ? "Side panel" : "Open full page"}</button>
           </span>
-          <button onClick={onClose} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
+          <button onClick={close} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className={`mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-8 ${full ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:gap-10" : ""}`}>

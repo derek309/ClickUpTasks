@@ -40,6 +40,8 @@ import { CurrentStep, sameStepName } from "./CurrentStep";
 import { AfterThis, ClientRemindWord, type AfterStep } from "./AfterThis";
 import { AskedLog } from "./AskedLog";
 import { InlineReply } from "./InlineReply";
+import { useUndoActions } from "./useUndoActions";
+import type { ActionState } from "@/lib/undoAction";
 import { addAfterThisStep, afterThisFilled, afterThisOf, afterThisWho, doneNextLabel, finishOpensWhatsNext, isClientWait, patchForAction, patchForWho, suggestedAfter } from "@/lib/afterThis";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
@@ -274,6 +276,22 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // side effect in the render path. The reads that matter happen well after
   // commit anyway (a title fetch resolving hundreds of ms later).
   useEffect(() => { taskRef.current = task; }, [task]);
+  // An action left with nothing entered takes itself back (Derek,
+  // 2026-10-15: "we hit Esc and never enter anything, cancel and remove
+  // it"): each one below notes the task as it was before it (`task`, this
+  // render's copy) and where it is left from (lib/undoAction).
+  const undo = useUndoActions({
+    taskId: task.id, task,
+    current: () => taskRef.current,
+    apply: (patch) => { onPatch(patch); },
+    onUndone: (removed) => {
+      pushToast("Canceled");
+      if (!removed.length) return;
+      setOpenStepPage((o) => (o && removed.includes(o.id) ? null : o));
+      if (talkReturn.current && removed.includes(talkReturn.current)) talkReturn.current = null;
+      setSetupFor((m) => (removed.some((id) => id in m) ? Object.fromEntries(Object.entries(m).filter(([id]) => !removed.includes(id))) : m));
+    },
+  });
 
   const addLink = () => {
     const url = linkUrl.trim();
@@ -1292,7 +1310,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const now = new Date().toISOString();
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
       onPatch({ draftEmail: { subject: `Done: ${task.title}`, body: `${greetingHtml(messageDest?.name)}<p>Good news: <strong>${esc(task.title)}</strong> is done.</p><p>Let me know if you have any questions, or if there is anything else you need.</p>`, replyTo: null, createdAt: now, updatedAt: now } });
-      setEmailOpenNonce((n) => n + 1);
+      openNewEmail(task, { draftOnly: true });
       pushToast(`Task done. The email to ${firstName} is drafted for you to read.`);
     } else pushToast("Task done");
   };
@@ -1761,7 +1779,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // a reply replaces it, after a confirm when it has writing in it.
   // keepHold: the caller has put the email on its step already.
   // open: false writes the draft without opening the window (Reply in place).
-  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }, keepHold = false, open = true) => {
+  // before: the task before the action that led here, when that was not
+  // this render (a step's Email, started once it holds the email).
+  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }, keepHold = false, open = true, before: ActionState = task) => {
     const current = task.draftEmail;
     const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
     if (!keepCurrent) {
@@ -1778,7 +1798,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now },
         ...(moveHold ? { subtasks: holdOnStep(list, target!.id, "email") } : {}) });
     }
-    if (open) setEmailOpenNonce((n) => n + 1);
+    if (open) openNewEmail(before);
+  };
+  // The email window opening on what an action just wrote: Escape there with
+  // nothing changed takes the action back (useUndoActions). draftOnly: only
+  // the email goes, the rest of the action stays (a finished step).
+  const openNewEmail = (before: ActionState = task, opts?: { draftOnly?: boolean }) => {
+    setEmailOpenNonce((n) => n + 1);
+    undo.note("email", before, opts);
   };
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
@@ -2462,7 +2489,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       subtasks: list,
       ...(hasMessaging && messageDest?.email ? { draftEmail: { subject: task.title.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>To keep <strong>${esc(task.title)}</strong> moving, we need this from you:</p><p></p>${clientPortalUrl ? `<p>You can reply to this email or answer on your tasks page: <a href="${esc(clientPortalUrl)}">open it here</a>.</p>` : "<p>Just reply to this email.</p>"}`, replyTo: null, createdAt: now, updatedAt: now } } : {}),
     });
-    if (hasMessaging && messageDest?.email) setEmailOpenNonce((n) => n + 1);
+    if (hasMessaging && messageDest?.email) openNewEmail();
     return true;
   };
   // Who does what: a handoff to a teammate (the delegate box) or a follow up.
@@ -2572,7 +2599,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // sending goes back to the task (finishTalkStep).
     talkReturn.current = id;
     setOpenStepPage({ taskId: task.id, id, full: false });
-    if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail(undefined, true);
+    if (deliverablePresent("email")) openNewEmail(); else startDraftEmail(undefined, true);
+    return id;
   };
   // A text or a portal chat as a step of its own, like Email (2026-10-13): its
   // page opens on that box; sending it finishes the step and asks what's next.
@@ -2582,6 +2610,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: title || (kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`), done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
     talkReturn.current = id;
     setOpenStepPage({ taskId: task.id, id, full: false });
+    undo.note(`step:${id}`, task);
+    return id;
   };
   // Remind the client (Derek, 2026-10-13: "a reminder email, individual for
   // the task and the step"): a step holding an email that names this task and
@@ -2611,7 +2641,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       subtasks: onStep ? taskRef.current.subtasks.map((x) => (x.id === onStep.id && !x.holds?.includes("email") ? { ...x, holds: [...(x.holds ?? []), "email"] } : x)) : holdOnStep([...taskRef.current.subtasks, { id, title: `Remind ${firstName}`, done: false, ...stepOwnerFields() }], id, "email"),
       draftEmail: { subject: `Reminder: ${task.title}`.slice(0, 120), body: `${greetingHtml(messageDest?.name)}<p>A quick reminder about <strong>${esc(task.title)}</strong>.</p>${what}${where}`, replyTo: null, createdAt: now, updatedAt: now },
     });
-    setEmailOpenNonce((n) => n + 1);
+    openNewEmail();
   };
   // Ask them to meet (Derek, 2026-10-13: "the request to meet by email or
   // text"), as the client page's Request does: three open times from your
@@ -2638,11 +2668,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }
     const copy = meetingTimesCopy(times, await theirTz);
     const title = `Request a meeting with ${firstName}`;
+    // The task as it is now, after the wait for the open times.
+    const before: ActionState = taskRef.current;
     if (channel === "sms") {
       const body = [`Hi ${firstName}, do you have time to meet this week about ${task.title}?`, copy.smsSentence, link ? `Or pick any time here: ${link.url}` : ""].filter(Boolean).join(" ");
       onPatch({ subtasks: [...taskRef.current.subtasks, { id, title, done: false, due: TODAY, draftMessage: { channel: "sms", body }, ...stepOwnerFields() }] });
       talkReturn.current = id;
       setOpenStepPage({ taskId: task.id, id, full: false });
+      undo.note(`step:${id}`, before);
     } else {
       const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
       const now = new Date().toISOString();
@@ -2658,7 +2691,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       });
       talkReturn.current = id;
       setOpenStepPage({ taskId: task.id, id, full: false });
-      setEmailOpenNonce((n) => n + 1);
+      openNewEmail(before);
     }
     if (!link) pushToast("No booking page found for you, so there are no open times in it.");
   };
@@ -2723,9 +2756,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const typed = subDraft.trim();
     closeNew();
     if (key?.startsWith("tpl:")) { onApplyTemplate(key.slice(4)); return; }
-    // A message is written now, in its window (no set up for these).
-    if (key === "email") { emailStep(typed); return; }
-    if (key === "text" || key === "chat") { talkStep(key === "text" ? "text" : "client", typed); return; }
+    // A message is written now, in its window (no set up for these). A name
+    // typed for the step is something entered: the step stays even when the
+    // message is left empty.
+    if (key === "email") { const id = emailStep(typed); if (typed) undo.keepStep(id); return; }
+    if (key === "text" || key === "chat") { const id = talkStep(key === "text" ? "text" : "client", typed); if (typed) undo.keepStep(id); return; }
     if (key === "askemail" || key === "asktext") { void requestMeetingStep(key === "askemail" ? "email" : "sms"); return; }
     // The meeting's steps are made with it, in front of the current one.
     if (key === "meetnow") { setMeetNowFrom({ stepId: null }); return; }
@@ -2744,7 +2779,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // An Email review or a Page review; once the task has its HTML review, the one it is.
     if (isPageAction(key)) (stepAddOptions(step).find((o) => o.key === key) ?? stepAddOptions(step).find((o) => isPageAction(o.key)))?.onPick();
     applySetup(id, { who, when: a.when });
-    if (key === "checklist" || key === "directions") setOpenStepPage({ taskId: task.id, id, full: false, [key]: true });
+    if (key === "checklist" || key === "directions") {
+      setOpenStepPage({ taskId: task.id, id, full: false, [key]: true });
+      // Its page closed with no to dos or directions takes it off again,
+      // unless a name was typed for it.
+      if (!typed) undo.note(`step:${id}`, task);
+    }
     // The new row comes into view, nothing else moves.
     else setTimeout(() => document.querySelector(`[data-step="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
   };
@@ -3115,7 +3155,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       draftEmail: { subject: items.length === 1 ? `Quick question: ${items[0].title}`.slice(0, 120) : `A few questions about ${task.title}`.slice(0, 120), body, replyTo: null, createdAt: now, updatedAt: now, asks: { stepId: st.id, todoIds: items.map((t) => t.id) } },
       subtasks: holdOnStep(taskRef.current.subtasks, st.id, "email"),
     });
-    setEmailOpenNonce((n) => n + 1);
+    openNewEmail();
   };
   // Right after Send, or an approval (Derek, 2026-10-12: "ok, what's next,
   // here's my suggestion and dates, approve or change"; "a pop up marked
@@ -3145,7 +3185,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       draftEmail: { subject: `${name}: approved`, body: `${greetingHtml(messageDest?.name)}<p>Thanks for approving <strong>${esc(name)}</strong>. We will take it from here and let you know when it is live.</p>`, replyTo: null, createdAt: now, updatedAt: now },
       subtasks: holdOnStep(taskRef.current.subtasks, st.id, "email"),
     });
-    setEmailOpenNonce((n) => n + 1);
+    openNewEmail();
   };
   // Built when drawn, not here: its menu reads work labels defined further
   // down, and reading them before then crashed the page (2026-10-12).
@@ -3376,8 +3416,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // box's Open and send does; with none, one is started.
     const heldDraft = !!task.draftEmail && (ps.holds ?? []).includes("email");
     const textStarted = `Hi ${firstName}, I sent you an email about ${task.title.trim()}. Did you get it?`;
-    const startText = () => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id
-      ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.channel === "sms" && x.draftMessage.body.trim() ? x.draftMessage.body : textStarted } } : x)) });
+    const startText = () => {
+      onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === ps.id
+        ? { ...x, draftMessage: { channel: "sms" as const, body: x.draftMessage?.channel === "sms" && x.draftMessage.body.trim() ? x.draftMessage.body : textStarted } } : x)) });
+      // The text as started, left as it is (Escape, clicking away): it goes.
+      undo.note(`msg:${ps.id}`, task);
+    };
     return (
       // Said once (Derek, 2026-10-14): the title says it waits, the email it
       // waits on sits above; when it checks again is each choice's tooltip.
@@ -3486,6 +3530,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const draftEmailBlock = (
     <DraftEmail key={`email-${task.id}`} task={task} onPatch={onPatch} sendNote={hasMessaging ? sendNote : undefined}
+      // Left as the action that opened it wrote it: that action is taken back.
+      onLeave={(latest) => undo.leave("email", { draftEmail: latest })}
       onSent={(m) => {
         const list = taskRef.current.subtasks;
         const on = stepHolding(list, "email");
@@ -3513,7 +3559,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Its email sits on the step that made the review (addClientReviewStep
     // puts it there when the client's step starts): no second write of the list
     // here, which could carry an older copy over the new step.
-    setEmailOpenNonce((n) => n + 1);
+    openNewEmail(task, { draftOnly: true });
     return true;
   };
   // Image and web page reviews (Derek, 2026-09-12): the same line and window as the
@@ -3628,13 +3674,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // to start once it has moved there (a block that mounts ignores a start it
   // was already holding).
   const [pendingStart, setPendingStart] = useState<DeliverableKey | null>(null);
+  // The task before the pick that put the work on its step, for its undo.
+  const pendingBefore = useRef<ActionState | null>(null);
   useEffect(() => {
     if (!pendingStart || !stepHolding(task.subtasks, pendingStart)) return;
     const k = pendingStart;
     setPendingStart(null);
+    const before = pendingBefore.current ?? undefined;
+    pendingBefore.current = null;
     if (k === "doc") setDocStartNonce((n) => n + 1);
     else if (k === "brief") setBriefStartNonce((n) => n + 1);
-    else if (k === "email") startDraftEmail(undefined, true);
+    else if (k === "email") startDraftEmail(undefined, true, true, before);
     else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
   }, [pendingStart, task.subtasks]); // eslint-disable-line react-hooks/exhaustive-deps
   // Files uploaded from a step's menu land on that step once they arrive.
@@ -3672,6 +3722,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const openSetup = (id: string, entry: SetupEntry = {}) => {
     setSetupFor((m) => ({ ...m, [id]: entry }));
     setOpenStepPage({ taskId: task.id, id, full: false });
+    // The step just made: its page closed with nothing set takes it off.
+    undo.note(`step:${id}`, task);
   };
   const endSetup = (id: string) => setSetupFor((m) => { if (!(id in m)) return m; const n = { ...m }; delete n[id]; return n; });
   // A message step made from Quick step: its page sits under the compose
@@ -3720,7 +3772,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (start.open === "email") {
       talkReturn.current = id;
       setOpenStepPage({ taskId: task.id, id, full: false });
-      if (deliverablePresent("email")) setEmailOpenNonce((n) => n + 1); else startDraftEmail(undefined, true);
+      if (deliverablePresent("email")) openNewEmail(); else startDraftEmail(undefined, true);
       return;
     }
     // The client's turn: the ask, as Delegate to the client's set up.
@@ -3743,6 +3795,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       today: TODAY,
       preset: entry.preset ?? null,
       onDone: (a, run) => applySetup(sub.id, a, run),
+      // Escape on the set up of a step just made, nothing picked: the step goes.
+      onEscape: () => undo.leave(`step:${sub.id}`),
       // The three recommended actions read the name, what the context asks
       // for and what steps named like it held before.
       stepName,
@@ -3776,8 +3830,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // written in place right under the email (Derek, 2026-10-15); Full window
   // opens the window on the same draft.
   const replyToEmail = (sub: Subtask, e: ReceivedEmail) => {
-    startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId }, false, sub.assigneeId === CLAUDE_ID);
+    const inWindow = sub.assigneeId === CLAUDE_ID;
+    startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId }, false, inWindow);
     onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
+    // Left as written (Escape, clicking away, Discard): the reply goes.
+    undo.note(inWindow ? "email" : `reply:${sub.id}`, task);
   };
   // The reply box is open on this step: the client's email on it, its draft
   // written here (Claude's own draft keeps its row, to read first).
@@ -3796,9 +3853,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onSend={() => sendInlineReply(sub)}
         onAi={onDraftMessage ? () => onDraftMessage("email", undefined, taskRef.current.draftEmail?.aiContext) : undefined}
         onUpload={onUploadMessageImage}
-        onFull={() => setEmailOpenNonce((n) => n + 1)}
+        onFull={() => { undo.reslot(`reply:${sub.id}`, "email"); setEmailOpenNonce((n) => n + 1); }}
         note={sendNote(null)}
+        onLeave={() => { undo.leave(`reply:${sub.id}`); }}
         onDiscard={() => {
+          // Nothing written since Reply: it goes as if Reply was never pressed.
+          if (undo.leave(`reply:${sub.id}`)) return;
           const kept = taskRef.current.draftEmail;
           const list = taskRef.current.subtasks.map((x) => (x.id === sub.id && x.holds?.includes("email") ? { ...x, holds: x.holds.filter((k) => k !== "email").length ? x.holds.filter((k) => k !== "email") : undefined } : x));
           onPatch({ draftEmail: null, subtasks: list });
@@ -3918,7 +3978,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatch({ subtasks: asking ? answerWhatsNext(list, sub.id, title) : title ? list.map((x) => (x.id === sub.id ? { ...x, title, namedFrom: { title: sub.title, key, as: title } } : x)) : list });
       // Shown on the step, not opened: a tap on it opens the editor (Derek,
       // 2026-10-14). An email is the exception, its window is the work.
-      if (key === "email" && !deliverablePresent(key)) setPendingStart(key);
+      if (key === "email" && !deliverablePresent(key)) { pendingBefore.current = task; setPendingStart(key); }
     };
     const kinds: { key: DeliverableKey; label: string; pageKind?: PageKind }[] = [
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" },
@@ -3941,9 +4001,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     }),
     // A text or a portal chat drafted on the step, read and sent from it (2026-10-13).
     ...(messageDest?.phone && !noClient ? [{ key: "text", label: "Text", disabled: sub.draftMessage?.channel === "sms", note: sub.draftMessage?.channel === "sms" ? "on this step" : undefined,
-      onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("text", firstName), { draftMessage: { channel: "sms" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
+      onPick: () => { onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("text", firstName), { draftMessage: { channel: "sms" as const, body: sub.draftMessage?.body ?? "" } }) }); undo.note(`msg:${sub.id}`, task); } }] : []),
     ...(hasMessaging ? [{ key: "chat", label: "Chat", disabled: sub.draftMessage?.channel === "chat", note: sub.draftMessage?.channel === "chat" ? "on this step" : undefined,
-      onPick: () => onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("chat", firstName), { draftMessage: { channel: "chat" as const, body: sub.draftMessage?.body ?? "" } }) }) }] : []),
+      onPick: () => { onPatch({ subtasks: answerWhatsNext(taskRef.current.subtasks, sub.id, pickStepTitle("chat", firstName), { draftMessage: { channel: "chat" as const, body: sub.draftMessage?.body ?? "" } }) }); undo.note(`msg:${sub.id}`, task); } }] : []),
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
     ...(isPersonal ? [] : [{ key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }]),
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
@@ -4081,7 +4141,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {dm && (
           <DraftMessageBox key={`${sub.id}-${dm.channel}`} light={light} channel={dm.channel} body={dm.body} firstName={firstName} tone={!sub.done && sub.assigneeId !== CLAUDE_ID ? stepTone(sub) : null} waiting={!sub.done && sub.assigneeId === CLAUDE_ID}
             onSave={(body) => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: dm.channel, body } } : x)) })}
-            onDiscard={() => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) })}
+            onDiscard={() => { if (!undo.leave(`msg:${sub.id}`)) onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) }); }}
+            // Clicking away on the task page with nothing written takes the pick back.
+            onLeave={light ? () => { undo.leave(`msg:${sub.id}`); } : undefined}
             onSend={(body) => {
               if (!onSendTaskMessage) return;
               onSendTaskMessage(dm.channel, "", body);
@@ -4721,7 +4783,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               }} onCopyForClaude={() => void copyStepForClaude(ps)} outFor={ps.onClient && sentReviews(ps).length ? outFor(ps) : undefined} doneActions={doneActionsFor(ps)}
               stepNo={at >= 0 ? { at: at + 1, total: steps.length } : undefined}
               onPrev={at > 0 ? go(steps[at - 1]) : undefined} onNext={at >= 0 && at < steps.length - 1 ? go(steps[at + 1]) : undefined} client={client} firstName={firstName} stage={stepStage(ps, task.assigneeId)} isCurrent={isCur} full={openStepPage.full}
-              onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))} onClose={() => setOpenStepPage(null)}
+              onToggleFull={() => setOpenStepPage((o) => (o ? { ...o, full: !o.full } : o))}
+              onClose={(left) => {
+                // A step just made, its page closed with nothing on it, goes
+                // again; typing not saved yet (left.dirty) keeps it.
+                const here = (slot: string) => slot === `step:${ps.id}` || slot === `msg:${ps.id}`;
+                if (left?.dirty) undo.forget(here); else undo.leave(here);
+                setOpenStepPage(null);
+              }}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
               onMarkDone={() => completeStep(ps.id)} onReopen={() => onToggleSub(ps.id, false)}
               // Make it its own task is off for now (Derek, 2026-10-13); stepToTask stays for when it comes back.
