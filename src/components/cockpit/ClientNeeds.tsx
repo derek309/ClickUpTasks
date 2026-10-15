@@ -11,7 +11,7 @@
 // had is in the Conversation feed or under Meet ▾.
 import { useEffect, useState } from "react";
 import { MoveMeeting, cancelMeeting, meetingCanChange, meetingCantChangeWhy, useNextMeeting } from "./MeetingMenu";
-import { loadBookingLinks } from "./useCalendar";
+import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { EVERY_CHOICES, WEEKDAY_SHORT, reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 
 const TZ = "America/Los_Angeles";
@@ -71,6 +71,12 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
   // undefined while reading (the line stays empty until it is ready); null when nothing is booked.
   const meeting = useNextMeeting(clientId, ghlContactId);
   const [meetOpen, setMeetOpen] = useState(false);
+  // Your calendar for Request a time and your booking link, picked here and
+  // kept for you (Derek, 2026-10-15: "we need to be able to set a default
+  // calendar, it's doing ClickUpLocal Demo").
+  const [cals, setCals] = useState<BookingLink[] | null>(null);
+  useEffect(() => { if (meetOpen && !cals) void loadBookingLinks().then(setCals); }, [meetOpen, cals]);
+  const calNow = cals ? cals.find((x) => x.calendarId === defaultCalendarId) ?? cals.find((x) => x.memberId === meId) ?? cals[0] ?? null : null;
   // When the menu opened: a meeting that has started by then can't move.
   const [openedAt, setOpenedAt] = useState(0);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -177,6 +183,15 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
                 </>}
                 <div className="my-1 border-t" />
                 <button onClick={pick(() => void copyBookingLink())} className={item}><b className="block font-semibold">Copy my booking link</b></button>
+                {onSetDefault && cals && cals.length > 1 && (
+                  <label className="flex flex-col gap-1 px-3 py-2 text-[16px]">
+                    <span className="text-muted">My calendar for times and links</span>
+                    <select value={calNow?.calendarId ?? ""} onChange={(e) => { onSetDefault(e.target.value || null); pushToast(`Your calendar is now ${cals.find((x) => x.calendarId === e.target.value)?.label ?? "set"}`); }}
+                      className="h-10 w-full rounded-[5px] bg-surface px-2 text-[16px] ring-1 ring-inset ring-[var(--border)]">
+                      {cals.map((c) => <option key={c.calendarId} value={c.calendarId}>{c.label}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
             </>}
           </span>

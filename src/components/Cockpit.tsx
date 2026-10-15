@@ -3618,7 +3618,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         // onto whatever task you jumped to, which reads as the jump not
         // having happened. Applies to j/k navigation too, and should: a draft
         // typed against one task has no business following you to another.
-        <TaskDrawer key={openTask.id} task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
+        <TaskDrawer key={openTask.id} defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} task={openTask} clientById={clientById} projectById={projectById} contactById={contactById}
           // A task opens as a panel sliding over the list, from anywhere, with
           // Open full page beside it (Derek, 2026-10-12: "in list mode can we
           // click to slide out and full as well").
