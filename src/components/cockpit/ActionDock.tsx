@@ -739,7 +739,7 @@ export function ActionDock({
     // the same 1280px width, so its edges meet the title and sections (Derek,
     // 2026-09-16: "make it the same width as the top content box"; 1280 in the
     // task detail redesign, 2026-10-11, with the client column gone).
-    <div className={bar ? "absolute inset-x-0 bottom-0 z-30 border-t bg-surface px-3 pb-2 pt-1.5 sm:px-6" : "pointer-events-none absolute inset-x-0 bottom-0 z-30 px-2 pb-2 sm:px-5 sm:pb-4"}>
+    <div className={bar ? "absolute inset-x-0 bottom-0 z-30 border-t bg-surface px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-1.5 sm:px-6" : "pointer-events-none absolute inset-x-0 bottom-0 z-30 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] sm:px-5 sm:pb-4"}>
       <div className={bar ? "w-full" : "pointer-events-auto mx-auto w-full max-w-[1280px] rounded-2xl border bg-surface/95 p-2 shadow-[0_12px_32px_rgba(20,24,40,.14),0_2px_6px_rgba(20,24,40,.08)] backdrop-blur-md"}>
 
         {view === "closed" && (() => {

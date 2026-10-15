@@ -64,6 +64,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* The phone's notch and home bar when ClickUpTasks runs from the home screen
+   (Derek, 2026-10-15). The layout sets viewport-fit=cover, so these pad the
+   shell and the full height panels clear of them; in a browser tab and on a
+   computer they are all zero. */
+@utility safe-top { padding-top: env(safe-area-inset-top, 0px); }
+@utility safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+@utility safe-y { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+@utility safe-x { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+
 html,
 body {
   background: var(--background);

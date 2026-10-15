@@ -788,7 +788,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     <>
       {!full && <div className="fixed inset-0 z-[79] bg-black/30" onClick={onClose} />}
       <div ref={pageRef} role="dialog" aria-label={`Step: ${sub.title}`}
-        className={`fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
+        className={`safe-y fixed z-[80] flex min-w-0 flex-col bg-surface ${full ? "inset-0" : "inset-y-0 right-0 w-full shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[min(760px,92vw)] md:rounded-l-2xl"}`}>
         {/* One line: a long task name shortens instead of pushing × down. */}
         {/* On a phone: back, the step arrows, one ⋯ menu and ×. Eight things
             in a row pushed the back link to nothing and the rest off screen

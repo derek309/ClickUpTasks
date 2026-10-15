@@ -2809,7 +2809,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // edge, or the window's left edge when the sidebar is collapsed. Set here
     // (rather than read inside the drawer) so the one place that owns the
     // sidebar's width owns this too.
-    <div className="flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
+    <div className="safe-x safe-y flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -2822,7 +2822,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           feeding the width into state re-rendered on every step until the
           renderer died. macOS overlay scrollbars take no width, which is why
           it only ever happened to Michaella. */}
-      <aside style={{ width: sidebarPx, maxWidth: "85vw" }} className={`sidebar-dark fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col overflow-y-auto [scrollbar-gutter:stable] border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside style={{ width: sidebarPx, maxWidth: "85vw" }} className={`sidebar-dark safe-y fixed inset-y-0 left-0 z-40 flex shrink-0 flex-col overflow-y-auto [scrollbar-gutter:stable] border-r bg-surface transition-transform ${sidebarHidden ? "md:hidden" : "md:static md:translate-x-0"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         {/* Dashboard, Conversations, and Clients/Projects/Personal, all one
             block (Derek: put them together "so they use less space") — no
             divider/gap between them, just Pinned below stays its own
@@ -3473,7 +3473,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           // Centred over the task area, not the window, so the sidebar never
           // covers its left end; it wraps to a second row when narrow
           // (Derek, 2026-10-12: it was cut off).
-          className="fixed bottom-4 left-1/2 z-30 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-[5px] border bg-surface px-3 py-2 text-[16px] shadow-xl md:left-[calc(var(--drawer-left,0px)_+_(100vw_-_var(--drawer-left,0px))_/_2)] md:max-w-[min(1100px,calc(100vw_-_var(--drawer-left,0px)_-_32px))]">
+          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 z-30 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-[5px] border bg-surface px-3 py-2 text-[16px] shadow-xl md:left-[calc(var(--drawer-left,0px)_+_(100vw_-_var(--drawer-left,0px))_/_2)] md:max-w-[min(1100px,calc(100vw_-_var(--drawer-left,0px)_-_32px))]">
           <span className="font-semibold tabular-nums">{selectedTaskIds.size} selected</span>
           <button onClick={clearSelection} title="Unselect them (Esc)" aria-label="Clear the selection" className="h-9 rounded-[5px] px-2 text-muted hover:bg-background hover:text-foreground">✕</button>
           <span aria-hidden className="mx-1 h-6 w-px bg-[var(--border)]" />
@@ -3685,7 +3685,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       )}
       {settingsClient && (<>
           <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setClientSettingsOpen(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-hidden border-l bg-surface shadow-xl">
+          <div className="safe-y fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-hidden border-l bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b px-5 py-3">
               <h2 className="text-[17px] font-semibold">Client settings — {settingsClient.name}</h2>
               <button onClick={() => setClientSettingsOpen(false)} className="rounded-md p-1.5 text-muted hover:bg-background hover:text-foreground"><I.close /></button>

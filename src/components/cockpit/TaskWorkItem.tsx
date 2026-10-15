@@ -124,7 +124,7 @@ export function WorkItemWindow({ icon, title, badge, status, actions, onClose, b
     // On a phone the header scrolls away with the page (Derek, 2026-10-14:
     // never a fixed header; it took a third of a 375px screen): one scroll
     // for both. From sm up the header stays and the body scrolls, as before.
-    <div role="dialog" aria-modal="true" className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-background sm:overflow-hidden">
+    <div role="dialog" aria-modal="true" className="safe-y fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-background sm:overflow-hidden">
       <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-surface px-4 py-3 sm:px-8">
         {/* On a phone the back link has a line of its own, then the icon and
             the name a full line under it, so a long name wraps instead of

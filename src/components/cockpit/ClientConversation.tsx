@@ -183,7 +183,7 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
 
   return (
     <aside aria-label={`Conversation with ${first}`}
-      className="fixed inset-0 z-50 flex flex-col bg-surface text-[16px] sm:inset-y-0 sm:left-auto sm:right-0 sm:z-40 sm:w-[420px] sm:max-w-[92vw] sm:border-l sm:shadow-xl lg:static lg:z-auto lg:max-w-none lg:shrink-0 lg:shadow-none">
+      className="safe-top fixed inset-0 z-50 flex flex-col bg-surface text-[16px] sm:inset-y-0 sm:left-auto sm:right-0 sm:z-40 sm:w-[420px] sm:max-w-[92vw] sm:border-l sm:shadow-xl lg:static lg:z-auto lg:max-w-none lg:shrink-0 lg:shadow-none">
       <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <b className="min-w-0 flex-1 truncate text-[17px]">{first} · {(["email", "sms", "chat"] as const).filter((c) => has.has(c) || channels.includes(c)).map((c) => WORD[c]).join(", ") || "no messages yet"}</b>
         <select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Show"
