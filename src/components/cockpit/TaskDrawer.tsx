@@ -37,14 +37,20 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
 import { NextChoices, StepPage } from "./StepPage";
 import { CurrentStep, sameStepName } from "./CurrentStep";
-import { AfterThis, type AfterStep } from "./AfterThis";
+import { AfterThis, ClientRemindWord, type AfterStep } from "./AfterThis";
+import { AskedLog } from "./AskedLog";
 import { InlineReply } from "./InlineReply";
-import { addAfterThisStep, afterThisFilled, afterThisOf, afterThisWho, doneNextLabel, finishOpensWhatsNext, patchForAction, patchForWho, suggestedAfter } from "@/lib/afterThis";
+import { addAfterThisStep, afterThisFilled, afterThisOf, afterThisWho, doneNextLabel, finishOpensWhatsNext, isClientWait, patchForAction, patchForWho, suggestedAfter } from "@/lib/afterThis";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
 // when the app loads, because the app rewrites the address as you move around,
 // and handed to the first drawer that holds that delegation.
 let handoffFromUrl: string | null = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("handoff");
+/** Opens this step's page when its task's drawer next opens (Reminders and
+ *  What we need from a client link straight to a step, 2026-10-15). */
+export function openStepNext(stepId: string): void { handoffFromUrl = stepId; }
+/** Under the client's reminder choices: what On means for them. */
+const REMIND_NOTE = (first: string) => `Each one waits in Reminders for your Approve. ${first} gets one email a day at most, about the top request.`;
 import { STEP_TOOLS, stepsForClaude } from "@/lib/claudeBrief";
 import { DraftEmail } from "./DraftEmail";
 import { rememberedFollowUpDate, type OutgoingEmail } from "./EmailWindow";
@@ -1952,12 +1958,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word}>{whoName}</span>}
         onChange={(a) => assignStep(sub, a, isActive)} />
     ) });
-    parts.push({ lead: d ? "due" : "", pick: (
+    // A client's step has a need by date, not a due date (Derek and Justin, 2026-10-15).
+    const clientStep = isClientWait(sub);
+    parts.push({ lead: d ? (clientStep ? "need by" : "due") : "", pick: (
       <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)} onClear={() => onPatchSub(sub.id, { due: null })}
         emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">no due date</span>}
         formatValue={(v) => `${formatDue(v)}${sub.done ? "" : `, ${dueCountdown(v).replace(/^due /, "")}`}`}
         className={`${dateWord} ${dueTone === "late" ? "text-danger" : dueTone === "soon" ? "text-highlight" : ""}`} />
     ) });
+    if (clientStep && !sub.done && canRemindClient) parts.push({ lead: "", pick: clientRemindWord(sub) });
     if (teammate && !sub.done) parts.push({ lead: `on ${userById(sub.assigneeId!)?.name.split(" ")[0] ?? "their"}'s list`, pick: (
       <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
         emptyLabel={setADate} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))} className={dateWord} />
@@ -1985,8 +1994,39 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // dates sit under the name on their own muted line: "Checking again Oct 16 ▾"
   // and, when it differs, "due Oct 18 ▾" (Derek, 2026-10-14). The same pickers
   // and setters as the sentence: checking again is the task's follow up.
+  // The client's reminder word on their step: on by default with a need by
+  // date, one email a day at most about their top request (lib/clientRequests).
+  const canRemindClient = hasMessaging && !!messageDest?.email && !noClient;
+  const clientRemindWord = (sub: Subtask) => (
+    <ClientRemindWord remind={sub.remind} needBy={sub.due ?? null} first={firstName} note={REMIND_NOTE(firstName)}
+      onRemind={(r) => onPatchSub(sub.id, { remind: r ?? undefined })} className={`rounded-[5px] text-left ${word} text-accent`} />
+  );
   const waitDates = (sub: Subtask, isActive: boolean) => {
     if (sub.done) return null;
+    // The client's step reads as one sentence (Derek and Justin, 2026-10-15):
+    // "● Brian's turn, need by Fri, Oct 17, 🔔 reminders on", and the task's
+    // check in after it when one is set.
+    if (isClientWait(sub)) {
+      const d = sub.due ?? null;
+      const tone = d ? stepDateLabel(d).tone : "later";
+      const dateWord = `-mx-1 ${word} text-[16px] sm:text-[18px]`;
+      return (
+        <div data-no-open className="text-[16px] leading-snug sm:text-[18px]">
+          <span className="font-semibold"><span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META.waiting.dot }} />{firstName}&apos;s turn</span>
+          {", need by "}
+          <span className="inline-flex items-baseline">
+            <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)} onClear={() => onPatchSub(sub.id, { due: null })}
+              emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
+              formatValue={(v) => formatDayDate(v)} className={`${dateWord} ${tone === "late" ? "text-danger" : tone === "soon" ? "text-highlight" : ""}`} />
+            {canRemindClient || (isActive && followUp) ? "," : ""}
+          </span>
+          {canRemindClient && <>{" "}{clientRemindWord(sub)}{isActive && followUp ? "," : ""}</>}
+          {isActive && followUp && <span className="text-muted">{" "}checking again{" "}
+            <span className="inline-flex items-baseline"><InlineDate value={followUp} onChange={(v) => moveStepDate(v)} formatValue={(v) => formatDue(v)} className={`${dateWord} text-muted`} /></span>
+          </span>}
+        </div>
+      );
+    }
     const d = sub.due ?? null;
     const dueTone = d ? stepDateLabel(d).tone : "later";
     const pick = "font-semibold text-foreground text-[16px]";
@@ -3789,7 +3829,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <AfterThis next={next} suggested={!real && !!sg} clientFirst={firstName} ownerId={task.assigneeId ?? null} meId={meId ?? null}
         who={afterWhoChoices()} nameOf={firstOf}
-        remindNote={client.reminders?.auto ? `Sends itself, as set for ${client.name}.` : `Waits in your Inbox for review first, as set for ${client.name}.`}
+        remindNote={REMIND_NOTE(firstName)}
         canRemindClient={hasMessaging && !!messageDest?.email}
         onName={(title) => {
           const r = afterThisOf(taskRef.current.subtasks, sub.id);
@@ -4683,6 +4723,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
               incoming={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "came") ?? undefined}
               waiting={waitingStep(ps)} waitDates={waitDates(ps, isCur)} face={turnFace(ps)}
+              asked={isClientWait(ps) || ps.addedFor?.startsWith("checkit:") ? <AskedLog clientId={task.clientId} stepId={ps.addedFor?.startsWith("checkit:") ? ps.addedFor.slice(8) : ps.id} /> : undefined}
               onAddLink={(url) => { addLinkOn(url, "", ps.id); pushToast("Link added to this step"); }}
               onAttachFiles={() => fileRef.current?.click()}
               onCopyPortalLink={noClient ? undefined : onCopyClientLink}

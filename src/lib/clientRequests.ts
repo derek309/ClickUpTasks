@@ -348,7 +348,7 @@ export function requestEmail(o: {
     ? `<p>It's what holds up ${escapeHtml(task)}${o.expected ? `, which is expected ${escapeHtml(formatDue(o.expected))}` : ""}.</p>`
     : o.expected ? `<p>It's expected ${escapeHtml(formatDue(o.expected))}.</p>` : "";
   const more = o.more > 0 && o.listUrl
-    ? `<p style="color:#6b7280">${things(o.more)} more ${o.more === 1 ? "is" : "are"} waiting on you. <a href="${escapeHtml(o.listUrl)}" style="color:#6b7280">See everything we need</a></p>` : "";
+    ? `<p style="color:#6b7280">${o.more} more ${o.more === 1 ? "thing is" : "things are"} waiting on you. <a href="${escapeHtml(o.listUrl)}" style="color:#6b7280">See everything we need</a></p>` : "";
   return {
     subject,
     body: `${hi}<p>${lead}</p>${firstAsked}${holds}${draftLinkHtml(o.link)}<p>Or reply to this email with your answer.</p>${more}${thanks}`,

@@ -353,7 +353,7 @@ export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, del
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -428,6 +428,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** A waiting step's dates, under its name in place of the sentence:
    *  "Checking again Oct 16 ▾" (Derek, 2026-10-14). */
   waitDates?: React.ReactNode;
+  /** A client's step: each reminder about it (AskedLog), under its directions. */
+  asked?: React.ReactNode;
   /** A link typed in the row onto this step (Derek, 2026-10-14). */
   onAddLink?: (url: string) => void;
   /** Picks files to add to this step. */
@@ -814,6 +816,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   </div>
                 )}
                 {directions}
+                {asked}
               </div>
               {/* What came in (Derek, 2026-10-14): the client's email, open,
                   with its files, or the review out with them and the email that

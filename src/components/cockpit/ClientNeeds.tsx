@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { MoveMeeting, cancelMeeting, meetingCanChange, meetingCantChangeWhy, useNextMeeting } from "./MeetingMenu";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
-import { EVERY_CHOICES, WEEKDAY_SHORT, reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
+import { EVERY_CHOICES, REMINDERS_REVIEW_ALL, WEEKDAY_SHORT, reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 
 const TZ = "America/Los_Angeles";
 const timeOnly = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
@@ -31,7 +31,7 @@ function Answer({ title, line, tone }: { title: string; line: string; tone?: str
   );
 }
 
-export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered = null, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onRemind, reminders, onSetReminders = null, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
+export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered = null, draftCount, feedOpen, onToggleFeed, waiting, oldestWaiting, onOpenNeeds = null, onRemind, reminders, onSetReminders = null, canBook, onBook, requestChannels, onRequest, onMeetNow, meetingNow, meId, pushToast, defaultCalendarId, onSetDefault }: {
   clientId: string;
   /** Meetings carry the GoHighLevel contact; their clientId is the sub-account. */
   ghlContactId: string | null;
@@ -46,6 +46,8 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
   onToggleFeed: () => void;
   waiting: number;
   oldestWaiting: string | null;
+  /** Opens What we need from them, the whole queue (ClientRequestsList). */
+  onOpenNeeds?: (() => void) | null;
   /** Writes the reminder as a draft in the feed. */
   onRemind: (() => void) | null;
   /** When the 8 AM job reminds them (lib/reminderSchedule); null or absent is Mondays, for review. */
@@ -123,11 +125,19 @@ export function ClientNeeds({ clientId, ghlContactId, first, newest, unanswered 
       </button>
 
       <div className={`${cell} ${waiting ? "bg-highlight-soft" : "bg-background"}`}>
-        <span className="block min-w-0 flex-1">
-          <Answer title={waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`} line={oldestWaiting ?? "Ball's in our court"} tone={waiting ? "text-highlight" : undefined} />
-          {/* When the 8 AM email goes (Derek, 2026-10-14). */}
-          {waiting > 0 && <span className="block text-[16px] text-muted">{reminderLine(reminders ?? null)}</span>}
-        </span>
+        {waiting > 0 && onOpenNeeds ? (
+          // The whole queue, across their lists (Derek and Justin, 2026-10-15).
+          <button onClick={onOpenNeeds} title={`What we need from ${first}`} className="block min-w-0 flex-1 text-left">
+            <Answer title={`${waiting} waiting on ${first} ›`} line={oldestWaiting ?? ""} tone="text-highlight" />
+            {reminderSettings(reminders ?? null).schedule !== "off" && <span className="block text-[16px] text-muted">{reminderLine(reminders ?? null)}</span>}
+          </button>
+        ) : (
+          <span className="block min-w-0 flex-1">
+            <Answer title={waiting ? `${waiting} waiting on ${first}` : `Nothing waiting on ${first}`} line={oldestWaiting ?? "Ball's in our court"} tone={waiting ? "text-highlight" : undefined} />
+            {/* When the 8 AM email goes (Derek, 2026-10-14). */}
+            {waiting > 0 && <span className="block text-[16px] text-muted">{reminderLine(reminders ?? null)}</span>}
+          </span>
+        )}
         {waiting > 0 && (onRemind || onSetReminders) && (
           <RemindButtons first={first} onRemind={onRemind} reminders={reminders ?? null} onSetReminders={onSetReminders} btn={btn} item={item} />
         )}
@@ -254,7 +264,7 @@ function RemindButtons({ first, onRemind, reminders, onSetReminders, btn, item }
             <button onClick={pick(onRemind)} className={item}><b className="block font-semibold">Remind now</b><span className="text-muted">A draft in the conversation, to read and send</span></button>
             <div className="my-1 border-t" />
           </>}
-          <div className="px-3 pb-1 pt-2 text-[16px] font-semibold">Email {first} at 8 AM</div>
+          <div className="px-3 pb-1 pt-2 text-[16px] font-semibold">Counts email to {first} at 8 AM</div>
           <div role="radiogroup" aria-label="When">
             <button role="radio" aria-checked={onDays} onClick={() => { if (!onDays) save({ schedule: "monday", days: undefined }); }} className={row}>
               {radio(onDays)}<span className="min-w-0 flex-1"><b className="block font-semibold">On these days</b></span>
@@ -280,7 +290,8 @@ function RemindButtons({ first, onRemind, reminders, onSetReminders, btn, item }
               {radio(s.schedule === "off")}<span className="min-w-0 flex-1"><b className="block font-semibold">Off</b><span className="text-muted">Only when you press Remind</span></span>
             </button>
           </div>
-          {s.schedule !== "off" && <>
+          {/* Every reminder waits for review for now (REMINDERS_REVIEW_ALL). */}
+          {s.schedule !== "off" && !REMINDERS_REVIEW_ALL && <>
             <div className="my-1 border-t" />
             <div role="radiogroup" aria-label="How it goes">
               <button role="radio" aria-checked={!s.auto} onClick={() => { if (s.auto) save({ auto: false }); }} className={row}>

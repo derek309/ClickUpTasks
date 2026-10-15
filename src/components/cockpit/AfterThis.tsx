@@ -11,6 +11,7 @@
 import { useState, type ReactNode } from "react";
 import { CLAUDE_ID, formatDayDate, type StepRemind, type Subtask } from "@/lib/data";
 import { ACTION_WORDS, afterThisAction, afterThisWho, remindKind, remindWord, type AfterAction } from "@/lib/afterThis";
+import { remindersOn } from "@/lib/clientRequests";
 import { InlineDate } from "./GroupedList";
 import { MenuSheet } from "./ActionMenu";
 import { useEscapeToClose } from "./useEscapeToClose";
@@ -24,7 +25,7 @@ type MenuItem = { key: string; label: string; sub?: string; on?: boolean; muted?
 
 /** A word in the sentence that opens a short menu: anchored on a desktop, a
  *  sheet at the bottom on a phone. Inline, so the sentence wraps as words. */
-function WordMenu({ label, title, heading, items, note, className }: { label: ReactNode; title: string; heading?: string; items: MenuItem[]; note?: string; className: string }) {
+export function WordMenu({ label, title, heading, items, note, className }: { label: ReactNode; title: string; heading?: string; items: MenuItem[]; note?: string; className: string }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   useEscapeToClose(() => setOpen(false), open);
@@ -61,6 +62,24 @@ function WordMenu({ label, title, heading, items, note, className }: { label: Re
         <MenuSheet label={title} onClose={() => setOpen(false)}>{body}</MenuSheet>
       </>)}
     </>
+  );
+}
+
+/** The client's reminder word on their step (Derek and Justin, 2026-10-15):
+ *  "🔔 reminders on" by default with a need by date, its menu On or Off. An
+ *  older choice (once, every N) reads as it was until changed. */
+export function ClientRemindWord({ remind, needBy, first, onRemind, note, className }: { remind?: StepRemind; needBy: string | null; first: string; onRemind: (r: StepRemind | null) => void; note?: string; className: string }) {
+  const on = remindersOn({ remind, needBy });
+  const legacy = !!remind && "every" in remind;
+  const label = legacy ? remindWord(remind, first, needBy ? formatDayDate(needBy) : null) : on ? "reminders on" : "reminders off";
+  return (
+    <WordMenu title={`Remind ${first} about this`} heading={`Remind ${first} about this`} className={className} note={note}
+      label={<><span aria-hidden>🔔 </span>{label}</>}
+      items={[
+        // On is the default (nothing saved) once there is a need by date; without one, every 3 business days.
+        { key: "on", label: "On", sub: "Every 3 days, then the due day, then daily once late", on: on && !legacy, onClick: () => onRemind(needBy ? null : { every: 3 }) },
+        { key: "off", label: "Off", sub: `Nothing goes to ${first} about this`, on: !on, onClick: () => onRemind({ off: true }) },
+      ]} />
   );
 }
 
@@ -104,7 +123,7 @@ export function AfterThis({ next, suggested = false, clientFirst, ownerId, meId,
   if (next) {
     if (whoKey !== CLAUDE_ID) parts.push(
       <span key="d">
-        {whoKey === "client" ? "check in " : next.due ? "due " : ""}
+        {whoKey === "client" ? "need by " : next.due ? "due " : ""}
         <span className="inline-flex items-baseline">
           <InlineDate value={next.due ?? null} onChange={(v) => onDue(v)}
             emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">{whoKey === "client" ? "set a date" : "no due date"}</span>}
@@ -112,23 +131,20 @@ export function AfterThis({ next, suggested = false, clientFirst, ownerId, meId,
         </span>
       </span>,
     );
-    if (whoKey === "client") parts.push(<span key="a">waiting for {clientFirst}&apos;s reply</span>);
-    else if (whoKey !== CLAUDE_ID) parts.push(
+    if (whoKey !== "client" && whoKey !== CLAUDE_ID) parts.push(
       <WordMenu key="a" title="What the next step is" className={action ? pickWord : `${pickWord} text-accent`}
         label={action && action !== "wait" && action !== "brief" ? ACTION_WORDS[action] : "pick what"}
         items={[...(Object.keys(ACTION_WORDS) as Exclude<AfterAction, "wait" | "brief">[]).map((k) => ({ key: k, label: ACTION_WORDS[k], on: action === k, onClick: () => onAction(k) })),
           ...(action ? [{ key: "none", label: "Nothing to make", muted: true, onClick: () => onAction(null) }] : [])]} />,
     );
-    if (kind && (kind === "teammate" || canRemindClient)) parts.push(
+    if (kind === "client" && canRemindClient) parts.push(
+      <ClientRemindWord key="r" remind={r} needBy={next.due ?? null} first={clientFirst} note={remindNote} onRemind={onRemind} className={`${pickWord} text-accent`} />,
+    );
+    else if (kind === "teammate") parts.push(
       <WordMenu key="r" title={`Remind ${remindTo} about this`} heading={`Remind ${remindTo} about this`}
         className={`${pickWord} text-accent`}
         label={<><span aria-hidden>🔔 </span>{r ? remindWord(r, remindTo, checkIn) : "add a reminder"}</>}
-        note={kind === "client" ? remindNote : undefined}
-        items={kind === "client" ? [
-          { key: "once", label: checkIn ? `Email ${remindTo} on ${checkIn}` : `Email ${remindTo} at check in`, sub: checkIn ? "Once, at the check in" : "Once, on the check in date", on: !!r && "every" in r && r.every === "once", onClick: () => setRemind({ every: "once" }) },
-          ...([2, 3, 5] as const).map((n) => ({ key: `e${n}`, label: `Every ${n} business days`, on: !!r && "every" in r && r.every === n, onClick: () => setRemind({ every: n }) })),
-          ...(r ? [{ key: "off", label: "Off", muted: true, onClick: () => setRemind(null) }] : []),
-        ] : [
+        items={[
           { key: "day", label: "The day before", on: !!r && "at" in r && r.at === "day_before", onClick: () => setRemind({ at: "day_before" }) },
           { key: "morning", label: "The morning it's due", on: !!r && "at" in r && r.at === "morning", onClick: () => setRemind({ at: "morning" }) },
           ...(r ? [{ key: "off", label: "Off", muted: true, onClick: () => setRemind(null) }] : []),

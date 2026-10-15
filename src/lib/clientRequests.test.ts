@@ -139,7 +139,7 @@ describe("the emails", () => {
     expect(e.body).toContain("It's what holds up Newsletter, which is expected Oct 27.");
     expect(e.body).toContain('href="https://x/waiting/tok?task=t1"');
     expect(e.body).toContain("Or reply to this email with your answer.");
-    expect(e.body).toContain("5 things more are waiting on you.");
+    expect(e.body).toContain("5 more things are waiting on you.");
     expect(e.body).toContain("See everything we need");
     expect(e.body).toContain("Thanks!<br>Derek");
     // Never the list, never a dash.
