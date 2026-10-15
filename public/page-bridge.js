@@ -3,10 +3,11 @@
 // opaque origin, and only talks to the window around it by postMessage. The other
 // side, which checks everything this sends, is src/lib/pageFrameProtocol.ts.
 //
-// It draws the numbered pins, keeps links from leaving the page, and has three
-// modes: Comment (a click drops a pin), Edit text (a click lets that text be
-// changed; only the words go back, never the page) and Try the page. Elements
-// carry data-cul-n numbers from the server, which is what pins and edits name.
+// It draws the numbered pins, keeps links from leaving the page, marks the words
+// new since the client last looked, and has three modes: Comment (a click drops a
+// pin), Edit (a click lets that text be changed; only the words go back, never
+// the page) and Preview. Elements carry data-cul-n numbers from the server, which
+// is what pins and edits name.
 (() => {
   "use strict";
   if (window.__culBridge || window.parent === window) return;
@@ -237,6 +238,52 @@
     redraw();
   };
 
+  // New words ----------------------------------------------------------------
+
+  // The words added since the client last looked, each marked where it first
+  // shows inside one run of text. Marks come off before any editing, so a run
+  // of text is never split while it is being changed.
+  const MARK = "cul-mark";
+  const unmark = () => {
+    const parents = new Set();
+    for (const m of Array.from(document.querySelectorAll(MARK))) {
+      const parent = m.parentNode;
+      if (!parent) continue;
+      parent.replaceChild(document.createTextNode(m.textContent || ""), m);
+      parents.add(parent);
+    }
+    for (const p of parents) p.normalize();
+  };
+  const SKIP_MARK = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "TITLE", "CUL-PIN", "CUL-PINS", "CUL-EDIT", "CUL-MARK"]);
+  const textNodes = () => {
+    const out = [];
+    if (!document.body) return out;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement && !SKIP_MARK.has(n.parentElement.tagName) && !blank(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n);
+    return out;
+  };
+  const mark = (phrases) => {
+    unmark();
+    if (editing || mode === "edit") return;
+    for (const phrase of phrases.slice(0, 60)) {
+      if (typeof phrase !== "string" || phrase.length < 3 || phrase.length > 300) continue;
+      const re = new RegExp(phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
+      for (const node of textNodes()) {
+        const m = re.exec(node.nodeValue);
+        if (!m) continue;
+        const middle = node.splitText(m.index);
+        middle.splitText(m[0].length);
+        const box = document.createElement(MARK);
+        box.setAttribute("style", "all:unset;background:#fff3b0;border-radius:3px;box-shadow:0 0 0 2px #fff3b0");
+        box.textContent = middle.nodeValue;
+        middle.parentNode.replaceChild(box, middle);
+        break;
+      }
+    }
+  };
+
   // Clicks -------------------------------------------------------------------
 
   const onClick = (e) => {
@@ -297,6 +344,7 @@
   const setMode = (next) => {
     if (next !== "comment" && next !== "edit" && next !== "browse") return;
     if (mode === "edit" && next !== "edit") finishEdit(true);
+    if (next === "edit") unmark();
     mode = next;
     cursor.textContent = mode === "comment" ? "html, html * { cursor: crosshair !important; }" : mode === "edit" ? "html, html * { cursor: text !important; }" : "";
     if (!cursor.isConnected) document.documentElement.appendChild(cursor);
@@ -323,6 +371,7 @@
       window.scrollTo({ left: Math.max(0, s.x - window.innerWidth / 2), top: Math.max(0, s.y - window.innerHeight / 2), behavior: "smooth" });
       redraw();
     } else if (d.type === "edits" && Array.isArray(d.edits)) replay(d.edits);
+    else if (d.type === "highlight" && Array.isArray(d.phrases)) mark(d.phrases);
   });
 
   // Keep pins on their elements as the page loads, reflows and scrolls.

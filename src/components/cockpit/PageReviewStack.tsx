@@ -21,7 +21,7 @@ export type StackPage = { fileId: string; label: string };
 
 export function PageReviewStack({
   pages, loadFrame, onLoadError, mode, onMode, device, onDevice, canEdit, canComment, pinsFor, pending, focus, edits,
-  onPlace, onPinClick, onEdit, header, actions, color, dim,
+  onPlace, onPinClick, onEdit, header, actions, color, dim, toolbar = true, highlights,
 }: {
   pages: StackPage[];
   /** A fresh frame address for one page, or null when it could not be had. */
@@ -54,6 +54,11 @@ export function PageReviewStack({
   color?: string;
   /** Pages to show faded: options not picked when another one was. */
   dim?: (fileId: string) => boolean;
+  /** The stack's own mode and width toolbar; off where the review draws its own
+   *  (an HTML review's Comment, Edit and Preview, HtmlReviewBars.tsx). */
+  toolbar?: boolean;
+  /** Words to mark on each page, by page: what is new since the client last looked. */
+  highlights?: Record<string, string[]>;
 }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
   const ids = pages.map((p) => p.fileId).join("|");
@@ -81,8 +86,8 @@ export function PageReviewStack({
 
   return (
     <div className="w-full">
-      <PageReviewToolbar mode={mode} onMode={onMode} device={device} onDevice={onDevice}
-        canEdit={canEdit} canComment={canComment} actions={actions} color={color} />
+      {toolbar && <PageReviewToolbar mode={mode} onMode={onMode} device={device} onDevice={onDevice}
+        canEdit={canEdit} canComment={canComment} actions={actions} color={color} />}
       <div className="space-y-8">
         {pages.map((page, i) => {
           const pins = pinsFor(page.fileId);
@@ -100,7 +105,8 @@ export function PageReviewStack({
                 edits={edits[page.fileId] ?? []}
                 onPlace={(place) => onPlace(page.fileId, place)}
                 onPinClick={onPinClick}
-                onEdit={(edit) => onEdit(page.fileId, edit)} />
+                onEdit={(edit) => onEdit(page.fileId, edit)}
+                highlights={highlights?.[page.fileId]} />
             </section>
           );
         })}

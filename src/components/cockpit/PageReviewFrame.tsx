@@ -10,8 +10,8 @@
 // frame opens up to the page's height and zooms to its content. The other side is
 // public/page-bridge.js.
 //
-// The toolbar that picks the mode (Comment, Edit text, Try the page) and the width
-// (Desktop 1280px, Mobile 390px) is its own component, because a review can stack
+// The toolbar that picks the mode (Comment, Edit, Preview) and the width (Desktop
+// 1280px, Tablet 820px, Mobile 390px) is its own component, because a review can stack
 // several pages under one toolbar (PageReviewStack.tsx, Derek 2026-09-16: two emails
 // in one HTML review). Each frame only listens to messages from its own window, so
 // any number of them can sit on one page.
@@ -21,18 +21,24 @@ import type { PinAnchor } from "@/lib/reviewPins";
 
 // maxZoom: how far a page with narrow content (an email) is zoomed in to fill the
 // box. A phone view stays at its own size.
+// Tablet is for a page review's Preview (Derek, 2026-10-15); an email has Desktop and Mobile.
 export const PAGE_DEVICES = {
   desktop: { label: "Desktop", width: 1280, height: 860, maxZoom: 1.5 },
+  tablet: { label: "Tablet", width: 820, height: 1180, maxZoom: 1 },
   mobile: { label: "Mobile", width: 390, height: 844, maxZoom: 1 },
 } as const;
 export type PageDevice = keyof typeof PAGE_DEVICES;
 /** The device a pin was dropped at, to show the page at that width before focusing it. */
-export const deviceForWidth = (width: number | null | undefined): PageDevice => (width != null && width < 800 ? "mobile" : "desktop");
+export const deviceForWidth = (width: number | null | undefined): PageDevice =>
+  (width != null && width < 600 ? "mobile" : width != null && width < 1100 ? "tablet" : "desktop");
 
+// Comment is where a review opens; Edit changes the words in place; Preview is
+// the page full size with every link working (Derek, 2026-10-15: "Try the page"
+// became Preview).
 export const MODES: { mode: FrameMode; label: string; hint: string }[] = [
-  { mode: "comment", label: "Comment", hint: "Click anywhere on the page to drop a numbered pin." },
-  { mode: "edit", label: "Edit text", hint: "Click any text to change it. Press Enter to keep it." },
-  { mode: "browse", label: "Try the page", hint: "Use the page like a visitor would. Links stay on this page." },
+  { mode: "comment", label: "Comment", hint: "Click any spot on the page to leave a note." },
+  { mode: "edit", label: "Edit", hint: "Click any words to change them. Press Enter to keep them." },
+  { mode: "browse", label: "Preview", hint: "The page full size, the way a reader sees it." },
 ];
 
 export type PagePlace = { x: number; y: number; anchor: PinAnchor | null };
@@ -71,19 +77,19 @@ export function PageReviewToolbar({ mode, onMode, device, onDevice, canEdit, can
 }) {
   const { modes, current } = allowedModes(mode, canEdit, canComment);
   const segment = (active: boolean) =>
-    `rounded-full px-3 py-1 text-[16px] font-medium transition ${active ? (color ? "text-white" : "bg-foreground text-background") : "text-muted hover:text-foreground"}`;
+    `rounded-[5px] px-3 py-1 text-[16px] font-medium transition ${active ? (color ? "text-white" : "bg-foreground text-background") : "text-muted hover:text-foreground"}`;
   const segmentStyle = (active: boolean) => (active && color ? { background: color } : undefined);
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div role="radiogroup" aria-label="What a click does" className="flex flex-wrap gap-1 rounded-full border bg-surface p-1">
+        <div role="radiogroup" aria-label="What a click does" className="flex flex-wrap gap-1 rounded-[5px] border bg-surface p-1">
           {modes.map((m) => (
             <button key={m.mode} role="radio" aria-checked={current.mode === m.mode} onClick={() => onMode(m.mode)} className={segment(current.mode === m.mode)} style={segmentStyle(current.mode === m.mode)}>{m.label}</button>
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-full border bg-surface p-1">
-            {(Object.keys(PAGE_DEVICES) as PageDevice[]).map((d) => (
+          <div role="radiogroup" aria-label="Page width" className="flex gap-1 rounded-[5px] border bg-surface p-1">
+            {(["desktop", "mobile"] as PageDevice[]).map((d) => (
               <button key={d} role="radio" aria-checked={device === d} onClick={() => onDevice(d)} className={segment(device === d)} style={segmentStyle(device === d)}>{PAGE_DEVICES[d].label}</button>
             ))}
           </div>
@@ -100,7 +106,7 @@ export function PageReviewToolbar({ mode, onMode, device, onDevice, canEdit, can
 // leaves the attribute off and relies on that header alone; production keeps both.
 const FRAME_SANDBOX = process.env.NODE_ENV === "development" ? undefined : "allow-scripts";
 
-export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, title }: {
+export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, canComment, pins, pending, focus, edits, onPlace, onPinClick, onEdit, title, highlights }: {
   /** The frame's address, or null while it is being fetched. */
   frameUrl: string | null;
   /** Fetch a fresh frame address (the old one expired or the page navigated away). */
@@ -120,6 +126,8 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
   onPlace: (place: PagePlace) => void;
   onPinClick: (id: string) => void;
   onEdit: (edit: PageEdit) => void;
+  /** Words new since the client last looked, marked on the page (htmlReview.ts addedPhrases). */
+  highlights?: string[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -144,8 +152,8 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
   const send = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ cul: 1, ...message }, "*");
 
   // The handler reads the latest props, so it is added once.
-  const latest = useRef({ frameUrl, mode, pins, pending, edits, onPlace, onPinClick, onEdit, canComment, canEdit });
-  useEffect(() => { latest.current = { frameUrl, mode, pins, pending, edits, onPlace, onPinClick, onEdit, canComment, canEdit }; });
+  const latest = useRef({ frameUrl, mode, pins, pending, edits, onPlace, onPinClick, onEdit, canComment, canEdit, highlights });
+  useEffect(() => { latest.current = { frameUrl, mode, pins, pending, edits, onPlace, onPinClick, onEdit, canComment, canEdit, highlights }; });
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -157,6 +165,7 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
         send({ type: "mode", mode: l.mode });
         send({ type: "pins", pins: l.pins, pending: l.pending });
         if (l.edits.length) send({ type: "edits", edits: l.edits });
+        if (l.highlights?.length) send({ type: "highlight", phrases: l.highlights });
       } else if (message.type === "place") {
         if (l.canComment) l.onPlace({ x: message.x, y: message.y, anchor: message.anchor });
       } else if (message.type === "pin-click") {
@@ -199,6 +208,10 @@ export function PageReviewFrame({ frameUrl, onReload, mode, device, canEdit, can
   }, []);
 
   useEffect(() => { if (ready) send({ type: "mode", mode }); }, [ready, mode]);
+  // Marks are taken off while editing (they would split the words being edited)
+  // and put back after; an empty list takes them all off.
+  const highlightKey = JSON.stringify(highlights ?? []);
+  useEffect(() => { if (ready) send({ type: "highlight", phrases: mode === "edit" ? [] : highlights ?? [] }); }, [ready, mode, highlightKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const pinsKey = JSON.stringify([pins, pending]);
   useEffect(() => { if (ready) send({ type: "pins", pins, pending }); }, [ready, pinsKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (ready && focus) send({ type: "focus", id: focus.id }); }, [ready, focus]);

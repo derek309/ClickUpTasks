@@ -37,7 +37,9 @@ export type ParentMessage =
   | { cul: 1; type: "mode"; mode: FrameMode }
   | { cul: 1; type: "pins"; pins: FramePin[]; pending: { x: number; y: number; anchor: PinAnchor | null; number: number } | null }
   | { cul: 1; type: "focus"; id: string }
-  | { cul: 1; type: "edits"; edits: PageEdit[] };
+  | { cul: 1; type: "edits"; edits: PageEdit[] }
+  /** Words new since the client last looked, to mark on the page; [] takes the marks off. */
+  | { cul: 1; type: "highlight"; phrases: string[] };
 
 export const MAX_EDIT_CHARS = 5000;
 /** The largest page a web page review takes: checked in the browser before an

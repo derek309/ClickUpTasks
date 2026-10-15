@@ -64,7 +64,7 @@ describe("page bridge", () => {
     expect(last("place")).toBeTruthy();
   });
 
-  it("lets the page work in Try the page, except links that leave it", () => {
+  it("lets the page work in Preview, except links that leave it", () => {
     fromParent({ type: "mode", mode: "browse" });
     expect(click(document.querySelector('a[href="/shop"]')!).defaultPrevented).toBe(true);
     expect(click(document.querySelector('a[href="#top"]')!).defaultPrevented).toBe(false);
@@ -130,6 +130,25 @@ describe("page bridge", () => {
     window.dispatchEvent(new Event("resize"));
     await new Promise((r) => setTimeout(r, 450));
     expect(last("size")).toEqual({ cul: 1, type: "size", height: 1200, left: 300, right: 980 });
+  });
+
+  it("marks the new words it is sent, and takes the marks off for editing", () => {
+    // The heading reads "Winter Sale" since the rewording above.
+    fromParent({ type: "highlight", phrases: ["Winter  Sale", "no such words anywhere"] });
+    const marks = document.querySelectorAll("cul-mark");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe("Winter Sale");
+    expect(marks[0].parentElement?.tagName).toBe("H1");
+    fromParent({ type: "mode", mode: "edit" });
+    expect(document.querySelectorAll("cul-mark")).toHaveLength(0);
+    // The words are back as one run of text, so an edit counts it the same way.
+    expect(document.querySelector("h1")!.childNodes).toHaveLength(1);
+    expect(document.querySelector("h1")!.textContent).toBe("Winter Sale");
+    fromParent({ type: "mode", mode: "comment" });
+    fromParent({ type: "highlight", phrases: ["Hello"] });
+    expect(document.querySelector("cul-mark")?.textContent).toBe("Hello");
+    fromParent({ type: "highlight", phrases: [] });
+    expect(document.querySelectorAll("cul-mark")).toHaveLength(0);
   });
 
   it("does nothing at all when opened on its own, outside a frame", () => {
