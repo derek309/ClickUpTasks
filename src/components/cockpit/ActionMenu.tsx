@@ -10,8 +10,10 @@ import { quietButton } from "./TaskWorkItem";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { menuPos } from "./ui";
 
-/** divider: a thin line above the item, to group a long menu. */
-export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; divider?: boolean };
+/** divider: a thin line above the item, to group a long menu. heading: a
+ *  group's name above the item (with the line). note: a second, quieter line
+ *  under the label. checked: the one picked. */
+export type ActionMenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; divider?: boolean; heading?: string; note?: string; checked?: boolean };
 
 /** On a phone a menu opens as a sheet at the bottom of the screen, like the
  *  client page's Contact sheet (2026-10-14): an anchored menu ran off the
@@ -92,11 +94,14 @@ export function ActionMenu({ label, title, items, triggerClassName = quietButton
     setOpen((o) => !o);
   };
   const itemButton = (item: ActionMenuItem, i: number) => (
-    <div key={item.label} className={item.divider && i > 0 ? "mt-1 border-t pt-1" : undefined}>
-      <button role="menuitem" disabled={item.disabled}
+    <div key={`${i}:${item.label}`} className={(item.divider || item.heading) && i > 0 ? "mt-1 border-t pt-1" : undefined}>
+      {item.heading && <div className="px-3 pb-0.5 pt-1.5 text-[16px] font-bold text-muted">{item.heading}</div>}
+      <button role={item.checked === undefined ? "menuitem" : "menuitemradio"} disabled={item.disabled} aria-checked={item.checked === undefined ? undefined : item.checked}
         onClick={() => { setOpen(false); item.onClick(); }}
-        className={`block w-full rounded-md px-3 py-2 text-left text-[16px] hover:bg-background disabled:opacity-50 ${item.danger ? "text-danger" : ""}`}>
+        className={`block w-full rounded-md px-3 py-2 text-left text-[16px] hover:bg-background disabled:opacity-50 ${item.danger ? "text-danger" : ""} ${item.checked ? "font-semibold text-accent" : ""}`}>
+        {item.checked !== undefined && <span aria-hidden className="mr-1.5 inline-block w-4">{item.checked ? "✓" : ""}</span>}
         {item.label}
+        {item.note && <span className={`block text-[16px] font-normal text-muted ${item.checked !== undefined ? "pl-[1.375rem]" : ""}`}>{item.note}</span>}
       </button>
     </div>
   );

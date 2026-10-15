@@ -72,6 +72,7 @@ import { useShareLinks } from "./cockpit/useShareLinks";
 import { useNotify } from "./cockpit/useNotify";
 import { useAiHelpers } from "./cockpit/useAiHelpers";
 import { useComposer, type TaskStart } from "./cockpit/useComposer";
+import { fromKey } from "./cockpit/FromNumber";
 import { useTaskEdits } from "./cockpit/useTaskEdits";
 import { useClientRecords } from "./cockpit/useClientRecords";
 import { useClientAdmin } from "./cockpit/useClientAdmin";
@@ -1761,6 +1762,12 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (c?.linkedContactId) return contactById(c.linkedContactId);
     return clientId.startsWith("cl_") ? contactById(clientId.slice(3)) : null;
   };
+  // The GoHighLevel sub account a client's contact is in: which of our
+  // numbers a text to them can go from (FromNumberLine).
+  const textLocationFor = (clientId: string): string | null => {
+    const ct = contactForClient(clientId);
+    return ct ? clientById(ct.clientId)?.ghlLocationId || null : null;
+  };
   const ghlContactUrlFor = (clientId: string) => {
     const ct = contactForClient(clientId);
     if (!ct) return null;
@@ -2739,7 +2746,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       showAutomatic={!!inboxPrefs.feedShowAutomatic} onShowAutomatic={(v) => setInboxPrefs({ feedShowAutomatic: v })}
       seenAt={inboxPrefs.feedSeen?.[talk.cid] ?? null}
       onSeen={() => { const cid = talk.cid; setInboxPrefs((p) => ({ feedSeen: { ...(p.feedSeen ?? {}), [cid]: new Date().toISOString() } })); }}
-      onClose={() => setFeedClient(null)} />
+      onClose={() => setFeedClient(null)}
+      textFrom={{ pickKey: fromKey.client(talk.cid), locationId: textLocationFor(talk.cid) }} />
   ) : null;
   // A phone's ⋮ holds the client's links and who follows them (2026-10-14).
   const phoneSaas = isClientDetail ? contactForClient(activeClient)?.saasUrl ?? null : null;
@@ -3621,7 +3629,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         const allowed = canMessageClient(cid);
         return (
           <TextWindow key={clientText.nonce} clientId={cid} clientName={clientById(cid)?.name ?? "this client"} toName={ct?.name || clientById(cid)?.name || "them"} toPhone={ct?.phone || null}
-            start={clientText.body} meId={me.id} pushToast={pushToast} onClose={() => setClientText(null)}
+            start={clientText.body} meId={me.id} pushToast={pushToast} onClose={() => setClientText(null)} textLocationId={textLocationFor(cid)}
             history={ct ? messages.filter((m) => m.contactId === ct.id && m.channel === "sms").sort((a, b) => a.at.localeCompare(b.at)) : []}
             onSend={allowed ? (body) => afterQueuedSend(clientText.queuedId, sendMessage(cid, "sms", "", body)) : undefined}
             onSchedule={allowed ? (body, whenIso) => scheduleMessage(cid, "sms", "", body, whenIso) : undefined}

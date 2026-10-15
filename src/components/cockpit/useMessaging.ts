@@ -12,6 +12,7 @@ import { insertMessage, deleteMessageDb, markTaskChannelReadDb, signedUrlForFile
 import { mergeFetched } from "@/lib/localTaskWrites";
 import type { Attachment, Client, Contact, Message, MessageChannel, ScheduledMessage } from "@/lib/data";
 import { newId } from "./ui";
+import { fromKey, fromPick } from "./FromNumber";
 
 export function useMessaging({ meId, messages, setMessages, loading, openTaskId, conversationContactId, contactForClient, clientById, pushToast, onAnswered }: {
   meId: string;
@@ -141,9 +142,12 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
       // upload — an hour is ample time for that fetch, without leaving the
       // private bucket's contents reachable indefinitely.
       const attachmentUrls = (await Promise.all(attachments.filter((a) => a.path).map((a) => signedUrlForFile(a.path!, 60 * 60)))).filter((u): u is string => !!u);
+      // A text goes from the number picked over any of this client's text
+      // boxes (FromNumberLine); none picked, the server's default (lib/textFrom).
+      const fromNumber = channel === "sms" ? fromPick(fromKey.client(clientId)) : null;
       const res = await authedFetch("/api/ghl/message", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, isHtml: channel === "email", attachments: attachmentUrls, cc: emailCc, bcc: emailBcc, replyToMessageId }),
+        body: JSON.stringify({ clientId, locationId: target.locationId, ghlContactId: target.ghlContactId, channel, subject: channel === "email" ? subject : undefined, body, isHtml: channel === "email", attachments: attachmentUrls, cc: emailCc, bcc: emailBcc, replyToMessageId, ...(fromNumber ? { fromNumber } : {}) }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { pushToast(j.error || "Failed to send message."); return false; }
@@ -152,6 +156,7 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
         subject: channel === "email" && subject.trim() ? subject.trim() : null, body,
         ghlMessageId: j.ghlMessageId ?? null, ghlConversationId: j.ghlConversationId ?? null, createdBy: meId, at: new Date().toISOString(), read: true,
         attachments, cc: emailCc, bcc: emailBcc,
+        ...(typeof j.ourNumber === "string" && j.ourNumber ? { ourNumber: j.ourNumber } : {}),
       };
       setMessages((ms) => [...ms, m]);
       insertMessage(m);

@@ -6,12 +6,14 @@
 // it. Opens over the page from the client's Messages box, Request a meeting
 // and the Journal's SMS. The draft is kept in this browser per client until it
 // sends or is discarded.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type Message } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import { BookingLinkMenu } from "./BookingLinkMenu";
 import { SchedulePopover } from "./SchedulePopover";
 import { WorkItemWindow, quietButton as quiet } from "./TaskWorkItem";
+import { FromNote, FromNumberLine, fromKey } from "./FromNumber";
+import { fromNumberNotes } from "@/lib/textFrom";
 
 const TZ = "America/Los_Angeles";
 const key = (clientId: string) => `cut:text-draft:${clientId}`;
@@ -36,7 +38,7 @@ const isAutomatic = (m: Message) => m.direction === "outbound" && (m.bulk === tr
 const dayKey = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: TZ });
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
 
-export function TextWindow({ clientId, clientName, toName, toPhone, start, history, meId, onClose, onSend, onSchedule, onAiDraft, onPageLink, pushToast }: {
+export function TextWindow({ clientId, clientName, toName, toPhone, start, history, meId, onClose, onSend, onSchedule, onAiDraft, onPageLink, pushToast, textLocationId }: {
   clientId: string;
   clientName: string;
   toName: string;
@@ -53,8 +55,11 @@ export function TextWindow({ clientId, clientName, toName, toPhone, start, histo
   /** Their client page link, made the first time it's asked for. */
   onPageLink?: () => string | null;
   pushToast: (text: string) => void;
+  /** Their sub account, for which of our numbers the text goes from. */
+  textLocationId?: string | null;
 }) {
   const first = toName.split(/\s+/)[0] || "them";
+  const fromNotes = useMemo(() => fromNumberNotes(history), [history]);
   const [body, setBody] = useState(() => {
     const saved = readDraft(clientId);
     if (start && saved.trim() && saved !== start && !window.confirm(`You already started a text to ${toName}. Replace it with this one?`)) return saved;
@@ -134,7 +139,7 @@ export function TextWindow({ clientId, clientName, toName, toPhone, start, histo
                 {newDay && <div className="my-4 flex items-center gap-3 text-[14px] font-semibold text-muted"><span className="h-px flex-1 bg-[var(--border)]" />{dayLabel(k)}<span className="h-px flex-1 bg-[var(--border)]" /></div>}
                 <div className={`mb-2 flex flex-col ${ours ? "items-end" : "items-start"}`}>
                   <div className={`max-w-[75%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 ${auto ? "bg-surface text-[15px] text-muted ring-1 ring-[var(--border)]" : ours ? "rounded-br-md bg-accent text-[16px] text-white" : "rounded-bl-md bg-surface text-[16px] ring-1 ring-[var(--border)]"}`}>{m.body}</div>
-                  <span className="mt-0.5 px-1 text-[13px] text-muted">{auto ? "Automatic · " : ""}{timeOf(m.at)}</span>
+                  <span className="mt-0.5 px-1 text-[13px] text-muted">{auto ? "Automatic · " : ""}{timeOf(m.at)}{fromNotes.has(m.id) && <> · <FromNote note={fromNotes.get(m.id)} /></>}</span>
                 </div>
               </div>
             );
@@ -152,6 +157,7 @@ export function TextWindow({ clientId, clientName, toName, toPhone, start, histo
               <button onClick={() => void writeWithAi()} disabled={busy !== null} className="rounded-md bg-accent px-3 py-1.5 text-[15px] font-semibold text-white disabled:opacity-50">{busy === "ai" ? "Writing…" : "Write it"}</button>
             </div>
           )}
+          {toPhone && <FromNumberLine pickKey={fromKey.client(clientId)} locationId={textLocationId ?? null} history={history} firstName={first} className="px-4 pt-2" />}
           <textarea ref={box} rows={3} value={body} onChange={(e) => setBody(e.target.value)}
             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void send(); } }}
             placeholder={`Text ${first}…`} aria-label="Your text"

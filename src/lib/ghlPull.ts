@@ -25,6 +25,8 @@ import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { matchGhlToLocal, isRealGhlId, MATCH_WINDOW_MS, type MatchCandidate } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
+import { insertMessageRow, insertMessageRows } from "@/lib/ghlNumbers";
+import { ourNumberOnGhlMessage } from "@/lib/textFrom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -258,6 +260,8 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
         created_by: null,
         created_at: new Date(f.at).toISOString(),
         attachments: ghlAttachments(f.m),
+        // Our number on a text, when GoHighLevel says which (lib/textFrom).
+        ...(f.channel === "sms" && ourNumberOnGhlMessage(f.m) ? { our_number: ourNumberOnGhlMessage(f.m) } : {}),
         // A task already bound to this conversation wins over the open
         // Conversation task (unless it is a reply task that closed itself).
         // With reply tasks off, only a conversation already linked to a task.
@@ -307,12 +311,12 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
 
   if (toInsert.length) {
     let rows = toInsert.map((t) => t.row);
-    let { error } = await supabaseAdmin.from("messages").insert(rows);
+    let { error } = await insertMessageRows(rows);
     if (error && rows.length > 1) {
       // One row that clashes must not cost the others: store them one by one.
       console.error("[ghlPull] batch insert failed, retrying one by one", o.contactId, error.message);
       const ok: typeof rows = [];
-      for (const r of rows) if (!(await supabaseAdmin.from("messages").insert(r)).error) ok.push(r);
+      for (const r of rows) if (!(await insertMessageRow(r)).error) ok.push(r);
       rows = ok;
       error = ok.length ? null : error;
       raise = raise.filter(({ row }) => ok.includes(row));
@@ -404,6 +408,7 @@ export async function pullStrangerConversation(o: {
         peer_address: conv.phone || conv.email || null,
         read: m.direction !== "inbound",
         attachments: ghlAttachments(m),
+        ...(channel === "sms" && ourNumberOnGhlMessage(m) ? { our_number: ourNumberOnGhlMessage(m) } : {}),
       });
     }
     const nextPage = Array.isArray(container) ? json?.nextPage : container?.nextPage;
@@ -420,7 +425,7 @@ export async function pullStrangerConversation(o: {
   const known = new Set((have ?? []).map((r: any) => r.ghl_message_id as string));
   const fresh = rows.filter((r) => !known.has(r.ghl_message_id)).map((r) => ({ ...r, task_id: taskId }));
   if (!fresh.length) return 0;
-  const { error } = await supabaseAdmin.from("messages").insert(fresh);
+  const { error } = await insertMessageRows(fresh);
   if (error) { console.error("[ghlPull] stranger insert failed", conv.id, error.message); return 0; }
   return fresh.length;
 }

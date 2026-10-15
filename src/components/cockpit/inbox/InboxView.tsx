@@ -30,6 +30,8 @@ import { isSignatureImage } from "@/lib/emailFiles";
 import { guessFromSignature } from "@/lib/signature";
 import { shortcut } from "@/lib/platform";
 import { smsText } from "@/lib/smsText";
+import { fromNumberNotes } from "@/lib/textFrom";
+import { FromNote, FromNumberLine, fromKey, fromPick } from "../FromNumber";
 import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { kindQuery } from "@/lib/reviewKinds";
 import { fetchTaskDocument } from "@/lib/db";
@@ -818,6 +820,8 @@ function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive
   const items = useMemo(() => chatItems(visible, (m) => m.direction === "outbound"
     ? (m.createdBy && m.createdBy !== p.me.id ? teamName(m.createdBy) : null)
     : t.channel === "chat" || (t.channel === "team" && !t.key.startsWith("team:dm:")) ? (m.peerName || t.peerName) : null), [visible, p.me.id, teamName, t.channel, t.peerName, t.key]);
+  // Which number each of our texts went from, and where that changed.
+  const fromNotes = useMemo(() => fromNumberNotes(oldestFirst), [oldestFirst]);
   const newest = t.messages[0]?.id;
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -843,7 +847,7 @@ function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive
         )}
         {items.map((it) => it.kind === "day"
           ? <div key={it.key} className="flex items-center gap-3 pb-1 pt-4 font-semibold text-muted" role="separator"><span className="h-px flex-1 bg-[var(--border)]" />{it.label}<span className="h-px flex-1 bg-[var(--border)]" /></div>
-          : <ChatGroup key={it.key} g={it} t={t} p={p} />)}
+          : <ChatGroup key={it.key} g={it} t={t} p={p} fromNotes={fromNotes} />)}
         <PendingSends t={t} />
         {typing && <div className="mt-3 italic text-muted">{typing} is writing a reply…</div>}
       </div>
@@ -854,9 +858,12 @@ function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive
   );
 }
 
-function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: InboxThread; p: InboxViewProps }) {
+function ChatGroup({ g, t, p, fromNotes }: { g: Extract<ChatItem, { kind: "group" }>; t: InboxThread; p: InboxViewProps; fromNotes?: Map<string, { number: string; changed: boolean }> }) {
   const mine = g.side === "mine";
   const last = g.messages[g.messages.length - 1];
+  // Our texts' number: said once under the group, and under any text that
+  // went from a different number than the one before it.
+  const lastNote = mine ? fromNotes?.get(last.id) : undefined;
   return (
     <div className={`mt-2.5 flex w-fit flex-col gap-[3px] ${g.messages.some((m) => m.channel === "call") ? "max-w-full" : "max-w-[85%] sm:max-w-[75%]"} ${mine ? "ml-auto items-end" : "items-start"}`}>
       {g.who && <div className="px-3 font-semibold text-muted">{g.who}</div>}
@@ -876,10 +883,11 @@ function ChatGroup({ g, t, p }: { g: Extract<ChatItem, { kind: "group" }>; t: In
                 </div>
               )}
             {(m.attachments?.length ?? 0) > 0 && <Files m={m} p={p} />}
+            {mine && m.id !== last.id && fromNotes?.get(m.id)?.changed && <div className="px-3"><FromNote note={fromNotes.get(m.id)} /></div>}
           </div>
         );
       })}
-      <div className="px-3 text-muted">{shortTime(last.at)}</div>
+      <div className="px-3 text-muted">{shortTime(last.at)}{lastNote && <> · <FromNote note={lastNote} /></>}</div>
     </div>
   );
 }
@@ -1734,6 +1742,9 @@ function Composer({ p, t, onSent, onDraft, onDiscard, mode = "reply", answering,
     p.pushToast("Draft discarded", { label: "Undo", run: () => { put(before); setFiles(beforeFiles); saver.now(before); onDraft(); } });
   };
   const channelForAi = t.channel === "email" ? "email" : t.channel === "chat" ? "chat" : "sms";
+  // A text (or a missed call answered by text) goes from one of our numbers.
+  const texting = t.channel === "sms" || t.channel === "call";
+  const textLocation = t.ghlConversationId ? p.inbox.convs.get(t.ghlConversationId)?.locationId ?? null : null;
 
   const words = (v: string) => (rich ? htmlToText(v) : v).split(/\s+/).filter(Boolean).length;
   // Improve fixes, Shorter tightens. The email box sends its HTML, so bold,
@@ -1815,7 +1826,9 @@ function Composer({ p, t, onSent, onDraft, onDiscard, mode = "reply", answering,
   const deliver = async (body: string) => {
     if (t.channel === "chat") return p.onSendChat(t, body);
     if (t.channel === "team") return p.onSendTeam(t.key, body);
+    const fromNumber = texting ? fromPick(fromKey.thread(t.key)) : null;
     await p.inbox.send({
+      ...(fromNumber ? { fromNumber } : {}),
       threadKey: t.key.startsWith("gm:") || t.key.startsWith("ghl:") ? t.key : null,
       to: email ? (to.trim() || undefined) : undefined,
       ...(forward && t.subject ? { subject: /^fwd?:/i.test(t.subject) ? t.subject : `Fwd: ${t.subject}` } : {}),
@@ -1913,6 +1926,7 @@ function Composer({ p, t, onSent, onDraft, onDiscard, mode = "reply", answering,
           {altEmail && emailInstead && <button onClick={() => emailInstead(altEmail, text)} className="h-9 rounded-md px-3 ring-1 ring-current">✉️ Email them instead</button>}
         </div>
       )}
+      {texting && !forward && <FromNumberLine pickKey={fromKey.thread(t.key)} locationId={textLocation} history={t.messages} firstName={t.peerName.split(/\s+/)[0] || "They"} className="mb-1.5" />}
       {email && !rich && (
         <div className="flex flex-wrap items-center gap-2 border-b py-1.5">
           <span className="w-11 text-muted">To</span>
@@ -3133,13 +3147,22 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
   const upload = async (list: FileList | null) => {
     for (const f of Array.from(list ?? [])) { const a = await p.onUpload(`inbox/${p.me.id}`, f); if (a) setFiles((x) => [...x, a]); }
   };
+  // A new text: their texts so far, and the sub account their text
+  // conversation is in, for which number it goes from.
+  const toContactId = to?.contactId ?? null;
+  const { threads: allThreads, convs: allConvs } = p.inbox;
+  const textHome = useMemo(() => {
+    const theirs = toContactId ? allThreads.filter((x) => x.contactId === toContactId && (x.channel === "sms" || x.channel === "call")) : [];
+    const conv = theirs.map((x) => (x.ghlConversationId ? allConvs.get(x.ghlConversationId) : undefined)).find(Boolean);
+    return { locationId: conv?.locationId ?? null, history: theirs.flatMap((x) => x.messages) };
+  }, [toContactId, allThreads, allConvs]);
   const send = async () => {
     if (!to || !hasText) return;
     setBusy("send");
     try {
       const r = kind === "email"
         ? await p.inbox.send({ to: to.address, cc: cc.split(/[,\s]+/).filter(Boolean), bcc: bcc.split(/[,\s]+/).filter(Boolean), subject, body, attachments: files.filter((f) => f.path).map((f) => ({ path: f.path!, name: f.name })), ghlLog: logIt })
-        : await p.inbox.send({ channel: "sms", contactId: to.contactId, body: body.trim() });
+        : await p.inbox.send({ channel: "sms", contactId: to.contactId, body: body.trim(), ...(to.contactId && fromPick(fromKey.contact(to.contactId)) ? { fromNumber: fromPick(fromKey.contact(to.contactId))! } : {}) });
       if (task && r.threadKey) await p.inbox.linkTask(r.threadKey, task.id).catch(() => null);
       p.pushToast(task ? `Sent, and linked to ${task.title}` : "Sent");
       // A Claude draft leaves Drafts once it has gone.
@@ -3174,7 +3197,9 @@ function NewMessage({ p, start, onClose }: { p: InboxViewProps; start: NewStart;
       <div className="@container">
       <div className="grid grid-cols-1 items-start gap-4 @min-[880px]:grid-cols-[minmax(0,1fr)_300px]">
         <div className="flex min-w-0 flex-col rounded-xl bg-surface p-4 ring-1 ring-[var(--border)]">
-          <div className={row}><span className="w-16 shrink-0 text-muted">From</span><span className="min-w-0 flex-1 truncate px-2.5">{kind === "email" ? (p.me.email ?? "Your Gmail") : "Their sub-account's GoHighLevel number"}</span></div>
+          <div className={row}><span className="w-16 shrink-0 text-muted">From</span>{kind === "text" && to?.contactId
+            ? <FromNumberLine pickKey={fromKey.contact(to.contactId)} locationId={textHome.locationId} history={textHome.history} firstName={to.name.split(/\s+/)[0] || "They"} className="min-w-0 flex-1 px-2.5" />
+            : <span className="min-w-0 flex-1 truncate px-2.5">{kind === "email" ? (p.me.email ?? "Your Gmail") : "Their sub account's GoHighLevel number"}</span>}</div>
           <div className={`relative ${row}`}>
             <span className="w-16 shrink-0 text-muted">To</span>
             {to ? (

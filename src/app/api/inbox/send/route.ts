@@ -14,6 +14,8 @@ import { isClientVisible } from "@/lib/extensionApi";
 import { contactHome } from "@/lib/ghlPerson";
 import { smsText } from "@/lib/smsText";
 import { copyEmailFilesToTask, copySoon } from "@/lib/emailFilesServer";
+import { insertMessageRow, listTextNumbers, textHistory } from "@/lib/ghlNumbers";
+import { ghlTextPayload, resolveFromNumber } from "@/lib/textFrom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -44,7 +46,18 @@ type Body = {
   subject?: string; body?: string; attachments?: { path: string; name: string }[];
   /** Log it in GoHighLevel through the sender's Auto BCC Sync address (default on). */
   ghlLog?: boolean;
+  /** A text: the number of ours it goes from (lib/textFrom). Left out, the
+   *  number the conversation last used, else the account's default. */
+  fromNumber?: string | null;
 };
+
+/** The number a text goes from, for a contact's sub account: the one asked
+ *  for, else the one the conversation knows. An error when the one asked for
+ *  is not in that account. */
+async function textFrom(b: Body, locationId: string, scope: { contactId?: string | null; conversationId?: string | null }) {
+  const [numbers, history] = await Promise.all([listTextNumbers(), textHistory(scope)]);
+  return resolveFromNumber({ requested: b.fromNumber, locationId, numbers, history });
+}
 
 // The sender's GoHighLevel Auto BCC Sync address for the sub-account the
 // contact lives in: Directory for a listed business, else Agency (Derek's rule:
@@ -221,11 +234,18 @@ async function sendGhl(caller: any, b: Body, rawText: string, rows: any[], conv:
   const token = await tokenForLocation(conv.location_id as string);
   if (!token) return NextResponse.json({ error: "No GoHighLevel token for this sub-account." }, { status: 501 });
 
+  // A text goes from the number this conversation knows, or the one picked.
+  let ourNumber: string | null = null;
+  if (type === "SMS") {
+    const from = await textFrom(b, conv.location_id as string, { conversationId: conv.id as string });
+    if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
+    ourNumber = from.number?.number ?? null;
+  }
   const { data: prof } = await supabaseAdmin.from("profiles").select("ghl_user_id").eq("id", caller.id).maybeSingle();
   const res = await fetch("https://services.leadconnectorhq.com/conversations/messages", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ type, contactId: conv.ghl_contact_id, message: text, ...(prof?.ghl_user_id ? { userId: prof.ghl_user_id } : {}) }),
+    body: JSON.stringify(ghlTextPayload({ type, contactId: conv.ghl_contact_id, message: text, fromNumber: ourNumber, userId: prof?.ghl_user_id as string | null })),
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
@@ -242,8 +262,9 @@ async function sendGhl(caller: any, b: Body, rawText: string, rows: any[], conv:
     channel: channel === "call" ? "sms" : channel, direction: "outbound", subject: null, body: text,
     ghl_message_id: ghlMessageId, ghl_conversation_id: conv.id, created_by: caller.memberId,
     peer_name: peer.name, peer_address: peer.address, read: true,
+    ...(ourNumber ? { our_number: ourNumber } : {}),
   };
-  const { error } = await supabaseAdmin.from("messages").insert(row);
+  const { error } = await insertMessageRow(row);
   if (error) console.error("[inbox/send] stored copy failed", error.message);
   return NextResponse.json({ ok: true, messageId: row.id, threadKey: `ghl:${conv.id}` });
 }
@@ -265,12 +286,15 @@ async function sendNewText(caller: any, b: Body, rawText: string) {
   let token = locationId ? await tokenForLocation(locationId) : null;
   // A contact filed on their own client (not a sub-account): ask GoHighLevel where they live.
   if (!token) { const home = await contactHome(contact.ghl_contact_id as string); if (home) { locationId = home.locationId; token = home.token; } }
-  if (!token) return NextResponse.json({ error: "No GoHighLevel token for that contact's sub-account." }, { status: 501 });
+  if (!token || !locationId) return NextResponse.json({ error: "No GoHighLevel token for that contact's sub-account." }, { status: 501 });
+  const from = await textFrom(b, locationId, { contactId: contact.id as string });
+  if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
+  const ourNumber = from.number?.number ?? null;
   const { data: prof } = await supabaseAdmin.from("profiles").select("ghl_user_id").eq("id", caller.id).maybeSingle();
   const res = await fetch("https://services.leadconnectorhq.com/conversations/messages", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Version: "2021-04-15", Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "SMS", contactId: contact.ghl_contact_id, message: text, ...(prof?.ghl_user_id ? { userId: prof.ghl_user_id } : {}) }),
+    body: JSON.stringify(ghlTextPayload({ contactId: contact.ghl_contact_id as string, message: text, fromNumber: ourNumber, userId: prof?.ghl_user_id as string | null })),
   });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
@@ -285,8 +309,9 @@ async function sendNewText(caller: any, b: Body, rawText: string) {
     channel: "sms", direction: "outbound", subject: null, body: text,
     ghl_message_id: ghlMessageId, ghl_conversation_id: convId, created_by: caller.memberId,
     peer_name: contact.name, peer_address: contact.phone, read: true,
+    ...(ourNumber ? { our_number: ourNumber } : {}),
   };
-  const { error } = await supabaseAdmin.from("messages").insert(row);
+  const { error } = await insertMessageRow(row);
   if (error) console.error("[inbox/send] stored copy failed", error.message);
   return NextResponse.json({ ok: true, messageId: row.id, threadKey: convId ? `ghl:${convId}` : null });
 }

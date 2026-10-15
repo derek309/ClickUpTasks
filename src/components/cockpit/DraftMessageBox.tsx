@@ -6,9 +6,9 @@
 // sending finishes the step. Saved as you leave the box, not on every key.
 // Left with nothing written (clicking away, Escape), the pick that made it
 // can take itself back (onLeave, lib/undoAction).
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
-export function DraftMessageBox({ channel, body, firstName, tone, waiting, light = false, onSave, onSend, onDiscard, onLeave }: {
+export function DraftMessageBox({ channel, body, firstName, tone, waiting, light = false, from, onSave, onSend, onDiscard, onLeave }: {
   channel: "sms" | "chat";
   body: string;
   firstName: string;
@@ -19,6 +19,8 @@ export function DraftMessageBox({ channel, body, firstName, tone, waiting, light
   /** Send as a light button: on the task page the step's Done is the one
    *  dark button (Derek, 2026-10-14). */
   light?: boolean;
+  /** A text's "From (530) 362 0990 · ClickUpLocal" line (FromNumberLine). */
+  from?: ReactNode;
   onSave: (body: string) => void;
   onSend: (body: string) => void;
   onDiscard: () => void;
@@ -40,6 +42,7 @@ export function DraftMessageBox({ channel, body, firstName, tone, waiting, light
         <span className={`min-w-0 flex-1 truncate text-[16px] font-semibold ${tone ? tone.sayTone : ""}`}>{what}{waiting ? " · waiting on Claude" : text.trim() ? ", ready to read and send" : ""}</span>
         <button onClick={onDiscard} title="Throw this draft away" aria-label="Discard the draft" className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
       </div>
+      {channel === "sms" && from}
       <textarea value={text} onChange={(e) => setText(e.target.value)} onBlur={() => { if (text !== body) onSave(text); else left(); }} rows={3} autoFocus={!body}
         // Escape keeps what was written before the key goes on.
         onKeyDown={(e) => { if (e.key === "Escape" && text !== body) onSave(text); }}

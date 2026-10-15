@@ -165,6 +165,9 @@ const messageToRow = (m: Message) => ({
   // Who an email went to, when it wasn't the client's main contact (a reply
   // to someone else on the thread). Left out otherwise, as before.
   ...(m.peerAddress ? { peer_address: m.peerAddress } : {}),
+  // A text's number of ours, only when known: before
+  // supabase/message-our-number.sql runs the row is stored without it.
+  ...(m.ourNumber ? { our_number: m.ourNumber } : {}),
 });
 const taskActionToRow = (a: TaskAction) => ({
   id: a.id, task_id: a.taskId, kind: a.kind, author_id: a.authorId, body: a.body, at: a.at,
@@ -190,6 +193,7 @@ export const rowToMessage = (r: any): Message => ({
   direction: r.direction as MessageDirection, subject: r.subject ?? null, body: r.body ?? "",
   ghlMessageId: r.ghl_message_id ?? null, ghlConversationId: r.ghl_conversation_id ?? null, gmailMessageId: r.gmail_message_id ?? null, gmailThreadId: r.gmail_thread_id ?? null, rfc822MessageId: r.rfc822_message_id ?? null, createdBy: r.created_by ?? null, at: r.created_at,
   read: r.read ?? true, attachments: r.attachments ?? [], cc: r.cc ?? [], bcc: r.bcc ?? [],
+  ...(r.our_number ? { ourNumber: r.our_number as string } : {}),
 });
 
 // Row shape returned by GET /api/messages/schedule (raw column names, not
@@ -1081,7 +1085,18 @@ export const fetchTaskBriefFiles = async (briefId: string): Promise<TaskBriefFil
   }));
 };
 
-export const insertMessage = (m: Message) => save(() => supabase.from("messages").insert(messageToRow(m)));
+export const insertMessage = (m: Message) => save(async () => {
+  const row = messageToRow(m);
+  const res = await supabase.from("messages").insert(row);
+  // Before supabase/message-our-number.sql the column is missing: the message
+  // is kept without its number rather than lost.
+  if (res.error && "our_number" in row && /our_number/.test(res.error.message ?? "")) {
+    const rest: Record<string, unknown> = { ...row };
+    delete rest.our_number;
+    return supabase.from("messages").insert(rest);
+  }
+  return res;
+});
 // One write per opened conversation, not per message — flips every unread
 // inbound row for that contact in a single UPDATE.
 export const markMessagesReadDb = (contactId: string) =>

@@ -5,6 +5,8 @@ import { appendSignatureHtml } from "@/lib/emailSignature";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ghlReplyFields } from "@/lib/ghlReply";
 import { smsText } from "@/lib/smsText";
+import { listTextNumbers, textHistory } from "@/lib/ghlNumbers";
+import { ghlTextPayload, resolveFromNumber } from "@/lib/textFrom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,7 +36,10 @@ export async function POST(req: NextRequest) {
   const caller = await requireUser(req);
   if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const b = await req.json().catch(() => ({} as any));
-  const { clientId, locationId, ghlContactId, channel, subject, body, isHtml, attachments, cc, bcc, replyToMessageId } = b as {
+  const { clientId, locationId, ghlContactId, channel, subject, body, isHtml, attachments, cc, bcc, replyToMessageId, fromNumber } = b as {
+    /** A text: the number of ours it goes from (lib/textFrom). Left out, the
+     *  number this person was last texted from, else the account's default. */
+    fromNumber?: string | null;
     replyToMessageId?: string | null; // messages.id this answers, so it goes out as a reply in the same thread
     clientId?: string;
     locationId?: string;
@@ -113,8 +118,24 @@ export async function POST(req: NextRequest) {
   const emailHtml = appendSignatureHtml(isHtml ? body : escapeHtml(body).replace(/\r\n|\r|\n/g, "<br>"), signature);
   // A reply goes out in the thread it answers (ghlReply.ts); null sends a new email.
   const reply = channel === "email" ? await ghlReplyFields({ token, clientId, ghlContactId, locationId, replyToMessageId }) : null;
+  // A text goes from one of the contact's own sub account's numbers: the one
+  // picked, else the one they know (lib/textFrom). Unknown (the list could not
+  // be read), GoHighLevel picks, as before.
+  let ourNumber: string | null = null;
+  if (channel === "sms") {
+    const [numbers, history] = await Promise.all([
+      listTextNumbers(),
+      (async () => {
+        const { data: c } = await supabaseAdmin.from("contacts").select("id").eq("ghl_contact_id", ghlContactId).maybeSingle();
+        return textHistory({ contactId: (c?.id as string | undefined) ?? null });
+      })(),
+    ]);
+    const from = resolveFromNumber({ requested: fromNumber, locationId, numbers, history });
+    if (!from.ok) return NextResponse.json({ error: from.error }, { status: 400 });
+    ourNumber = from.number?.number ?? null;
+  }
   const payload = channel === "sms"
-    ? { type: "SMS", contactId: ghlContactId, message: smsText(body), ...(attachmentUrls ? { attachments: attachmentUrls } : {}) }
+    ? ghlTextPayload({ contactId: ghlContactId, message: smsText(body), fromNumber: ourNumber, attachments: attachmentUrls })
     : { type: "Email", contactId: ghlContactId, subject: (subject || "").slice(0, 200), html: emailHtml,
         // Attribute the send to the teammate's GHL user so GHL uses their own
         // email as the "from" (native per-user sending). userId is the primary
@@ -153,7 +174,7 @@ export async function POST(req: NextRequest) {
     // client's reply on this conversation then finds the task you sent from
     // rather than a generic Conversation task.
     const ghlConversationId: string | null = json?.conversationId ?? json?.conversation?.id ?? null;
-    return NextResponse.json({ ok: true, ghlMessageId, ghlConversationId });
+    return NextResponse.json({ ok: true, ghlMessageId, ghlConversationId, ourNumber });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "GoHighLevel request failed." }, { status: 502 });
   }

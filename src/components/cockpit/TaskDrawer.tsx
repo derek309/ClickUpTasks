@@ -15,6 +15,7 @@ import {
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
 import { usePersisted } from "@/lib/usePersisted";
 import { DraftMessageBox } from "./DraftMessageBox";
+import { FromNumberLine, fromKey } from "./FromNumber";
 import { authedFetch } from "@/lib/supabase";
 import { pickThreeTimes } from "@/lib/improveText";
 import { meetingTimesCopy } from "@/lib/meetingTimes";
@@ -220,6 +221,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
    *  rule as the client page (Derek, 2026-10-13: "The Artist Workshop", not
    *  "Artist"). */
   const firstName = clientFirstName(messageDest, client.name);
+  // Over every text box on the task: which of our numbers it goes from, in
+  // the sub account of the contact the text goes to.
+  const textSub = messageDest ? clientById(messageDest.clientId) : null;
+  const textFromLine = messageDest ? <FromNumberLine pickKey={fromKey.client(task.clientId)} locationId={textSub?.ghlLocationId || null} history={messages ?? []} firstName={firstName} /> : null;
   // No client behind it (Derek, 2026-10-14: "make sure Projects and Personal
   // are up to date"): a Personal to do, or a list in Projects, the
   // workspace's own work. Nothing on it talks to a client, waits on one or
@@ -1902,7 +1907,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     task, client, comment, setComment, onAddComment, onUploadCommentImage, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds,
     attImageUrls, openPreview, attachToTask, messages, onMarkChannelRead, messageDest, onUploadMessageImage,
     onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin,
-    onDeleteMessage, onEditMessage, hasMessaging,
+    onDeleteMessage, onEditMessage, hasMessaging, textFrom: textFromLine,
     // Over the Inbox you just read the conversation, so the feed opens on Everything.
     initialView: fromInbox ? "all" : undefined,
   });
@@ -4234,7 +4239,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <div className="flex flex-col gap-2">
         {/* A text or chat for the client, read and sent from here (2026-10-13). */}
         {dm && (
-          <DraftMessageBox key={`${sub.id}-${dm.channel}`} light={light} channel={dm.channel} body={dm.body} firstName={firstName} tone={!sub.done && sub.assigneeId !== CLAUDE_ID ? stepTone(sub) : null} waiting={!sub.done && sub.assigneeId === CLAUDE_ID}
+          <DraftMessageBox key={`${sub.id}-${dm.channel}`} light={light} channel={dm.channel} from={textFromLine} body={dm.body} firstName={firstName} tone={!sub.done && sub.assigneeId !== CLAUDE_ID ? stepTone(sub) : null} waiting={!sub.done && sub.assigneeId === CLAUDE_ID}
             onSave={(body) => onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: { channel: dm.channel, body } } : x)) })}
             onDiscard={() => { if (!undo.leave(`msg:${sub.id}`)) onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, draftMessage: undefined } : x)) }); }}
             // Clicking away on the task page with nothing written takes the pick back.
@@ -4906,6 +4911,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onSendHeldEmail={heldEmailSendFor(ps)}
               canText={!!messageDest?.phone && mayContactClient}
               onSendText={onSendTaskMessage ? (body) => { onSendTaskMessage("sms", "", body); finishTalkStep("sms", null, ps.id); } : undefined}
+              textFrom={textFromLine}
               canEmail={!!messageDest?.email && mayContactClient}
               onFullEmail={(subject, body) => {
                 // What was typed in the step goes into the email window; with

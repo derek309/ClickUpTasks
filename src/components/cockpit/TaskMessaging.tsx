@@ -132,6 +132,8 @@ export interface TaskMessagingProps {
   messageDest?: Contact | null;
   onUploadMessageImage?: (file: File) => Promise<Attachment | null>;
   onSendTaskMessage?: (channel: MessageChannel, subject: string, body: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
+  /** Over a text: which of our numbers it goes from (FromNumberLine). */
+  textFrom?: React.ReactNode;
   onScheduleTaskMessage?: (channel: MessageChannel, subject: string, body: string, scheduledAt: string, attachments?: Attachment[], cc?: string[], bcc?: string[], replyToMessageId?: string | null) => void;
   sendingMessage?: boolean;
   onDraftMessage?: (channel: "email" | "sms" | "chat", prompt?: string, context?: string) => Promise<{ subject?: string; body: string } | null>;
@@ -385,6 +387,7 @@ export function useTaskMessaging(p: TaskMessagingProps & { actions?: TaskAction[
     if (channel === "sms") return (
       <div className="shrink-0 rounded-xl border-t-2 p-3" style={{ borderTopColor: color, background: color + "0d" }}>
         <div className="mb-2 shrink-0 text-[16px] text-muted">Texting: <span className="font-medium text-foreground">{messageDest?.phone || "no phone on file"}</span></div>
+        {p.textFrom && <div className="mb-2">{p.textFrom}</div>}
         {msgAttBar}
         <textarea value={msgBody} onChange={(e) => setMsgBody(e.target.value)} onPaste={handleMsgPaste} autoFocus
           onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); submitTaskMessage(); } }}

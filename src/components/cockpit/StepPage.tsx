@@ -357,7 +357,7 @@ export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, del
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false, transcript }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false, transcript, textFrom }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -448,6 +448,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   addOptions?: { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void; tone?: { label: string; chip: string; text: string; dot: string } }[];
   canText?: boolean;
   onSendText?: (body: string) => void;
+  /** Over a text: which of our numbers it goes from (FromNumberLine). */
+  textFrom?: React.ReactNode;
   /** Email the client from the step (Derek, 2026-10-11: "email, sms or chat,
    *  we need all the options"). */
   canEmail?: boolean;
@@ -701,6 +703,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           <input value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="Subject" placeholder="Subject"
             className="mb-1 w-full border-b bg-transparent px-2 py-1 text-[16px] font-semibold outline-none" />
         )}
+        {talk === "text" && textFrom && <div className="px-2 pb-1">{textFrom}</div>}
         <label htmlFor={`step-msg-${sub.id}`} className="sr-only">{talk === "team" ? (own ? "Note" : "Note for the team") : `Message ${first}`}</label>
         <textarea ref={talkRef} id={`step-msg-${sub.id}`} value={draft} onChange={(e) => setDraft(e.target.value)}
           // An email is written in lines: Enter is a new line there, ⌘ Enter sends.

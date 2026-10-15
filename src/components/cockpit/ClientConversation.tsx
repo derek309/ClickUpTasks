@@ -26,6 +26,8 @@ import { ImageLightbox } from "./TaskWorkItem";
 import { DraftMessageBox } from "./DraftMessageBox";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { buildFeedDrafts, type FeedDraftDeps } from "./clientFeedDrafts";
+import { FromNote, FromNumberLine } from "./FromNumber";
+import { fromNumberNotes } from "@/lib/textFrom";
 
 const TZ = "America/Los_Angeles";
 const dayTime = (iso: string) => new Date(timeOf(iso)).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -48,7 +50,7 @@ export type FeedDraft = {
   onTask?: () => void;
 };
 
-export function ClientConversation({ first, meId, nameOf, messages, taskTitle, onOpenTask, onOpenFile, draftDeps, channels, whereFor, taskOptions, answering, onSend, onFullEmail, onAiDraft, showAutomatic, onShowAutomatic, seenAt, onSeen, onClose }: {
+export function ClientConversation({ first, meId, nameOf, messages, taskTitle, onOpenTask, onOpenFile, draftDeps, channels, whereFor, taskOptions, answering, onSend, onFullEmail, onAiDraft, showAutomatic, onShowAutomatic, seenAt, onSeen, onClose, textFrom }: {
   first: string;
   meId: string;
   nameOf: (memberId: string) => string | null;
@@ -84,6 +86,9 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   /** Opened (and closed) now. */
   onSeen: () => void;
   onClose: () => void;
+  /** Which of our numbers a text goes from: the pick's key and their sub
+   *  account (FromNumberLine). Left out, no From line. */
+  textFrom?: { pickKey: string; locationId: string | null };
 }) {
   useEscapeToClose(onClose);
   const drafts = buildFeedDrafts(draftDeps);
@@ -103,6 +108,9 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (writing) box.current?.focus(); }, [writing]);
   const talk = useMemo(() => messages.filter(isTalk).sort(byTime), [messages]);
+  // Which number each of our texts went from, and where it changed.
+  const fromNotes = useMemo(() => fromNumberNotes(talk), [talk]);
+  const fromLine = textFrom ? <FromNumberLine pickKey={textFrom.pickKey} locationId={textFrom.locationId} history={messages} firstName={first} className="mb-1.5" /> : null;
   // They wrote last and nobody answered yet: a red line above that message.
   const waiting = useMemo(() => waitingOnReply(messages), [messages]);
   const has = new Set(talk.map((m) => m.channel));
@@ -240,6 +248,7 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
             <div key={r.key} className={`max-w-[88%] rounded-[5px] px-3 py-2 ${mine ? "self-end bg-accent-soft" : "self-start bg-surface ring-1 ring-[var(--border)]"} ${auto ? "opacity-80" : ""}`}>
               <div className="text-[16px] text-muted">
                 {auto ? (mine ? "Automatic" : `${whoOf(m)}, automatic`) : whoOf(m)} · {WORD[m.channel as TalkChannel]} · <span title={dayTime(m.at)}>{messageStamp(m.at)}</span>
+                {fromNotes.has(m.id) && <> · <FromNote note={fromNotes.get(m.id)} /></>}
                 {!mine && !m.read && <b className="ml-1.5 text-accent">New</b>}
                 {r.kind === "auto" && <button onClick={() => setOpenAuto((s) => { const n = new Set(s); n.delete(m.id); return n; })} className="ml-1.5 font-semibold text-accent hover:underline">Fold</button>}
               </div>
@@ -256,7 +265,7 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
           const what = `Draft ${d.kind === "email" ? "email" : d.kind === "sms" ? "text" : "chat"}`;
           if (editing === d.id && x.editText) return (
             <div key={d.id} className="self-stretch">
-              <DraftMessageBox channel={d.kind === "chat" ? "chat" : "sms"} body={d.body} firstName={first} light
+              <DraftMessageBox channel={d.kind === "chat" ? "chat" : "sms"} body={d.body} firstName={first} light from={d.kind === "chat" ? undefined : fromLine ?? undefined}
                 onSave={x.editText.save} onDiscard={() => { setEditing(null); x.editText!.discard(); }}
                 onSend={(body) => void run(d.id, async () => { await x.editText!.send(body); setEditing(null); })} />
               <button onClick={() => setEditing(null)} className={`${link} mt-1 text-[16px]`}>Done editing</button>
@@ -311,6 +320,7 @@ export function ClientConversation({ first, meId, nameOf, messages, taskTitle, o
             <input value={emailSubject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Subject"
               className="mb-2 h-10 w-full rounded-[5px] border bg-surface px-2.5 text-[16px] outline-none focus:border-accent" />
           )}
+          {ch === "sms" && fromLine}
           <textarea ref={box} value={text} onChange={(e) => setText(e.target.value)} rows={ch === "email" ? 5 : 3} aria-label={`Write to ${first}`}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }}
             placeholder={`Write to ${first}…`} className="w-full resize-y rounded-[5px] border bg-surface px-2.5 py-2 text-[16px] outline-none focus:border-accent" />

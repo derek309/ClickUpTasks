@@ -15,6 +15,8 @@ import { appendSignatureHtml } from "./emailSignature";
 import { ghlReplyFields } from "./ghlReply";
 import { closeAnsweredReplyTask } from "./ghlConversationTask";
 import { smsText } from "./smsText";
+import { insertMessageRow, listTextNumbers, textHistory } from "@/lib/ghlNumbers";
+import { ghlTextPayload, resolveFromNumber } from "@/lib/textFrom";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -171,8 +173,16 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
   const reply = input.channel === "email"
     ? await ghlReplyFields({ token, clientId: input.clientId, ghlContactId: contact.ghlContactId, locationId, replyToMessageId: input.replyToMessageId })
     : null;
+  // A text goes from the number this person knows, else the account's
+  // default (lib/textFrom); unknown, GoHighLevel picks, as before.
+  let ourNumber: string | null = null;
+  if (input.channel === "sms") {
+    const [numbers, history] = await Promise.all([listTextNumbers(), textHistory({ contactId: contact.id })]);
+    const from = resolveFromNumber({ locationId, numbers, history });
+    ourNumber = from.ok ? from.number?.number ?? null : null;
+  }
   const payload = input.channel === "sms"
-    ? { type: "SMS", contactId: contact.ghlContactId, message: smsText(input.body), ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) }
+    ? ghlTextPayload({ contactId: contact.ghlContactId, message: smsText(input.body), fromNumber: ourNumber, attachments: attachmentUrls })
     : { type: "Email", contactId: contact.ghlContactId, subject: (input.subject || "").slice(0, 200), html: emailHtml,
         ...(input.cc.length ? { emailCc: input.cc } : {}), ...(input.bcc.length ? { emailBcc: input.bcc } : {}),
         ...(attachmentUrls.length ? { attachments: attachmentUrls } : {}) };
@@ -189,19 +199,20 @@ export async function sendScheduledMessageNow(input: ScheduledSendInput): Promis
     if (!res.ok) { const text = await res.text().catch(() => ""); return { ok: false, error: `GoHighLevel API ${res.status}: ${text.slice(0, 240)}` }; }
     const json = await res.json().catch(() => ({}));
     const ghlMessageId: string | null = json?.messageId ?? json?.message?.id ?? json?.conversationId ?? json?.id ?? null;
-    return insertSentMessage(input, contact.id, ghlMessageId, null);
+    return insertSentMessage(input, contact.id, ghlMessageId, null, null, null, null, ourNumber);
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "GoHighLevel request failed." };
   }
 }
 
-async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null, rfc822: string | null = null, peerAddress: string | null = null): Promise<{ ok: true; messageId: string }> {
+async function insertSentMessage(input: ScheduledSendInput, contactId: string, ghlMessageId: string | null, gmailMessageId: string | null, gmailThreadId: string | null = null, rfc822: string | null = null, peerAddress: string | null = null, ourNumber: string | null = null): Promise<{ ok: true; messageId: string }> {
   const messageId = "msg_" + randomUUID();
-  await supabaseAdmin.from("messages").insert({
+  await insertMessageRow({
     id: messageId, contact_id: contactId, client_id: input.clientId, task_id: input.taskId, channel: input.channel, direction: "outbound",
     subject: input.subject, body: input.body, ghl_message_id: ghlMessageId, gmail_message_id: gmailMessageId, gmail_thread_id: gmailThreadId, rfc822_message_id: rfc822,
     created_by: input.createdBy, read: true, attachments: input.attachments, cc: input.cc, bcc: input.bcc,
     ...(peerAddress ? { peer_address: peerAddress } : {}),
+    ...(ourNumber ? { our_number: ourNumber } : {}),
   });
   await closeAnsweredReplyTask(input.taskId, new Date().toISOString(), input.createdBy, input.channel === "sms" ? "text" : "email");
   return { ok: true, messageId };

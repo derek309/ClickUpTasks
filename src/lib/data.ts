@@ -674,6 +674,9 @@ export interface Message {
   bcc: string[];
   /** Whose Gmail this came into (roster id). Null for GoHighLevel and portal chat. */
   mailboxMemberId?: string | null;
+  /** A text's number of ours: the one it went from (ours) or came in to
+   *  (theirs), when known (supabase/message-our-number.sql, lib/textFrom). */
+  ourNumber?: string | null;
   /** The other person, stored on the row so a stranger's message (no contact
    *  yet, contactId "") still says who it is from. */
   peerName?: string | null;
