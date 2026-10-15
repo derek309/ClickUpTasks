@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import {
   describeRecurrence, htmlToText, initialsOf, splitQuotedEmail, tidyEmailText,
-  type Attachment, type Recurrence, type RecurrenceUnit,
+  type Attachment, type Recurrence, type RecurrenceUnit, type Subtask,
 } from "@/lib/data";
 import { TASK_FILES_BUCKET } from "@/lib/db";
 import { QUEUE_TASK_COLS, portalQueueMarks, queueSettings, queueTaskFromRow, type QueueSettings } from "../../../../../mcp/queue.mjs";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 import { orderLists } from "@/lib/listOrder";
+import { portalRequestFromTask } from "@/lib/portalRequests";
+import { clientFirstName } from "@/lib/clientFirstName";
+import { requestFromTask } from "@/lib/clientRequests";
 
 // Public, deliberately unauthenticated — the first route of its kind in this
 // app. Backs /waiting/[token], a client-facing page showing "here's what
@@ -124,6 +127,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     return (await q).count ?? 0;
   };
   const clientId = scope.clientId;
+  // What the page calls them ("Thanks, Brian."): the contact's first name when
+  // the contact is a person, else the client's name. Only that leaves here.
+  const contactId = scope.linkedContactId || (clientId.startsWith("cl_") ? clientId.slice(3) : null);
+  const { data: contact } = contactId ? await supabaseAdmin.from("contacts").select("name, company").eq("id", contactId).maybeSingle() : { data: null };
+  const firstName = clientFirstName(contact as { name?: string | null; company?: string | null } | null, scope.clientName, "");
   const finishedAt = (t: Row) => (t.status === "done" ? t.completed_at ?? t.updated_at ?? null : null);
 
   // Every row as the page reads it. Rows not in `full` (finished a while
@@ -191,6 +199,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     // task that is a review opens straight into it (Derek, 2026-10-08).
     const SHARED = ["with_client", "client_submitted", "approved"];
     const reviewByTask = new Map<string, string>();
+    // A review still waiting on their answer: their request is to look it over.
+    const reviewOpen = new Set((docRows ?? []).filter((d) => d.status === "with_client").map((d) => d.task_id as string));
     for (const d of docRows ?? []) {
       if (!SHARED.includes(d.status as string)) continue;
       const had = reviewByTask.get(d.task_id as string);
@@ -208,6 +218,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         hasDoc: false, review: null, attachments: [], response: null, thread: [], changes: [], short: true,
       };
       const cr = t.client_response as { body: string; attachments: Attachment[]; submittedAt: string } | null;
+      // What we need from them on it, one thing at a time (lib/portalRequests).
+      const request = portalRequestFromTask({
+        id: t.id, title: t.title, clientId, projectId: t.project_id ?? null, due: t.due ?? null, status: t.status,
+        waitingOnClient: t.waiting_on_client === true, subtasks: ((t as Record<string, unknown>).subtasks as Subtask[] | null) ?? null,
+      }, { firstName, reviewOpen: reviewOpen.has(t.id) });
       const threadRows = threadByTask.get(t.id) ?? [];
       const [attachments, responseAttachments, thread] = await Promise.all([
         resolveAttachments(t.attachments ?? []),
@@ -235,7 +250,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         // Stripped to plain text server-side — no HTML ever reaches this public
         // response, and the page never needs the TipTap editor bundle to render it.
         description: htmlToText(t.description ?? ""),
-        status: t.status, needsResponse: t.waiting_on_client === true,
+        status: t.status, needsResponse: !!request, request,
         // When it was finished, for "Done Oct 3": completed_at, else the last change.
         doneAt: finishedAt(t), repeat,
         hasDoc: withDoc.has(t.id),
@@ -280,6 +295,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   ]);
   const byId = new Map<string, Row>();
   [...(waiting ?? []), ...(responded ?? []), ...(deepLinked ?? []), ...(allOpen ?? [])].forEach((t) => byId.set((t as unknown as Row).id, t as unknown as Row));
+  // Every task whose current step is theirs is something we need from them,
+  // whether or not the portal lists the whole account: read light first, the
+  // ones not already here in full after.
+  if (!scope.showAllTasks) {
+    const { data: openLight } = await scopedTaskQuery("id, title, subtasks").not("status", "in", "(done,on_hold)").limit(1000);
+    const want = ((openLight ?? []) as unknown as { id: string; title: string; subtasks: Subtask[] | null }[])
+      .filter((t) => !byId.has(t.id) && requestFromTask({ id: t.id, title: t.title, clientId, subtasks: t.subtasks }))
+      .map((t) => t.id);
+    for (let i = 0; i < want.length; i += 200) {
+      const { data: more } = await scopedTaskQuery().in("id", want.slice(i, i + 200));
+      for (const t of (more ?? []) as unknown as Row[]) byId.set(t.id, t);
+    }
+  }
   // A finished task out of the 13 months by its real finish date counts as older.
   let olderCount = olderDone;
   for (const t of recentDone) {
@@ -301,5 +329,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   // writes anything, so this is purely so the client isn't offered a button
   // that would only refuse them (see supabase/client-request-new-tasks.sql).
   // Always false for a project-scoped token (see resolveWaitingToken).
-  return NextResponse.json({ clientName: scope.clientName, canRequestNewTasks: scope.canRequestNewTasks, projects, tasks, olderDone: olderCount, deepLinkTaskId: deepLinkTaskId || null });
+  return NextResponse.json({ clientName: scope.clientName, firstName, canRequestNewTasks: scope.canRequestNewTasks, projects, tasks, olderDone: olderCount, deepLinkTaskId: deepLinkTaskId || null });
 }

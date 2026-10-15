@@ -12,6 +12,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { timeAgo, type Attachment } from "@/lib/data";
 import { uploadSharedFile } from "@/lib/docFileUpload";
 import { doneByMonth, doneLines, monthCount, ongoingWork, type DoneLine } from "@/lib/portalDone";
+import { doneWord, nextRequest, portalQueue, queuePosition, thanksLine, type PortalRequest, type PortalRequestKind } from "@/lib/portalRequests";
+import { FocusedRequest, RequestList } from "./PortalRequests";
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 /** queue: the list works one at a time (a queue list): Now, then in line. */
@@ -41,7 +43,22 @@ type WaitingTask = {
   /** On a queue list: being done now, or waiting in line at `place` ("2nd"). */
   queue?: "now" | "line";
   place?: string | null;
+  /** What we need from them on it now, if anything (lib/portalRequests). */
+  request?: PortalRequest | null;
 };
+/** A review they left the portal to approve: on the way back, answered or not. */
+const PENDING_KEY = (token: string) => `portal-pending:${token}`;
+function readPending(token: string): { key: string; kind: PortalRequestKind } | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_KEY(token));
+    window.sessionStorage.removeItem(PENDING_KEY(token));
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v.key === "string" ? { key: v.key, kind: v.kind } : null;
+  } catch { return null; }
+}
+function savePending(token: string, key: string, kind: PortalRequestKind) {
+  try { window.sessionStorage.setItem(PENDING_KEY(token), JSON.stringify({ key, kind })); } catch { /* private window: no thanks on the way back */ }
+}
 // "Here's where you are, what's done, what's next" — see
 // A draft attachment is either a stored file (has `path`, uploaded via
 // upload/route.ts) or a plain link (kind "link", has `url` instead) — mirrors
@@ -529,6 +546,8 @@ export default function WaitingView({ token }: { token: string }) {
   // otherwise waiting-on-client or answered (e.g. "this is done"), and gets
   // scrolled to + highlighted below instead of buried in the rest of the list.
   const deepLinkTaskId = useMemo(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("task")), []);
+  // &step=<id>: the reminder's own step, so one answered since says so.
+  const deepLinkStepId = useMemo(() => (typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("step")), []);
   // Landing page is a plain list — title + status only, no inline threads —
   // and opening one task swaps the whole main column to that task's full
   // chat instead of every card carrying its own thread+composer inline.
@@ -536,7 +555,17 @@ export default function WaitingView({ token }: { token: string }) {
   // rendering a scrollable thread and a composer, stacked on top of each
   // other. A ?task= deep link (e.g. from the task drawer's email tab) opens
   // straight into that task's detail view instead of the list.
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => deepLinkTaskId);
+  // Decided once the page loads: a request opens on its own (focus, below),
+  // anything else in its conversation as before.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // One request at a time (Derek and Justin, 2026-10-15): `key` is the one
+  // shown, null for the top of the queue. Null focus is the usual page.
+  const [focus, setFocus] = useState<{ key: string | null } | null>(null);
+  // Answered on this visit, so "2 of 6" counts them and they don't come back
+  // before the next refresh; `thanks` is the line over the next one.
+  const [answered, setAnswered] = useState<{ keys: string[]; thanks: string | null }>({ keys: [], thanks: null });
+  const [changesFor, setChangesFor] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState<string | null>(null);
   // Keeps ?task=<id> in the URL in sync with the open detail view (no new
   // history entry — this is "what page am I on", not a back-button stop),
   // so refreshing the browser lands back on the same task instead of
@@ -559,16 +588,36 @@ export default function WaitingView({ token }: { token: string }) {
   };
   const openTask = (id: string, review?: string | null) => {
     if (review && !goingTo) { void goToReview(id, review); return; }
+    setFocus(null);
     setSelectedTaskId(id);
     const url = new URL(window.location.href);
     url.searchParams.set("task", id);
+    url.searchParams.delete("step");
     window.history.replaceState(null, "", url.toString());
   };
   const closeTask = () => {
     setSelectedTaskId(null);
     const url = new URL(window.location.href);
     url.searchParams.delete("task");
+    url.searchParams.delete("step");
     window.history.replaceState(null, "", url.toString());
+  };
+  // One request on its own; the address follows it, so a refresh comes back to it.
+  const focusOn = (r: PortalRequest | null) => {
+    setSelectedTaskId(null);
+    setChangesFor(null);
+    setFocus({ key: r?.key ?? null });
+    const url = new URL(window.location.href);
+    if (r) url.searchParams.set("task", r.taskId); else url.searchParams.delete("task");
+    url.searchParams.delete("step");
+    window.history.replaceState(null, "", url.toString());
+    window.scrollTo({ top: 0 });
+  };
+  const leaveFocus = () => {
+    setFocus(null);
+    setAnswered((a) => ({ ...a, thanks: null }));
+    setView("theirs");
+    closeTask();
   };
   const [tasks, setTasks] = useState<WaitingTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -665,6 +714,7 @@ export default function WaitingView({ token }: { token: string }) {
       // screen; the 15 second refresh that works must replace it.
       setError(null);
       setClientName(j.clientName ?? null);
+      setFirstName(typeof j.firstName === "string" ? j.firstName : null);
       setCanRequestNewTasks(j.canRequestNewTasks === true);
       setProjects(Array.isArray(j.projects) ? j.projects : []);
       setOlderDone(typeof j.olderDone === "number" ? j.olderDone : 0);
@@ -758,6 +808,63 @@ export default function WaitingView({ token }: { token: string }) {
     return [...seen.values()].slice(0, 5);
   }, [tasks]);
   const totalCount = (tasks ?? []).length;
+
+  // Everything we need from them, in our order (lib/portalRequests), less
+  // what they answered on this visit.
+  const queue = useMemo(() => portalQueue((tasks ?? []).map((t) => t.request).filter((r): r is PortalRequest => !!r), todayKey())
+    .filter((r) => !answered.keys.includes(r.key)), [tasks, answered.keys]);
+  const focused = focus ? (focus.key ? queue.find((r) => r.key === focus.key) ?? null : null) ?? nextRequest(queue, null) : null;
+  // The page opened from a reminder (?task=, &step=) or back from a review
+  // they went to approve: decided once, when the first load is in.
+  const resolvedRef = useRef(false);
+  useEffect(() => {
+    if (!tasks || resolvedRef.current) return;
+    resolvedRef.current = true;
+    const pending = readPending(token);
+    /* eslint-disable react-hooks/set-state-in-effect -- decided once, from the first load */
+    if (pending) {
+      if (queue.some((r) => r.key === pending.key)) { setFocus({ key: pending.key }); return; }
+      setAnswered({ keys: [pending.key], thanks: thanksLine(doneWord(pending.kind), firstName) });
+      setFocus({ key: null });
+      return;
+    }
+    if (!deepLinkTaskId) return;
+    const r = queue.find((x) => x.taskId === deepLinkTaskId);
+    if (r && (!deepLinkStepId || !r.stepId || r.stepId === deepLinkStepId)) { setFocus({ key: r.key }); return; }
+    if (deepLinkStepId) {
+      // That one is answered already: say so, and show what's next.
+      setAnswered({ keys: [], thanks: thanksLine("That one is answered", firstName) });
+      setFocus({ key: null });
+      return;
+    }
+    setSelectedTaskId(deepLinkTaskId);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The address follows the one shown, so a refresh comes back to it.
+  useEffect(() => {
+    if (!focus || !focused) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("task") === focused.taskId) return;
+    url.searchParams.set("task", focused.taskId);
+    url.searchParams.delete("step");
+    window.history.replaceState(null, "", url.toString());
+  }, [focus, focused]);
+
+  // Their answer, through the portal's own messages path (which finishes the
+  // step on the server), then the next one.
+  const answerFocused = async (r: PortalRequest) => {
+    const changes = changesFor === r.key;
+    const ok = await sendChatMessage(r.taskId);
+    if (!ok) return;
+    setAnswered((a) => ({ keys: [...a.keys, r.key], thanks: thanksLine(changes ? "Sent" : doneWord(r.kind), firstName) }));
+    focusOn(null);
+  };
+  // A review is approved on its own page, which brings them back here.
+  const openFocusedReview = (r: PortalRequest, kind: string) => {
+    savePending(token, r.key, r.kind);
+    void goToReview(r.taskId, kind);
+  };
   // Which list a new request will actually go to: the client's own pick
   // once they've touched the dropdown, else the first one — never asked at
   // all when there's only one.
@@ -817,9 +924,9 @@ export default function WaitingView({ token }: { token: string }) {
   const removeAttachment = (taskId: string, attId: string) =>
     setDrafts((prev) => { const d = prev[taskId]; if (!d) return prev; return { ...prev, [taskId]: { ...d, attachments: d.attachments.filter((a) => a.id !== attId) } }; });
 
-  const sendChatMessage = async (taskId: string) => {
+  const sendChatMessage = async (taskId: string): Promise<boolean> => {
     const draft = drafts[taskId] ?? { body: "", attachments: [] };
-    if (!draft.body.trim() && draft.attachments.length === 0) return;
+    if (!draft.body.trim() && draft.attachments.length === 0) return false;
     setSendingIds((s) => new Set(s).add(taskId));
     try {
       const res = await fetch(`/api/waiting/${token}/messages`, {
@@ -827,13 +934,14 @@ export default function WaitingView({ token }: { token: string }) {
         body: JSON.stringify({ taskId, body: draft.body, attachments: draft.attachments }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) { setSendErrors((e) => ({ ...e, [taskId]: j.error || "Couldn't send — try again." })); return; }
+      if (!res.ok) { setSendErrors((e) => ({ ...e, [taskId]: j.error || "Couldn't send — try again." })); return false; }
       setSendErrors((e) => { const n = { ...e }; delete n[taskId]; return n; });
       // Clear the composer immediately — load()'s draft-seeding only fills
       // in tasks with NO existing entry, so without this the just-sent text
       // would still sit in the box looking unsent.
       setDrafts((prev) => ({ ...prev, [taskId]: { body: "", attachments: [] } }));
       await load();
+      return true;
     } finally {
       setSendingIds((s) => { const n = new Set(s); n.delete(taskId); return n; });
     }
@@ -992,7 +1100,15 @@ export default function WaitingView({ token }: { token: string }) {
           <iframe src={docView.url} title="Your document" className="min-h-0 w-full flex-1 border-0 bg-surface" />
         </div>
       )}
-      {selectedTask ? (
+      {focus && !selectedTask ? (
+        // One request: whose page it is, and where this one is in the line.
+        <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
+          <div className="mx-auto flex max-w-[560px] items-center gap-3 px-4 py-3 text-[16px] text-white">
+            <b className="min-w-0 truncate">{clientName}</b>
+            {focused && (() => { const p = queuePosition(queue, focused.key, answered.keys.length); return p ? <span className="ml-auto shrink-0 text-white/80">{p.n} of {p.of}</span> : null; })()}
+          </div>
+        </div>
+      ) : selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
           <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
             <button onClick={closeTask} className="inline-flex h-10 items-center gap-2 rounded-[5px] border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← All my tasks</button>
@@ -1038,13 +1154,48 @@ export default function WaitingView({ token }: { token: string }) {
           statusBusy={statusBusyIds.has(selectedTask.id)}
           onDoc={() => void (selectedTask.hasDoc ? goToReview(selectedTask.id, "doc") : viewDoc(selectedTask.id))}
           docBusy={docBusyId === selectedTask.id}
-          otherWaiting={open.filter((o) => o.needsResponse && o.id !== selectedTask.id).sort(sortFn).map((o) => ({ id: o.id, title: o.title }))}
+          otherWaiting={queue.filter((r) => r.taskId !== selectedTask.id).map((r) => ({ id: r.taskId, title: r.ask }))}
           onOpenTask={openTask}
           onBack={closeTask}
           team={teamSenders}
           doneCount={doneCount}
           totalCount={totalCount}
         />
+      ) : focus && tasks ? (
+        <div className="mx-auto w-full max-w-[560px] px-4 pb-10 pt-5">
+          {answered.thanks && <div className="mb-4 rounded-[5px] bg-success-soft px-4 py-3 text-[17px] font-bold text-success" role="status">{answered.thanks}</div>}
+          {focused ? (() => {
+            const t = (tasks ?? []).find((x) => x.id === focused.taskId);
+            const draft = drafts[focused.taskId] ?? { body: "", attachments: [] };
+            return (
+              <>
+                {answered.thanks && <div className="mb-2 text-[16px] font-semibold text-muted">Here&apos;s what else we need</div>}
+                <FocusedRequest key={focused.key} r={focused} today={todayKey()}
+                  listName={projects.length > 1 ? projectName(focused.listId) : null}
+                  review={t?.review ?? null}
+                  body={draft.body} files={draft.attachments}
+                  uploading={uploadingIds.has(focused.taskId)} sending={sendingIds.has(focused.taskId)} error={sendErrors[focused.taskId]}
+                  changesOpen={changesFor === focused.key} opening={goingTo === focused.taskId}
+                  onBody={(v) => updateBody(focused.taskId, v)}
+                  onFiles={(f) => handleFiles(focused.taskId, f)}
+                  onRemoveFile={(id) => removeAttachment(focused.taskId, id)}
+                  onAnswer={() => void answerFocused(focused)}
+                  onOpenReview={() => (t?.review ? openFocusedReview(focused, t.review) : openTask(focused.taskId))}
+                  onAskChanges={() => setChangesFor(focused.key)} />
+                <button onClick={leaveFocus} className="mt-5 block w-full py-2 text-center text-[16px] font-semibold text-accent">See everything we need · {queue.length}</button>
+              </>
+            );
+          })() : (
+            <>
+              <div className="rounded-[5px] border bg-surface px-5 py-5">
+                <h2 className="text-[18px] font-bold">That&apos;s everything we need for now</h2>
+                <p className="mt-1 text-[16px] text-muted">We&apos;ll let you know when we need something else.</p>
+              </div>
+              <button onClick={() => { setFocus(null); setAnswered((a) => ({ ...a, thanks: null })); setView("all"); closeTask(); }}
+                className="mt-5 block w-full py-2 text-center text-[16px] font-semibold text-accent">See what we&apos;re working on</button>
+            </>
+          )}
+        </div>
       ) : (
       <div className="mx-auto w-full max-w-[1280px] px-4 pb-10 pt-5">
         {error ? (
@@ -1158,7 +1309,7 @@ export default function WaitingView({ token }: { token: string }) {
                   then what we're working on, then what's done, folded away. */}
               {(() => {
                 const all = tasks ?? [];
-                const needCount = all.filter((t) => t.status !== "done" && t.needsResponse).length;
+                const needCount = queue.length;
                 const progCount = all.filter((t) => t.status !== "done" && !t.needsResponse).length;
                 const doneAll = all.filter((t) => t.status === "done").length;
                 const lists = [...projects.map((p) => ({ id: p.id as string | null, name: p.name })), ...(all.some((t) => !projects.some((p) => p.id === t.projectId)) ? [{ id: null, name: "Other" }] : [])];
@@ -1224,7 +1375,7 @@ export default function WaitingView({ token }: { token: string }) {
                   );
                 };
                 const showing = view ?? (needCount ? "theirs" : "all");
-                const theirs = all.filter((t) => t.status !== "done" && t.needsResponse).sort(sortFn);
+                const theirs = queue;
                 const toggle = all.length > 0 && (
                   <div role="tablist" aria-label="Which tasks" className="grid grid-cols-3 gap-1 rounded-[5px] bg-border/60 p-1">
                     {/* Short names on a phone: the long ones wrapped a word a line and
@@ -1368,7 +1519,7 @@ export default function WaitingView({ token }: { token: string }) {
                           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-highlight text-[22px] font-extrabold text-white">{theirs.length}</span>
                           <div>
                             <h2 className="text-[20px] font-extrabold text-highlight">{theirs.length === 1 ? "1 thing we need from you" : `${theirs.length} things we need from you`}</h2>
-                            <p className="text-[16px] text-foreground/80">The soonest is first. Each one takes you right to it.</p>
+                            <p className="text-[16px] text-foreground/80">Most urgent first. Tap one to answer it.</p>
                           </div>
                         </div>
                       </div>
@@ -1378,25 +1529,9 @@ export default function WaitingView({ token }: { token: string }) {
                         <p className="text-[16px] text-muted">We&apos;ll let you know when we need something. Everything we&apos;re working on is under All tasks.</p>
                       </div>
                     )}
-                    {theirs.length > 0 && (
-                      <div className="grid gap-3">
-                        {theirs.map((t) => (
-                          <button key={t.id} onClick={() => openTask(t.id, t.review)} disabled={goingTo === t.id}
-                            style={{ borderLeftColor: "var(--highlight)" }}
-                            className="flex w-full flex-col items-stretch gap-3 rounded-[5px] border border-l-[6px] bg-surface px-4 py-4 text-left shadow-[var(--shadow-sm)] transition hover:shadow-[var(--shadow-md)] disabled:opacity-60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
-                            <div className="min-w-0 flex-1">
-                              <b className="block text-[18px]">{t.title}</b>
-                              <span className="text-[16px] text-muted">{[t.due ? `Due ${shortDate(t.due)}` : null, projects.length > 1 ? projectName(t.projectId) : null].filter(Boolean).join(" · ")}</span>
-                            </div>
-                            {/* Under the task's name on a phone, full width: beside it, it
-                                squeezed the name to a narrow column. */}
-                            <span className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-[5px] bg-highlight px-5 text-[16px] font-bold text-white">
-                              {goingTo === t.id ? "Opening…" : t.review ? "Review it" : "Answer it"} <span aria-hidden>→</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {/* Grouped Overdue, Today, This week and Later, in the same
+                        order as our side; a row opens that one on its own. */}
+                    {theirs.length > 0 && <RequestList queue={theirs} today={todayKey()} listName={(id) => (projects.length > 1 ? projectName(id) : null)} onOpen={focusOn} />}
                   </div>
                 );
                 return (
