@@ -24,7 +24,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false, onAddLink, onAttachFiles }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false, onAddLink, onAttachFiles, transcript }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -87,6 +87,9 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   afterThis?: React.ReactNode;
   doneLabel?: string;
   replyPending?: boolean;
+  /** Add the transcript (TranscriptBox), or the line offering it; open, its
+   *  Save is the dark button and Done goes light. */
+  transcript?: { node: React.ReactNode; open: boolean };
   replyOpen?: boolean;
   /** Link and Attach on the On this step line: onto this step. */
   onAddLink?: (url: string) => void;
@@ -211,7 +214,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
       {!outFor && !whatsNext && !setup && (() => {
         const todos = !sub.onClient && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0);
         const addable = !sub.done && !sub.onClient && sub.finishWhen !== "reply";
-        if (!held && !planBits && !followBox && !todos && !addable && !files) return null;
+        if (!held && !planBits && !followBox && !todos && !addable && !files && !transcript?.node) return null;
         return (
           <section aria-label="On this step" className="flex flex-col gap-2">
             {addable && (
@@ -222,6 +225,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
                 onLink={onAddLink ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
                 onAttach={onAttachFiles} />
             )}
+            {transcript?.node}
             {linkDraft !== null && (
               <div className="flex flex-wrap items-center gap-2">
                 <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
@@ -254,7 +258,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
               <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
             </div>
           ) : (
-            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen} onGiveClaude={onGiveClaude} delegate={delegate}>
+            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open} onGiveClaude={onGiveClaude} delegate={delegate}>
               <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
             </StepFinish>
           )}

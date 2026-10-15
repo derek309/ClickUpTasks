@@ -11,6 +11,7 @@ import { contactsByEmail } from "./contactsByEmail";
 import { TASK_FILES_BUCKET } from "./db";
 import { ensureMeetingSteps, stepWaitsOnTranscript, stepsOnMeetingTranscript } from "./stepsServer";
 import type { Subtask } from "./data";
+import { storageSafeName } from "./transcriptPaste";
 import { allGranolaKeys, granolaKeyFor, type GranolaKey } from "./granolaKeys";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -127,17 +128,23 @@ async function transcriptOntoTask(clientId: string, note: Awaited<ReturnType<typ
 
 async function fileTranscript(taskId: string, note: Awaited<ReturnType<typeof granolaGetNote>>, stepId?: string): Promise<string> {
   const meetingDay = (note.calendar_event?.scheduled_start_time || note.created_at).slice(0, 10);
-  const waiting = { id: taskId };
-  const body = transcriptText(note);
-  const name = `Meeting transcript ${meetingDay}.txt`;
-  const path = `${waiting.id}/${randomUUID().slice(0, 8)}-${name.replace(/\s+/g, "-")}`;
+  return fileTextTranscript(taskId, { name: `Meeting transcript ${meetingDay}.txt`, body: transcriptText(note), stepId });
+}
+
+/** A transcript as a text file on the task, held on its step, which is
+ *  done (stepsOnMeetingTranscript). Granola's, and one pasted by hand
+ *  (Derek, 2026-10-15, api/tasks/[id]/transcript). `alsoHold`: more of the
+ *  task's attachments for the step to hold (the recording's link). */
+export async function fileTextTranscript(taskId: string, o: { name: string; body: string; stepId?: string; alsoHold?: string[]; outcome?: string }): Promise<string> {
+  const { name, body } = o;
+  const path = `${taskId}/${randomUUID().slice(0, 8)}-${storageSafeName(name)}`;
   const { error } = await supabaseAdmin.storage.from(TASK_FILES_BUCKET).upload(path, Buffer.from(body, "utf8"), { contentType: "text/plain; charset=utf-8", upsert: false });
   if (error) throw new Error(`upload failed: ${error.message}`);
   const bytes = Buffer.byteLength(body, "utf8");
   const att = { id: "a_" + randomUUID().slice(0, 12), name, kind: "doc", size: bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`, path, mimeType: "text/plain" };
-  const { error: rpcError } = await supabaseAdmin.rpc("append_task_attachments", { task_id: waiting.id, items: [att] });
+  const { error: rpcError } = await supabaseAdmin.rpc("append_task_attachments", { task_id: taskId, items: [att] });
   if (rpcError) throw new Error(`attach failed: ${rpcError.message}`);
-  await stepsOnMeetingTranscript(waiting.id, att.id, stepId);
+  await stepsOnMeetingTranscript(taskId, [att.id, ...(o.alsoHold ?? [])], o.stepId, o.outcome);
   return name;
 }
 
@@ -145,7 +152,7 @@ async function fileTranscript(taskId: string, note: Awaited<ReturnType<typeof gr
  *  the task has none, then the client's Granola meeting nearest the step's
  *  date, from the last two weeks, filed now. For a meeting Granola sent
  *  before the step was there. */
-export async function transcriptForTask(taskId: string, stepId?: string): Promise<{ ok: true; filed: string | null } | { ok: false; error: string }> {
+export async function transcriptForTask(taskId: string, stepId?: string): Promise<{ ok: true; filed: string | null; stepId: string } | { ok: false; error: string }> {
   if (stepId) await stepWaitsOnTranscript(taskId, stepId); else await ensureMeetingSteps(taskId);
   const { data: task } = await supabaseAdmin.from("tasks").select("client_id, subtasks").eq("id", taskId).maybeSingle();
   if (!task) return { ok: false, error: "No such task." };
@@ -153,13 +160,13 @@ export async function transcriptForTask(taskId: string, stepId?: string): Promis
   if (!step) return { ok: false, error: "Couldn't add the transcript step." };
   const since = new Date(Date.now() - 14 * 86400000).toISOString();
   const { data: notes } = await supabaseAdmin.from("granola_synced_notes").select("granola_note_id, client_note_id, granola_user_id").eq("client_id", task.client_id).not("client_note_id", "is", null);
-  if (!notes?.length) return { ok: true, filed: null };
+  if (!notes?.length) return { ok: true, filed: null, stepId: step.id };
   const { data: meetings } = await supabaseAdmin.from("client_notes").select("id, created_at").in("id", notes.map((n: any) => n.client_note_id)).gte("created_at", since);
   const target = Date.parse(step.due ?? new Date().toISOString().slice(0, 10));
   const nearest = (meetings ?? []).sort((a: any, b: any) => Math.abs(Date.parse(a.created_at) - target) - Math.abs(Date.parse(b.created_at) - target))[0];
-  if (!nearest) return { ok: true, filed: null };
+  if (!nearest) return { ok: true, filed: null, stepId: step.id };
   const row = notes.find((n: any) => n.client_note_id === nearest.id)!;
-  return { ok: true, filed: await fileTranscript(taskId, await readNoteWithAnyKey(row.granola_note_id, row.granola_user_id), stepId) };
+  return { ok: true, filed: await fileTranscript(taskId, await readNoteWithAnyKey(row.granola_note_id, row.granola_user_id), step.id), stepId: step.id };
 }
 
 /** The note with the key that filed it, else the deployment's, else anyone's

@@ -321,15 +321,18 @@ export async function ensureMeetingSteps(taskId: string): Promise<boolean> {
 /** The meeting's transcript came in from Granola: the open "Add the meeting
  *  transcript" step holds the file and is done, and the meeting step before
  *  it too (Derek, 2026-10-12). */
-export async function stepsOnMeetingTranscript(taskId: string, attachmentId: string, stepId?: string): Promise<boolean> {
+/** One added by hand (Derek, 2026-10-15) the same way: `attachmentIds` the
+ *  transcript first, then its recording's link; `outcome` says how it came. */
+export async function stepsOnMeetingTranscript(taskId: string, attachmentIds: string | string[], stepId?: string, outcome = "Transcript from Granola"): Promise<boolean> {
+  const keys = (Array.isArray(attachmentIds) ? attachmentIds : [attachmentIds]).map((id) => `att:${id}`);
   return rewriteSteps(taskId, (row) => {
     const list = row.subtasks ?? [];
     const step = list.find((x) => (stepId ? x.id === stepId : !x.done && x.finishWhen === "transcript"));
     if (!step) return null;
     const now = new Date().toISOString();
     return list.map((x) => {
-      if (x.id === step.id) return { ...x, done: true, doneAt: x.doneAt ?? now, finishWhen: undefined, outcome: "Transcript from Granola", holds: [...(x.holds ?? []), `att:${attachmentId}`] };
-      if (!x.done && x.finishWhen === "transcript") return { ...x, done: true, doneAt: now, outcome: "Transcript from Granola" };
+      if (x.id === step.id) return { ...x, done: true, doneAt: x.doneAt ?? now, finishWhen: undefined, outcome, holds: [...new Set([...(x.holds ?? []), ...keys])] };
+      if (!x.done && x.finishWhen === "transcript") return { ...x, done: true, doneAt: now, outcome };
       if (!x.done && x.addedFor === "meeting") return { ...x, done: true, doneAt: now, outcome: "Met" };
       return x;
     });

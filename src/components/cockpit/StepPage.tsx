@@ -357,7 +357,7 @@ export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, del
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false, transcript }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -488,6 +488,9 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   replyPending?: boolean;
   /** The reply box is open under the email: its Send is the dark button. */
   replyOpen?: boolean;
+  /** Add the transcript (TranscriptBox), or the line offering it; open, its
+   *  Save is the dark button and Done goes light. */
+  transcript?: { node: React.ReactNode; open: boolean };
 }) {
   const close = () => onClose({ dirty: dir.dirty() || !!todo.typing.trim() || !!draft.trim() });
   useEscapeToClose(close);
@@ -840,6 +843,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     onChecklist={() => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); }}
                     onLink={onAddLink || (savedLinks.length && onAttachLinks) ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
                     onAttach={onAttachFiles} />
+                  {transcript?.node}
                   {linkDraft !== null && (
                     <div className="flex flex-wrap items-center gap-2">
                       {onAddLink && <>
@@ -919,7 +923,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                       <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
                     </div>
                   ) : (
-                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen}
+                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open}
                       onGiveClaude={onGiveClaude} delegate={delegate} />
                   )}
                 </div>

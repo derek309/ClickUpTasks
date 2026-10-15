@@ -42,6 +42,8 @@ import { AskedLog } from "./AskedLog";
 import { InlineReply } from "./InlineReply";
 import { useUndoActions } from "./useUndoActions";
 import type { ActionState } from "@/lib/undoAction";
+import { TranscriptBox, TranscriptWaitLine, type TranscriptEntry } from "./TranscriptBox";
+import { recordingUrl, transcriptBoxReason, transcriptNameFor, transcriptSavePayload, type TranscriptSave } from "@/lib/transcriptPaste";
 import { addAfterThisStep, afterThisFilled, afterThisOf, afterThisWho, doneNextLabel, finishOpensWhatsNext, isClientWait, patchForAction, patchForWho, suggestedAfter } from "@/lib/afterThis";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
@@ -523,7 +525,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     onDrop: (e: React.DragEvent) => {
       dragDepth.current = 0;
       setFileOverDrawer(false);
-      if (!e.dataTransfer.files.length) return;
+      // Taken by a box of its own (Add the transcript).
+      if (e.defaultPrevented || !e.dataTransfer.files.length) return;
       e.preventDefault();
       // Dropped on a step's page, or on the task page with a step to add
       // to: the files go onto that step too.
@@ -711,6 +714,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // intercepts when the clipboard actually carries a file, so a normal text
   // paste into any field is left untouched.
   const handlePaste = (e: React.ClipboardEvent) => {
+    // Taken by a box of its own (Add the transcript).
+    if (e.defaultPrevented) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     // Any file, not just images. A pasted PDF, video or doc is exactly as
@@ -2416,6 +2421,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             onMarkDone={() => completeStep(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
             afterThis={afterThisFor(sub)} doneLabel={doneLabelFor(sub)} replyPending={replyPendingOn(sub)} replyOpen={inlineReplyOn(sub)}
             onAddLink={(url) => { addLinkOn(url, "", sub.id); pushToast("Link added to this step"); }} onAttachFiles={() => { setAddOnStep(sub.id); fileRef.current?.click(); }}
+            transcript={pageStepId === sub.id ? undefined : transcriptFor(sub)}
             onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
         )}
       </li>
@@ -3576,16 +3582,41 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       })} />
   );
   // From a step page it lands on that step; from Add, on the meeting's steps.
+  // When Granola finds nothing, isn't connected or fails, the step opens Add
+  // the transcript to paste it or drop the file (Derek, 2026-10-15); "Paste
+  // or drop it instead" on the toast skips the wait.
   const pullTranscript = async (stepId?: string) => {
-    pushToast("Looking for the meeting in Granola…");
-    const res = await authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/meeting-transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }).catch(() => null);
-    const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string; connect?: boolean } | null;
-    if (!res?.ok) { pushToast(`⚠️ ${j?.error ?? "Couldn't reach Granola."}`); return; }
-    // Your meetings only come in once your own Granola key is in.
-    if (!j?.filed && j?.connect) { pushToast("Connect your Granola first: Settings, Granola. Then click Transcript again."); return; }
-    pushToast(j?.filed ? `Added ${j.filed}.`
-      : stepId ? `No Granola meeting with ${firstName} yet. It lands on this step after the meeting.`
-      : "Added the meeting steps. Granola's transcript lands there after the meeting.");
+    const before: ActionState = { subtasks: taskRef.current.subtasks, draftEmail: taskRef.current.draftEmail ?? null };
+    const taskId = task.id;
+    transcriptSkip.current = null;
+    pushToast("Looking for the meeting in Granola…", { label: "Paste or drop it instead", run: () => {
+      if (stepId) openTranscriptBox(stepId, transcriptBoxReason({ skipped: true }));
+      else transcriptSkip.current = taskId;
+    } });
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/meeting-transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }).catch(() => null);
+    const j = (await res?.json().catch(() => null)) as { filed?: string | null; error?: string; connect?: boolean; stepId?: string | null; subtasks?: Subtask[] | null } | null;
+    // Another task opened in this drawer meanwhile: its own Granola try is its own.
+    if (taskRef.current.id !== taskId) return;
+    const skipped = transcriptSkip.current === taskId;
+    transcriptSkip.current = null;
+    if (Array.isArray(j?.subtasks)) {
+      taskRef.current = { ...taskRef.current, subtasks: j.subtasks };
+      onStepsFromServer?.(j.subtasks);
+    }
+    if (res?.ok && j?.filed) {
+      setTranscriptBox((b) => (b && b.taskId === taskId ? null : b));
+      pushToast(`Added ${j.filed}.`);
+      return;
+    }
+    const sid = j?.stepId ?? stepId ?? taskRef.current.subtasks.find((x) => !x.done && x.finishWhen === "transcript")?.id;
+    if (!sid) { pushToast(`⚠️ ${j?.error ?? "Couldn't reach Granola."}`); return; }
+    // What the try made (the meeting's steps, or this step now waiting on
+    // its transcript) goes again when the box closes with nothing in it.
+    undo.note(`transcript:${sid}`, before);
+    const reason = transcriptBoxReason({ skipped, error: res?.ok ? null : (j?.error ?? "Couldn't reach Granola"), connect: !!j?.connect });
+    // Granola can still file it after the meeting: Wait for Granola keeps the steps.
+    openTranscriptBox(sid, reason, res?.ok && !j?.connect);
+    if (!stepId) setOpenStepPage({ taskId, id: sid, full: false });
   };
   // Everything a task can gain, in one menu beside Deliverables. It was a row
   // of up to seven dashed buttons, wrapping two by two in the rail.
@@ -3687,6 +3718,70 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     else if (k === "email") startDraftEmail(undefined, true, true, before);
     else setReviewStartNonce((r) => ({ ...r, [k]: r[k] + 1 }));
   }, [pendingStart, task.subtasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Add the transcript, open on one step (TranscriptBox). A file saved from
+  // it goes up the task's own upload path, then the route holds it on the
+  // step as the transcript once it is on the task.
+  const [transcriptBox, setTranscriptBox] = useState<{ taskId: string; stepId: string; reason: string; canWait?: boolean; saving?: boolean } | null>(null);
+  const transcriptSkip = useRef<string | null>(null);
+  const transcriptFile = useRef<{ taskId: string; stepId: string; name: string; link: string; before: string[] } | null>(null);
+  const openTranscriptBox = (stepId: string, reason: string, canWait = false) =>
+    setTranscriptBox((b) => (b && b.taskId === task.id && b.stepId === stepId ? b : { taskId: task.id, stepId, reason, canWait }));
+  const closeTranscriptBox = (stepId: string, kept: boolean) => {
+    setTranscriptBox(null);
+    if (kept) undo.forget(`transcript:${stepId}`); else undo.leave(`transcript:${stepId}`);
+  };
+  const postTranscript = async (payload: TranscriptSave): Promise<boolean> => {
+    const taskId = task.id;
+    const res = await authedFetch(`/api/tasks/${encodeURIComponent(taskId)}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+    const j = (await res?.json().catch(() => null)) as { filed?: string; error?: string; subtasks?: Subtask[] | null } | null;
+    if (!res?.ok) { pushToast(`⚠️ ${j?.error ?? "Couldn't save the transcript."}`); return false; }
+    if (taskRef.current.id === taskId && Array.isArray(j?.subtasks)) {
+      taskRef.current = { ...taskRef.current, subtasks: j.subtasks };
+      onStepsFromServer?.(j.subtasks);
+    }
+    pushToast(`Added ${j?.filed ?? "the transcript"}.`);
+    return true;
+  };
+  const saveTranscript = async (stepId: string, entry: TranscriptEntry) => {
+    const step = taskRef.current.subtasks.find((x) => x.id === stepId);
+    if (!step) { pushToast("That step is gone."); setTranscriptBox(null); return; }
+    const name = transcriptNameFor(step, taskRef.current.subtasks, taskRef.current.title);
+    if (entry.file) {
+      transcriptFile.current = { taskId: task.id, stepId, name, link: entry.link, before: taskRef.current.attachments.map((a) => a.id) };
+      const dt = new DataTransfer();
+      dt.items.add(entry.file);
+      onAddFiles(dt.files);
+      closeTranscriptBox(stepId, true);
+      return;
+    }
+    const payload = transcriptSavePayload({ stepId, name, text: entry.text, link: entry.link });
+    if (!payload) { closeTranscriptBox(stepId, false); return; }
+    setTranscriptBox((b) => (b && b.stepId === stepId ? { ...b, saving: true } : b));
+    if (await postTranscript(payload)) closeTranscriptBox(stepId, true);
+    else setTranscriptBox((b) => (b && b.stepId === stepId ? { ...b, saving: false } : b));
+  };
+  // The dropped file is on the task: it is the step's transcript now.
+  useEffect(() => {
+    const t = transcriptFile.current;
+    if (!t || uploadProgress || t.taskId !== task.id) return;
+    const fresh = task.attachments.find((a) => !t.before.includes(a.id));
+    if (!fresh) return;
+    transcriptFile.current = null;
+    void postTranscript({ stepId: t.stepId, name: t.name, attachmentId: fresh.id, ...(recordingUrl(t.link) ? { link: recordingUrl(t.link)! } : {}) });
+  }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On a step: the box when it is open there; on a step waiting for its
+  // transcript, the line offering it.
+  const transcriptFor = (sub: Subtask): { node: React.ReactNode; open: boolean } | undefined => {
+    const box = transcriptBox && transcriptBox.taskId === task.id && transcriptBox.stepId === sub.id ? transcriptBox : null;
+    if (box) return { open: true, node: (
+      <TranscriptBox key={`transcript-${sub.id}`} reason={box.reason} saving={box.saving}
+        onSave={(entry) => void saveTranscript(sub.id, entry)}
+        onCancel={() => closeTranscriptBox(sub.id, false)}
+        onWait={box.canWait ? () => { closeTranscriptBox(sub.id, true); pushToast("Granola adds it to this step after the meeting."); } : undefined} />
+    ) };
+    if (!sub.done && sub.finishWhen === "transcript" && !isPersonal) return { open: false, node: <TranscriptWaitLine onPaste={() => openTranscriptBox(sub.id, transcriptBoxReason({ skipped: true }))} /> };
+    return undefined;
+  };
   // Files uploaded from a step's menu land on that step once they arrive.
   const [fileTarget, setFileTarget] = useState<{ stepId: string; before: string[] } | null>(null);
   useEffect(() => {
@@ -4789,6 +4884,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 // again; typing not saved yet (left.dirty) keeps it.
                 const here = (slot: string) => slot === `step:${ps.id}` || slot === `msg:${ps.id}`;
                 if (left?.dirty) undo.forget(here); else undo.leave(here);
+                // Add the transcript open on it, left unsaved: nothing added.
+                if (transcriptBox?.stepId === ps.id) closeTranscriptBox(ps.id, false);
                 setOpenStepPage(null);
               }}
               onRename={(t) => onRenameSub(ps.id, t)} onPatchSub={(patch) => onPatchSub(ps.id, patch)}
@@ -4821,6 +4918,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               }}
               onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
               followBox={nudgeBoxFor(ps, isCur)}
+              transcript={transcriptFor(ps)}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}
               held={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "work") ?? undefined}
               files={ps.onClient ? undefined : stepHeld(withSentHolds(ps), false, "files") ?? undefined}
