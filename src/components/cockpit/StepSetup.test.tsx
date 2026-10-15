@@ -35,19 +35,23 @@ function setup(p: Partial<React.ComponentProps<typeof StepSetup>> = {}) {
 }
 
 describe("StepSetup's action row", () => {
-  it("shows three recommended and keeps the rest behind All actions", () => {
+  it("is one row, each action once, no find box and no All actions", () => {
     setup({ lead: [{ ...a("image", "Make the flyer") }] });
     expect(buttons("Make the flyer").length).toBeGreaterThan(0);
     expect(buttons("Directions").length).toBeGreaterThan(0);
-    expect(buttons("To dos").length).toBeGreaterThan(0);
-    expect(buttons("HTML review")).toHaveLength(0);
-    click(buttons("All actions")[0]);
     expect(buttons("HTML review").length).toBeGreaterThan(0);
+    expect(buttons("All actions")).toHaveLength(0);
+    expect(host.querySelector("input[name=find-action]")).toBeNull();
   });
-  it("Give to Claude with no menu item makes it Claude's turn, today", () => {
-    const onDone = setup({ rows: [{ label: "Write", items: [a("directions", "Directions")] }] });
-    click(buttons("Give to Claude")[0]);
-    expect(onDone).toHaveBeenCalledWith({ who: CLAUDE_ID, when: WED }, expect.any(Function));
+  it("puts four in the row and the rest in More", () => {
+    setup({ rows: [{ label: "Write", items: [a("directions", "Directions"), a("checklist", "To dos")] }, { label: "Make to review", items: [a("doc", "Document"), a("image", "Image"), a("page", "HTML review"), a("video", "Video")] }] });
+    expect(buttons("Video")).toHaveLength(0);
+    click(buttons("More ▾")[0]);
+    expect(host.textContent).toContain("Video");
+  });
+  it("never offers Give to Claude as an action while Claude is in Whose turn", () => {
+    setup({ rows: [{ label: "Write", items: [a("directions", "Directions")] }] });
+    expect(buttons("Give to Claude")).toHaveLength(0);
   });
   it("Claude's turn asks only what Claude should do: no date, Directions or To dos, Give to Claude", () => {
     const onDone = setup({ submit: "Save next step" });

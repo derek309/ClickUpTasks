@@ -8,16 +8,16 @@
 // Oct 16"). Skip folds it with what is picked. Desktop keys: 1 to 5 pick in
 // the row you are on, Tab or Enter moves on, Escape skips.
 //
-// The action row is a find box and three recommended actions, nothing else
-// (Derek, 2026-10-14: the box, a suggestion and three rows of nine was too
-// much). The full list shows once a letter is typed, filtered, or from "All
-// actions". The three are ranked in lib/stepSetup (recommendActions).
+// The action row is one row, each action once (Derek, 2026-10-14: "I'm not
+// loving this", mocked in action-row-mockup.html): four, the likely one for
+// the step first (lib/stepSetup recommendActions), the rest in More ▾.
 //
 // One pattern, two places: a step's own page (a step just added, or made
 // from Quick step or an Add menu) and What's next.
 import { useEffect, useId, useState } from "react";
 import { CLAUDE_ID, formatDue, isLongTitle } from "@/lib/data";
 import { historyKinds, impliedBy, recommendActions, whenChoices, whenKeyFor, type HistoryStep } from "@/lib/stepSetup";
+import { suggestStepActions } from "@/lib/stepSuggest";
 import { I } from "./ui";
 import { InlineDate } from "./GroupedList";
 import { ActionMenu } from "./ActionMenu";
@@ -65,8 +65,6 @@ export type SetupAnswer = { who: string | null; when: string };
 const CHOICE = "inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset";
 const OFF = `${CHOICE} bg-surface text-foreground ring-border hover:ring-accent`;
 const ON = `${CHOICE} bg-accent-soft text-accent ring-2 ring-accent`;
-// An action on a desktop sits in its labelled row as a plain accent word.
-const ITEM = "inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50";
 // On a phone the actions are large tiles, three a row, the icon above a short
 // word; the name's suggestion comes first, outlined in the accent.
 const TILE = "flex min-h-[4.75rem] min-w-0 flex-col items-center justify-center gap-1.5 rounded-[5px] px-1 py-2 text-center text-[16px] font-semibold leading-tight ring-inset [overflow-wrap:anywhere] disabled:opacity-50";
@@ -125,9 +123,6 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
 }) {
   const [whoPick, setWhoPick] = useState<string | null>(whoInitial);
   const [when, setWhen] = useState(whenInitial);
-  const [q, setQ] = useState("");
-  const [qAt, setQAt] = useState(0);
-  const [showAll, setShowAll] = useState(false);
   // Rows found by id: no refs read while drawing.
   const uid = useId();
   const rowEl = (i: number) => (typeof document === "undefined" ? null : document.getElementById(`${uid}-row${i}`));
@@ -180,16 +175,23 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   const pool: SetupAction[] = [...lead, ...rows.flatMap((r) => r.items), ...more,
     ...(claudeTurn ? [{ key: "claude", label: "Give to Claude", onPick: () => {} }] : [])]
     .filter((a, i, all) => all.findIndex((b) => b.key === a.key) === i);
-  const byKey = (k: string) => pool.find((a) => a.key === k);
-  const recs = recommendActions({
-    preset, lead: lead.map((a) => a.key), context, history: history ? historyKinds(stepName, history) : [],
-    available: pool.filter((a) => !a.disabled).map((a) => a.key), stepName,
-  }).flatMap((k) => { const a = byKey(k); return a ? [k === "claude" ? { ...a, label: "Give to Claude" } : a] : []; });
-  // What the search finds: every action, the + More ones too, by any word.
-  const needle = q.trim().toLowerCase();
-  const found = !needle ? [] : pool
-    .filter((a) => !a.disabled)
-    .filter((a) => a.label.toLowerCase().split(/\s+/).some((w) => w.startsWith(needle)) || a.label.toLowerCase().includes(needle));
+  // The action row (Derek, 2026-10-14, mocked in action-row-mockup.html):
+  // four actions, each once, the likely one for the step first, the rest in
+  // More ▾. No find box, no All actions, no labelled rows, and no Give to
+  // Claude when Claude is a choice in Whose turn.
+  const rowPool = pool.filter((a) => !(a.key === "claude" && claudeTurn) && (!a.disabled || preset === a.key));
+  const likely = recommendActions({
+    preset, lead: lead.map((a) => a.key), context: context ?? suggestStepActions(stepName, "")[0]?.kind ?? null,
+    history: history ? historyKinds(stepName, history) : [], available: rowPool.map((a) => a.key), stepName, count: 4,
+    fallbacks: ["directions", "checklist", "doc", "image"],
+  });
+  const ordered = [...likely.flatMap((k) => rowPool.filter((a) => a.key === k)), ...rowPool.filter((a) => !likely.includes(a.key))];
+  const rowActs = ordered.length <= 5 ? ordered : ordered.slice(0, 4);
+  const rest = ordered.slice(rowActs.length);
+  // More, grouped as the Add menu is (write, talk, make, then the others).
+  const groupOf = (k: string) => { const i = ADD_ROWS.findIndex((r) => (r.keys as readonly string[]).includes(k)); return i < 0 ? ADD_ROWS.length : i; };
+  const moreItems = [...rest].sort((x, y) => groupOf(x.key) - groupOf(y.key))
+    .map((a, i, all) => ({ label: lead.some((l) => l.key === a.key) ? a.label : ADD_SHORT[a.key] ?? a.label, onClick: () => act(a), divider: i > 0 && groupOf(a.key) !== groupOf(all[i - 1].key) }));
   const known = who.some((c) => c.key === whoPick);
   const claudeActs = forClaude ? ["directions", "checklist"].flatMap((k) => { const a = pool.find((x) => x.key === k && !x.disabled); return a ? [a] : []; }) : [];
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -248,101 +250,42 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
         return <button key={`c-${a.key}`} data-choice onClick={() => act(a)} className={OFF}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{ADD_SHORT[a.key] ?? a.label}</button>;
       }) }) : Row({ i: 2, label: "What's the action?", short: "Do", children: (
         <div className="flex w-full min-w-0 flex-col gap-2">
-          <input value={q} onChange={(e) => { setQ(e.target.value); setQAt(0); }} placeholder="Find an action" aria-label="Find an action"
-            name="find-action" autoComplete="off" enterKeyHint="go"
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); setQAt((n) => Math.min(n + 1, Math.max(0, found.length - 1))); }
-              else if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); setQAt((n) => Math.max(0, n - 1)); }
-              else if (e.key === "Enter" && !e.nativeEvent.isComposing && needle && found[qAt]) { e.preventDefault(); e.stopPropagation(); act(found[qAt]); }
-              // Nothing typed: Enter sets it up with what is picked, as Add step does.
-              else if (e.key === "Enter" && !e.nativeEvent.isComposing && !needle && submit) { e.preventDefault(); e.stopPropagation(); onDone(answer()); }
-            }}
-            className="h-10 w-full rounded-[5px] bg-surface px-2.5 text-[16px] outline-none ring-1 ring-inset ring-border focus:ring-accent sm:max-w-[320px]" />
-          {needle ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {found.length ? found.map((a, i) => {
-                const Icon = ADD_ICON[a.key];
-                return <button key={`f-${a.key}`} data-choice aria-pressed={i === qAt} onClick={() => act(a)} className={i === qAt ? ON : OFF}>{Icon && <Icon className="h-4 w-4 shrink-0" />}{a.label}</button>;
-              }) : <span className="text-[16px] text-muted">Nothing matches &ldquo;{q}&rdquo;</span>}
-            </div>
-          ) : (<>
-            {/* Three recommended: tiles on a phone, buttons on a desktop. */}
-            <div className="grid w-full grid-cols-3 gap-2 sm:hidden">
-              {recs.map((a, i) => {
-                const Icon = ADD_ICON[a.key];
-                const on = preset === a.key;
-                return (
-                  <button key={`t-${a.key}`} aria-pressed={on} disabled={a.disabled && !on} title={a.title ?? (tileWord(a.key, a.label) !== a.label ? a.label : undefined)}
-                    onClick={() => tap(a)} className={on ? TILE_ON : i === 0 ? TILE_LEAD : TILE_OFF}>
-                    {Icon ? <Icon className="h-6 w-6 shrink-0" /> : <I.plus className="h-6 w-6 shrink-0" />}{lead.some((l) => l.key === a.key) || a.key === "claude" ? a.label : tileWord(a.key, a.label)}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 max-sm:hidden">
-              {recs.map((a, i) => {
-                const Icon = ADD_ICON[a.key];
-                const on = preset === a.key;
-                return (
-                  <button key={`r-${a.key}`} data-choice aria-pressed={on} disabled={a.disabled && !on} title={a.title} onClick={() => tap(a)}
-                    className={on ? ON : i === 0 ? `${CHOICE} bg-surface text-accent ring-2 ring-accent` : OFF}>
-                    {Icon && <Icon className="h-4 w-4 shrink-0" />}{a.label}
-                  </button>
-                );
-              })}
-            </div>
-            <button type="button" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}
-              className="self-start text-[16px] font-semibold text-accent underline decoration-dotted underline-offset-4 hover:text-foreground">
-              {showAll ? "Fewer actions" : "All actions"}
-            </button>
-            {showAll && (<>
-              <div className="grid w-full grid-cols-3 gap-2 sm:hidden">
-                {rows.flatMap((r) => r.items).map((a) => {
-                  const Icon = ADD_ICON[a.key];
-                  const on = preset === a.key;
-                  return (
-                    <button key={`ta-${a.key}`} aria-pressed={on} disabled={a.disabled && !on} title={a.title ?? (tileWord(a.key, a.label) !== a.label ? a.label : undefined)}
-                      onClick={() => tap(a)} className={on ? TILE_ON : TILE_OFF}>
-                      {Icon ? <Icon className="h-6 w-6 shrink-0" /> : <I.plus className="h-6 w-6 shrink-0" />}{tileWord(a.key, a.label)}
-                    </button>
-                  );
-                })}
-                {more.length > 0 && (
-                  <ActionMenu sheet label={<span className="flex flex-col items-center gap-1.5"><I.plus className="h-6 w-6" />More</span>} title="More to add to this step"
-                    triggerClassName={`${TILE_OFF} w-full text-accent`}
-                    items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
-                )}
-              </div>
-              <div className="flex min-w-0 flex-col gap-1 max-sm:hidden">
-                {rows.map((r) => (
-                  // The row's word in its own column and its choices wrapping beside
-                  // it, so a narrow panel never leaves a choice hanging under the word.
-                  <div key={r.label} className="flex min-w-0 items-start gap-x-2">
-                    <span className="w-[7.5rem] shrink-0 pt-2 text-[16px] text-muted">{r.label}</span>
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
-                    {r.items.map((a) => {
-                      const Icon = ADD_ICON[a.key];
-                      const on = preset === a.key;
-                      return (
-                        <button key={a.key} aria-pressed={on} disabled={a.disabled && !on} title={a.title} onClick={() => tap(a)}
-                          className={on ? ON : ITEM}>
-                          {Icon && <Icon className="h-4 w-4 shrink-0" />}{ADD_SHORT[a.key] ?? a.label}
-                        </button>
-                      );
-                    })}
-                    </div>
-                  </div>
-                ))}
-                {more.length > 0 && (
-                  <span className="shrink-0 self-start">
-                    <ActionMenu sheet label={<span className="inline-flex items-center gap-1.5"><I.plus className="h-4 w-4" />More</span>} title="More to add to this step"
-                      triggerClassName="inline-flex h-10 items-center whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
-                      items={more.map((a) => !a.disabled && { label: a.label, onClick: () => act(a) })} />
-                  </span>
-                )}
-              </div>
-            </>)}
-          </>)}
+          {/* Phone: tiles, three a row, More as the last tile. */}
+          <div className="grid w-full grid-cols-3 gap-2 sm:hidden">
+            {rowActs.map((a, i) => {
+              const Icon = ADD_ICON[a.key];
+              const on = preset === a.key;
+              return (
+                <button key={`t-${a.key}`} aria-pressed={on} disabled={a.disabled && !on} title={a.title ?? (tileWord(a.key, a.label) !== a.label ? a.label : undefined)}
+                  onClick={() => tap(a)} className={on ? TILE_ON : i === 0 && !preset ? TILE_LEAD : TILE_OFF}>
+                  {Icon ? <Icon className="h-6 w-6 shrink-0" /> : <I.plus className="h-6 w-6 shrink-0" />}{lead.some((l) => l.key === a.key) ? a.label : tileWord(a.key, a.label)}
+                </button>
+              );
+            })}
+            {moreItems.length > 0 && (
+              <ActionMenu sheet label={<span className="flex flex-col items-center gap-1.5"><I.plus className="h-6 w-6" />More</span>} title="More actions"
+                triggerClassName={`${TILE_OFF} w-full text-accent`} items={moreItems} />
+            )}
+          </div>
+          {/* Desktop: one row, each action once, More ▾ at the end. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 max-sm:hidden">
+            {rowActs.map((a, i) => {
+              const Icon = ADD_ICON[a.key];
+              const on = preset === a.key;
+              return (
+                <button key={`r-${a.key}`} data-choice aria-pressed={on} disabled={a.disabled && !on} title={a.title} onClick={() => tap(a)}
+                  className={on ? ON : i === 0 && !preset ? `${CHOICE} bg-surface text-accent ring-2 ring-accent` : OFF}>
+                  {Icon && <Icon className="h-4 w-4 shrink-0" />}{lead.some((l) => l.key === a.key) ? a.label : ADD_SHORT[a.key] ?? a.label}
+                </button>
+              );
+            })}
+            {moreItems.length > 0 && (
+              <span data-choice className="shrink-0">
+                <ActionMenu sheet label="More ▾" title="More actions" items={moreItems}
+                  triggerClassName="inline-flex h-10 items-center whitespace-nowrap rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background" />
+              </span>
+            )}
+          </div>
         </div>
       ) })}
       {(skip || submit) && <div className="flex flex-wrap items-center justify-end gap-4">

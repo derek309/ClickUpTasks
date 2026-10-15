@@ -108,9 +108,7 @@ describe("step 1, set up in the box", () => {
   it("picking an action adds the task with step 1 holding it", () => {
     const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
     type("Design the spring flyer");
-    // Three recommended show; the rest wait behind All actions.
-    expect(button("Document")).toBeUndefined();
-    click(button("All actions"));
+    // One row of actions, each once (Derek, 2026-10-14).
     click(button("Document"));
     expect(p.onCreate).toHaveBeenCalledTimes(1);
     expect(p.onCreate.mock.calls[0][0][0].step1).toMatchObject({ action: "doc" });
@@ -118,7 +116,6 @@ describe("step 1, set up in the box", () => {
 
   it("an action with nothing typed adds nothing", () => {
     const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
-    click(button("All actions"));
     click(button("Document"));
     expect(p.onCreate).not.toHaveBeenCalled();
   });
@@ -218,7 +215,7 @@ describe("the box with no client (Derek, 2026-10-14)", () => {
     expect(owner).not.toBeNull();
     expect([...owner.options].some((o) => o.value === "client")).toBe(false);
     expect(host.textContent).toContain("Whose turn");
-    click(button("All actions"));
+    click(button("More ▾"));
     expect(host.textContent).toContain("HTML review");
   });
 });
