@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase, supabaseReady } from "@/lib/supabase";
 import { users, type Me, type Role } from "@/lib/data";
 import Cockpit from "./Cockpit";
+import { forgetPushOnSignOut, startPushWorker } from "@/lib/pushClient";
 
 function initialsOf(name: string) {
   const p = name.trim().split(/\s+/);
@@ -56,12 +57,19 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Phone notifications (Derek, 2026-10-15): once signed in, the service
+  // worker starts and a phone that said yes refreshes its subscription. Only
+  // in the signed in app, never on a client's portal or review page.
+  const signedIn = !!me;
+  useEffect(() => { if (signedIn) void startPushWorker(); }, [signedIn]);
+
   if (!supabaseReady)
     return <Centered><div className="text-lg font-semibold">Supabase not configured</div><p className="mt-1 text-sm text-muted">Add your keys to <code>.env.local</code> and restart.</p></Centered>;
   if (checking) return <Centered><div className="text-muted">Loading…</div></Centered>;
   if (recoveryMode) return <SetNewPassword onDone={() => setRecoveryMode(false)} />;
   if (!me) return <Login />;
-  return <Cockpit me={me} onSignOut={() => supabase.auth.signOut()} />;
+  // Signing out also stops this phone getting their notifications.
+  return <Cockpit me={me} onSignOut={async () => { await forgetPushOnSignOut(); await supabase.auth.signOut(); }} />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

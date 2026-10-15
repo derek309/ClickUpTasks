@@ -4,6 +4,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { advanceDue, clientAnswerPatch, type Recurrence, type RecurrenceUnit, type Subtask, type TaskStatus } from "@/lib/data";
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
+import { pushClientWrote } from "@/lib/push";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
 
@@ -99,14 +100,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     // `X replied on "<task>"` — wording that was wrong here in the first
     // place: nobody replied, a status was set. The bell text below says what
     // actually happened. Reverting is a one-line swap back to the helper.
+    const text = status === "done"
+      ? `${scope.clientName} approved "${task.title}".`
+      : status === "review"
+        ? `${scope.clientName} flagged "${task.title}" for a closer look.`
+        : `${scope.clientName} requested changes on "${task.title}".`;
     await supabaseAdmin.from("notifications").insert({
       id: "n_" + randomUUID(),
       recipient_id: notifyRecipient,
-      text: status === "done"
-        ? `${scope.clientName} approved "${task.title}".`
-        : status === "review"
-          ? `${scope.clientName} flagged "${task.title}" for a closer look.`
-          : `${scope.clientName} requested changes on "${task.title}".`,
+      text,
       task_id: taskId,
       actor_id: null,
       client_id: scope.clientId,
@@ -115,6 +117,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
       read: false,
       kind: "activity",
     });
+    await pushClientWrote({ recipients: [notifyRecipient], text, taskId, clientId: scope.clientId });
   }
 
   return NextResponse.json({ ok: true });

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "./supabaseAdmin";
 import { sendGmailAs, googleConfigured } from "./googleMail";
 import { APP_URL } from "./appUrl";
+import { pushClientWrote } from "./push";
 
 const SEND_DOMAIN = "clickuplocal.com";
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -39,6 +40,8 @@ export async function notifyTeamOfClientActivity(opts: {
     text: opts.notifText, task_id: opts.taskId, actor_id: null, client_id: opts.clientId, project_id: opts.projectId,
     at: new Date().toISOString(), read: false, kind: opts.kind ?? "activity",
   });
+  // On their phone too (lib/push; a quiet no until the keys are set).
+  await pushClientWrote({ recipients: [opts.notifyRecipient], text: opts.notifText, taskId: opts.taskId, clientId: opts.clientId });
 
   if (!googleConfigured) return;
   try {

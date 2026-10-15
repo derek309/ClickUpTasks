@@ -23,6 +23,9 @@ const nextConfig: NextConfig = {
     return [
       { source: "/doc/:path*", headers: DOC_HEADERS },
       { source: "/api/doc/:path*", headers: DOC_HEADERS },
+      // The notification service worker (public/sw.js) is checked fresh on
+      // every open, so a change to it reaches phones with the next deploy.
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] },
     ];
   },
 };

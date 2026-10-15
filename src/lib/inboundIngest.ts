@@ -18,6 +18,7 @@ import { normalizeBody, matchGhlToLocal, MATCH_WINDOW_MS } from "@/lib/ghlMatch"
 import { raiseReplyTasks } from "@/lib/inbox";
 import type { GmailFile } from "@/lib/googleMail";
 import { pictureMime } from "@/lib/pictures";
+import { pushClientWrote } from "@/lib/push";
 
 /** An email's files as the row's attachments: each stays in Gmail and is
  *  fetched when opened (api/inbox/attachment), so a photo can be previewed. */
@@ -364,6 +365,7 @@ export async function ingestInboundMessage(opts: {
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
     : `${titleCase(contact.name)} sent an email${subject?.trim() ? `: ${subject.trim()}` : `: ${snippet}`}`;
   const recipients = await notifyInbound(contact, taskId, text);
+  await pushClientWrote({ recipients, text, taskId, clientId: contact.client_id });
   // The bell above is what this path has always done; the email is the half
   // that was missing — "notify me when a client replies" only ever mailed for
   // portal replies, never for a real email or text. Rate-limited per client

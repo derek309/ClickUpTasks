@@ -21,6 +21,8 @@ import TeamPanel from "./TeamPanel";
 import TemplatesPanel from "./TemplatesPanel";
 import ApiTokensPanel from "./ApiTokensPanel";
 import NotificationPrefsPanel from "./NotificationPrefsPanel";
+import PushNotificationsCard from "./PushNotificationsCard";
+import { pushEnabled } from "@/lib/pushClient";
 import SignaturePanel from "./SignaturePanel";
 import GranolaPanel from "./GranolaPanel";
 import { SettingsCard, Tile, BTN, BTN_DANGER, INPUT, type Tone } from "./settings/ui";
@@ -111,7 +113,7 @@ export default function SettingsHub({
     { key: "team", label: "Team", icon: "user", tone: "indigo", about: "Who is on the team and what each person can do.", visible: canAdmin },
     { key: "templates", label: "Task templates", icon: "clipboard", tone: "sky", about: "Ready made steps to start a task from.", visible: canAdmin && TEMPLATES_ON },
     { key: "tokens", label: "Claude and API tokens", icon: "key", tone: "violet", about: "Connect Claude, and keys for scripts and tools.", visible: true },
-    { key: "notifications", label: "Notifications", icon: "bell", tone: "rose", about: "Which emails you get a copy of.", visible: true },
+    { key: "notifications", label: "Notifications", icon: "bell", tone: "rose", about: pushEnabled() ? "Notifications on your phone, and which emails you get a copy of." : "Which emails you get a copy of.", visible: true },
     // Per-person, not team management: same footing as Notifications.
     { key: "signature", label: "Email signature", icon: "mail", tone: "emerald", about: "Added to the bottom of every client email you send.", visible: true },
     // Your own Granola key: your meetings, from any folder (2026-10-12).
@@ -200,7 +202,7 @@ export default function SettingsHub({
               </div>
             )}
             {tab === "tokens" && <ApiTokensPanel />}
-            {tab === "notifications" && <NotificationPrefsPanel />}
+            {tab === "notifications" && <div className="space-y-4"><PushNotificationsCard /><NotificationPrefsPanel /></div>}
             {tab === "signature" && <SignaturePanel />}
             {tab === "trash" && canAdmin && (
               <TrashPanel onRestoreClient={onRestoreClient} onRestoreProject={onRestoreProject} onRestoreTask={onRestoreTask}

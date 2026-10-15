@@ -21,6 +21,7 @@ import { tokenForLocation } from "@/lib/ghlTokens";
 import { titleCase } from "@/lib/data";
 import { closeAnsweredReplyTask, isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { notifyInbound, sendInboundReplyEmail } from "@/lib/inboundIngest";
+import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { matchGhlToLocal, isRealGhlId, MATCH_WINDOW_MS, type MatchCandidate } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
@@ -346,6 +347,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
       : `📞 Missed call from ${name}`;
     const recipients = await notifyInbound(contact, taskId, text);
     if (latest.row.channel === "sms") {
+      await pushClientWrote({ recipients, text, taskId, clientId: contact.client_id });
       await sendInboundReplyEmail({ clientId: contact.client_id, contactName: contact.name, channel: "sms", body: latest.row.body, taskId, recipientIds: recipients });
     }
   }

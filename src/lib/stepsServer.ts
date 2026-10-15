@@ -14,6 +14,7 @@ import {
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
 import { promoteQueueForTask } from "./queueServer";
+import { pushIfClaudeFinished } from "./push";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -339,8 +340,10 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
   const finished = new Set(((docs ?? []) as { kind: string; status: string }[]).filter((d) => d.status === "approved" || d.status === "completed").map((d) => d.kind));
   let note = "";
   let status: TaskStatus | null = null;
+  let claudeClosed: string | null = null; // the step's name, when Claude closed it
   const ok = await rewriteSteps(taskId, (row, first) => {
     status = null;
+    claudeClosed = null;
     const list = row.subtasks ?? [];
     const s = list.find((x) => x.id === stepId);
     if (!s) { note = "That step is not on the task any more."; return null; }
@@ -364,6 +367,7 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
       }
     }
     let next = list.map((x) => (x.id === stepId ? { ...x, done: true, doneAt: now, outcome: "Done", doneBy: CLAUDE_ID } : x));
+    claudeClosed = s.title;
     const after = stepAfter(next, stepId);
     if (after) {
       // Client work still under way moves on with the plan, to the next
@@ -383,6 +387,8 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
     note = `"${s.title}" done. That was the last step${asked ? `, so the task now asks "${asked.find((x) => x.addedFor === `next:${stepId}`)?.title}"` : ""}. Add the next step with add_checklist_items, or set the task's status to done if it is finished.`;
     return asked ?? next;
   }, false, () => (status ? { status } : null));
+  // Claude finished and the next turn is a person's: their phone (lib/push).
+  if (ok && claudeClosed) await pushIfClaudeFinished(taskId, claudeClosed);
   return ok || note ? note : "The step could not be saved. Try again.";
 }
 

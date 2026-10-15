@@ -11,6 +11,8 @@ import { type Me, type Notification, type NotificationKind, type Task } from "@/
 import { insertNotif, markNotifReadDb } from "@/lib/db";
 import { isInboxNotification } from "@/lib/extensionInbox";
 import { authedFetch } from "@/lib/supabase";
+import { askServerToPush } from "@/lib/pushClient";
+import { teammatePushReason } from "@/lib/pushPayload";
 
 export type UseNotifyDeps = {
   tasksRef: React.RefObject<Task[]>;
@@ -52,7 +54,10 @@ export function useNotify({ tasksRef, me, setNotifications, notifications }: Use
     if (nt?.private && recipientId !== nt.assigneeId) return;
     const n: Notification = { id: newId("n_"), recipientId, text, taskId, actorId: me.id, clientId: extra?.clientId ?? null, projectId: extra?.projectId ?? null, at: new Date().toISOString(), read: false, kind: extra?.kind ?? "activity" };
     setNotifications((ns) => [n, ...ns]);
-    insertNotif(n);
+    // The phone notification (Derek, 2026-10-15) once the row is saved, since
+    // the server reads the row rather than trusting this text: a message, a
+    // mention or a step handed over, nothing else (lib/pushPayload).
+    void insertNotif(n).then((res) => { if (res && !res.error && teammatePushReason(n)) askServerToPush(n.id); });
     if (!extra?.skipEmail) {
       // extra.link wins: a caller with no task or client to point at (Team
       // Chat) would otherwise send an email whose only link is the app root.

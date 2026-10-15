@@ -4,6 +4,7 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { titleCase, advanceDue, type Recurrence, type RecurrenceUnit, type Subtask } from "@/lib/data";
 import { isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTask } from "@/lib/ghlConversationTask";
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
+import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
 import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
 
@@ -199,6 +200,8 @@ async function handleMessageReply(body: any, custom: any) {
     ? `${titleCase(contact.name)} sent a text: ${snippet}`
     : `${titleCase(contact.name)} sent an email${typeof custom?.subject === "string" && custom.subject.trim() ? `: ${custom.subject.trim()}` : `: ${snippet}`}`;
   const recipients = await notifyInbound(contact, taskId, notifText);
+  // And on their phones (lib/push; a quiet no until the keys are set).
+  await pushClientWrote({ recipients, text: notifText, taskId, clientId: contact.client_id });
   // The bell has always fired here; the email had not. "Notify me when a
   // client replies" only ever mailed for client-PORTAL replies, so a real
   // text or email coming through GHL rang the bell and stopped there. Shared

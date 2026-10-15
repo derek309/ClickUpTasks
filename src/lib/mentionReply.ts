@@ -13,6 +13,8 @@
 import { supabaseAdmin } from "./supabaseAdmin";
 import { MENTION_EMAIL_FOOTER, plainTextToHtml, replyOnly } from "./data";
 import { canActOnTask } from "./taskAccess";
+import { pushConfigured, sendPush } from "./push";
+import { teammatePush } from "./pushPayload";
 
 // Both live in data.ts now: the task list's message preview cuts quoted text
 // the same way, and this file is server only.
@@ -109,10 +111,18 @@ export async function commentFromMentionReply(args: {
   const owner = task.assignee_id as string | null;
   if (owner && owner !== authorId) {
     const name = ((author.name as string | null) ?? "").trim() || "A teammate";
-    await supabaseAdmin.from("notifications").upsert({
+    const row = {
       id: `n_mr_${args.gmailMessageId}`, recipient_id: owner, text: `${name} replied by email on “${task.title}”`,
       task_id: args.taskId, actor_id: authorId, client_id: task.client_id, project_id: null, at, read: false, kind: "message",
-    }, { onConflict: "id", ignoreDuplicates: true });
+    };
+    await supabaseAdmin.from("notifications").upsert(row, { onConflict: "id", ignoreDuplicates: true });
+    // On their phone too (lib/push). Once per email: a second pass stopped at
+    // the comment check above.
+    if (pushConfigured()) {
+      const { data: c } = task.client_id ? await supabaseAdmin.from("clients").select("name").eq("id", task.client_id).maybeSingle() : { data: null };
+      const payload = teammatePush(row, { clientName: (c as { name?: string } | null)?.name ?? null });
+      if (payload) await sendPush([owner], payload);
+    }
   }
   return true;
 }
