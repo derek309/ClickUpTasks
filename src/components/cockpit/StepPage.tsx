@@ -14,12 +14,13 @@ import {
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
-import { ActionMenu, MenuSheet, type ActionMenuItem } from "./ActionMenu";
+import { ActionMenu, type ActionMenuItem } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
-import { ADD_ICON, ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
+import { ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
+import { OnThisStep } from "./OnThisStep";
 import type { HistoryStep } from "@/lib/stepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
 
@@ -326,8 +327,33 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
   return { todos, show, showTodos, setShowTodos, ref, node };
 }
 
+/** How a step ends, the same on its page and on the task page: Done (its
+ *  words say what happens next) and Delegate ▾, Claude first (Derek,
+ *  2026-10-15: Give to Claude moved into Delegate). light: another button is
+ *  the dark one (Reply, or the reply box's Send). */
+export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, delegate = [], children }: {
+  /** Missing where the step ends another way (a wait's own choices): Delegate only. */
+  onMarkDone?: () => void;
+  label?: string;
+  light?: boolean;
+  onGiveClaude?: () => void;
+  delegate?: ActionMenuItem[];
+  children?: React.ReactNode;
+}) {
+  const items: ActionMenuItem[] = [...(onGiveClaude ? [{ label: "⚡ Claude, due today", onClick: onGiveClaude }] : []), ...delegate];
+  const text = label ?? "Done · what's next?";
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+      {onMarkDone && <button onClick={onMarkDone} aria-label={label ? text : "Done with this step, choose what's next"}
+        className={`min-h-10 rounded-[5px] px-4 py-1.5 text-left text-[16px] font-semibold leading-snug ${light ? "bg-surface ring-1 ring-inset ring-border hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>{text}</button>}
+      {items.length > 0 && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={items} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
+      {children}
+    </div>
+  );
+}
+
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -446,6 +472,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** What the client sent from their portal for this step: they see each one ticked off there. */
   clientItems?: Subtask[];
   onToggleClientItem?: (id: string) => void;
+  /** After this (AfterThis): the next step, set up while working this one. */
+  afterThis?: React.ReactNode;
+  /** Done's words when After this is filled: "Done · Pamela's turn next". */
+  doneLabel?: string;
+  /** The client's email waits for its Reply: Reply is the dark button, Done light. */
+  replyPending?: boolean;
+  /** The reply box is open under the email: its Send is the dark button. */
+  replyOpen?: boolean;
 }) {
   useEscapeToClose(onClose);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -479,10 +513,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const [subject, setSubject] = useState(`Re: ${task.title}`);
   // The saved files and links being picked, or null when the list is closed.
   const [linkPick, setLinkPick] = useState<string[] | null>(null);
-  // Which Add menu is open (the + beside Actions, the rows' + More), or none.
-  const [addOpen, setAddOpen] = useState<"main" | "compact" | "more" | null>(null);
-  // Where the desktop menu sits, kept inside the window.
-  const [addPos, setAddPos] = useState({ top: 0, left: 0 });
   const talkRef = useRef<HTMLTextAreaElement>(null);
   const todoRef = todo.ref;
   // Which box to put the cursor in next, set by a choice, done after drawing.
@@ -519,16 +549,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // it: finishing is sending (Derek, 2026-10-13: "Send the email to Ryan").
   const sendReady = !!onSendHeldEmail && holdsKind("email")
     && named.every((x) => x.kind === "email" || !optionFor(x.kind) || holdsKind(x.kind));
-  // Light, never dark: the only dark button on a step is the one that
-  // finishes it (Derek, 2026-10-14). Outlined with a ring, its kind's icon.
-  const suggestButtons = (compact: boolean) => suggestions.map((x) => {
-    const Icon = ADD_ICON[x.kind];
-    return (
-      <button key={x.kind} onClick={x.onPick} className={`inline-flex ${compact ? "h-8 px-2.5" : "h-10 px-3"} items-center gap-1.5 rounded-[5px] bg-surface text-[16px] font-semibold text-accent ring-1 ring-inset ring-border hover:bg-background hover:ring-accent`}>
-        {Icon && <Icon className="h-4 w-4 shrink-0" />}{x.label}
-      </button>
-    );
-  });
   const [draft, setDraft] = useState("");
   // A link being typed into the Links and files row, or null when closed.
   const [linkDraft, setLinkDraft] = useState<string | null>(null);
@@ -688,93 +708,15 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     </section>
   );
 
-  const empty = !held && !todo.show && !incoming;
-  // The one way to add to a step (Derek, 2026-10-11): a quick list to start
-  // with while it is empty, then a button.
-  // Once the step holds client work, the + sits beside its heading instead
-  // (Derek, 2026-10-11: "reclaim that space").
-  // "more": the + More at the end of an empty step's rows, with what the
-  // rows leave out.
-  const addMenu = (compact: boolean, items = options, more = false) => {
-    const which = more ? "more" : compact ? "compact" : "main";
-    const open = addOpen === which;
-    const label = more ? "More to add to this step" : "Add to this step";
-    const item = (o: (typeof items)[number]) => (
-      <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setAddOpen(null); o.onPick(); }}
-        className="flex min-h-11 w-full items-center gap-2 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
-        <span className="min-w-0 truncate">{o.label}</span>
-        {o.tone && <span className="shrink-0 rounded-[5px] px-1.5 font-semibold" style={{ background: o.tone.chip, color: o.tone.text }}>{o.tone.label}</span>}
-        {o.note && <span className="min-w-0 flex-1 truncate text-right text-muted">{o.note}</span>}
-      </button>
-    );
-    return (
-      <div className="relative">
-        <button onClick={(e) => {
-          // Desktop: fixed under the button, kept inside the window both ways.
-          const r = e.currentTarget.getBoundingClientRect();
-          const w = Math.min(300, window.innerWidth - 16);
-          const h = items.length * 44 + 14;
-          setAddPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)), top: r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4 });
-          setAddOpen(open ? null : which);
-        }}
-          aria-haspopup="menu" aria-expanded={open} title={label} aria-label={label}
-          className={more ? "inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background"
-            : compact ? "inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface text-accent hover:bg-background"
-            : "inline-flex h-10 items-center gap-1.5 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background"}><I.plus className="h-4 w-4" />{more ? <span>More</span> : !compact && <span className={suggestions.length ? "hidden sm:inline" : ""}>Add</span>}</button>
-        {open && (<>
-          <div className="fixed inset-0 z-30 hidden sm:block" onClick={() => setAddOpen(null)} />
-          <div role="menu" aria-label={label} style={{ top: addPos.top, left: addPos.left }}
-            className="fixed z-40 hidden max-h-[calc(100vh-16px)] w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-lg border bg-surface p-1.5 shadow-lg sm:block">
-            {items.map(item)}
-          </div>
-          {/* A phone: a sheet at the bottom; anchored, it ran off the left edge (2026-10-14). */}
-          <MenuSheet label={label} onClose={() => setAddOpen(null)}>{items.map(item)}</MenuSheet>
-        </>)}
-      </div>
-    );
-  };
-  // One Add button, not a wall of them (Derek, 2026-10-13: "this is getting
-  // messy"): the same list opens from it. What the step's name suggests sits
-  // before it. No line explaining Add (Derek, 2026-10-13: remove it).
-  const quickStart = (
-    <section aria-label="Add to this step" className="flex flex-wrap items-center gap-3">
-      {suggestButtons(false)}
-      {addMenu(false)}
-    </section>
-  );
-  // An empty open step (Derek, 2026-10-14): what its name suggests first,
-  // light, then the Add menu's own choices in three labelled rows, each doing what
-  // picking it from + Add does. A suggested one isn't shown twice.
+  // An empty step lays the Add menu out in rows only inside its set up.
   const suggested = new Set<string>(suggestions.map((x) => x.kind));
   const { rows: addRowList, rest: addRest } = addRowsOf(options, first, suggested);
-  const addRows = (
-    <section aria-label="Add to this step" className="flex flex-col gap-3">
-      {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-3">{suggestButtons(false)}</div>}
-      <div className="flex flex-col gap-1">
-        {addRowList.map((r, i) => (
-          <div key={r.label} role="group" aria-label={r.label} className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
-            <span className="mr-2 shrink-0 text-[16px] text-muted sm:min-w-[10rem]">{r.label}</span>
-            {r.items.map((o) => {
-              const Icon = ADD_ICON[o.key];
-              const short = ADD_SHORT[o.key] ?? o.label;
-              // A document already made elsewhere keeps its name and where it sits, as in the menu.
-              const says = [o.label !== short && o.label, o.note].filter(Boolean).join(", ");
-              return (
-                <button key={o.key} disabled={o.disabled} onClick={o.onPick} title={says || undefined}
-                  className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-2.5 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50 disabled:hover:bg-transparent">
-                  {Icon && <Icon className="h-4 w-4 shrink-0" />}{short}
-                </button>
-              );
-            })}
-            {i === addRowList.length - 1 && addRest.length > 0 && addMenu(false, addRest, true)}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
   // Why it is whose move, when the sentence's first word doesn't say it all.
   // A bare "Your turn" or "Claude's turn" is the sentence itself (2026-10-13).
-  const reason = tone?.say && !sub.done && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
+  // Not said over the client's email card, which says it already (Derek,
+  // 2026-10-15: "Pam wrote. Your turn to reply" above her email and Reply).
+  const emailShown = !sub.done && !!sub.fromEmails?.length && !!incoming;
+  const reason = tone?.say && !sub.done && !emailShown && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
   // The directions sit under the sentence the way the task shows its
   // description (Derek, 2026-10-13): muted text, four lines, Read more; a
   // click edits. Added from + Add like the rest (Derek, 2026-10-11); the ✳
@@ -877,36 +819,30 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   with its files, or the review out with them and the email that
                   took it; then the links and files on the step. */}
               {outFor !== undefined ? outFor : incoming}
-              {/* Links and files, apart from what does something (Derek,
-                  2026-10-14); they come in by paste or drag (2026-10-11). */}
-              {(files || held || ((onAddLink || onAttachFiles) && !sub.onClient && !setup && !(empty && !dir.open))) && (
-                <section aria-labelledby="step-files" className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <h3 id="step-files" className="text-[17px] font-bold">Links and files</h3>
-                    {/* Added here, they go on this step (Derek, 2026-10-14). */}
-                    {onAddLink && <button onClick={() => setLinkDraft((d) => (d === null ? "" : null))} aria-expanded={linkDraft !== null} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.link /> Link</button>}
-                    {onAttachFiles && <button onClick={onAttachFiles} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent hover:underline"><I.plus /> Attach</button>}
-                  </div>
+              {/* On this step (Derek, 2026-10-15): one quiet line, Directions ·
+                  Checklist · Link · Attach · ＋ Add ▾, then what the step holds.
+                  Links and files still come in by paste or drop (2026-10-11). */}
+              {!setup && outFor === undefined && !sub.onClient && (
+                <section aria-label="On this step" className="flex flex-col gap-2">
+                  <OnThisStep first={first} options={options}
+                    lead={sub.done ? [] : suggestions.map((x) => ({ key: x.kind, label: x.label, onPick: x.onPick }))}
+                    onDirections={dir.open ? undefined : dir.start}
+                    onChecklist={() => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); }}
+                    onLink={onAddLink || (savedLinks.length && onAttachLinks) ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
+                    onAttach={onAttachFiles} />
                   {linkDraft !== null && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
-                        onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
-                        placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
-                      <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
+                      {onAddLink && <>
+                        <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
+                          onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
+                          placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                        <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
+                      </>}
+                      {savedLinks.length > 0 && onAttachLinks && <button onClick={() => { setLinkDraft(null); setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); }} className="h-9 rounded-[5px] px-2 text-[16px] font-semibold text-accent hover:bg-background">Saved ({savedLinks.length})</button>}
                       <button onClick={() => setLinkDraft(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
                     </div>
                   )}
                   {files}
-                  <p className="hidden text-[16px] text-muted sm:block">Paste a link or drop a file anywhere on this page to add it here.</p>
-                </section>
-              )}
-              {/* What I'm going to do: the work, the + to add more, the to dos. */}
-              {setup || outFor !== undefined ? null : empty && !files && !dir.open ? (sub.done || whatsNext ? quickStart : addRows) : (
-                <section aria-labelledby="step-works" className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 id="step-works" className="text-[17px] font-bold">Actions</h3>
-                    {suggestButtons(true)}{addMenu(true)}
-                  </div>
                   {followBox}
                   {planBits}
                   {held}
@@ -959,24 +895,22 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 // finished, not up top (Derek, 2026-10-13).
                 <div className="border-t pt-4">{doneActions}</div>
               ) : !sub.done && !doneActions && !sub.onClient ? (
-                <div className="border-t pt-4">
-                  {/* One button while you work (Derek, 2026-10-13: "I'm done with
-                      this step when you click it, then ask what you want to do
-                      next"). The choices (start the next step, give it to Claude,
-                      the task is finished) come after, in What's next; the
-                      button says so (2026-10-14: "Done · what's next?"). */}
-                  {sendReady ? (
+                <div className="flex flex-col gap-4 border-t pt-4">
+                  {/* After this: the next step, set up while you work (Derek,
+                      2026-10-15). Filled, Done starts it with no What's next. */}
+                  {afterThis}
+                  {/* One dark button (Derek, 2026-10-14): Done, unless the
+                      client's email waits for its Reply or the reply box is
+                      open, when Reply or Send is the one. */}
+                  {sendReady && !replyOpen ? (
                     <div className="flex flex-col items-start gap-2">
                       <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {first}</button>
                       {/* Finishing without sending stays one click away. */}
                       <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                      <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
-                      {onGiveClaude && <button onClick={onGiveClaude} title="Claude's turn, due today" className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background"><I.bolt className="h-4 w-4" /> Give to Claude</button>}
-                      {!!delegate?.length && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={delegate} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
-                    </div>
+                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen}
+                      onGiveClaude={onGiveClaude} delegate={delegate} />
                   )}
                 </div>
               ) : null}

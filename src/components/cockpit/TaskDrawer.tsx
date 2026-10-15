@@ -37,6 +37,9 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
 import { NextChoices, StepPage } from "./StepPage";
 import { CurrentStep, sameStepName } from "./CurrentStep";
+import { AfterThis, type AfterStep } from "./AfterThis";
+import { InlineReply } from "./InlineReply";
+import { addAfterThisStep, afterThisFilled, afterThisOf, afterThisWho, doneNextLabel, finishOpensWhatsNext, patchForAction, patchForWho, suggestedAfter } from "@/lib/afterThis";
 
 // A handoff link (?task=…&handoff=…) names the delegation to open. Read once
 // when the app loads, because the app rewrites the address as you move around,
@@ -85,7 +88,7 @@ const saasChecked = new Map<string, boolean>();
 // CLAUDE_ROUTINE_ID is set). Null until known.
 const claudeCloud: { ready: boolean | null } = { ready: null };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onSaveToClient, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask, defaultCalendarId = null }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, onEmailToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onSaveToClient, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask, defaultCalendarId = null }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -101,7 +104,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   start?: { stepId: string; open: "checklist" | "directions" | "email" | "text" | "chat" | "ask"; when: string | null };
   clientById: (id: string) => Client | null; projectById: (id: string) => Project | null; contactById: (id: string | null) => Contact | null;
   full: boolean; onToggleFull: () => void; navIndex: number; navTotal: number; onPrev: () => void; onNext: () => void;
-  onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; /** The × on the red Needs you line. */ onClearNeedsYou?: () => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string, want?: boolean) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
+  onClose: () => void; onPatch: (patch: Partial<Task>) => void | Promise<unknown>; /** The × on the red Needs you line. */ onClearNeedsYou?: () => void; onDelete: () => void; onAddComment: (body: string, attachments?: Attachment[]) => void; onAddFiles: (files: FileList) => void; onDownloadFile: (path: string) => void; onDownloadFileAs: (path: string, filename: string) => void; onDownloadAll: (items: Attachment[], zipName: string, batchId: string) => void; zippingIds: Set<string>; onRemoveFile: (att: Attachment) => void; uploadProgress: { done: number; total: number } | null; allClients: Client[]; onMoveClient: (clientId: string) => void; clientProjects: Project[]; onSetProject: (pid: string) => void; onNewProject: () => void; onRenameProject: () => void; onToggleSub: (sid: string, want?: boolean) => void; onAddSub: (title: string) => void; onRenameSub: (sid: string, title: string) => void; onDeleteSub: (sid: string, after?: (rest: Subtask[], full: Subtask[]) => Subtask[]) => void; onPatchSub: (sid: string, patch: Partial<Subtask>) => void; onToggleLabel: (lid: string) => void; onCopyLink: () => void; onDuplicate: (target?: { clientId: string; projectId: string }) => void; onStepToTask?: (stepId: string) => void; /** Make it a task, from a client's email on a step. */ onEmailToTask?: (stepId: string) => void; projectsFor: (clientId: string) => Project[]; onOpenMerge: () => void; onOpenClientList: () => void;
   templates: TaskTemplate[]; onApplyTemplate: (templateId: string) => void;
   /** Saves this task's steps as a plan (admins: templates are admin-written). */
   onSaveTemplate?: (spec: { name: string; checklistItems: TaskTemplate["checklistItems"]; clientId?: string | null }) => void;
@@ -1401,6 +1404,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Said, never asked (Derek, 2026-10-13: a browser box asking to "mark it
     // done" was the wrong word and in the way). What is left stays on the step.
     if (ask) pushToast(`"${sub!.title}" ${ask}; it stays on the step.`);
+    // After this's suggestion becomes the next step, and a filled After this
+    // starts with no What's next card (Derek, 2026-10-15).
+    if (sub && taskRef.current.status !== "done") takeAfterSuggestion(sub);
+    const startsNext = !finishOpensWhatsNext(taskRef.current.subtasks, sid);
     // A finished task asks nothing more: the step is ticked, no What's next,
     // no next step made (Derek, 2026-10-14: ticking steps on a done task
     // opened What's next and a suggested step).
@@ -1446,7 +1453,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Ticked done: what's next is asked at once, with the plan's next step
     // or a blank to name one (Derek, 2026-10-12: "a way to create the next step").
     const nextId = advanceFrom(sid);
-    if (nextId && sub) setSentNext({ taskId: task.id, stepId: nextId, done: sub.title, doneId: sid, held: sub.holds });
+    if (nextId && sub) {
+      if (startsNext) afterStarted(nextId, true);
+      else setSentNext({ taskId: task.id, stepId: nextId, done: sub.title, doneId: sid, held: sub.holds });
+    }
   };
   // The current step's date is the follow up's: one date, written to both.
   // The task's follow up date, managed by the task (Derek, 2026-10-11), apart
@@ -1735,7 +1745,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // message, opens the draft email window. A draft already here opens as it is;
   // a reply replaces it, after a confirm when it has writing in it.
   // keepHold: the caller has put the email on its step already.
-  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }, keepHold = false) => {
+  // open: false writes the draft without opening the window (Reply in place).
+  const startDraftEmail = (reply?: { subject?: string; replyTo?: string }, keepHold = false, open = true) => {
     const current = task.draftEmail;
     const keepCurrent = !!current && (!reply || (!!htmlToText(current.body).trim() && !window.confirm("Replace the draft email on this task with this reply?")));
     if (!keepCurrent) {
@@ -1752,7 +1763,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now },
         ...(moveHold ? { subtasks: holdOnStep(list, target!.id, "email") } : {}) });
     }
-    setEmailOpenNonce((n) => n + 1);
+    if (open) setEmailOpenNonce((n) => n + 1);
   };
   // The hidden file input lives in whichever of the two is actually mounted
   // (never both, since they're mutually exclusive) so fileRef always resolves.
@@ -2327,6 +2338,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
             onMarkDone={() => completeStep(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
+            afterThis={afterThisFor(sub)} doneLabel={doneLabelFor(sub)} replyPending={replyPendingOn(sub)} replyOpen={inlineReplyOn(sub)}
+            onAddLink={(url) => { addLinkOn(url, "", sub.id); pushToast("Link added to this step"); }} onAttachFiles={() => { setAddOnStep(sub.id); fileRef.current?.click(); }}
             onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
         )}
       </li>
@@ -2446,6 +2459,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const before = task.status;
     const st = statusForClaudeStep(task.status, step, task.assigneeId ?? null, claudeCloud.ready);
     const saved = onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) });
+    cloudStart(stepId, saved, st, before);
+    pushToast("Given to Claude");
+  };
+  // Claude's step starting in the cloud, once the save that made it lands.
+  const cloudStart = (stepId: string, saved: unknown, st: TaskStatus | null, before: TaskStatus) => {
     // After the save lands: before it, the server has no such step yet (404).
     void Promise.resolve(saved).then(() => authedFetch(`/api/tasks/${encodeURIComponent(task.id)}/claude-cloud`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stepId }) }))
       .then(async (res) => {
@@ -2462,7 +2480,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         }
       })
       .catch(() => onPatchSub(stepId, { cloudError: "Couldn't reach the app" }));
-    pushToast("Given to Claude");
+  };
+  // After this was Claude's turn and it starts now: due today, Claude's in
+  // the cloud, as Give to Claude does (Derek, 2026-10-15).
+  const startClaudeNext = (stepId: string) => {
+    const now = new Date().toISOString();
+    const list = taskRef.current.subtasks.map((x) => (x.id === stepId ? { ...x, due: TODAY, followUpAt: undefined, toClaudeAt: now, cloudError: undefined } : x));
+    const step = list.find((x) => x.id === stepId);
+    if (!step) return;
+    const before = taskRef.current.status;
+    const st = statusForClaudeStep(before, step, task.assigneeId ?? null, claudeCloud.ready);
+    cloudStart(stepId, onPatch({ subtasks: list, followUpAt: null, ...(st ? { status: st } : {}) }), st, before);
   };
   const claudeStep = () => {
     if (asking) setAskNext(null);
@@ -3226,6 +3254,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const talkStepPlan = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): TalkPlan | null =>
     planTalkStep(taskRef.current.subtasks, task.assigneeId, channel, TODAY, followUpDate, stepId);
   const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
+    // After this's suggestion is taken by the send, as by Done (Derek, 2026-10-15).
+    const first = talkStepPlan(channel, followUpDate, stepId);
+    if (first?.kind === "finish") takeAfterSuggestion(first.cur);
     const plan = talkStepPlan(channel, followUpDate, stepId);
     if (!plan) return false;
     const { cur, due } = plan;
@@ -3266,8 +3297,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         onPatch({ subtasks: restored, status: was.status, waitingOnClient: was.waitingOnClient, followUpAt: was.followUpAt, due: was.due });
         setSentNext(null);
       };
-      pushToast(`Sent. Finished "${cur.title}"; checking in ${formatDue(due)}`, { label: "Undo step changes", run: undo });
+      pushToast(plan.after && !plan.after.finishWhen ? `Sent. Finished "${cur.title}"; started "${plan.after.title}"` : `Sent. Finished "${cur.title}"; checking in ${formatDue(due)}`, { label: "Undo step changes", run: undo });
     }
+    // After this was set up: it starts, no What's next card.
+    if (plan.after) { afterStarted(plan.after.id, channel !== "email"); return true; }
     const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`) ?? list.find((x) => !x.done && x.finishWhen === "reply");
     if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id, via: channel });
     if (checkIn?.addedFor === `checkin:${cur.id}`) setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
@@ -3671,10 +3704,131 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [nextInlineId]);
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
-  // Reply to the client's email on a step: the answer drafted on that step.
+  // Reply to the client's email on a step: the answer drafted on that step,
+  // written in place right under the email (Derek, 2026-10-15); Full window
+  // opens the window on the same draft.
   const replyToEmail = (sub: Subtask, e: ReceivedEmail) => {
-    startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId });
+    startDraftEmail({ subject: /^re:/i.test(e.subject) ? e.subject : `Re: ${e.subject || task.title}`, replyTo: e.messageId }, false, sub.assigneeId === CLAUDE_ID);
     onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") });
+  };
+  // The reply box is open on this step: the client's email on it, its draft
+  // written here (Claude's own draft keeps its row, to read first).
+  const inlineReplyOn = (sub: Subtask) => hasMessaging && !sub.done && !!sub.fromEmails?.length && (sub.holds ?? []).includes("email") && !!task.draftEmail && sub.assigneeId !== CLAUDE_ID;
+  // The client's email waits for its Reply: Reply is the dark button.
+  const replyPendingOn = (sub: Subtask) => hasMessaging && !sub.done && sub.assigneeId !== CLAUDE_ID && replyWaiting(sub, !!task.draftEmail);
+  const saveDraft = (patch: Partial<NonNullable<Task["draftEmail"]>>) => {
+    const d = taskRef.current.draftEmail;
+    if (d) onPatch({ draftEmail: { ...d, ...patch, updatedAt: new Date().toISOString() } });
+  };
+  const inlineReply = (sub: Subtask) => {
+    const d = task.draftEmail!;
+    return (
+      <InlineReply key={`reply-${sub.id}-${d.createdAt}`} toName={draftToName || firstName} draft={d} pushToast={pushToast}
+        onSave={saveDraft}
+        onSend={() => sendInlineReply(sub)}
+        onAi={onDraftMessage ? () => onDraftMessage("email", undefined, taskRef.current.draftEmail?.aiContext) : undefined}
+        onUpload={onUploadMessageImage}
+        onFull={() => setEmailOpenNonce((n) => n + 1)}
+        note={sendNote(null)}
+        onDiscard={() => {
+          const kept = taskRef.current.draftEmail;
+          const list = taskRef.current.subtasks.map((x) => (x.id === sub.id && x.holds?.includes("email") ? { ...x, holds: x.holds.filter((k) => k !== "email").length ? x.holds.filter((k) => k !== "email") : undefined } : x));
+          onPatch({ draftEmail: null, subtasks: list });
+          pushToast("Reply discarded", { label: "Undo", run: () => onPatch({ draftEmail: kept, subtasks: holdOnStep(taskRef.current.subtasks, sub.id, "email") }) });
+        }} />
+    );
+  };
+  // Send in the reply box: the window's own Send (sendDraft), with After
+  // this taken as it stands (its suggestion saved first).
+  const sendInlineReply = (sub: Subtask) => {
+    const d = taskRef.current.draftEmail;
+    if (!d || !sendDraft || !draftTo) { pushToast("There is nobody to send this to yet."); return; }
+    const body = draftLinkAsButton(d.body, d.link);
+    if (!htmlToText(body).trim() && !(d.attachments?.length)) { pushToast("Write the email before sending it."); return; }
+    const subject = d.subject.trim() || task.title.trim();
+    if (!subject) { pushToast("Add a subject before sending."); return; }
+    takeAfterSuggestion(sub);
+    sendDraft({ subject, body, attachments: d.attachments ?? [], cc: d.cc ?? [], bcc: d.bcc ?? [], replyTo: d.replyTo ?? null, followUpDate: null });
+  };
+  // ── After this (Derek, 2026-10-15, step-flow-mockup.html): the next step,
+  // named and set up at the bottom of the current one, so Done (or Send)
+  // finishes this step and starts that one with no What's next card. It is
+  // the plan's own next step; with none, After this suggests one after an
+  // email to the client (lib/afterThis suggestedAfter), saved only when Done,
+  // Send or a change to one of its words takes it. Clearing the name of the
+  // suggestion leaves After this empty.
+  const [afterOff, setAfterOff] = useState<Record<string, true>>({});
+  const afterSuggestFor = (list: Subtask[], sub: Subtask) => !afterOff[sub.id] && !noClient && !afterThisOf(list, sub.id) ? suggestedAfter(sub, firstName, TODAY) : null;
+  /** The suggestion saved as the next step (with `patch` on it); its id, or null when there was none. */
+  const takeAfterSuggestion = (sub: Subtask, patch: Partial<Subtask> = {}): string | null => {
+    const list = taskRef.current.subtasks;
+    const cur = list.find((x) => x.id === sub.id) ?? sub;
+    const sg = afterSuggestFor(list, cur);
+    if (!sg) return null;
+    const id = newId("s_");
+    onPatch({ subtasks: addAfterThisStep(list, sub.id, sg.title, id, { ...sg, addedFor: `after:${sub.id}`, ...patch }) });
+    return id;
+  };
+  const afterWhoChoices = () => [
+    ...(meId ? [{ key: meId, label: "You" }] : []),
+    ...(isPersonal ? [] : assignableUsers().filter((u) => u.id !== meId && u.id !== CLAUDE_ID).map((u) => ({ key: u.id, label: u.name }))),
+    { key: CLAUDE_ID, label: "Claude" },
+    ...(mayContactClient && !noClient ? [{ key: "client", label: firstName }] : []),
+  ];
+  const afterThisFor = (sub: Subtask) => {
+    if (sub.done || sub.onClient || asksWhatsNext(sub)) return undefined;
+    const real = afterThisOf(task.subtasks, sub.id);
+    const sg = real ? null : afterSuggestFor(task.subtasks, sub);
+    const next: AfterStep | null = real ?? sg;
+    // A word changed: on the next step, the suggestion saved first with it.
+    const patchNext = (patch: Partial<Subtask>) => {
+      const r = afterThisOf(taskRef.current.subtasks, sub.id);
+      if (r) onPatchSub(r.id, patch); else takeAfterSuggestion(sub, patch);
+    };
+    const curNext = () => afterThisOf(taskRef.current.subtasks, sub.id) ?? afterSuggestFor(taskRef.current.subtasks, sub);
+    return (
+      <AfterThis next={next} suggested={!real && !!sg} clientFirst={firstName} ownerId={task.assigneeId ?? null} meId={meId ?? null}
+        who={afterWhoChoices()} nameOf={firstOf}
+        remindNote={client.reminders?.auto ? `Sends itself, as set for ${client.name}.` : `Waits in your Inbox for review first, as set for ${client.name}.`}
+        canRemindClient={hasMessaging && !!messageDest?.email}
+        onName={(title) => {
+          const r = afterThisOf(taskRef.current.subtasks, sub.id);
+          if (r) {
+            // Emptied: a step After this made goes; a plan's own step keeps its name.
+            if (!title.trim()) { if (r.addedFor === `after:${sub.id}`) onPatch({ subtasks: taskRef.current.subtasks.filter((x) => x.id !== r.id) }); return; }
+            onRenameSub(r.id, title);
+            return;
+          }
+          if (!title.trim()) { setAfterOff((m) => ({ ...m, [sub.id]: true })); return; }
+          if (takeAfterSuggestion(sub, { title })) return;
+          onPatch({ subtasks: addAfterThisStep(taskRef.current.subtasks, sub.id, title, newId("s_"), { addedFor: `after:${sub.id}`, ...stepOwnerFields() }) });
+        }}
+        onWho={(key) => {
+          const n = curNext();
+          if (!n) return;
+          const p = patchForWho(n, key, { ownerId: task.assigneeId ?? null, meId: meId ?? null });
+          // The client's turn needs a check in: two business days out.
+          patchNext(key === "client" && !n.due ? { ...p, due: addBusinessDaysIso(TODAY, 2) } : p);
+        }}
+        onDue={(v) => patchNext({ due: v })}
+        onAction={(a) => patchNext(patchForAction(a))}
+        onRemind={(r) => patchNext({ remind: r ?? undefined })} />
+    );
+  };
+  /** Done's words while After this is filled: what happens next. */
+  const doneLabelFor = (sub: Subtask): string | undefined => {
+    const n = afterThisOf(task.subtasks, sub.id) ?? afterSuggestFor(task.subtasks, sub);
+    if (!n || !afterThisFilled({ done: false, ...n })) return undefined;
+    return doneNextLabel(afterThisWho(n, task.assigneeId ?? null), { meId: meId ?? null, ownerId: task.assigneeId ?? null, clientFirst: firstName, nameOf: firstOf });
+  };
+  /** The next step After this set up has started: Claude's starts in the
+   *  cloud, and an open step page moves on to it. */
+  const afterStarted = (nextId: string, toast: boolean) => {
+    const nx = taskRef.current.subtasks.find((x) => x.id === nextId);
+    if (!nx) return;
+    if (nx.assigneeId === CLAUDE_ID && !nx.toClaudeAt) startClaudeNext(nextId);
+    if (stepPageOpen()) setOpenStepPage({ taskId: task.id, id: nextId, full: openStepPage!.full });
+    if (toast) pushToast(`Started "${nx.title}"`);
   };
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];
@@ -3698,7 +3852,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(canHaveDocument ? [{ key: "doc" as const, label: "Document" }, { key: "image" as const, label: "Image" }, { key: "page" as const, label: "HTML review" }, { key: "video" as const, label: "Video" }] : []),
       // An email drafted on the step, to read and send (Derek, 2026-10-12);
       // quick messages still go through the conversation.
-      ...(hasMessaging ? [{ key: "email" as const, label: "Email" }] : []),
+      // Not on a step holding the client's email: Reply on it is the way (Derek, 2026-10-15).
+      ...(hasMessaging && !(sub.fromEmails?.length && !sub.done) ? [{ key: "email" as const, label: "Email" }] : []),
     ];
     return [...kinds.map((x): { key: string; label: string; disabled: boolean; onPick: () => void; tone?: ReturnType<typeof reviewTone>; note?: string } => {
       const here = holds.includes(x.key);
@@ -3719,7 +3874,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
     ...(isPersonal ? [] : [{ key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }]),
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
-    ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : [])];
+    ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : []),
+    // Make it a task: the client's email here as a new task's step 1, linked both ways (Derek, 2026-10-15).
+    ...(onEmailToTask && sub.fromEmails?.length ? [{ key: "maketask", label: "Make it a task", disabled: false, onPick: () => { setOpenStepPage(null); onEmailToTask(sub.id); } }] : [])];
   };
   // The step's own + Add offers handing it to Claude, as What's next does
   // (Derek, 2026-10-14: "the next action is to delegate to Claude, how do I
@@ -3827,7 +3984,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // what came in, what I'm going to do, done).
   const stepHeld = (sub: Subtask, light = false, part: "work" | "files" | "all" | "came" = "all") => {
     const waits = waitingStep(sub);
-    const keys = (sub.holds ?? []).filter((k) =>
+    // The reply written in place: its box sits under the client's email, not
+    // as a draft row with the step's work (Derek, 2026-10-15).
+    const replyHere = inlineReplyOn(sub);
+    const keys = (sub.holds ?? []).filter((k) => !(replyHere && k === "email")).filter((k) =>
       (part !== "files" && part !== "came" && (DELIVERABLE_KEYS as string[]).includes(k))
       || (part !== "files" && !!sentMail(k) && (part === "all" || (part === "came") === waits))
       || ((part === "files" || part === "all") && k.startsWith("att:") && task.attachments.some((a) => attachmentKey(a.id) === k)));
@@ -3841,6 +4001,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     );
     if (!keys.length && !emails.length && !dm) return null;
     const sortable = keys.length > 1;
+    const replyBox = replyHere && part !== "work" && part !== "files" && emails.length > 0 ? inlineReply(sub) : null;
     return (
       <div className="flex flex-col gap-2">
         {/* A text or chat for the client, read and sent from here (2026-10-13). */}
@@ -3860,7 +4021,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           // anything else by name and size (Derek, 2026-10-13).
           const files = filesOfEmail(e, task.attachments, messages?.find((m) => m.id === e.messageId));
           return (
-            <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done} light
+            <ReceivedEmailBox key={e.messageId} email={e} answered={sub.done} light={!replyPendingOn(sub)}
               approve={(() => {
                 // "approved" by email, with a review still open: mark it here.
                 if (!readsAsApproval(clientEmailText(e.body, e.from))) return undefined;
@@ -3874,6 +4035,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onReply={hasMessaging && replyWaiting(sub, !!task.draftEmail) ? () => replyToEmail(sub, e) : undefined} />
           );
         })}
+        {replyBox}
         {keys.map((k) => {
           const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
           const mail = sentMail(k);
@@ -3984,7 +4146,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   ) : undefined;
   // The email to the client held on the step, written and ready: the step's
   // finish button sends it (Derek, 2026-10-13).
-  const heldEmailSendFor = (ps: Subtask) => sendDraft && draftTo && task.draftEmail && !ps.done && (ps.holds ?? []).includes("email")
+  const heldEmailSendFor = (ps: Subtask) => sendDraft && draftTo && task.draftEmail && !ps.done && (ps.holds ?? []).includes("email") && !inlineReplyOn(ps)
     && (htmlToText(task.draftEmail.body).trim() || task.draftEmail.attachments?.length) ? sendDraftNow : undefined;
   const askTodosFor = (ps: Subtask) => (hasMessaging && !!messageDest?.email ? (ids: string[]) => askAboutTodos(ps, ids) : undefined);
   // A to-do that was the client's comment: the comment is done on the review too.
@@ -4554,7 +4716,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onAddNote={(body) => logAction({ id: newId("ta_"), taskId: task.id, kind: "note", authorId: meId ?? null, toId: null, parentId: null,
                 body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })}
               clientItems={clientItemsOf(ps.id)} onToggleClientItem={onToggleSub}
-              onTodoDone={todoDoneFor(ps)} />
+              onTodoDone={todoDoneFor(ps)}
+              afterThis={isCur ? afterThisFor(ps) : undefined} doneLabel={isCur ? doneLabelFor(ps) : undefined}
+              replyPending={replyPendingOn(ps)} replyOpen={inlineReplyOn(ps)} />
           );
         })()}
         {sentNextPanel()}

@@ -9,10 +9,11 @@
 import { useState } from "react";
 import { htmlToText, type Message, type StepTodo, type Subtask } from "@/lib/data";
 import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
-import { useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
+import { StepFinish, useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
-import { ActionMenu, type ActionMenuItem } from "./ActionMenu";
+import { type ActionMenuItem } from "./ActionMenu";
+import { OnThisStep } from "./OnThisStep";
 import { I, LinkedText } from "./ui";
 
 type AddOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
@@ -23,7 +24,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false, onAddLink, onAttachFiles }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -82,6 +83,14 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   onAcceptSuggestion?: () => void;
   /** ✳ Copy for Claude: the way to start Claude now when its cloud start is not set up. */
   onCopyForClaude?: () => void;
+  /** After this, Done's words, and which button is the dark one: as on the step's page. */
+  afterThis?: React.ReactNode;
+  doneLabel?: string;
+  replyPending?: boolean;
+  replyOpen?: boolean;
+  /** Link and Attach on the On this step line: onto this step. */
+  onAddLink?: (url: string) => void;
+  onAttachFiles?: () => void;
 }) {
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
   const dir = useStepDirections({ sub, onPatchSub, inline: true });
@@ -91,6 +100,9 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   const [naming, setNaming] = useState(false);
   // The suggestion sits in the name box until it is typed over.
   const [typed, setTyped] = useState(false);
+  // A link being typed onto the step, or null when closed.
+  const [linkDraft, setLinkDraft] = useState<string | null>(null);
+  const saveLink = () => { const u = (linkDraft ?? "").trim(); if (u && onAddLink) { onAddLink(u); setLinkDraft(null); } };
   const options: AddOption[] = [
     // Not offered once the step has them (Derek, 2026-10-14).
     ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
@@ -114,7 +126,9 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   const addRows = setup ? addRowsOf(options, firstName, new Set(quick ? named.map((x) => x.kind) : [])) : null;
   const link = "font-semibold text-accent underline-offset-4 hover:underline";
   // The longer reason, when the sentence's first word does not say it all.
-  const reason = tone.say && !sub.done && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
+  // Not said over the client's email card, which says it already (Derek, 2026-10-15).
+  const emailShown = !sub.done && !!sub.fromEmails?.length && !!incoming;
+  const reason = tone.say && !sub.done && !emailShown && tone.say !== tone.word && !["Your turn", "Claude's turn"].includes(tone.say) ? tone.say : null;
   // A "what's next?" step's context (why it is asking, the original ask): the
   // easiest thing on the card to read, in ink, right under its heading (Derek,
   // 2026-10-14: it was pale grey under a red line).
@@ -189,27 +203,34 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
           took it), then the links and files on the step. */}
       {!context && dir.node}
       {outFor ?? incoming}
-      {!outFor && files && (
-        <section aria-label="Links and files" className="flex flex-col gap-1.5">
-          <h4 className="text-[16px] font-semibold text-muted">Links and files</h4>
-          {files}
-        </section>
-      )}
-      {/* What I'm going to do: the work, the + to add one, the to dos. A wait
-          on the client gets no to do box until one is added; nor a step with
-          no name yet, or still asking what's next (Derek, 2026-10-14). */}
+      {/* On this step (Derek, 2026-10-15): one quiet line, then what the step
+          holds and its to dos. A wait on the client gets no to do box until
+          one is added; nor a step with no name yet, or still asking what's
+          next (Derek, 2026-10-14). */}
       {!outFor && !whatsNext && !setup && (() => {
         const todos = !sub.onClient && !!sub.title.trim() && (sub.finishWhen !== "reply" || todo.todos.length > 0);
         const addable = !sub.done && !sub.onClient && sub.finishWhen !== "reply";
-        if (!held && !planBits && !followBox && !todos && !addable) return null;
+        if (!held && !planBits && !followBox && !todos && !addable && !files) return null;
         return (
-          <section aria-label="Actions" className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h4 className="text-[16px] font-semibold text-muted">Actions</h4>
-              {addable && <ActionMenu label={<span className="inline-flex items-center gap-1"><I.plus /> Add</span>} title="Add to this step"
-                triggerClassName="inline-flex items-center text-[16px] font-medium text-accent hover:underline"
-                items={options.map((o) => !o.disabled && { label: o.note ? `${o.label} (${o.note})` : o.label, onClick: o.onPick })} />}
-            </div>
+          <section aria-label="On this step" className="flex flex-col gap-2">
+            {addable && (
+              <OnThisStep first={firstName} options={options}
+                lead={quick ? [{ key: "quick", label: quick.label, onPick: quick.onPick }] : []}
+                onDirections={dir.open ? undefined : dir.start}
+                onChecklist={() => todo.ref.current?.focus()}
+                onLink={onAddLink ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
+                onAttach={onAttachFiles} />
+            )}
+            {linkDraft !== null && (
+              <div className="flex flex-wrap items-center gap-2">
+                <input autoFocus value={linkDraft} onChange={(e) => setLinkDraft(e.target.value)} aria-label="Link to add to this step"
+                  onKeyDown={(e) => { if (e.key === "Enter") saveLink(); if (e.key === "Escape") { e.stopPropagation(); setLinkDraft(null); } }}
+                  placeholder="Paste a link (Drive, website, doc…)" className="min-w-0 flex-1 rounded-[5px] border bg-surface px-2.5 py-1.5 text-[16px] outline-none focus:border-accent" />
+                <button onClick={saveLink} disabled={!linkDraft.trim()} className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-40">Add</button>
+                <button onClick={() => setLinkDraft(null)} className="h-9 rounded-[5px] px-2 text-[16px] text-muted hover:text-foreground">Cancel</button>
+              </div>
+            )}
+            {files}
             {followBox}
             {planBits}
             {held}
@@ -220,20 +241,28 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
       {/* How it ends: Done, then What's next; a waiting, check in or "what's
           next?" step has its own choices. The only dark button on the page. */}
       {!sub.done && doneActions && <div className="border-t pt-3">{doneActions}</div>}
-      {/* One line: Done (the page's one dark button), then Open the step
-          beside it, wrapping under only when the width forces it. No quick
-          action link here (Derek, 2026-10-14). */}
-      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px] ${!sub.done && !doneActions && !sub.onClient ? "border-t pt-3" : ""}`}>
-        {!sub.done && !doneActions && !sub.onClient && (sendReady ? (<>
-          <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {firstName}</button>
-          <button onClick={onMarkDone} className="font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
-        </>) : (
-          <button onClick={onMarkDone} aria-label="Done with this step, choose what's next" className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Done · what&apos;s next?</button>
-        ))}
-        {!sub.done && !sub.onClient && onGiveClaude && <button onClick={onGiveClaude} title="Claude's turn, due today" className="inline-flex h-10 items-center gap-1.5 rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset ring-border hover:bg-background"><I.bolt className="h-4 w-4" /> Give to Claude</button>}
-        {!sub.done && !sub.onClient && !!delegate?.length && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={delegate} triggerClassName={link} />}
-        <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
-      </div>
+      {/* After this, then how it ends: Done (its words say what happens
+          next) and Delegate ▾, Open the step beside them (Derek, 2026-10-15). */}
+      {!sub.done && !doneActions && !sub.onClient ? (
+        <div className="flex flex-col gap-3 border-t pt-3">
+          {afterThis}
+          {sendReady && !replyOpen ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+              <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {firstName}</button>
+              <button onClick={onMarkDone} className="font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
+              <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
+            </div>
+          ) : (
+            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen} onGiveClaude={onGiveClaude} delegate={delegate}>
+              <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
+            </StepFinish>
+          )}
+        </div>
+      ) : (
+        <StepFinish onGiveClaude={!sub.done && !sub.onClient ? onGiveClaude : undefined} delegate={!sub.done && !sub.onClient ? delegate : []}>
+          <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
+        </StepFinish>
+      )}
     </div>
   );
 }
