@@ -56,3 +56,24 @@ export function reminderEmail(o: { firstName: string | null; groups: ReminderGro
 }
 
 export const REMINDER_LINK_LABEL = "Open your client portal";
+
+/** Step reminders the 8 AM job queues (lib/stepReminderServer): their own id
+ *  prefix, the step's id in it, so "once" goes once per step. */
+export const STEP_REMINDER_PREFIX = "smr_step_";
+export const STEP_REMINDER_LINK_LABEL = "Open it in your client portal";
+
+/** The reminder about one item on one step (Derek, 2026-10-15: "sometimes
+ *  clients need a reminder on a specific task"): what we asked, why it
+ *  matters, the portal link to that item, and to answer there rather than
+ *  replying. Short, never the counts email. The link goes in as a plain link
+ *  line; the server turns it into a button. */
+export function stepReminderEmail(o: { firstName: string | null; ask: string; taskTitle: string; link: DraftLink | null }): { subject: string; body: string } {
+  const ask = o.ask.trim() || o.taskTitle.trim();
+  const task = o.taskTitle.trim();
+  const why = task && task.toLowerCase() !== ask.toLowerCase() ? `We need it to move ${escapeHtml(task)} forward.` : "We need it to move forward.";
+  return {
+    subject: `Reminder: ${ask}`.slice(0, 120),
+    body: `<p>Hi ${escapeHtml(o.firstName?.trim() || "there")},</p><p>A quick reminder about ${escapeHtml(ask)}. ${why}</p>`
+      + `${draftLinkHtml(o.link)}<p>Please answer there rather than replying to this email.</p><p>Thanks!</p>`,
+  };
+}

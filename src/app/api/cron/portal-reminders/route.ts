@@ -4,8 +4,9 @@ import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
 import { buildPortalReminder } from "@/lib/portalReminderServer";
-import { toPacificDate, todayPacific } from "@/lib/data";
-import { isReminderHour, PORTAL_REMINDER_PREFIX, REVIEW_STATUS } from "@/lib/portalReminders";
+import { todayPacific } from "@/lib/data";
+import { isReminderHour, PORTAL_REMINDER_PREFIX, REVIEW_STATUS, STEP_REMINDER_PREFIX } from "@/lib/portalReminders";
+import { lastReminderDay, runStepReminders } from "@/lib/stepReminderServer";
 import { isReminderDay, reminderQueueStatus, reminderSettings } from "@/lib/reminderSchedule";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,6 +32,11 @@ import { isReminderDay, reminderQueueStatus, reminderSettings } from "@/lib/remi
 // in the one that is 8 AM in California. An admin can POST ?dry=1 to see who
 // would get one today without queuing anything, and ?force=1 to run outside
 // the hour (each client's schedule still decides).
+//
+// Reminders set on a step (After this's "add a reminder", Derek, 2026-10-15,
+// lib/stepReminderServer) go first: the client's short email about that one
+// item, or a teammate's notification. They share the one a day per client
+// guard with the counts email below, so a client never gets both on one day.
 
 export const maxDuration = 60;
 export async function GET(req: NextRequest) { return run(req); }
@@ -44,6 +50,7 @@ async function run(req: NextRequest) {
   const nowMs = Date.now();
   if (!dry && !force && !isReminderHour(nowMs)) return NextResponse.json({ ok: true, skipped: "not 8 AM on a weekday in California" });
   const today = todayPacific();
+  const steps = await runStepReminders({ today, nowMs, dry });
 
   // Open, shared tasks waiting on a client: who gets an email at all.
   const { data: waiting, error } = await supabaseAdmin.from("tasks").select("client_id")
@@ -67,13 +74,13 @@ async function run(req: NextRequest) {
     const setting = settings.get(clientId) ?? null;
     if (reminderSettings(setting).schedule === "off") { tally.off++; continue; }
     // The newest reminder sent or queued for them, whatever became of it.
-    const { data: last } = await supabaseAdmin.from("scheduled_messages").select("scheduled_at").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).order("scheduled_at", { ascending: false }).limit(1);
-    const lastDay = last?.[0]?.scheduled_at ? toPacificDate(last[0].scheduled_at as string) : null;
+    // A step reminder counts too: one a day per client, whichever kind.
+    const lastDay = await lastReminderDay(clientId);
     // One a day at most.
     if (lastDay && lastDay >= today) { tally.alreadyToday++; continue; }
     if (!isReminderDay(setting, today, lastDay)) { tally.notToday++; continue; }
     // The last one still waiting for review: not a second one (audit 2026-10-07).
-    const { data: open } = await supabaseAdmin.from("scheduled_messages").select("id").like("id", `${PORTAL_REMINDER_PREFIX}%`).eq("client_id", clientId).eq("status", REVIEW_STATUS).limit(1);
+    const { data: open } = await supabaseAdmin.from("scheduled_messages").select("id").or(`id.like.${PORTAL_REMINDER_PREFIX}%,id.like.${STEP_REMINDER_PREFIX}%`).eq("client_id", clientId).eq("status", REVIEW_STATUS).limit(1);
     if (open?.length) { tally.waitingReview++; continue; }
     // The same builder Refresh uses in the Inbox (lib/portalReminderServer).
     const built = await buildPortalReminder(clientId, { dry });
@@ -89,7 +96,7 @@ async function run(req: NextRequest) {
     });
     if (!qErr) { tally.queued++; if (status !== REVIEW_STATUS) tally.sentOnTheirOwn++; }
   }
-  const out = { ok: true, dry, today, ...(settingsMissing ? { settingsMissing } : {}), ...tally, ...(dry ? { previews } : {}) };
-  console.log("[cron/portal-reminders]", JSON.stringify({ ...out, previews: undefined }));
+  const out = { ok: true, dry, today, ...(settingsMissing ? { settingsMissing } : {}), ...tally, stepReminders: steps.tally, ...(dry ? { previews, stepPreviews: steps.previews } : {}) };
+  console.log("[cron/portal-reminders]", JSON.stringify({ ...out, previews: undefined, stepPreviews: undefined }));
   return NextResponse.json(out);
 }
