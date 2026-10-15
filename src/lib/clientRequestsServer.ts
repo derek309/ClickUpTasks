@@ -211,7 +211,9 @@ async function buildRequestEmail(st: ClientState, stage: RequestStage, request: 
   const overdue = ordered.filter((r) => daysLate(r.needBy, o.today) > 0).length;
   const clientFirst = first ?? String((client as any).name ?? "").split(" ")[0];
   const firstAsked = request ? (request.startedAt ? toPacificDate(request.startedAt) : o.history.get(request.stepId)?.first ?? o.today) : o.today;
-  const link = request ? { url: `${portal}?task=${encodeURIComponent(request.taskId)}`, label: "Open it in your client portal" } : null;
+  // Opens that one request in the portal (its step too, so a request already
+  // answered says so and moves on to the next one).
+  const link = request ? { url: `${portal}?task=${encodeURIComponent(request.taskId)}&step=${encodeURIComponent(request.stepId)}`, label: "Open it in your client portal" } : null;
   const email = requestEmail({
     stage, firstName: first, ask: request ? stepAsk({ title: request.title, notes: request.notes }, clientFirst, request.taskTitle) : "",
     taskTitle: request?.taskTitle ?? "", needBy: request?.needBy ?? null, firstAsked, today: o.today, expected: task?.due ?? null,
