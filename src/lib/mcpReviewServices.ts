@@ -268,10 +268,11 @@ export function createReviewServices({ memberId, origin = APP_URL }: { memberId:
       return out.join("\n");
     },
 
-    async createReview(taskId: string, kind: ReviewKind, title?: string, step?: string): Promise<string> {
+    async createReview(taskId: string, kind: ReviewKind, title?: string, step?: string, pageKind?: "email" | "page"): Promise<string> {
       const task = await taskFor(taskId);
       if (typeof task === "string") return task;
-      const made = await createReview(task, kind, actor);
+      // An HTML review is an Email review or a Page review; left out, its name decides.
+      const made = await createReview(task, kind, actor, kind === "page" && pageKind ? { pageKind } : null);
       if (!made.ok) return made.error;
       if (title !== undefined) {
         const named = await renameReview(task.id, kind, actor, title);

@@ -1380,9 +1380,12 @@ export function createServer(opts = {}) {
     server.tool("get_client_document", "Read a task's client document. The same as get_review with kind \"doc\".", { task_id: z.string() }, getReview);
 
     server.tool("create_review",
-      "Start a review on a task (one of each kind per task). Refused on private and Personal tasks. A new review is named after the task unless title is given.",
-      { task_id: z.string(), kind: KIND, title: z.string().optional(), step: STEP },
-      async ({ task_id, kind, title, step }) => reply(await services.createReview(task_id, kind, title, step)));
+      "Start a review on a task (one of each kind per task). Refused on private and Personal tasks. A new review is named after the task unless title is given. An HTML review (kind page) is an Email review or a Page review: pass page_kind.",
+      {
+        task_id: z.string(), kind: KIND, title: z.string().optional(), step: STEP,
+        page_kind: z.enum(["email", "page"]).optional().describe('kind page only: "email" for an Email review (a newsletter or email, with a subject and preview text), "page" for a Page review (a web page). Left out, a name with newsletter or email makes it an Email review'),
+      },
+      async ({ task_id, kind, title, step, page_kind }) => reply(await services.createReview(task_id, kind, title, step, page_kind)));
 
     server.tool("update_review",
       "Rename a review, pick its stage by hand, reopen one the client approved so it can change again, or relabel an image review's images or an HTML review's pages. Completed locks it; any stage but approved clears a client approval.",

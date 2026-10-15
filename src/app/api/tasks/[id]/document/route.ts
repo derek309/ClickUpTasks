@@ -3,7 +3,7 @@ import { adminConfigured, supabaseAdmin } from "@/lib/supabaseAdmin";
 import { teamDocAccess, teamActor, kindOf, NO_STORE } from "@/lib/taskDocumentServer";
 import {
   createReview, deleteReview, pickReviewVersion, removeReviewVersion, renameReview, reopenReview, setReviewReminders, setReviewStage, writeDocBody,
-  pickReviewOption, type ReviewOutcome,
+  pickReviewOption, setReviewMeta, type ReviewOutcome,
 } from "@/lib/reviewService";
 import { DOC_MAX_RAW_CHARS } from "@/lib/docHtml";
 import { isFileKind } from "@/lib/reviewKinds";
@@ -24,7 +24,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const access = await teamDocAccess(req, id);
   if (!access.ok) return access.res;
-  return answer(await createReview(access.task, kindOf(req), teamActor(access.user)));
+  // An HTML review can start as an Email review or a Page review: { pageKind }.
+  const body = await req.json().catch(() => null) as { pageKind?: unknown } | null;
+  return answer(await createReview(access.task, kindOf(req), teamActor(access.user), body && typeof body === "object" ? { pageKind: body.pageKind as never } : null));
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -37,7 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const text = await req.text();
   if (text.length > DOC_MAX_RAW_CHARS) return json({ error: "This document is too long." }, 413);
-  let payload: { body?: unknown; file?: unknown; images?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown; reminders?: unknown; pick?: unknown };
+  let payload: { body?: unknown; file?: unknown; images?: unknown; removeVersion?: unknown; reopen?: unknown; restoreVersion?: unknown; restoreCheckpoint?: unknown; checkpoint?: unknown; title?: unknown; status?: unknown; reminders?: unknown; pick?: unknown; meta?: unknown };
   try { payload = JSON.parse(text) ?? {}; } catch { return json({ error: "Invalid request." }, 400); }
 
   if (payload.reopen === true) return answer(await reopenReview(id, kind, actor));
@@ -51,6 +53,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (typeof payload.title === "string") return answer(await renameReview(id, kind, actor, payload.title));
   if (payload.reminders !== undefined) return answer(await setReviewReminders(id, kind, actor, payload.reminders));
+  // An HTML review's kind, subject and the like (htmlReview.ts).
+  if (payload.meta !== undefined) return answer(await setReviewMeta(id, kind, actor, payload.meta));
   if (payload.pick !== undefined && isFileKind(kind)) return answer(await pickReviewOption(id, kind, actor, payload.pick));
   if (isFileKind(kind)) {
     if (payload.removeVersion !== undefined) return answer(await removeReviewVersion(id, kind, actor, payload.removeVersion));

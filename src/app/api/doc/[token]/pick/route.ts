@@ -7,6 +7,7 @@ import { sharedVersionFiles } from "@/lib/taskDocumentFiles";
 import { isFileKind } from "@/lib/reviewKinds";
 import { parseImageSet } from "@/lib/imageSet";
 import { resolveNotifyRecipient } from "@/lib/waitingNotify";
+import { withPick } from "@/lib/htmlReview";
 
 // Public, no login: the client chooses one of the options a version holds, like
 // one of three emails (Derek, 2026-10-07: "make it clear for the client to
@@ -33,8 +34,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   const item = fileId ? items.find((x) => x.file === fileId) : null;
   if (fileId && !item) return json({ error: "That option is not on this review." }, 400);
 
+  // The review's own fields (its kind, an email's subject) sit beside the pick and stay.
+  const { data: row } = await supabaseAdmin.from("task_documents").select("picks").eq("id", scope.documentId).maybeSingle();
   const { error } = await supabaseAdmin.from("task_documents")
-    .update({ picks: item ? { fileId: item.file, by: "client", at: new Date().toISOString() } : {}, updated_by: null })
+    .update({ picks: withPick(row?.picks, item ? { fileId: item.file, by: "client", at: new Date().toISOString() } : null), updated_by: null })
     .eq("id", scope.documentId);
   if (error) return json({ error: error.message }, 400);
 

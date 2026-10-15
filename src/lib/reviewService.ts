@@ -15,6 +15,7 @@ import { sanitizeDocHtml, DOC_MAX_HTML_CHARS } from "./docHtml";
 import { filePurpose, kindNoun, kindWhat, noDocumentYet, type FileKind, type ReviewKind } from "./reviewKinds";
 import { nameReviewIfDefault } from "./reviewAutoName";
 import { cleanImageSet, formatImageSet, parseImageSet, setFiles } from "./imageSet";
+import { cleanReviewMeta, withPick, withReviewMeta, type ReviewMeta } from "./htmlReview";
 
 type Row = Record<string, unknown>;
 export type ReviewOutcome<T> = ({ ok: true } & T) | { ok: false; status: number; error: string; current?: unknown };
@@ -34,12 +35,15 @@ async function update(documentId: string, patch: Row): Promise<ReviewOutcome<{ d
 
 /** The task's review of a kind, made if there is none. Two made at once: one live
  *  review per task and kind, so the second insert fails and gets the first. */
-export async function createReview(task: TeamTask, kind: ReviewKind, actor: ReviewActor): Promise<ReviewOutcome<{ document: Row; created: boolean }>> {
+export async function createReview(task: TeamTask, kind: ReviewKind, actor: ReviewActor, meta?: ReviewMeta | null): Promise<ReviewOutcome<{ document: Row; created: boolean }>> {
   const existing = await liveDocument(task.id, kind, "*");
   if (existing) return { ok: true, document: existing, created: false };
   const now = new Date().toISOString();
+  // An HTML review starts as an Email review or a Page review (htmlReview.ts).
+  const clean = kind === "page" ? cleanReviewMeta(meta) : {};
   const { data, error } = await supabaseAdmin.from("task_documents")
-    .insert({ id: "tdoc_" + randomUUID(), task_id: task.id, kind, created_by: actor.memberId, updated_by: actor.memberId, created_at: now, updated_at: now })
+    .insert({ id: "tdoc_" + randomUUID(), task_id: task.id, kind, created_by: actor.memberId, updated_by: actor.memberId, created_at: now, updated_at: now,
+      ...(Object.keys(clean).length ? { picks: { meta: clean } } : {}) })
     .select("*").single();
   if (!error) return { ok: true, document: data as Row, created: true };
   const winner = await liveDocument(task.id, kind, "*");
@@ -123,10 +127,23 @@ export async function renameReview(taskId: string, kind: ReviewKind, actor: Revi
  *  The rest are not picked. A null file clears it. Stored as
  *  { fileId, by, at } in task_documents.picks. */
 export async function pickReviewOption(taskId: string, kind: ReviewKind, actor: ReviewActor, raw: unknown): Promise<ReviewOutcome<{ document: Row }>> {
-  const doc = await liveDocument(taskId, kind);
+  const doc = await liveDocument(taskId, kind, "id, picks");
   if (!doc) return fail(404, noDocumentYet(kind));
   const fileId = typeof raw === "string" && raw.trim() ? raw.trim().slice(0, 200) : null;
-  return update(doc.id, { picks: fileId ? { fileId, by: "team", at: new Date().toISOString() } : {}, ...stampOf(actor) });
+  return update(doc.id, { picks: withPick(doc.picks, fileId ? { fileId, by: "team", at: new Date().toISOString() } : null), ...stampOf(actor) });
+}
+
+/** An HTML review's kind and the fields on top of it (htmlReview.ts): an
+ *  email's subject and preview text, a page's title, description and address.
+ *  Kept in picks.meta beside the option chosen. Allowed on an approved review:
+ *  they are the team's, not part of what the client approved. */
+export async function setReviewMeta(taskId: string, kind: ReviewKind, actor: ReviewActor, input: unknown): Promise<ReviewOutcome<{ document: Row }>> {
+  if (kind !== "page") return fail(400, "Only an HTML review has these.");
+  const change = cleanReviewMeta(input);
+  if (!Object.keys(change).length) return fail(400, "Nothing to change.");
+  const doc = await liveDocument(taskId, kind, "id, picks");
+  if (!doc) return fail(404, noDocumentYet(kind));
+  return update(doc.id, { picks: withReviewMeta(doc.picks, change), ...stampOf(actor) });
 }
 
 /** The client document's working copy: new text, or an earlier version or saved

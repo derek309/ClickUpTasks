@@ -9,6 +9,7 @@ import { sumStoredVideo } from "./videoStorage";
 import type { EmailDraft } from "./data";
 import { isFileKind, parseKind, type FileKind, type ReviewKind } from "./reviewKinds";
 import { setFiles } from "./imageSet";
+import { readReviewMeta, type ReviewMeta } from "./htmlReview";
 import { reminderSettings } from "./reminderSchedule";
 import { APPROVED_DAYS } from "./openReviews";
 import type { OpenReviewDoc, OpenReviewStatus, ReviewVersionRow } from "./openReviews";
@@ -906,6 +907,8 @@ export type TaskDocument = {
   /** The option chosen when a version holds several, and who chose it (task_documents.picks). */
   pick: string | null;
   pickBy: "team" | "client" | null;
+  /** An HTML review's kind and the fields on top of it, in picks.meta (htmlReview.ts). */
+  meta: ReviewMeta;
 };
 export type TaskDocumentVersion = {
   id: string; version: number; kind: "sent" | "client_submitted" | "client_approved";
@@ -924,6 +927,7 @@ export const rowToTaskDocument = (r: any): TaskDocument => ({
   clientViewedAt: r.client_viewed_at ?? null,
   pick: (r.picks?.fileId as string | undefined) ?? null,
   pickBy: (r.picks?.by as "team" | "client" | undefined) ?? null,
+  meta: readReviewMeta(r.picks),
 });
 // The email a teammate is writing to a client outside any task (the Journal's
 // Email and Reply, Remind client): one per client, kept until it is sent or

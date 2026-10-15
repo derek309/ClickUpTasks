@@ -4,6 +4,7 @@ import { rateLimit } from "@/lib/rateLimit";
 import { DOC_TOKEN_PATTERN, NO_STORE, docNotFound, resolveDocToken, latestPublished, latestSentAt } from "@/lib/taskDocumentServer";
 import { sharedDocFiles, sharedVersionFiles, docComments, type SharedVersionFile } from "@/lib/taskDocumentFiles";
 import { isFileKind } from "@/lib/reviewKinds";
+import { pageKindOf, readReviewMeta } from "@/lib/htmlReview";
 
 // Public, no login: what the client review page shows. It reads and never
 // writes. Mail security scanners (Outlook Safe Links and others) open links
@@ -21,20 +22,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
 
   const scope = await resolveDocToken(token);
   if (!scope) return docNotFound();
-  const [latest, { data: doc }, files, comments, versionFiles, sharedAt] = await Promise.all([
+  const [latest, { data: doc }, files, comments, versionFiles, sharedAt, { data: taskRow }] = await Promise.all([
     latestPublished(scope.documentId, scope.kind),
     supabaseAdmin.from("task_documents").select("status, approved_at, approved_by, title, picks").eq("id", scope.documentId).maybeSingle(),
     sharedDocFiles(scope.documentId),
     docComments(scope.documentId),
     isFileKind(scope.kind) ? sharedVersionFiles(scope.documentId) : Promise.resolve<SharedVersionFile[]>([]),
     latestSentAt(scope.documentId),
+    // The client's waiting step, for "need by" on an HTML review.
+    scope.kind === "page" ? supabaseAdmin.from("tasks").select("subtasks").eq("id", scope.taskId).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   if (!latest || !doc) return docNotFound();
+  const name = ((doc.title as string | null) ?? "").trim() || scope.taskTitle;
+  const meta = scope.kind === "page" ? readReviewMeta(doc.picks) : {};
+  const steps = ((taskRow as { subtasks?: unknown } | null)?.subtasks ?? []) as { done?: boolean; onClient?: boolean; waitsOn?: string; due?: string }[];
+  const waiting = Array.isArray(steps) ? steps.find((x) => x && !x.done && x.onClient && x.waitsOn === "page") : undefined;
 
   return NextResponse.json({
     kind: scope.kind,
     // The document's own name when the team gave it one, else the task's title.
-    title: ((doc.title as string | null) ?? "").trim() || scope.taskTitle,
+    title: name,
     clientName: scope.clientName,
     // An image or page review shows the newest version file not removed; "" when none is left.
     body: isFileKind(scope.kind) ? (versionFiles.at(-1)?.body ?? "") : latest.body,
@@ -53,5 +60,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     versionFiles,
     // When the team last sent a version: the client's comments count as changes from here on (reviewChanges.ts).
     sharedAt,
+    // An HTML review: an Email review or a Page review, an email's subject and
+    // preview text for the inbox header in Preview, and the date it is needed by
+    // (htmlReview.ts). Only the fields the client is shown.
+    ...(scope.kind === "page" ? {
+      pageKind: pageKindOf(meta, name),
+      subject: meta.subject ?? "", previewText: meta.previewText ?? "",
+      needBy: typeof waiting?.due === "string" ? waiting.due : null,
+    } : {}),
   }, { headers: NO_STORE });
 }
