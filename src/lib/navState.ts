@@ -12,6 +12,7 @@ import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
 //   ?view=work|clients|personal|settings   the special boards
 //   ?view=inbox&dm=<userId>                a DM thread
 //   ?view=mail                             the Inbox (email, texts, task chats)
+//   ?view=reminders                        Reminders, every reminder to a client (2026-10-15)
 //   ?view=mail&thread=<key>                one conversation in it, a link to
 //                                          paste into a Claude chat (2026-10-09)
 //   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
@@ -28,7 +29,7 @@ import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
 export type NavSub = "reviews" | "drafts" | "completed";
-export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; thread?: string | null; assignee: string | null; sub: NavSub | null };
+export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "reminders" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; thread?: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
@@ -65,7 +66,7 @@ export function parseSearch(search: string): NavState {
   const tab = p.get("tab");
   const sub = p.get("sub");
   return {
-    view: v === "work" || v === "personal" || v === "inbox" || v === "mail" || v === "calendar" || v === "clients" || v === "projects" || v === "settings" ? v : null,
+    view: v === "work" || v === "personal" || v === "inbox" || v === "mail" || v === "reminders" || v === "calendar" || v === "clients" || v === "projects" || v === "settings" ? v : null,
     client: p.get("client") ?? "all",
     project: p.get("project"),
     task: p.get("task"),

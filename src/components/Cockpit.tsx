@@ -95,7 +95,7 @@ import { ConfirmModal, PromptModal, ShortcutsModal, LinkFormModal, MergeTaskModa
 import { CommandK } from "./cockpit/CommandK";
 import { GroupedList, InlineDate, friendlyDue } from "./cockpit/GroupedList";
 import StageBoard from "./cockpit/StageBoard";
-import { TaskDrawer } from "./cockpit/TaskDrawer";
+import { TaskDrawer, openStepNext } from "./cockpit/TaskDrawer";
 import { FeedbackTab, FEEDBACK_TASK_ID } from "./cockpit/FeedbackTab";
 import { appendCommentDb } from "@/lib/db";
 import { QuickLinksBar } from "./cockpit/ClientLinks";
@@ -109,6 +109,9 @@ import { orderLists } from "@/lib/listOrder";
 import { REMINDER_LINK_LABEL, reminderEmail, reminderGroups } from "@/lib/portalReminders";
 import { reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
+import { RemindersView } from "./cockpit/RemindersView";
+import { ClientRequestsList } from "./cockpit/ClientRequestsList";
+import { orderRequests, requestFromTask, type ClientRequest } from "@/lib/clientRequests";
 import { ClientConversation } from "./cockpit/ClientConversation";
 import { sendFromFeed, useClientSavedDraft } from "./cockpit/clientFeedDrafts";
 import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, waitingLine, waitingOnReply, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
@@ -256,7 +259,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // resets it alongside the others.
   // "inbox" is the Inbox (every email, text and task chat, 2026-10-01), a
   // full page like the directories, so it shares their flag.
-  const [dirView, setDirView] = useState<"clients" | "projects" | "inbox" | "calendar" | null>(null);
+  const [dirView, setDirView] = useState<"clients" | "projects" | "inbox" | "reminders" | "calendar" | null>(null);
   // Dashboard's own Work/Completed split — Completed relocated here from the
   // Clients directory (Derek: "makes more sense there") — see the myWork
   // content branch below. The Activity tab (notifications inbox) was cut
@@ -403,11 +406,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // set identical state by construction rather than by two hand-maintained
   // copies that quietly drift — and so adding a view later is one edit, not
   // five. NAV_KEY_VIEWS maps the number keys onto these.
-  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox" | "calendar") => {
+  const goToView = (view: "dashboard" | "alltasks" | "clients" | "projects" | "personal" | "inbox" | "reminders" | "calendar") => {
     setMyWork(view === "dashboard");
     setPersonalView(view === "personal");
     setInboxView(false);
-    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : view === "inbox" ? "inbox" : view === "calendar" ? "calendar" : null);
+    setDirView(view === "clients" ? "clients" : view === "projects" ? "projects" : view === "inbox" ? "inbox" : view === "reminders" ? "reminders" : view === "calendar" ? "calendar" : null);
     setDmUserId(null);
     setSettingsView(false);
 
@@ -693,6 +696,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // The client page's Conversation, open beside the list (Derek, 2026-10-14):
   // the client it is open for, so it closes on its own when you go elsewhere.
   const [feedClient, setFeedClient] = useState<string | null>(null);
+  // What we need from a client, open over their page (ClientRequestsList).
+  const [needsFor, setNeedsFor] = useState<string | null>(null);
   // Moves when the client's saved email changes outside its window (Remind, a send from the feed).
   const [savedDraftNonce, setSavedDraftNonce] = useState(0);
   // Another client's page starts with it closed.
@@ -909,7 +914,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setInboxView(s.view === "inbox" && !!s.dm);
     setDmUserId(s.view === "inbox" ? s.dm : null);
     setMailThread(s.view === "mail" ? s.thread ?? null : null);
-    setDirView(s.view === "clients" || s.view === "projects" || s.view === "calendar" ? s.view : s.view === "mail" ? "inbox" : null);
+    setDirView(s.view === "clients" || s.view === "projects" || s.view === "calendar" || s.view === "reminders" ? s.view : s.view === "mail" ? "inbox" : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
     if (s.clientTab) setClientTab(s.clientTab);
@@ -1261,6 +1266,17 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const toggleCol = (key: string) => setVisibleCols(visibleCols.includes(key) ? visibleCols.filter((x) => x !== key) : [...visibleCols, key]);
 
   const canAdmin = me.role === "admin";
+  // Reminders waiting for review, for the sidebar row's count (admins only:
+  // they go to clients in a teammate's name). The view sets it fresh too.
+  const [reminderCount, setReminderCount] = useState(0);
+  useEffect(() => {
+    if (!canAdmin) return;
+    let live = true;
+    const load = () => authedFetch("/api/reminders?count=1").then((r) => (r.ok ? r.json() : null)).then((j) => { if (live && typeof j?.toReview === "number") setReminderCount(j.toReview); }, () => {});
+    load();
+    const i = setInterval(load, 5 * 60_000);
+    return () => { live = false; clearInterval(i); };
+  }, [canAdmin]);
   // Sending email/SMS is gated per-user (admins always, VAs when granted).
   // When false, the SMS/Email composers are never even rendered — passing an
   // undefined send handler hides them (see TaskDrawer's hasMessaging).
@@ -1616,6 +1632,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   /** Open tasks this client owes us an answer on. Unassigned by construction,
    *  so every caller has to look them up deliberately rather than expecting
    *  them in an assignee-scoped list. */
+  /** The client's open requests: the current client step of each open,
+   *  shared task, across all their lists (lib/clientRequests). */
+  function clientRequestsFor(clientId: string): ClientRequest[] {
+    return (scopedTasksByClientId.get(clientId) ?? [])
+      .filter((t) => t.status !== "done" && t.status !== "on_hold" && !t.private && !t.hiddenFromClient)
+      .map((t) => requestFromTask({ id: t.id, title: t.title, clientId: t.clientId, projectId: t.projectId, due: t.due, subtasks: t.subtasks }))
+      .filter((r): r is ClientRequest => !!r);
+  }
   function waitingTasksFor(clientId: string): Task[] {
     return (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && t.waitingOnClient);
   }
@@ -2344,7 +2368,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // "All Tasks" is the flat list with no other view claiming the screen —
   // the same condition headerTitleText falls through to below.
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
-  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
+  const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "reminders" ? "Reminders" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
@@ -2653,13 +2677,18 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const needsStrip = talk ? (() => {
           const { cid, ct, first, canMsg, said, draftCount } = talk;
           const waiting = waitingTasksFor(cid).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
+          // Their open steps, the queue the reminders chase (lib/clientRequests).
+          const requests = clientRequestsFor(cid);
+          const top = orderRequests(requests, TODAY)[0];
           const unanswered = waitingOnReply(said);
           return (
+            <>
               <ClientNeeds clientId={cid} ghlContactId={ct?.ghlContactId ?? null} first={first}
                 newest={newestLine(said, { first, meId: me.id, nameOf: (id) => userById(id)?.name ?? null })}
                 unanswered={unanswered ? waitingLine(first, unanswered.at) : null}
                 draftCount={draftCount} feedOpen={feedFor === cid} onToggleFeed={() => setFeedClient(feedFor === cid ? null : cid)}
-                waiting={waiting.length} oldestWaiting={waiting[0]?.title ?? null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
+                waiting={requests.length || waiting.length} oldestWaiting={top?.title ?? waiting[0]?.title ?? null}
+                onOpenNeeds={requests.length ? () => setNeedsFor(cid) : null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
                 reminders={clientById(cid)?.reminders} onSetReminders={canAdmin && clientById(cid)?.reminders !== undefined ? setActiveClientReminders : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(cid)}
                 requestChannels={[...(ct?.email ? ["email" as const] : []), ...(ct?.phone ? ["sms" as const] : [])]}
@@ -2668,6 +2697,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 meetingNow={liveMeetingOf(scopedTasksByClientId.get(cid) ?? [], nowMs())}
                 meId={me.id} pushToast={(m) => pushToast(m)}
                 defaultCalendarId={inboxPrefs.defaultCalendarId ?? null} onSetDefault={(id) => setInboxPrefs({ defaultCalendarId: id })} />
+              {needsFor === cid && (
+                <ClientRequestsList clientId={cid} first={first} requests={requests} today={TODAY}
+                  listName={(id) => (id ? projectById(id)?.name ?? null : null)}
+                  onOpenStep={(taskId, stepId) => { setNeedsFor(null); openStepNext(stepId); setOpenTaskId(taskId); }}
+                  onReorder={(changes) => {
+                    // One write per task whose step moved, never a bulk update.
+                    for (const c of changes) {
+                      const t = tasks.find((x) => x.id === c.taskId);
+                      if (t) patchTask(t.id, { subtasks: t.subtasks.map((x) => (x.id === c.stepId ? { ...x, clientOrder: c.clientOrder } : x)) });
+                    }
+                  }}
+                  onClose={() => setNeedsFor(null)} />
+              )}
+            </>
           );
         })() : null;
   // The Conversation: beside the list on a desktop, over it on a tablet, the
@@ -2877,6 +2920,14 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 className="hidden h-10 place-items-center rounded-lg text-[20px] transition hover:bg-background sm:grid">{icon}</a>
             ))}
           </div>
+          {/* Reminders, right under Inbox (Derek and Justin, 2026-10-15): every
+              reminder to a client waits there for Approve. */}
+          {canAdmin && (
+            <SideItem href="/?view=reminders" active={dirView === "reminders"} title="Reminders: every reminder to a client, to approve before it goes" onClick={() => goToView("reminders")}>
+              <I.bell className="text-muted" /> <span>Reminders</span>
+              {reminderCount > 0 && <span className="ml-auto text-[16px] font-bold text-accent" aria-label={`${reminderCount} to review`}>{reminderCount}</span>}
+            </SideItem>
+          )}
           <SideItem href="/?view=work" active={myWork} title="Clients (press 2)" onClick={() => goToView("dashboard")}><I.user className="text-muted" /> <span>Clients</span><span className="ml-auto text-[13px] text-muted">{myAssignedClients.length + myAssignedProjects.length}</span></SideItem>
           {/* Directly under My Work, which stays exactly as it was — this is
               a second way in, not a replacement. It went in without a number
@@ -3099,7 +3150,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {/* Not truncate: it clipped the Following menu beside the name. */}
               <h1 className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[20px] font-semibold">
                 {/* The name gives way (ends in …) before the links run under the bell. */}
-                <span className="min-w-0 truncate">{settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}</span>
+                <span className="min-w-0 truncate">{settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "reminders" ? "Reminders" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (ghlContactUrlFor(activeClient) ? <a href={ghlContactUrlFor(activeClient)!} target="_blank" rel="noopener noreferrer" title="Open this contact in GoHighLevel" className="hover:text-accent hover:underline">{clientById(activeClient)?.name}</a> : clientById(activeClient)?.name)}</span>
                 {/* The health pill is gone: the Overdue box under the header says it
                     with the count (Derek, 2026-10-05, header mockup C). */}
                 {/* Same star as the Clients directory row — pinning to the
@@ -3124,7 +3175,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 {/* Breadcrumb back to the Clients directory — only meaningful
                     when a specific client is the thing being viewed. */}
                 {/* Company, then who follows them (Derek, 2026-10-05, mockup C). */}
-                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
+                <span>{settingsView ? "Integrations, team, templates, and API tokens" : inboxView ? "Private, only the two of you can see this" : dirView === "inbox" ? "Your email, texts, social messages, calls and task chats" : dirView === "reminders" ? "Every reminder to a client waits here for your Approve" : dirView === "calendar" ? "The next two weeks, from GoHighLevel" : dirView === "clients" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"}` : dirView === "projects" ? `${workspaceProjects.length} project${workspaceProjects.length === 1 ? "" : "s"}` : personalView ? "Your private to-dos, only visible to you" : myWork ? "" : activeClient === "all" ? `${clientList.length} client${clientList.length === 1 ? "" : "s"} · ${projects.length} project${projects.length === 1 ? "" : "s"}` : clientCompany(clientById(activeClient))}</span>
               </div>
             </>)}
           </div>
@@ -3296,6 +3347,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 const first = c.name.trim().split(/\s+/)[0];
                 return [waiting ? `${waiting} waiting on ${first}` : "", late ? `${late} overdue` : ""].filter(Boolean).join(" · ") || null;
               }} />
+          </div>
+        ) : dirView === "reminders" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto bg-surface">
+            <RemindersView nameOf={(id) => (id === me.id ? "you" : userById(id)?.name ?? "the team")} pushToast={(m) => pushToast(m)} onCount={setReminderCount}
+              onOpenStep={(_clientId, taskId, stepId) => { if (stepId) openStepNext(stepId); setOpenTaskId(taskId); }} />
           </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">
