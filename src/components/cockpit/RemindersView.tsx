@@ -22,9 +22,10 @@ export type ReminderRow = {
 export type ComingRow = { day: string; clientId: string; clientName: string; stage: string; ask: string | null; taskTitle: string | null; taskId?: string | null; stepId: string | null; overdue: number; request?: { taskId: string } | null };
 export type RemindersData = { toReview: ReminderRow[]; comingUp: ComingRow[]; sent: ReminderRow[] };
 
-/** The link to a step's page: its task over its client, ?handoff= the step. */
-export const stepHref = (clientId: string, taskId: string, stepId: string | null) =>
-  `/?client=${encodeURIComponent(clientId)}&task=${encodeURIComponent(taskId)}${stepId ? `&handoff=${encodeURIComponent(stepId)}` : ""}`;
+/** The link a reminder opens: its task over its client, steps in view
+ *  (Derek, 2026-10-15), not the step's own page. */
+export const stepHref = (clientId: string, taskId: string) =>
+  `/?client=${encodeURIComponent(clientId)}&task=${encodeURIComponent(taskId)}`;
 
 const stageTone = (stage: string) => (/late|summary/.test(stage) ? "text-danger" : /due today/.test(stage) ? "text-highlight" : "text-muted");
 const whenSent = (iso: string) => new Date(iso).toLocaleString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -34,7 +35,7 @@ function StepLink({ row, onOpenStep, children, className }: { row: { clientId: s
   if (!row.taskId) return <span className={className}>{children}</span>;
   const taskId = row.taskId;
   return (
-    <a href={stepHref(row.clientId, taskId, row.stepId)} className={className}
+    <a href={stepHref(row.clientId, taskId)} className={className}
       onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); onOpenStep(row.clientId, taskId, row.stepId); }}>{children}</a>
   );
 }
@@ -124,7 +125,7 @@ export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial 
                   </button>
                   {isOpen && (
                     <div className="flex min-w-0 flex-col gap-2 px-3 pb-3">
-                      <div className="text-[16px] text-muted">To {r.to ?? "nobody (no email on file)"} · from {r.from ? nameOf(r.from) : "the team"}{r.taskId && <> · <StepLink row={r} onOpenStep={onOpenStep} className="font-semibold text-accent underline underline-offset-4">Open the step</StepLink></>}</div>
+                      <div className="text-[16px] text-muted">To {r.to ?? "nobody (no email on file)"} · from {r.from ? nameOf(r.from) : "the team"}{r.taskId && <> · <StepLink row={r} onOpenStep={onOpenStep} className="font-semibold text-accent underline underline-offset-4">Open the task</StepLink></>}</div>
                       {editing ? (<>
                         <input value={editing.subject} onChange={(e) => setEdit({ ...editing, subject: e.target.value })} aria-label="Subject"
                           className="h-10 w-full min-w-0 rounded-[5px] bg-surface px-3 text-[16px] font-semibold outline-none ring-1 ring-inset ring-[var(--border)] focus:ring-accent" />

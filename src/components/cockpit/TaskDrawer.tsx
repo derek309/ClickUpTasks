@@ -2370,7 +2370,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const currentRow = (sub: Subtask, i: number, noDeskTop = false) => {
     const t = stepTone(sub);
     return (
-      <li key={sub.id} data-step={sub.id} aria-current="step" className={`px-4 py-4 sm:px-5 ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${STEP_BAR[t.state] ?? ""}`}>
+      <li key={sub.id} data-step={sub.id} aria-current="step" className={`px-4 py-4 transition-shadow duration-700 sm:px-5 ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${STEP_BAR[t.state] ?? ""} ${flashId === sub.id ? "ring-2 ring-inset ring-accent" : ""}`}>
         {nextInline() ? nextBody(true) : (
           <CurrentStep key={sub.id} {...handOn(sub)} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
@@ -3164,7 +3164,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // (Derek, 2026-10-14: "I select everything I want, and then it goes to
     // here. It's very confusing").
     closeSentNext();
-    if (stepPageOpen() && next && !asksWhatsNext(next)) setOpenStepPage({ taskId: task.id, id: next.id, full: openStepPage!.full });
+    if (stepPageOpen() && next && !asksWhatsNext(next)) { setOpenStepPage(null); flashStep(next.id); }
   };
   // On the task page, What's next opens in place of the current step it
   // names, as it does at the foot of a step's page (Derek, 2026-10-14).
@@ -3243,7 +3243,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 setNextSetupDone(sentStep.id); applySetup(sentStep.id, a, run);
                 // Save next step (no action picked): the picks are kept and
                 // the card closes, as the old Start it did once answered.
-                if (!run) { const id = sentStep.id; closeSentNext(); if (stepPageOpen() && !asksWhatsNext(sentStep)) setOpenStepPage({ taskId: task.id, id, full: openStepPage!.full }); }
+                if (!run) { const id = sentStep.id; closeSentNext(); if (stepPageOpen() && !asksWhatsNext(sentStep)) setOpenStepPage(null); flashStep(id); }
               }} />
           </div>
         ) : (<>
@@ -3650,6 +3650,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   }, [task.attachments, uploadProgress]); // eslint-disable-line react-hooks/exhaustive-deps
   // The step whose own page is open, and whether full page (Derek: a slide
   // out to look quickly, full page to work in, like a handoff).
+  // The step that just became current, outlined for a moment on the task
+  // page so the change is seen.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashStep = (id: string) => {
+    setFlashId(id);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 2500);
+    setTimeout(() => document.querySelector(`[data-step="${id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+  };
   const [openStepPage, setOpenStepPage] = useState<{ taskId: string; id: string; full: boolean; checklist?: boolean; directions?: boolean; talk?: "client" | "text" } | null>(() => (linkedStep ? { taskId: task.id, id: linkedStep, full: false } : null));
   // ── Setting a step up (Derek, 2026-10-14; StepSetup): a step just made
   // opens its page asking whose turn, by when and what, the likely answers
@@ -3884,8 +3894,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const nx = taskRef.current.subtasks.find((x) => x.id === nextId);
     if (!nx) return;
     if (nx.assigneeId === CLAUDE_ID && !nx.toClaudeAt) startClaudeNext(nextId);
-    if (stepPageOpen()) setOpenStepPage({ taskId: task.id, id: nextId, full: openStepPage!.full });
-    if (toast) pushToast(`Started "${nx.title}"`);
+    // Back to the task, the new current step shown for a moment (Derek,
+    // 2026-10-15: "close the step window and go back to the main task, we
+    // can see it there"; "it happens so fast").
+    if (stepPageOpen()) setOpenStepPage(null);
+    flashStep(nextId);
+    if (toast || stepPageOpen()) pushToast(`Done. Next: ${nx.title}`);
   };
   const stepAddOptions = (sub: Subtask) => {
     const holds = sub.holds ?? [];

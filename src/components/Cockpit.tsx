@@ -3351,7 +3351,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
         ) : dirView === "reminders" ? (
           <div className="min-h-0 flex-1 overflow-y-auto bg-surface">
             <RemindersView nameOf={(id) => (id === me.id ? "you" : userById(id)?.name ?? "the team")} pushToast={(m) => pushToast(m)} onCount={setReminderCount}
-              onOpenStep={(_clientId, taskId, stepId) => { if (stepId) openStepNext(stepId); setOpenTaskId(taskId); }} />
+              // The task, its steps in view (Derek, 2026-10-15: "open the task so we can see the steps").
+              onOpenStep={(_clientId, taskId) => { setOpenTaskId(taskId); }} />
           </div>
         ) : dirView === "inbox" ? (
           <div className="flex min-h-0 flex-1 bg-surface">
