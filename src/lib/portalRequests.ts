@@ -13,6 +13,7 @@
 import { formatDayDate, formatDue, toPacificDate, type Subtask } from "./data";
 import { GROUP_LABEL, daysLate, orderRequests, requestFromTask, requestGroup, type RequestGroup } from "./clientRequests";
 import { stepAskWords } from "./stepReminders";
+import { richToText } from "./inbox";
 
 /** What the client is asked to do: look something over, send files, or answer. */
 export type PortalRequestKind = "review" | "upload" | "question";
@@ -39,6 +40,9 @@ export type PortalRequest = {
   /** A wait on their reply: the id of the email it waits on, so the task
    *  page can bring that email into view. Null for any other ask. */
   replyToId?: string | null;
+  /** The step's own directions as plain text, paragraphs kept, when it has
+   *  any (directionsText); the task page shows them in full at the top. */
+  directions?: string | null;
 };
 
 /** An email of ours a request can wait on, as the portal shows it. */
@@ -77,6 +81,7 @@ export function portalRequestFromTask(
       kind: reply && !o.reviewOpen ? "question" : requestKind({ reviewOpen: o.reviewOpen, ask: `${r.title} ${words.ask}` }),
       replyTo: reply && email ? email : null,
       replyToId: reply ? r.replyTo?.messageId ?? null : null,
+      directions: directionsText(r.notes ?? "") || undefined,
     };
   }
   if (!t.waitingOnClient) return null;
@@ -191,4 +196,31 @@ export function whatWeNeed(r: Pick<PortalRequest, "ask" | "replyTo" | "replyToId
   const subject = r.replyTo?.subject?.trim() || (r.ask.startsWith("Reply to: ") ? r.ask.slice("Reply to: ".length).trim() : "");
   if (subject && (r.replyTo || r.ask.startsWith("Reply to: "))) return { line: `We need your reply to our email "${subject}"`, reply: true, emailId: r.replyToId ?? null };
   return { line: r.ask, reply: false, emailId: null };
+}
+
+/** Directions as the portal shows them: plain text, never HTML, with their
+ *  paragraphs and line breaks kept (a paragraph is a blank line), on the
+ *  server as in the browser. Plain text comes through as written. */
+export function directionsText(html: string): string {
+  if (!html.trim()) return "";
+  return richToText(html.replace(/<\/p>/gi, "</p>\n")).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** What the box at the top of a task page holds (Derek, 2026-10-16: "make the
+ *  orange box up top what we need from them"): the task's title; the ask in a
+ *  line of its own only when it says more than the title and the directions
+ *  already do; and the ask in full, the step's directions (else the task's,
+ *  step 1's), or for a wait on their reply to our email the "We need your
+ *  reply" line with that email (whatWeNeed). */
+export function needBox(
+  taskTitle: string,
+  taskDirections: string,
+  r: Pick<PortalRequest, "ask" | "replyTo" | "replyToId" | "directions">,
+): { title: string; line: string | null; directions: string; reply: boolean; emailId: string | null; email: PortalEmail | null } {
+  const w = whatWeNeed(r);
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const directions = w.reply ? "" : (r.directions?.trim() || taskDirections.trim());
+  const firstLine = directions.split("\n").map((x) => x.trim()).find(Boolean) ?? "";
+  const said = !w.reply && (norm(w.line) === norm(taskTitle) || (!!firstLine && norm(firstLine).startsWith(norm(w.line))));
+  return { title: taskTitle.trim(), line: said ? null : w.line, directions, reply: w.reply, emailId: w.emailId, email: w.reply ? r.replyTo ?? null : null };
 }

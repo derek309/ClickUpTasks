@@ -9,7 +9,7 @@ import { QUEUE_TASK_COLS, portalQueueMarks, queueSettings, queueTaskFromRow, typ
 import { rateLimit } from "@/lib/rateLimit";
 import { resolveWaitingToken } from "@/lib/waitingToken";
 import { orderLists } from "@/lib/listOrder";
-import { portalEmail, portalRequestFromTask, type PortalEmail } from "@/lib/portalRequests";
+import { directionsText, portalEmail, portalRequestFromTask, type PortalEmail } from "@/lib/portalRequests";
 import { clientFirstName } from "@/lib/clientFirstName";
 import { requestFromTask } from "@/lib/clientRequests";
 
@@ -261,7 +261,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
         id: t.id, projectId: t.project_id ?? null, title: t.title, due: t.due ?? null,
         // Stripped to plain text server-side — no HTML ever reaches this public
         // response, and the page never needs the TipTap editor bundle to render it.
-        description: htmlToText(t.description ?? ""),
+        // Paragraphs and line breaks kept: the task page shows it in full.
+        description: directionsText(t.description ?? ""),
         status: t.status, needsResponse: !!request, request,
         // When it was finished, for "Done Oct 3": completed_at, else the last change.
         doneAt: finishedAt(t), repeat,

@@ -12,8 +12,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { timeAgo, type Attachment } from "@/lib/data";
 import { uploadSharedFile } from "@/lib/docFileUpload";
 import { doneByMonth, doneLines, monthCount, ongoingWork, type DoneLine } from "@/lib/portalDone";
-import { doneWord, firstAskedLine, othersInOrder, portalLinkOpens, portalQueue, queuePosition, stateWord, thanksLine, whatWeNeed, type PortalRequest, type PortalRequestKind } from "@/lib/portalRequests";
+import { doneWord, firstAskedLine, needBox, othersInOrder, portalLinkOpens, portalQueue, queuePosition, stateWord, thanksLine, type PortalRequest, type PortalRequestKind } from "@/lib/portalRequests";
 import { RequestList } from "./PortalRequests";
+type NeedBox = ReturnType<typeof needBox>;
 
 type WaitingAttachment = { id: string; name: string; kind: Attachment["kind"]; size: string; path: string | null; url: string | null };
 /** queue: the list works one at a time (a queue list): Now, then in line. */
@@ -173,18 +174,16 @@ function AttachmentGallery({ items }: { items: WaitingAttachment[] }) {
 // No title/back button here — those live in the shared hero bar above this
 // (see WaitingView's return), which becomes this task's header instead of
 // a second one nested inside a card.
-/** What we need from them on the open task, at the top of its page (Derek,
- *  2026-10-16): the ask in its own words, or "We need your reply to our email
- *  "…"" with that email brought into view in the conversation. */
+/** What we need from them on the open task, in the one box at the top of its
+ *  page (Derek, 2026-10-16: "make the orange box up top what we need from
+ *  them"): the ask in full, or "We need your reply to our email "…"" with
+ *  that email, marked in the conversation below. */
 type NeedCard = {
-  line: string;
+  /** The title, the ask and its directions, or the email we need a reply to
+   *  (lib/portalRequests needBox). */
+  box: NeedBox;
   state: { text: string; tone: "late" | "today" | "plain" } | null;
   asked: string | null;
-  /** A wait on their reply to our email: the email (its id when it is in the
-   *  conversation; its subject and first lines for when it isn't). */
-  reply: boolean;
-  emailId: string | null;
-  email: { subject: string; preview: string } | null;
   /** A review to look over (doc, image, page, video), and the way to it. */
   review: string | null;
   opening: boolean;
@@ -252,14 +251,19 @@ function TaskDetailBody({
   const markAnswered = () => { setAnsweredId(t.id); setTimeout(() => nextRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); };
   const next = otherWaiting[0] ?? null;
   const toolBtn = "inline-flex h-11 items-center gap-2 rounded-[5px] border-2 bg-surface px-4 text-[16px] font-bold text-foreground hover:border-accent hover:bg-accent-soft/40";
+  // What we need, when anything: the one box at the top says it in full.
+  const needOpen = !!need && !isDone;
+  const box = needOpen ? need!.box : null;
   // The pages we're asking about ("Homepage: https://…") become cards to tap,
   // not long addresses inside the paragraph (Derek, 2026-10-07).
-  const split = splitLabeledLinks(t.description);
+  const split = splitLabeledLinks(box ? box.directions : t.description);
   // A link to this portal itself ("Add your changes here", written for the
   // email) points at the page they're already on, so it isn't shown here, and
   // the "1." / "2." a numbered list leaves behind is trimmed (Derek,
   // 2026-10-07: "I don't get add your changes here").
-  const links = split.links.filter((l) => !/\/waiting\/[a-f0-9]{16,}/i.test(l.url));
+  const isPortalLink = (url: string | null) => !!url && /\/waiting\/[a-f0-9]{16,}/i.test(url);
+  const links = split.links.filter((l) => !isPortalLink(l.url));
+  const files = t.attachments.filter((a) => !(a.kind === "link" && isPortalLink(a.url)));
   const before = split.before.replace(/\s*\d+[.)]\s*$/, "");
   const after = split.after.replace(/^\s*\d+[.)]\s*/, "");
   const lastTeam = [...displayThreadOf(t)].reverse().find((m) => m.from === "team")?.sender ?? null;
@@ -273,22 +277,17 @@ function TaskDetailBody({
   const displayThread = displayThreadOf(t);
   const SHOWN_MESSAGES = 4;
   // A wait on their reply: the email it waits on, else our newest message to
-  // them, kept in view and marked, so they read it straight away.
-  const needOpen = !!need && !isDone;
-  const emailAt = !needOpen || !need!.reply ? -1
-    : need!.emailId && displayThread.some((m) => m.id === need!.emailId) ? displayThread.findIndex((m) => m.id === need!.emailId)
+  // them, kept in the conversation and marked. Never scrolled to on open: on
+  // a phone that pushed the box with the ask off the screen (Derek,
+  // 2026-10-16); the box says it, and the email is marked when they reach it.
+  const emailAt = !box?.reply ? -1
+    : box.emailId && displayThread.some((m) => m.id === box.emailId) ? displayThread.findIndex((m) => m.id === box.emailId)
     : displayThread.map((m) => m.from).lastIndexOf("team");
   const emailMsgId = emailAt >= 0 ? displayThread[emailAt].id : null;
   const hiddenCount = earlierFor === t.id ? 0 : Math.min(Math.max(0, displayThread.length - SHOWN_MESSAGES), emailAt >= 0 ? emailAt : Infinity);
   const emailRef = useRef<HTMLDivElement | null>(null);
-  const scrolledFor = useRef<string | null>(null);
-  const showEmail = (smooth: boolean) => emailRef.current?.scrollIntoView({ block: "nearest", behavior: smooth ? "smooth" : "auto" });
-  // Once, when the task opens: the email comes into view.
-  useEffect(() => {
-    if (!emailMsgId || scrolledFor.current === t.id) return;
-    const id = setTimeout(() => { scrolledFor.current = t.id; showEmail(false); }, 60);
-    return () => clearTimeout(id);
-  }, [t.id, emailMsgId]);
+  // Only when they ask: "Read the whole email below".
+  const showEmail = () => emailRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
   const composer = (
     <>
       {/* text-[16px] isn't a style choice here — any input/textarea under
@@ -353,54 +352,112 @@ function TaskDetailBody({
         </button>
       </div>
       {sendError && <div className="mt-1.5 text-[16px] text-danger">{sendError}</div>}
-      <div className="mt-2 text-[16px] text-muted">You can drop photos and files right into the box. We get it by email too.</div>
+      {/* "Rather talk it through?" folded in here: the composer is the way to
+          talk, and a phone number is one tap away (Derek, 2026-10-16). */}
+      <div className="mt-2 text-[16px] text-muted">
+        You can drop photos and files right into the box. We get it by email too.
+        {lastTeam?.phone && <> Rather talk? Call or text {lastTeam.name.split(/\s+/)[0]} at <a href={`tel:${lastTeam.phone.replace(/[^\d+]/g, "")}`} className="font-semibold text-accent underline">{lastTeam.phone}</a>.</>}
+      </div>
     </>
   );
-  // Laid out like the team's Inbox chat (Derek, 2026-10-07: "why not make it
-  // look like this"): the conversation is the page, bubbles theirs on the
-  // right and ours on the left, the box to write in at its foot, and the
-  // task's details in a side panel.
+  // One column (Derek, 2026-10-16: "simplify it into one column"): the box at
+  // the top is what we need from them, the one place it is said; below it,
+  // the conversation and the box to write in. On a phone nothing drops under
+  // the chat where it would never be seen.
   const card = "rounded-[5px] border bg-surface";
   const shown = displayThread.slice(hiddenCount);
   const sentFiles = displayThread.filter((m) => m.from === "client").flatMap((m) => m.attachments);
+  const changes = t.changes ?? [];
   return (
-    <div className="mx-auto grid w-full max-w-[1280px] gap-5 px-4 pb-10 pt-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-      {(notice || needOpen) && (
-        <div className="grid min-w-0 gap-3 lg:col-span-2">
-          {notice && <div className="rounded-[5px] bg-success-soft px-4 py-3 text-[17px] font-bold text-success" role="status">{notice}</div>}
-          {needOpen && (
-            <div className="rounded-[5px] bg-surface p-4 ring-2 ring-inset ring-highlight">
-              <div className="text-[16px] text-muted">
-                <b className="text-highlight">We need you</b>
-                {need!.state && <> · <b className={NEED_TONE[need!.state.tone]}>{need!.state.text}</b></>}
-                {need!.asked && <> · {need!.asked}</>}
-              </div>
-              <h2 className="mt-0.5 break-words text-[20px] font-bold leading-snug">{need!.line}</h2>
-              {need!.reply && (emailMsgId ? (
-                <button onClick={() => showEmail(true)} className="mt-1 text-[16px] font-semibold text-accent">Read our email below ›</button>
-              ) : need!.email && (
-                <div className="mt-3 rounded-[5px] bg-background px-3 py-2.5 text-[16px] ring-1 ring-inset ring-[var(--border)]">
-                  <div className="text-muted">Our email</div>
-                  <b className="block break-words">{need!.email.subject}</b>
-                  {need!.email.preview && <p className="mt-0.5 whitespace-pre-wrap break-words">{need!.email.preview}</p>}
-                </div>
-              ))}
-              {need!.review && (
-                <button onClick={need!.onReview} disabled={need!.opening}
-                  className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-60 sm:w-auto">
-                  {need!.opening ? "Opening…" : `Look over the ${REVIEW_NOUN[need!.review] ?? "review"}`} <span aria-hidden>›</span>
-                </button>
-              )}
-              {!need!.review && <p className="mt-1 text-[16px] text-muted">{need!.reply ? "Write your reply below, or answer the email itself." : "Write your answer below. You can add photos and files too."}</p>}
-            </div>
+    <div className="mx-auto grid w-full min-w-0 max-w-[760px] gap-4 px-4 pb-10 pt-5">
+      {notice && <div className="rounded-[5px] bg-success-soft px-4 py-3 text-[17px] font-bold text-success" role="status">{notice}</div>}
+
+      {/* The task: what we need from them in full when it is their turn
+          (orange), else what it is and where it stands. */}
+      <div className={`min-w-0 rounded-[5px] bg-surface p-4 sm:p-5 ${box ? "ring-2 ring-inset ring-highlight" : "border"}`}>
+        {/* One plain line, no pills (Derek, 2026-10-07). */}
+        <div className="text-[16px] text-muted">
+          {box ? (
+            <>
+              <b className="text-highlight">We need you</b>
+              {need!.state && <> · <b className={NEED_TONE[need!.state.tone]}>{need!.state.text}</b></>}
+              {need!.asked && <> · {need!.asked}</>}
+            </>
+          ) : (
+            <>
+              <b className={isDone ? "text-success" : "text-accent"}>{isDone ? "Done" : "We're on it"}</b>
+              {t.due && !isDone && <> · Due {shortDate(t.due)}</>}
+            </>
           )}
+          {showProjectName && projectName && <> · {projectName}</>}
+        </div>
+        <h1 className="mt-0.5 break-words text-[22px] font-extrabold leading-tight">{box?.title || t.title}</h1>
+        {box?.line && <p className="mt-2 break-words text-[18px] font-bold leading-snug">{box.line}</p>}
+        {box?.reply && box.email && (
+          <div className="mt-3 rounded-[5px] bg-background px-3 py-2.5 text-[16px] ring-1 ring-inset ring-[var(--border)]">
+            <div className="text-muted">Our email</div>
+            <b className="block break-words">{box.email.subject}</b>
+            {box.email.preview && <p className="mt-0.5 whitespace-pre-wrap break-words">{box.email.preview}</p>}
+          </div>
+        )}
+        {box?.reply && emailMsgId && (
+          <button onClick={showEmail} className="mt-2 text-[16px] font-semibold text-accent">Read the whole email below ›</button>
+        )}
+        {/* The ask in full, its paragraphs and lines as written. */}
+        {(before || links.length > 0 || after) && (
+          <div className="mt-3 text-[16px] leading-relaxed">
+            {before && <p className="whitespace-pre-wrap break-words">{linkify(before)}</p>}
+            {links.length > 0 && (
+              <div className="my-3 grid gap-2">
+                {links.map((l, i) => (
+                  <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
+                    className={`flex items-center justify-center gap-2 rounded-[5px] px-4 py-2.5 text-center font-bold [overflow-wrap:anywhere] ${i === 0 ? "bg-accent text-white hover:opacity-90" : "border text-accent hover:bg-background"}`}>
+                    {l.label} <span aria-hidden>↗</span>
+                  </a>
+                ))}
+              </div>
+            )}
+            {after && <p className="whitespace-pre-wrap break-words">{linkify(after)}</p>}
+          </div>
+        )}
+        <AttachmentGallery items={files} />
+        {box && need!.review && (
+          <button onClick={need!.onReview} disabled={need!.opening}
+            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-[5px] bg-accent px-4 text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-60 sm:w-auto">
+            {need!.opening ? "Opening…" : `Look over the ${REVIEW_NOUN[need!.review] ?? "review"}`} <span aria-hidden>›</span>
+          </button>
+        )}
+        {/* A task with a doc is approved inside the doc, one way to say yes
+            (Derek, 2026-10-07). */}
+        {!isDone && !t.hasDoc && (
+          <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-[5px] border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50 sm:w-auto">
+            ✓ All done, this looks good
+          </button>
+        )}
+        {box && !need!.review && <p className="mt-3 text-[16px] text-muted">{box.reply ? "Write your reply below, or answer the email itself." : "Or write to us below. You can add photos and files too."}</p>}
+      </div>
+
+      {/* Their changes, ticked off as we do them (Derek, 2026-10-07). */}
+      {changes.length > 0 && (
+        <div className={`${card} px-4 py-3`}>
+          <b className="block text-[17px]">Your changes · {changes.filter((c) => c.done).length} of {changes.length} done</b>
+          <ul className="mt-2 grid gap-1.5">
+            {changes.map((c) => (
+              <li key={c.id} className="flex items-start gap-2 text-[16px]">
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[16px] font-bold ${c.done ? "bg-success text-white" : "border-2 border-border"}`}>{c.done ? "✓" : ""}</span>
+                <span className={`min-w-0 break-words ${c.done ? "text-muted line-through decoration-muted/50" : ""}`}>{c.title}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
-      <section className={`${card} flex min-w-0 flex-col overflow-hidden lg:min-h-[70vh]`}>
-        <div className="flex items-center gap-3 border-b px-5 py-3">
+
+      <section className={`${card} flex min-w-0 flex-col overflow-hidden`}>
+        <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-5">
           {lastTeam ? <SenderAvatar sender={lastTeam} size={36} /> : null}
           <div className="min-w-0">
-            {/* Who they're talking with; the task's title is in the side panel
+            {/* Who they're talking with; the task's title is in the box above
                 (Derek, 2026-10-07: "we have the task title twice"). */}
             <b className="block truncate text-[17px]">{lastTeam?.name ?? "Our team"}</b>
             <span className="text-[16px] text-muted">{displayThread.length} {displayThread.length === 1 ? "message" : "messages"}</span>
@@ -409,7 +466,7 @@ function TaskDetailBody({
         {/* The doc to review, first thing in the conversation; it opens over
             this page and they come straight back (Derek, 2026-10-07). */}
         {t.hasDoc && (
-          <div className="mx-5 mt-4 flex flex-wrap items-center gap-3 rounded-[5px] border-2 border-accent bg-accent-soft/40 px-4 py-3">
+          <div className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-[5px] border-2 border-accent bg-accent-soft/40 px-4 py-3 sm:mx-5">
             <span aria-hidden className="text-[26px]">📝</span>
             <div className="min-w-0 flex-1">
               <b className="block text-[17px]">{isDone ? "The document" : "Your document is ready to review"}</b>
@@ -418,21 +475,21 @@ function TaskDetailBody({
             <button onClick={onDoc} disabled={docBusy} className="h-11 rounded-[5px] bg-accent px-5 text-[16px] font-bold text-white hover:opacity-90 disabled:opacity-50">{docBusy ? "Opening…" : isDone ? "Open it" : "Review and approve"}</button>
           </div>
         )}
-        <div ref={threadRef} className="flex-1 px-5 py-4">
+        <div ref={threadRef} className="px-4 py-4 sm:px-5">
           {displayThread.length === 0 ? (
             <p className="py-6 text-center text-[16px] text-muted">No messages yet. Write below and we&apos;ll get it by email.</p>
           ) : (
             <div className="space-y-4">
               {hiddenCount > 0 && (
-                <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-full bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
+                <button onClick={() => setEarlierFor(t.id)} className="mx-auto block rounded-[5px] bg-background px-4 py-1.5 text-[16px] font-semibold text-accent hover:bg-accent-soft">
                   Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
                 </button>
               )}
               {shown.map((m) => (
                 <div key={m.id} ref={m.id === emailMsgId ? emailRef : undefined} className={`flex scroll-mt-4 flex-col ${m.from === "client" ? "items-end" : "items-start"}`}>
                   {m.from === "team" && <span className="mb-1 text-[16px] text-muted">{m.id === emailMsgId ? <><b className="text-highlight">We need your reply to this</b> · </> : null}{m.sender?.name ?? "Our team"}</span>}
-                  <div className={`max-w-[85%] rounded-[5px] px-4 py-2.5 text-[16px] lg:max-w-[640px] ${m.from === "client" ? "bg-accent text-white" : "bg-background"} ${m.id === emailMsgId ? "ring-2 ring-highlight" : ""}`}>
-                    {m.body && <p className="whitespace-pre-wrap break-words">{linkify(m.body)}</p>}
+                  <div className={`min-w-0 max-w-[90%] rounded-[5px] px-4 py-2.5 text-[16px] ${m.from === "client" ? "bg-accent text-white" : "bg-background"} ${m.id === emailMsgId ? "ring-2 ring-highlight" : ""}`}>
+                    {m.body && <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{linkify(m.body)}</p>}
                     <AttachmentGallery items={m.attachments} />
                   </div>
                   <span className="mt-1 text-[16px] text-muted">{m.from === "client" ? "You · " : ""}{timeAgo(m.at)}</span>
@@ -442,7 +499,7 @@ function TaskDetailBody({
           )}
         </div>
         {answered && (
-          <div ref={nextRef as React.RefObject<HTMLDivElement>} className="mx-5 mb-3 rounded-[5px] border-2 border-success bg-success-soft px-4 py-3">
+          <div ref={nextRef as React.RefObject<HTMLDivElement>} className="mx-4 mb-3 rounded-[5px] border-2 border-success bg-success-soft px-4 py-3 sm:mx-5">
             <b className="block text-[18px]">Thank you, we have it. What would you like to do next?</b>
             <div className="mt-2 flex flex-wrap gap-2">
               {next && (
@@ -455,89 +512,24 @@ function TaskDetailBody({
             </div>
           </div>
         )}
-        <div className="border-t bg-background/40 px-5 py-4">{composer}</div>
+        <div className="border-t bg-background/40 px-4 py-4 sm:px-5">{composer}</div>
       </section>
 
-      {/* Stays in view beside a long conversation (Derek, 2026-10-07). */}
-      <aside className="grid gap-4 lg:sticky lg:top-4">
+      {/* What they've sent here, so nothing goes twice. */}
+      {sentFiles.length > 0 && (
         <div className={`${card} p-4`}>
-          {/* One plain line, no pills (Derek, 2026-10-07). */}
-          <div className="mb-1.5 text-[16px] text-muted">
-            <b className={isDone ? "text-success" : t.needsResponse ? "text-highlight" : "text-accent"}>{isDone ? "Done" : t.needsResponse ? "We need you" : "We're on it"}</b>
-            {t.due && !isDone && <> · Due {shortDate(t.due)}</>}
-            {showProjectName && projectName && <> · {projectName}</>}
+          <b className="block text-[17px]">What you&apos;ve sent · {sentFiles.length}</b>
+          <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-6">
+            {sentFiles.slice(0, 12).map((f) => (
+              f.kind === "image" && f.url
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" title={f.name}><img src={f.url} alt={f.name} className="aspect-square w-full rounded-[5px] border object-cover" /></a>
+                : <a key={f.id} href={f.url ?? undefined} target="_blank" rel="noopener noreferrer" title={f.name} className="flex aspect-square w-full items-center justify-center rounded-[5px] border bg-background p-1 text-center text-[16px] font-semibold text-muted">{(f.name.split(".").pop() ?? "file").toUpperCase().slice(0, 4)}</a>
+            ))}
           </div>
-          <h1 className="text-[20px] font-extrabold leading-tight">{t.title}</h1>
-          {(t.description || t.attachments.length > 0) && (
-            <div className="mt-3 border-t pt-3 text-[16px]">
-              {before && <p className="whitespace-pre-wrap break-words">{linkify(before)}</p>}
-              {links.length > 0 && (
-                <div className="my-3 grid gap-2">
-                  {links.map((l, i) => (
-                    <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
-                      className={`flex items-center justify-center gap-2 rounded-[5px] px-4 py-2.5 text-center font-bold ${i === 0 ? "bg-accent text-white hover:opacity-90" : "border text-accent hover:bg-background"}`}>
-                      {l.label} <span aria-hidden>↗</span>
-                    </a>
-                  ))}
-                </div>
-              )}
-              {after && <p className="whitespace-pre-wrap break-words">{linkify(after)}</p>}
-              <AttachmentGallery items={t.attachments} />
-            </div>
-          )}
-          {/* A task with a doc is approved inside the doc, one way to say yes
-              (Derek, 2026-10-07). */}
-          {!isDone && !t.hasDoc && (
-            <button onClick={() => { onSetStatus("done"); markAnswered(); }} disabled={statusBusy}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[5px] border-2 border-success bg-success-soft px-4 py-2.5 text-[16px] font-extrabold text-success hover:opacity-90 disabled:opacity-50">
-              ✓ All done, this looks good
-            </button>
-          )}
+          {sentFiles.length > 12 && <span className="mt-1 block text-[16px] text-muted">and {sentFiles.length - 12} more in the conversation</span>}
         </div>
-        {/* Their changes, ticked off as we do them (Derek, 2026-10-07). */}
-        {(t.changes?.length ?? 0) > 0 && (
-          <div className={`${card} p-4`}>
-            <b className="block text-[17px]">Your changes · {t.changes!.filter((c) => c.done).length} of {t.changes!.length} done</b>
-            <ul className="mt-2 grid gap-2">
-              {t.changes!.map((c) => (
-                <li key={c.id} className="flex items-start gap-2 text-[16px]">
-                  <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${c.done ? "bg-success text-white" : "border-2 border-border"}`}>{c.done ? "✓" : ""}</span>
-                  <span className={c.done ? "text-muted line-through decoration-muted/50" : ""}>{c.title}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {/* What they've sent here, so nothing goes twice. */}
-        {sentFiles.length > 0 && (
-          <div className={`${card} p-4`}>
-            <b className="block text-[17px]">What you&apos;ve sent · {sentFiles.length}</b>
-            <div className="mt-2 grid grid-cols-4 gap-2">
-              {sentFiles.slice(0, 12).map((f) => (
-                f.kind === "image" && f.url
-                  // eslint-disable-next-line @next/next/no-img-element
-                  ? <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" title={f.name}><img src={f.url} alt={f.name} className="aspect-square w-full rounded-[5px] border object-cover" /></a>
-                  : <a key={f.id} href={f.url ?? undefined} target="_blank" rel="noopener noreferrer" title={f.name} className="flex aspect-square w-full items-center justify-center rounded-[5px] border bg-background p-1 text-center text-[13px] font-semibold text-muted">{(f.name.split(".").pop() ?? "file").toUpperCase()}</a>
-              ))}
-            </div>
-            {sentFiles.length > 12 && <span className="mt-1 block text-[16px] text-muted">and {sentFiles.length - 12} more in the conversation</span>}
-          </div>
-        )}
-        {/* Someone to talk to, for those who'd rather not type. */}
-        {lastTeam && (
-          <div className={`${card} p-4`}>
-            <b className="block text-[17px]">Rather talk it through?</b>
-            <span className="text-[16px] text-muted">{lastTeam.name} is working on this with you.</span>
-            {lastTeam.phone ? (
-              <div className="mt-3 flex gap-2">
-                <a href={`tel:${lastTeam.phone.replace(/[^\d+]/g, "")}`} className="flex h-11 flex-1 items-center justify-center rounded-[5px] border-2 font-bold text-accent hover:bg-background">📞 Call</a>
-                <a href={`sms:${lastTeam.phone.replace(/[^\d+]/g, "")}`} className="flex h-11 flex-1 items-center justify-center rounded-[5px] border-2 font-bold text-accent hover:bg-background">💬 Text</a>
-              </div>
-            ) : <span className="mt-2 block text-[16px] text-muted">Write here any time; we answer the same day.</span>}
-            {lastTeam.phone && <span className="mt-2 block text-center text-[16px] text-muted">{lastTeam.phone}</span>}
-          </div>
-        )}
-      </aside>
+      )}
     </div>
   );
 }
@@ -907,10 +899,9 @@ export default function WaitingView({ token }: { token: string }) {
   // What we need on the open task, for the top of its page.
   const selectedNeed = (() => {
     if (!selectedTask || !selectedRequest) return null;
-    const w = whatWeNeed(selectedRequest);
     const review = selectedRequest.kind === "review" && selectedTask.review ? selectedTask.review : null;
     return {
-      line: w.line, reply: w.reply, emailId: w.emailId, email: selectedRequest.replyTo ?? null,
+      box: needBox(selectedTask.title, selectedTask.description, selectedRequest),
       state: stateWord(selectedRequest.needBy, todayKey()), asked: firstAskedLine(selectedRequest.startedAt),
       review, opening: goingTo === selectedTask.id,
       onReview: () => { if (review) openNeedReview(selectedRequest, review); },
@@ -1153,7 +1144,7 @@ export default function WaitingView({ token }: { token: string }) {
       )}
       {selectedTask ? (
         <div style={{ background: "linear-gradient(135deg, #12283f, var(--accent))" }}>
-          <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-3">
+          <div className="mx-auto flex max-w-[760px] items-center gap-3 px-4 py-3">
             <button onClick={closeTask} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[5px] border border-white/30 px-3 text-[16px] font-semibold text-white hover:bg-white/10">← All my tasks</button>
             {/* One at a time: where this one is in the line, and the next one
                 in the portal list's order (Overdue, Today, This week, Later). */}

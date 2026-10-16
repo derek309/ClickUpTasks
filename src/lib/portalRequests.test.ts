@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  doneWord, portalEmail, firstAskedLine, groupedQueue, othersInOrder, portalLinkOpens, portalQueue, portalRequestFromTask, portalTaskUrl, queuePosition, requestKind, rowDate, stateWord, thanksLine, whatWeNeed,
+  doneWord, portalEmail, firstAskedLine, groupedQueue, othersInOrder, portalLinkOpens, portalQueue, portalRequestFromTask, portalTaskUrl, queuePosition, requestKind, rowDate, stateWord, thanksLine, whatWeNeed, needBox, directionsText,
   type PortalRequest,
 } from "./portalRequests";
 import { orderRequests, type ClientRequest } from "./clientRequests";
@@ -193,5 +193,47 @@ describe("what we need, at the top of the task page", () => {
     const bare = portalRequestFromTask(task(steps), { firstName: "Carol", reviewOpen: false })!;
     expect(whatWeNeed(bare).line).toBe('We need your reply to our email "Let Carol know the changes are done"');
     for (const w of [whatWeNeed(r).line, whatWeNeed(bare).line]) expect(w).not.toMatch(/[-–—]/);
+  });
+});
+
+describe("the box at the top of the task page", () => {
+  const step = (s: Partial<Subtask>): Subtask => ({ id: "s1", title: "Step", done: false, ...s }) as Subtask;
+  const task = (title: string, subtasks: Subtask[]) => ({ id: "t1", title, clientId: "cl_pam", projectId: "p1", due: null, status: "waiting", waitingOnClient: false, subtasks });
+  const pamDirections = "Your home page shows your Google rating.\n\nWe need three to six quotes from clients happy to be quoted.";
+
+  it("holds the title and the task's directions in full, not the ask twice (Pam)", () => {
+    const r = portalRequestFromTask(task("Approve testimonials for the website", [step({ title: "Approve testimonials for the website", finishWhen: "reply" })]), { firstName: "Pam", reviewOpen: false })!;
+    expect(needBox("Approve testimonials for the website", pamDirections, r)).toEqual({
+      title: "Approve testimonials for the website", line: null, directions: pamDirections, reply: false, emailId: null, email: null,
+    });
+  });
+  it("an ask that says more than the title gets its own line, over the task's directions", () => {
+    const r = portalRequestFromTask(task("Website Upgrade 2026", [step({ title: "Carol: send your pet care details", finishWhen: "reply" })]), { firstName: "Carol", reviewOpen: false })!;
+    const b = needBox("Website Upgrade 2026", "Prices for walks, and which towns you cover.", r);
+    expect(b.line).toBe("Send your pet care details");
+    expect(b.directions).toBe("Prices for walks, and which towns you cover.");
+  });
+  it("the step's own directions come first, and the ask taken from their first line is not said twice", () => {
+    const r = portalRequestFromTask(task("Website Upgrade 2026", [step({ title: "Wait for Carol", notes: "<p>Pick the class times for November.</p><p>Two a week is plenty.</p>", finishWhen: "reply" })]), { firstName: "Carol", reviewOpen: false })!;
+    const b = needBox("Website Upgrade 2026", "Step 1 context", r);
+    expect(b.line).toBeNull();
+    expect(b.directions).toBe("Pick the class times for November.\n\nTwo a week is plenty.");
+  });
+  it("a wait on our email is the reply line with that email, and no other directions", () => {
+    const steps = [
+      { id: "s_tell", title: "Let Carol know the changes are done", done: true, holds: ["mail:msg_tell"], addedFor: "tell:s_x" } as Subtask,
+      { id: "s_check", title: "Check in if Carol hasn't replied", done: false, stage: "waiting", addedFor: "checkin:s_tell", due: "2026-10-16", finishWhen: "reply" } as Subtask,
+    ];
+    const email = { subject: "Your website changes are done", preview: "Done, as you asked." };
+    const r = portalRequestFromTask(task("Website Upgrade 2026", steps), { firstName: "Carol", reviewOpen: false, emails: { msg_tell: email } })!;
+    expect(needBox("Website Upgrade 2026", "Old step 1 context", r)).toEqual({
+      title: "Website Upgrade 2026", line: 'We need your reply to our email "Your website changes are done"', directions: "", reply: true, emailId: "msg_tell", email,
+    });
+  });
+  it("directions keep their paragraphs and lines, from HTML or plain text", () => {
+    expect(directionsText("<p>One.</p><p>Two<br>and a half.</p>")).toBe("One.\n\nTwo\nand a half.");
+    expect(directionsText("One.\n\nTwo.")).toBe("One.\n\nTwo.");
+    expect(directionsText("<p>Homepage: <a href=\"https://x.com\">https://x.com</a></p>")).toBe("Homepage: https://x.com");
+    expect(directionsText("<p></p>")).toBe("");
   });
 });
