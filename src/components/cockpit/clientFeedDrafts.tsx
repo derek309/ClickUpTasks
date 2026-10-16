@@ -195,7 +195,7 @@ export async function sendFromFeed(deps: Pick<FeedDraftDeps, "clientId" | "first
   const t = deps.tasksNow.current.find((x) => x.id === taskId);
   if (!t || t.status === "done") return true;
   const plan = talkStepPlan(t.subtasks, t.assigneeId, channel, TODAY);
-  const out = plan ? talkSendPatch(t, plan, channel, deps.first, () => newId("s_")) : null;
+  const out = plan ? talkSendPatch(t, plan, channel, deps.first, () => newId("s_"), undefined, subject) : null;
   if (!plan || !out) return true;
   deps.patchTask(taskId, out.patch);
   const what = channel === "sms" ? "Text" : channel === "chat" ? "Chat" : "Email";

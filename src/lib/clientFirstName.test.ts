@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientFirstName } from "./clientFirstName";
+import { clientFirstName, clientIsBusiness } from "./clientFirstName";
 
 describe("clientFirstName", () => {
   it("uses the contact's first name when the contact is a person", () => {
@@ -18,5 +18,21 @@ describe("clientFirstName", () => {
   it("falls back when there is no name at all", () => {
     expect(clientFirstName(null, "  ")).toBe("them");
     expect(clientFirstName({ name: "" }, "", "there")).toBe("there");
+  });
+  it("uses the first word of a client named for a person when the contact gives no person", () => {
+    expect(clientFirstName(null, "Carol Lindenmuth")).toBe("Carol");
+    expect(clientFirstName({ name: "" }, "Pamela Macias")).toBe("Pamela");
+    expect(clientFirstName({ name: "Unnamed contact" }, "Carol Lindenmuth")).toBe("Carol");
+  });
+  it("keeps the whole name of a client that looks like a business", () => {
+    expect(clientFirstName(null, "The Artist Workshop")).toBe("The Artist Workshop");
+    expect(clientFirstName(null, "Trinity Insurance Partners")).toBe("Trinity Insurance Partners");
+    expect(clientFirstName(null, "Lincoln Automotive")).toBe("Lincoln Automotive");
+    expect(clientFirstName(null, "Acme Widgets Sales Team West")).toBe("Acme Widgets Sales Team West");
+    expect(clientFirstName(null, "Brandon & Vanessa")).toBe("Brandon & Vanessa");
+  });
+  it("tells a business from a person", () => {
+    for (const b of ["The Artist Workshop", "Trinity Insurance Partners", "Smith Realty", "Oak Studio", "Hill Club", "Blue LLC", "Red Inc.", "One Two Three Four"]) expect(clientIsBusiness(b)).toBe(true);
+    for (const p of ["Carol Lindenmuth", "Pamela Macias", "Jack Flynn", "Mary Ann Smith"]) expect(clientIsBusiness(p)).toBe(false);
   });
 });

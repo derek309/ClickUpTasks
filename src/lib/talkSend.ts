@@ -45,7 +45,7 @@ export function talkStepPlan(subtasks: Subtask[], taskOwnerId: string | null, ch
 /** The change to the task a send makes, by its plan: null when the step
  *  can't take a check in. alsoDone is an emailing step above it that this
  *  email answered too ("Reply to media" above "Email Brian"). */
-export function talkSendPatch(task: Pick<Task, "subtasks" | "status" | "due" | "assigneeId">, plan: TalkPlan, channel: "email" | "sms" | "chat", firstName: string, makeId: () => string, now = new Date().toISOString()): { patch: Partial<Task>; alsoDone?: Subtask } | null {
+export function talkSendPatch(task: Pick<Task, "subtasks" | "status" | "due" | "assigneeId">, plan: TalkPlan, channel: "email" | "sms" | "chat", firstName: string, makeId: () => string, now = new Date().toISOString(), subject?: string | null): { patch: Partial<Task>; alsoDone?: Subtask } | null {
   const { cur, due, holder } = plan;
   if (plan.kind === "reminder") {
     const list = recordFollowUp(task.subtasks, cur.id, "email", due, now).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
@@ -65,7 +65,7 @@ export function talkSendPatch(task: Pick<Task, "subtasks" | "status" | "due" | "
     const status = statusForStep(task.status, stepStage(done.next, task.assigneeId));
     return { patch: { subtasks: list, ...(status ? { status } : {}) } };
   }
-  const made0 = addCheckInStep(task.subtasks, cur.id, firstName, due, makeId, now, channel);
+  const made0 = addCheckInStep(task.subtasks, cur.id, firstName, due, makeId, now, channel, subject);
   if (!made0) return null;
   const before = holder ? currentStep(task.subtasks) : undefined;
   const alsoDone = before && before.id !== cur.id && !before.onClient && !isHandoffStep(before, task.assigneeId) && EMAILING.test(before.title.trim())

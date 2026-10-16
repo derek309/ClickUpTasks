@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, checkInTitle, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -66,7 +66,8 @@ import { clientFirstName } from "@/lib/clientFirstName";
 import { conversationSummary } from "@/lib/conversationSummary";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices, setupHistory, recommendActions, historyKinds } from "@/lib/stepSetup";
 import { StepSetup, WhatsNextPicks, addRowsOf, type NextPick, type SetupAction, type SetupAnswer } from "./StepSetup";
-import { planOffer, replyWaiting, suggestStepActions } from "@/lib/stepSuggest";
+import { planOffer, replyWaiting, suggestStepActions, STEP_SUGGESTIONS_ON } from "@/lib/stepSuggest";
+import { replyWaitTitle, showCheckingAgain, stepRemindersOn, waitChoiceKeys } from "@/lib/stepWait";
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
 import { isPicture } from "@/lib/pictures";
@@ -1206,7 +1207,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const nudgeDays = followUp && stepDate.tone === "late" ? Math.max(1, Math.round((Date.now() - Date.parse(openStep?.at ?? followUp)) / 86_400_000)) : 0;
   const canNudge = !!openStep && !!watch && watch.kind !== "handoff" && !watchState?.met && nudgeDays > 0 && mayContactClient;
   const nudge = () => {
-    const first = client.name.split(" ")[0];
+    const first = firstName;
     const text = `Hi ${first}, just checking in on this. ${watch?.kind === "approved" ? "Let me know if it's good to go or if you'd like any changes." : "Let me know when you have a minute."}`;
     if (lastInbound && (lastInbound.channel === "chat" || lastInbound.channel === "sms")) {
       setReplyTarget((r) => ({ id: lastInbound.id, channel: lastInbound.channel as "chat" | "sms", preview: htmlToText(lastInbound.body).slice(0, 120), text, n: (r?.n ?? 0) + 1 }));
@@ -1685,7 +1686,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The day after the review's last reminder (reviewFollowUpDays).
     const date = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
     onPatch({ status: "waiting", followUpAt: date });
-    setNewStep(`Get ${client.name.split(" ")[0]}'s approval on ${name}`, date, watch);
+    setNewStep(`Get ${firstName}'s approval on ${name}`, date, watch);
   };
   const quickChip = "rounded-[5px] bg-surface px-3 py-1.5 text-[16px] font-semibold ring-1 ring-border hover:ring-accent";
   // Done, and no step after it: what happens next.
@@ -2017,7 +2018,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <InlineDate value={sub.followUpAt ?? null} onChange={(v) => onPatchSub(sub.id, { followUpAt: v })} onClear={() => onPatchSub(sub.id, { followUpAt: null })}
         emptyLabel={setADate} formatValue={(v) => (v === TODAY ? "today" : formatDue(v))} className={dateWord} />
     ) });
-    if (isActive && !sub.done) parts.push({ lead: teammate ? "you check back" : "follow up", pick: (
+    // A client's step: no follow up date while its reminders do the checking,
+    // nor one that repeats its need by date (Derek, 2026-10-16).
+    if (isActive && !sub.done && (!clientStep || showCheckingAgain({ remindersOn: stepRemindersOn(sub, canRemindClient), followUp: fu, needBy: d }))) parts.push({ lead: teammate ? "you check back" : "follow up", pick: (
       <InlineDate value={fu} onChange={(v) => moveStepDate(v)} onClear={fu ? () => moveStepDate(null) : undefined}
         emptyLabel={setADate} formatValue={formatDue} className={dateWord} />
     ) });
@@ -2057,6 +2060,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const d = sub.due ?? null;
       const tone = d ? stepDateLabel(d).tone : "later";
       const dateWord = `-mx-1 ${word} text-[16px] sm:text-[18px]`;
+      // "checking again <date>" only while the reminders are off and it is
+      // not the need by date again (Derek, 2026-10-16).
+      const checking = isActive && showCheckingAgain({ remindersOn: stepRemindersOn(sub, canRemindClient), followUp, needBy: d });
       return (
         <div data-no-open className="text-[16px] leading-snug sm:text-[18px]">
           <span className="font-semibold"><span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META.waiting.dot }} />{firstName}&apos;s turn</span>
@@ -2065,10 +2071,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <InlineDate value={d} onChange={(v) => setStepDue(sub, v, isActive)} onClear={() => onPatchSub(sub.id, { due: null })}
               emptyLabel={<span className="text-accent underline decoration-dotted underline-offset-4">set a date</span>}
               formatValue={(v) => formatDayDate(v)} className={`${dateWord} ${tone === "late" ? "text-danger" : tone === "soon" ? "text-highlight" : ""}`} />
-            {canRemindClient || (isActive && followUp) ? "," : ""}
+            {canRemindClient || checking ? "," : ""}
           </span>
-          {canRemindClient && <>{" "}{clientRemindWord(sub)}{isActive && followUp ? "," : ""}</>}
-          {isActive && followUp && <span className="text-muted">{" "}checking again{" "}
+          {canRemindClient && <>{" "}{clientRemindWord(sub)}{checking ? "," : ""}</>}
+          {checking && <span className="text-muted">{" "}checking again{" "}
             <span className="inline-flex items-baseline"><InlineDate value={followUp} onChange={(v) => moveStepDate(v)} formatValue={(v) => formatDue(v)} className={`${dateWord} text-muted`} /></span>
           </span>}
         </div>
@@ -2352,7 +2358,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>
               {/* Numbered, so "step 2" means the same to everyone (Derek, 2026-10-12). */}
               {!sub.fromClient && steps.some((x) => x.id === sub.id) && <span className="mr-1.5 tabular-nums text-muted">{steps.findIndex((x) => x.id === sub.id) + 1}.</span>}
-              {asksWhatsNext(sub) ? "What's next?" : sub.title}
+              {asksWhatsNext(sub) ? "What's next?" : stepName(sub)}
             </span>
             {say && <span className={`text-[16px] font-semibold ${sayTone}`}>{say}</span>}
             <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[16px]">
@@ -2410,7 +2416,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       <li key={sub.id} data-step={sub.id} aria-current="step" className={`px-4 py-4 transition-shadow duration-700 sm:px-5 ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${STEP_BAR[t.state] ?? ""} ${flashId === sub.id ? "ring-2 ring-inset ring-accent" : ""}`}>
         {nextInline() ? nextBody(true) : (
-          <CurrentStep key={sub.id} {...handOn(sub)} sub={sub} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
+          <CurrentStep key={sub.id} {...handOn(sub)} sub={shownStep(sub)} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
             messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
             clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
             addOptions={addOptionsFor(sub)}
@@ -3363,7 +3369,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // under Send before it goes.
   const talkStepPlan = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): TalkPlan | null =>
     planTalkStep(taskRef.current.subtasks, task.assigneeId, channel, TODAY, followUpDate, stepId);
-  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): boolean => {
+  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string, subject?: string | null): boolean => {
     // After this's suggestion is taken by the send, as by Done (Derek, 2026-10-15).
     const first = talkStepPlan(channel, followUpDate, stepId);
     if (first?.kind === "finish") takeAfterSuggestion(first.cur);
@@ -3373,7 +3379,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Sent from a message step made from Quick step: back to the task, where
     // its check in shows in the steps (Derek, 2026-10-14).
     if (talkReturn.current === cur.id) { talkReturn.current = null; setOpenStepPage(null); }
-    const out = talkSendPatch({ subtasks: taskRef.current.subtasks, status: task.status, due: task.due, assigneeId: task.assigneeId }, plan, channel, firstName, () => newId("s_"));
+    const out = talkSendPatch({ subtasks: taskRef.current.subtasks, status: task.status, due: task.due, assigneeId: task.assigneeId }, plan, channel, firstName, () => newId("s_"), undefined, subject);
     if (!out) return false;
     if (plan.kind === "reminder") {
       onPatch(out.patch);
@@ -3413,7 +3419,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (plan.after) { afterStarted(plan.after.id, channel !== "email"); return true; }
     const checkIn = list.find((x) => x.addedFor === `checkin:${cur.id}`) ?? list.find((x) => !x.done && x.finishWhen === "reply");
     if (checkIn) setSentNext({ taskId: task.id, stepId: checkIn.id, via: channel });
-    if (checkIn?.addedFor === `checkin:${cur.id}`) setNewStep(`Check in if ${firstName} hasn't replied`, due, "reply");
+    if (checkIn?.addedFor === `checkin:${cur.id}`) setNewStep(checkInTitle(firstName, channel === "email" ? subject : null), due, "reply");
     return true;
   };
   // Following up while waiting on them (Derek, 2026-10-13: "follow up by
@@ -3437,17 +3443,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return (
       // Said once (Derek, 2026-10-14): the title says it waits, the email it
       // waits on sits above; when it checks again is each choice's tooltip.
-      <NextChoices row choices={[
-        ...(hasMessaging && messageDest?.email ? [heldDraft
-          ? { label: "Send the follow up", says: "Opens the follow up email held on this step, to read and send. It keeps waiting.", onClick: () => openWork("email") }
-          : { label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }] : []),
-        ...(messageDest?.phone ? [{ label: `Text ${firstName}`, says: "A text already started, to change and send here. It keeps waiting.", onClick: startText }] : []),
-        { label: `I called ${firstName}`, says: "Notes the call and checks again in 3 business days.", onClick: () => {
+      // No Email a follow up while the reminders are on: they queue the
+      // follow up for review in Reminders (Derek, 2026-10-16).
+      <NextChoices row choices={waitChoiceKeys({ canEmail: hasMessaging && !!messageDest?.email, heldDraft, canText: !!messageDest?.phone, remindersOn: stepRemindersOn(ps, canRemindClient) }).map((k) => k === "send"
+        ? { label: "Send the follow up", says: "Opens the follow up email held on this step, to read and send. It keeps waiting.", onClick: () => openWork("email") }
+        : k === "email" ? { label: "Email a follow up", says: "Opens an email held on this step. It keeps waiting.", onClick: () => { onPatch({ subtasks: holdOnStep(taskRef.current.subtasks, ps.id, "email") }); startDraftEmail(undefined, true); } }
+        : k === "text" ? { label: `Text ${firstName}`, says: "A text already started, to change and send here. It keeps waiting.", onClick: startText }
+        : { label: `I called ${firstName}`, says: "Notes the call and checks again in 3 business days.", onClick: () => {
           const due = addBusinessDaysIso(TODAY, 3);
           onPatch({ subtasks: recordFollowUp(taskRef.current.subtasks, ps.id, "call", due), followUpAt: due });
           pushToast(`Call noted. Checking again ${formatDue(due)}.`);
-        } },
-      ]} link={{ label: `${firstName} answered another way`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => completeStep(ps.id, `${firstName} replied`) }} />
+        } })} link={{ label: `${firstName} answered another way`, says: "They replied another way: ticks this step and asks what comes next.", onClick: () => completeStep(ps.id, `${firstName} replied`) }} />
     );
   };
   // The draft email line: shown whenever a draft exists, from Claude, the drafter
@@ -3517,7 +3523,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       if (list) onPatch({ subtasks: list });
       return;
     }
-    if (finishTalkStep("email", email.followUpDate)) return;
+    if (finishTalkStep("email", email.followUpDate, undefined, email.subject)) return;
     pushToast("Email sent");
     // Sent and waiting on them: the follow up date is when they get a
     // reminder (Derek, 2026-10-07: "send and move the follow up, seamless").
@@ -4180,7 +4186,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const stepPlanBits = (sub: Subtask, isActive: boolean, light = false) => {
     // Not an email the client's own email on the step is there to Reply to
     // (planOffer, Derek 2026-10-14: one way to write back).
-    const offer = sub.assigneeId === CLAUDE_ID ? null : planOffer(sub) as DeliverableKey | null;
+    const offer = sub.assigneeId === CLAUDE_ID || !STEP_SUGGESTIONS_ON ? null : planOffer(sub) as DeliverableKey | null;
     const makes = offer && (offer === "email" ? hasMessaging : canHaveDocument) ? offer : null;
     const needs = sub.needs ?? [];
     // "Send to Brian again": the review is back on this step; open it to send.
@@ -4223,6 +4229,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const before = sub.startedAt ? Date.parse(sub.startedAt) + 5 * 60_000 : Date.now();
     return out.filter((m) => Date.parse(m.at) <= before).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
   };
+  // A check in reads as what it waits for, "Carol's reply to: <the email's
+  // subject>", not "Check in if Carol hasn't replied" (Derek, 2026-10-16).
+  // Display only: the stored name stays until someone renames it.
+  const stepName = (sub: Subtask): string => sub.finishWhen !== "reply" ? sub.title
+    : replyWaitTitle(sub, task.subtasks, firstName, (id) => (messages ?? []).find((m) => m.id === id)?.subject, waitedEmail(sub)?.subject);
+  const shownStep = (sub: Subtask): Subtask => { const t = stepName(sub); return t === sub.title ? sub : { ...sub, title: t }; };
   // Client work on a step sorts by dragging its grip (Derek, 2026-10-11):
   // the order is the step's own list, documents, reviews, links and files.
   const [dragHeld, setDragHeld] = useState<{ stepId: string; key: string; grabbed: boolean } | null>(null);
@@ -4902,7 +4914,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const at = steps.findIndex((x) => x.id === ps.id);
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
-            <StepPage task={task} sub={ps} key={ps.id} {...handOn(ps)} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
+            <StepPage task={task} sub={shownStep(ps)} key={ps.id} {...handOn(ps)} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
               nextPanel={sentStep ? nextBody(true) : undefined}
               onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
@@ -4950,7 +4962,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   setEmailOpenNonce((n) => n + 1);
                 } else startDraftEmail(undefined, true);
               }}
-              onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id); } : undefined}
+              onSendEmail={onSendTaskMessage ? (subject, body) => { onSendTaskMessage("email", subject, plainTextToHtml(body)); finishTalkStep("email", null, ps.id, subject); } : undefined}
               followBox={nudgeBoxFor(ps, isCur)}
               transcript={transcriptFor(ps)}
               planBits={!ps.done ? stepPlanBits(ps, isCur) : undefined}

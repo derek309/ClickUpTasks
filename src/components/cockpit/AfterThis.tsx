@@ -1,6 +1,6 @@
 "use client";
 
-// After this (Derek, 2026-10-15, step-flow-mockup.html): the bottom of the
+// After this, shown as "Next step" (Derek, 2026-10-15, step-flow-mockup.html; renamed 2026-10-16): the bottom of the
 // current step, on its page and on the task page. The next step's name, then
 // one sentence like the step's own, each word a picker: "● Pamela's turn,
 // check in Fri, Oct 17, waiting for Pamela's reply, 🔔 add a reminder". Whose
@@ -154,8 +154,13 @@ export function AfterThis({ next, suggested = false, clientFirst, ownerId, meId,
   function setRemind(x: StepRemind | null) { onRemind(x); }
   const dot = whoKey === "client" ? "#d97706" : whoKey === CLAUDE_ID ? "#ea580c" : !whoKey || whoKey === meId ? "#ef4444" : "#d97706";
   return (
-    <section aria-label="After this" className="flex min-w-0 flex-col gap-2">
-      <h3 className="text-[17px] font-bold">After this</h3>
+    <section aria-label="Next step" className="flex min-w-0 flex-col gap-2">
+      {/* Named "Next step", with when it starts under it (Derek, 2026-10-16:
+          "After this" read as unclear). */}
+      <div className="flex flex-col">
+        <h3 className="text-[17px] font-bold">Next step</h3>
+        <p className="text-[16px] text-muted">Starts when you click Done</p>
+      </div>
       <input value={name} aria-label="The next step" placeholder="Name the next step, or leave it for later" autoComplete="off" name="next-step"
         onFocus={() => setDraft(name)} onBlur={() => setDraft(null)}
         onChange={(e) => { setDraft(e.target.value); onName(e.target.value); }}

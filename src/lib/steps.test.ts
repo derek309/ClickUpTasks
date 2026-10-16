@@ -176,7 +176,7 @@ describe("steps added by what happens", () => {
   });
   it("sending the email starts a check-in that a reply finishes", () => {
     const out = addCheckInStep([s("t", "Let Brian know")], "t", "Brian", "2026-10-14", id, now)!;
-    expect(out[1]).toMatchObject({ title: "Check in if Brian hasn't replied", stage: "waiting", due: "2026-10-14", finishWhen: "reply" });
+    expect(out[1]).toMatchObject({ title: "Brian's reply", stage: "waiting", due: "2026-10-14", finishWhen: "reply" });
   });
 });
 

@@ -30,7 +30,7 @@ describe("talkSendPatch", () => {
     const out = talkSendPatch({ subtasks: subs, status: "todo", due: "2026-10-15", assigneeId: null }, plan, "sms", "Pamela", makeId, NOW)!;
     const list = out.patch.subtasks!;
     expect(list[0]).toMatchObject({ id: "a", done: true, outcome: "Text sent to Pamela", draftMessage: undefined });
-    expect(list[1]).toMatchObject({ title: "Check in if Pamela hasn't replied", finishWhen: "reply", due: "2026-10-19" });
+    expect(list[1]).toMatchObject({ title: "Pamela's reply", finishWhen: "reply", due: "2026-10-19" });
     expect(out.patch.followUpAt).toBe("2026-10-19");
     expect(out.patch.due).toBe("2026-10-19");
   });

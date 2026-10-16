@@ -112,15 +112,18 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
       <div className="flex min-w-0 items-center gap-3 px-3 py-2">
         <span aria-hidden className="text-[18px]">✉️</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[16px] font-semibold">{message.subject?.trim() || "Email"}</span>
+          {/* Show sits beside the subject, so the line under it never wraps
+              a lone link onto a phone's next line (Derek, 2026-10-16). */}
+          <span className="flex min-w-0 items-baseline gap-3">
+            <span className="min-w-0 flex-1 truncate text-[16px] font-semibold">{message.subject?.trim() || "Email"}</span>
+            <ShowLink open={open} controls={previewId} onToggle={toggle} />
+          </span>
           <span className="flex flex-wrap items-center gap-x-2 text-[16px] text-muted">
             <span>Sent {timeAgo(message.at)}</span>
             <span aria-hidden>·</span>
             {reply
               ? <span className="font-semibold" style={{ color: tone.text }}>{firstName} replied by {CHANNEL_WORD[reply.channel] ?? reply.channel} {timeAgo(reply.at)}</span>
               : <span>No reply yet</span>}
-            <span aria-hidden>·</span>
-            <ShowLink open={open} controls={previewId} onToggle={toggle} />
           </span>
         </span>
         {onRemove && (

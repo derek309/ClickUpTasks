@@ -18,7 +18,7 @@ import { ActionMenu, type ActionMenuItem } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
-import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
+import { dedupeSuggestions, suggestStepActions, STEP_SUGGESTIONS_ON, type StepSuggestKind } from "@/lib/stepSuggest";
 import { ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
 import { OnThisStep } from "./OnThisStep";
 import type { HistoryStep } from "@/lib/stepSetup";
@@ -225,8 +225,9 @@ export function useStepDirections({ sub, onPatchSub, startEditing = false, inlin
 
 /** A step's to dos, the same on its page and on the task page: tick, add,
  *  delete, ask the client about some in one email; what the client sent from
- *  their portal ticks off the same way. `inline` (the task page): no heading,
- *  and "+ Add a to do" is always there. */
+ *  their portal ticks off the same way. `inline` (the task page): no heading.
+ *  No "+ Add a to do" line until the step has to dos or Checklist is picked
+ *  (start): Checklist is the one way to begin one (Derek, 2026-10-16). */
 export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos, startOpen = false, inline = false }: {
   sub: Subtask;
   onPatchSub: (patch: Partial<Subtask>) => void;
@@ -246,6 +247,10 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
   const [todoDraft, setTodoDraft] = useState("");
   const [showTodos, setShowTodos] = useState(startOpen);
   const ref = useRef<HTMLInputElement>(null);
+  // Checklist picked: the add box shows and takes the cursor once drawn.
+  const [focusN, setFocusN] = useState(0);
+  useEffect(() => { if (focusN) ref.current?.focus(); }, [focusN]);
+  const start = () => { setShowTodos(true); setFocusN((n) => n + 1); };
   const setTodos = (next: StepTodo[]) => onPatchSub({ todos: next.length ? next : undefined });
   // To-dos picked to ask the client about, in one email.
   const [asking, setAsking] = useState<string[]>([]);
@@ -261,7 +266,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
     setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
     if (!t.done && t.commentId) onTodoDone?.(t);
   };
-  const show = inline || todos.length > 0 || clientItems.length > 0 || showTodos;
+  const show = todos.length > 0 || clientItems.length > 0 || showTodos || !!todoDraft;
   const node = !show ? null : (
     <section aria-labelledby={inline ? undefined : headId} aria-label={inline ? "To do" : undefined} className={`flex flex-col ${inline ? "gap-1" : "gap-2"}`}>
       {!inline && <h3 id={headId} className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>}
@@ -328,7 +333,7 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
       </div>
     </section>
   );
-  return { todos, show, showTodos, setShowTodos, ref, node, typing: todoDraft };
+  return { todos, show, showTodos, setShowTodos, start, ref, node, typing: todoDraft };
 }
 
 /** How a step ends, the same on its page and on the task page: Done (its
@@ -568,9 +573,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
     : (sub.holds ?? []).includes(k);
   const optionFor = (k: StepSuggestKind) => options.find((o) => o.key === k);
   const named = whatsNext ? [] : suggestStepActions(sub.title, first);
+  // Off for now (STEP_SUGGESTIONS_ON): + Add lists every action.
   // One way to each kind of work: none the plan offers already, and no
   // "Email …" while the client's email here waits for its Reply (2026-10-14).
-  const suggestions = sub.done || sub.onClient || outFor !== undefined ? [] : dedupeSuggestions(named, sub)
+  const suggestions = !STEP_SUGGESTIONS_ON || sub.done || sub.onClient || outFor !== undefined ? [] : dedupeSuggestions(named, sub)
     .filter((x) => !holdsKind(x.kind) && optionFor(x.kind) && !optionFor(x.kind)!.disabled)
     .map((x) => ({ ...x, onPick: optionFor(x.kind)!.onPick }));
   // The step's email is written and everything else its name asks for is on

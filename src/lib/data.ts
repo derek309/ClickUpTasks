@@ -3284,7 +3284,15 @@ export function addTellClientStep(subtasks: Subtask[], doneId: string, clientFir
 
 /** The email went: that step is done, and a check-in waits three business
  *  days, finished by the client's reply. */
-export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstName: string, due: string, makeId: () => string, now = new Date().toISOString(), via: "email" | "sms" | "chat" = "email"): Subtask[] | null {
+/** The check in's name: what it waits for, "Carol's reply to: Your website
+ *  changes are done" (the email's subject, its "Re:" off), else "Carol's
+ *  reply" (Derek, 2026-10-16; it was "Check in if Carol hasn't replied"). */
+export function checkInTitle(clientFirstName: string, subject?: string | null): string {
+  const s = (subject ?? "").replace(/\s+/g, " ").trim().replace(/^((re|fwd?):\s*)+/i, "").trim();
+  return s ? `${clientFirstName}'s reply to: ${s}` : `${clientFirstName}'s reply`;
+}
+
+export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstName: string, due: string, makeId: () => string, now = new Date().toISOString(), via: "email" | "sms" | "chat" = "email", subject?: string | null): Subtask[] | null {
   const key = `checkin:${sentId}`;
   if (subtasks.some((s) => s.addedFor === key)) return null;
   const at = subtasks.findIndex((s) => s.id === sentId);
@@ -3296,7 +3304,7 @@ export function addCheckInStep(subtasks: Subtask[], sentId: string, clientFirstN
   const waiting = sent.find((s) => !s.done && s.finishWhen === "reply" && s.id !== sentId);
   if (waiting) return recordFollowUp(sent, waiting.id, via, due, now);
   const list = sent;
-  list.splice(at + 1, 0, { id: makeId(), title: `Check in if ${clientFirstName} hasn't replied`, done: false, stage: "waiting", addedFor: key, due, finishWhen: "reply", startedAt: now });
+  list.splice(at + 1, 0, { id: makeId(), title: checkInTitle(clientFirstName, via === "email" ? subject : null), done: false, stage: "waiting", addedFor: key, due, finishWhen: "reply", startedAt: now });
   return list;
 }
 

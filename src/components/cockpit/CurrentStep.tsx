@@ -8,7 +8,7 @@
 // useStepTodos), so they edit and save the same way in both places.
 import { useState } from "react";
 import { htmlToText, type Message, type StepTodo, type Subtask } from "@/lib/data";
-import { dedupeSuggestions, suggestStepActions, type StepSuggestKind } from "@/lib/stepSuggest";
+import { dedupeSuggestions, suggestStepActions, STEP_SUGGESTIONS_ON, type StepSuggestKind } from "@/lib/stepSuggest";
 import { StepFinish, useStepDirections, useStepTodos, type StepSetupProps } from "./StepPage";
 import { StepSetup, ADD_SHORT, addRowsOf } from "./StepSetup";
 import { JoinNowLine } from "./MeetNowSheet";
@@ -111,18 +111,18 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   const options: AddOption[] = [
     // Not offered once the step has them (Derek, 2026-10-14).
     ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
-    { key: "checklist", label: "Checklist", onPick: () => todo.ref.current?.focus() },
+    { key: "checklist", label: "Checklist", onPick: todo.start },
     ...addOptions,
   ];
   // The step's main quick action: what its name suggests, as on its page,
-  // gone once the step holds that kind of work.
+  // gone once the step holds that kind of work. Off for now (STEP_SUGGESTIONS_ON).
   const holdsKind = (k: StepSuggestKind) =>
     k === "checklist" ? todo.todos.length > 0 || clientItems.length > 0
     : k === "text" ? sub.draftMessage?.channel === "sms"
     : (sub.holds ?? []).includes(k);
   const optionFor = (k: StepSuggestKind) => options.find((o) => o.key === k);
   const named = whatsNext ? [] : suggestStepActions(sub.title, firstName);
-  const quick = sub.done || sub.onClient || outFor !== undefined ? null : dedupeSuggestions(named, sub)
+  const quick = !STEP_SUGGESTIONS_ON || sub.done || sub.onClient || outFor !== undefined ? null : dedupeSuggestions(named, sub)
     .filter((x) => !holdsKind(x.kind) && optionFor(x.kind) && !optionFor(x.kind)!.disabled)
     .map((x) => ({ label: x.label, onPick: optionFor(x.kind)!.onPick }))[0] ?? null;
   // Its email is written and all it asks for is on it: finishing is sending.
@@ -223,7 +223,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
               <OnThisStep first={firstName} options={options}
                 lead={quick ? [{ key: "quick", label: quick.label, onPick: quick.onPick }] : []}
                 onDirections={dir.open ? undefined : dir.start}
-                onChecklist={() => todo.ref.current?.focus()}
+                onChecklist={todo.start}
                 onLink={onAddLink ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
                 onAttach={onAttachFiles} />
             )}

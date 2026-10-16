@@ -11,6 +11,12 @@
  *  holds that kind of work. A call needs nothing made, so it suggests nothing. */
 // An HTML review is offered as the Email review (a newsletter, campaign or
 // blast) or the Page review (a page, landing or site): htmlReview.ts.
+/** The step's suggested action on its On this step row ("Build the page
+ *  review", "Write the document") and the plan's "Make the …" button, on the
+ *  task page and the step's page. Off for now (Derek, 2026-10-16: "remove the
+ *  suggestions for now"); + Add still lists every action. True brings them back. */
+export const STEP_SUGGESTIONS_ON = false;
+
 export type StepSuggestKind = "email" | "text" | "doc" | "image" | "page:email" | "page:page" | "video" | "checklist";
 export type StepSuggestion = { kind: StepSuggestKind; label: string };
 

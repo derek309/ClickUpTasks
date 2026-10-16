@@ -2,14 +2,15 @@
 
 // "On this step" (Derek, 2026-10-15, step-flow-mockup.html): one quiet line
 // in place of the "Links and files" heading, its paste line and the "Actions
-// +" row. Directions · Checklist · Link · Attach · ＋ Add ▾. What the step
-// holds still shows under it. Pasting a link or dropping a file anywhere on
-// the page still adds it here; the line no longer says so.
+// +" row. What the step holds still shows under it. Pasting a link or
+// dropping a file anywhere on the page still adds it here.
 //
-// ＋ Add ▾ holds the rest, grouped: Make to review (Document, Image, HTML
-// review, Video), Talk to the client (Text, Chat in the portal, Meet), then
-// Make it a task and Transcript. The app's own icons, no emoji. On a phone it
-// opens as a sheet at the bottom.
+// One line that fits a phone (Derek, 2026-10-16): Directions (while the step
+// has none) · Checklist · ＋ Add ▾. ＋ Add ▾ holds the rest: Link and Attach a
+// file first, then Make to review (Document, Image, HTML review, Video), Talk
+// to the client (Text, Chat in the portal, Meet), then Make it a task and
+// Transcript. On a phone Directions goes into it too, so the line never wraps.
+// The app's own icons, no emoji. On a phone it opens as a sheet at the bottom.
 import { useState } from "react";
 import { I } from "./ui";
 import { ADD_ICON } from "./StepSetup";
@@ -45,19 +46,37 @@ export function OnThisStep({ first, options, onDirections, onChecklist, onLink, 
   /** Missing when the step has them already (Directions) or can't take them. */
   onDirections?: () => void;
   onChecklist?: () => void;
+  /** Link and Attach a file: the first items in ＋ Add ▾. */
   onLink?: () => void;
   onAttach?: () => void;
-  /** What the step's name suggests ("Write the document"), as a word before ＋ Add. */
+  /** What the step's name suggests ("Write the document"), as a word before
+   *  ＋ Add on a wider screen (off for now: STEP_SUGGESTIONS_ON). */
   lead?: { key: string; label: string; onPick: () => void }[];
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   // Escape closes the menu, not the step page under it.
   useEscapeToClose(() => setOpen(false), open);
-  const groups = addMenuGroups(options, first);
-  const word = "inline-flex min-h-9 items-center gap-1 rounded-[5px] px-1 text-[16px] font-semibold text-accent hover:bg-background";
+  const attach: OnStepOption[] = [
+    ...(onLink ? [{ key: "link", label: "Link", onPick: onLink }] : []),
+    ...(onAttach ? [{ key: "attach", label: "Attach a file", onPick: onAttach }] : []),
+  ];
+  // On a phone the words that don't fit the line lead the menu.
+  const phoneOnly: OnStepOption[] = [
+    ...lead.map((x) => ({ key: `lead:${x.key}`, label: x.label, onPick: x.onPick })),
+    ...(onDirections ? [{ key: "directions", label: "Directions", onPick: onDirections }] : []),
+  ];
+  const rest = addMenuGroups(options, first);
+  const groupsFor = (phone: boolean) => [
+    ...(phone && phoneOnly.length ? [{ label: null as string | null, items: phoneOnly }] : []),
+    ...(attach.length ? [{ label: null as string | null, items: attach }] : []),
+    ...rest,
+  ];
+  const deskGroups = groupsFor(false);
+  const word = "inline-flex min-h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] px-1 text-[16px] font-semibold text-accent hover:bg-background";
+  const ICONS: Record<string, typeof I.link | undefined> = { link: I.link, attach: I.clip, directions: I.clipboard };
   const item = (o: OnStepOption) => {
-    const Icon = icon(o.key);
+    const Icon = ICONS[o.key] ?? icon(o.key);
     return (
       <button key={o.key} role="menuitem" disabled={o.disabled} onClick={() => { setOpen(false); o.onPick(); }}
         className="flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[16px] hover:bg-background disabled:opacity-50">
@@ -70,35 +89,34 @@ export function OnThisStep({ first, options, onDirections, onChecklist, onLink, 
       </button>
     );
   };
-  const menu = groups.map((g, i) => (
+  const menu = (phone: boolean) => groupsFor(phone).map((g, i) => (
     <div key={g.label ?? `g${i}`} className={i > 0 ? "mt-1 border-t pt-1" : undefined}>
       {g.label && <div className="px-2.5 pb-0.5 pt-1.5 text-[16px] text-muted">{g.label}</div>}
       {g.items.map(item)}
     </div>
   ));
+  const hasMenu = deskGroups.length > 0 || phoneOnly.length > 0;
   return (
-    <div role="group" aria-label="On this step" className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="text-[16px] font-semibold text-muted">On this step</span>
-      {lead.map((x) => <button key={x.key} onClick={x.onPick} className={word}>{x.label}</button>)}
-      {onDirections && <button onClick={onDirections} className={word}>Directions</button>}
+    <div role="group" aria-label="On this step" className="flex min-w-0 flex-nowrap items-center gap-x-3">
+      <span className="shrink-0 whitespace-nowrap text-[16px] font-semibold text-muted">On this step</span>
+      {lead.map((x) => <button key={x.key} onClick={x.onPick} className={`${word} max-sm:hidden`}>{x.label}</button>)}
+      {onDirections && <button onClick={onDirections} className={`${word} max-sm:hidden`}>Directions</button>}
       {onChecklist && <button onClick={onChecklist} className={word}>Checklist</button>}
-      {onLink && <button onClick={onLink} className={word}><I.link className="h-4 w-4" />Link</button>}
-      {onAttach && <button onClick={onAttach} className={word}><I.plus className="h-4 w-4" />Attach</button>}
-      {groups.length > 0 && (
-        <span className="relative">
+      {hasMenu && (
+        <span className="relative shrink-0">
           <button aria-haspopup="menu" aria-expanded={open} title="Add to this step"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               const w = Math.min(300, window.innerWidth - 16);
-              const h = Math.min(window.innerHeight - 16, groups.reduce((n, g) => n + g.items.length * 44 + (g.label ? 32 : 8), 14));
+              const h = Math.min(window.innerHeight - 16, deskGroups.reduce((n, g) => n + g.items.length * 44 + (g.label ? 32 : 8), 14));
               setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)), top: r.bottom + h + 8 > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4 });
               setOpen((o) => !o);
             }} className={word}><I.plus className="h-4 w-4" />Add ▾</button>
           {open && (<>
             <div className="fixed inset-0 z-30 hidden sm:block" onClick={() => setOpen(false)} />
             <div role="menu" aria-label="Add to this step" style={{ top: pos.top, left: pos.left }}
-              className="fixed z-40 hidden max-h-[calc(100vh-16px)] w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-[5px] border bg-surface p-1.5 shadow-lg sm:block">{menu}</div>
-            <MenuSheet label="Add to this step" onClose={() => setOpen(false)}>{menu}</MenuSheet>
+              className="fixed z-40 hidden max-h-[calc(100vh-16px)] w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-[5px] border bg-surface p-1.5 shadow-lg sm:block">{menu(false)}</div>
+            <MenuSheet label="Add to this step" onClose={() => setOpen(false)}>{menu(true)}</MenuSheet>
           </>)}
         </span>
       )}
