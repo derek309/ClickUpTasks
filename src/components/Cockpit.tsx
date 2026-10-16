@@ -111,7 +111,7 @@ import { orderLists } from "@/lib/listOrder";
 import { REMINDER_LINK_LABEL, reminderEmail, reminderGroups } from "@/lib/portalReminders";
 import { reminderLine, reminderSettings, type ClientReminders } from "@/lib/reminderSchedule";
 import { ClientNeeds } from "./cockpit/ClientNeeds";
-import { RemindersView } from "./cockpit/RemindersView";
+import { RemindersView, prefetchReminders } from "./cockpit/RemindersView";
 import { ClientRequestsList } from "./cockpit/ClientRequestsList";
 import { orderRequests, requestFromTask, type ClientRequest } from "@/lib/clientRequests";
 import { addFoldIns, foldInTasks, type FoldInPick } from "@/lib/foldIn";
@@ -202,6 +202,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [myEmail, setMyEmail] = useState<string | null>(null);
   // From the saved session, not a call to the server (loading plan step 1).
   useEffect(() => { supabase.auth.getSession().then(({ data }) => setMyEmail(data.session?.user.email ?? null)).catch(() => {}); }, []);
+  // Opened on Reminders: its data starts loading now, not after the app's.
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("view") === "reminders") prefetchReminders(); }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);

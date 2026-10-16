@@ -337,13 +337,16 @@ const stageOf = (id: string, stepNeedBy: string | null, at: string): string => {
  *  on top), for the Reminders view. */
 export async function remindersOverview(o: { sentClientId?: string | null; sentLimit?: number; comingDays?: number } = {}): Promise<{ toReview: ReminderItem[]; comingUp: (ComingUp & { clientName: string; taskTitle: string | null; ask: string | null; stepId: string | null })[]; sent: ReminderItem[] }> {
   const COLS = "id, client_id, task_id, status, scheduled_at, sent_message_id, subject, body, created_by";
-  const { data: review } = await supabaseAdmin.from("scheduled_messages").select(COLS).eq("status", REVIEW_STATUS).order("scheduled_at", { ascending: true }).limit(200);
   let sentQ = supabaseAdmin.from("scheduled_messages").select(COLS).or([...CLIENT_REMINDER_PREFIXES, REMINDER_MESSAGE_PREFIX].map((p) => `id.like.${p}%`).join(","))
     .in("status", ["sent", "pending", "sending", "failed"]);
   if (o.sentClientId) sentQ = sentQ.eq("client_id", o.sentClientId);
-  const { data: sent } = await sentQ.order("scheduled_at", { ascending: false }).limit(o.sentLimit ?? 150);
-  const states = await loadClientStates();
-  const rows = await loadReminderRows([...states.keys()]);
+  // Side by side, not one after another: the page took 4 seconds to answer
+  // (Derek, 2026-10-16: "the reminders page takes about 15 seconds to load").
+  const [{ data: review }, { data: sent }, { states, rows }] = await Promise.all([
+    supabaseAdmin.from("scheduled_messages").select(COLS).eq("status", REVIEW_STATUS).order("scheduled_at", { ascending: true }).limit(200),
+    sentQ.order("scheduled_at", { ascending: false }).limit(o.sentLimit ?? 150),
+    loadClientStates().then(async (states) => ({ states, rows: await loadReminderRows([...states.keys()]) })),
+  ]);
   const history = historyByStep(rows);
   const today = todayPacific();
   const comingRaw: ComingUp[] = [];
@@ -357,11 +360,20 @@ export async function remindersOverview(o: { sentClientId?: string | null; sentL
   }
   const all = [...((review ?? []) as any[]), ...((sent ?? []) as any[])];
   const clientIds = [...new Set([...all.map((r) => r.client_id as string), ...comingRaw.map((c) => c.clientId)])];
-  const { data: clients } = clientIds.length ? await supabaseAdmin.from("clients").select("id, name").in("id", clientIds) : { data: [] as any[] };
-  const nameOf = new Map(((clients ?? []) as any[]).map((c) => [c.id as string, c.name as string]));
   const taskIds = [...new Set(all.map((r) => r.task_id).filter(Boolean) as string[])];
-  // Each open request's ask as the client reads it (stepAskWords).
-  const subjects = await replySubjects([...states.values()].flatMap((st) => st.requests));
+  const knownTasks = new Set([...states.values()].flatMap((st) => st.tasks.map((t) => t.id)));
+  const missing = taskIds.filter((id) => !knownTasks.has(id));
+  const reviewClients = [...new Set(((review ?? []) as any[]).map((r) => r.client_id as string))];
+  // Each open request's ask as the client reads it (stepAskWords), the
+  // clients' names, the tasks the sent ones were on and who each goes to.
+  const [{ data: clients }, subjects, missingTasks, toPairs] = await Promise.all([
+    clientIds.length ? supabaseAdmin.from("clients").select("id, name").in("id", clientIds) : Promise.resolve({ data: [] as any[] }),
+    replySubjects([...states.values()].flatMap((st) => st.requests)),
+    Promise.all(Array.from({ length: Math.ceil(missing.length / 200) }, (_, i) =>
+      supabaseAdmin.from("tasks").select("id, title, subtasks").in("id", missing.slice(i * 200, i * 200 + 200)).then(({ data }) => (data ?? []) as any[]))).then((x) => x.flat()),
+    Promise.all(reviewClients.map(async (id) => [id, (await resolveContact(id).catch(() => null))?.email ?? null] as const)),
+  ]);
+  const nameOf = new Map(((clients ?? []) as any[]).map((c) => [c.id as string, c.name as string]));
   const firstOf = (clientId: string) => String(nameOf.get(clientId) ?? "").trim().split(/\s+/)[0] ?? "";
   const askOf = new Map<string, string>();
   for (const st of states.values()) for (const r of st.requests) askOf.set(r.stepId, requestAsk(r, firstOf(st.clientId), subjects).title);
@@ -369,13 +381,8 @@ export async function remindersOverview(o: { sentClientId?: string | null; sentL
   const steps = new Map<string, { title: string; needBy: string | null }>();
   const taskTitle = new Map<string, string>();
   for (const st of states.values()) for (const t of st.tasks) { taskTitle.set(t.id, t.title); for (const s of t.subtasks ?? []) steps.set(s.id, { title: s.title, needBy: s.due ?? null }); }
-  const missing = taskIds.filter((id) => !taskTitle.has(id));
-  for (let i = 0; i < missing.length; i += 200) {
-    const { data } = await supabaseAdmin.from("tasks").select("id, title, subtasks").in("id", missing.slice(i, i + 200));
-    for (const t of (data ?? []) as any[]) { taskTitle.set(t.id, t.title); for (const s of (t.subtasks ?? []) as Subtask[]) steps.set(s.id, { title: s.title, needBy: s.due ?? null }); }
-  }
-  const toOf = new Map<string, string | null>();
-  for (const r of (review ?? []) as any[]) if (!toOf.has(r.client_id)) toOf.set(r.client_id, (await resolveContact(r.client_id).catch(() => null))?.email ?? null);
+  for (const t of missingTasks) { taskTitle.set(t.id, t.title); for (const s of (t.subtasks ?? []) as Subtask[]) steps.set(s.id, { title: s.title, needBy: s.due ?? null }); }
+  const toOf = new Map<string, string | null>(toPairs);
   const item = (r: any): ReminderItem => {
     const p = parseReminderId(r.id);
     const step = p.stepId ? steps.get(p.stepId) : undefined;

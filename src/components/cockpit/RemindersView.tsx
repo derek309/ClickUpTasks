@@ -40,6 +40,20 @@ function StepLink({ row, onOpenStep, children, className }: { row: { clientId: s
   );
 }
 
+// The page took 10 to 15 seconds to show (Derek, 2026-10-16): it asked for
+// its data only once the whole app had loaded. The app now asks the moment it
+// starts (prefetchReminders), and the last answer is kept so coming back to
+// the page shows it straight away while a fresh one loads.
+let lastData: RemindersData | null = null;
+let pending: Promise<RemindersData | null> | null = null;
+function fetchReminders(): Promise<RemindersData | null> {
+  const p = authedFetch("/api/reminders").then((r) => (r.ok ? r.json() : null)).then((j) => (j ? (lastData = j as RemindersData) : null), () => null);
+  pending = p;
+  p.finally(() => { if (pending === p) pending = null; });
+  return p;
+}
+export function prefetchReminders() { if (!pending) void fetchReminders(); }
+
 export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial = null }: {
   nameOf: (memberId: string) => string;
   pushToast: (text: string) => void;
@@ -49,7 +63,7 @@ export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial 
   /** Stand in data (the visual check); no fetching. */
   initial?: RemindersData | null;
 }) {
-  const [data, setData] = useState<RemindersData | null>(initial);
+  const [data, setData] = useState<RemindersData | null>(initial ?? lastData);
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ id: string; subject: string; body: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -61,7 +75,8 @@ export function RemindersView({ nameOf, pushToast, onOpenStep, onCount, initial 
   useEffect(() => {
     if (initial) return;
     let live = true;
-    authedFetch("/api/reminders").then((r) => (r.ok ? r.json() : null)).then((j) => { if (live && j) setData(j as RemindersData); }, () => {});
+    // The first read takes the one the app started; later ones ask afresh.
+    (nonce === 0 && pending ? pending : fetchReminders()).then((j) => { if (live && j) setData(j); });
     return () => { live = false; };
   }, [initial, nonce]);
   useEffect(() => {
