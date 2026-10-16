@@ -3654,14 +3654,17 @@ export function withMeetingSteps(subtasks: Subtask[], name: string, due: string,
 
 /** A client's email becomes the step answering it: "Reply to Pam: <subject>",
  *  current, with the email on it. Another email while that step is open joins
- *  it; the same email twice adds nothing. A "what's next?" step becomes it. */
-export function addReplyStep(subtasks: Subtask[], email: ReceivedEmail, clientFirstName: string, makeId: () => string, now = new Date().toISOString()): Subtask[] | null {
+ *  it; the same email twice adds nothing. A "what's next?" step becomes it.
+ *  A text or portal chat (channel) makes the same step, holding their words,
+ *  named "Reply to Pam's text" / "Reply to Pam's message", making no email. */
+export function addReplyStep(subtasks: Subtask[], email: ReceivedEmail, clientFirstName: string, makeId: () => string, now = new Date().toISOString(), channel: "email" | "sms" | "chat" = "email"): Subtask[] | null {
   if (subtasks.some((s) => s.fromEmails?.some((e) => e.messageId === email.messageId))) return null;
   const open = planSteps(subtasks).find((s) => !s.done && s.addedFor?.startsWith("reply:"));
   if (open) return subtasks.map((s) => (s.id === open.id ? { ...s, fromEmails: [...(s.fromEmails ?? []), email] } : s));
   const subject = email.subject.replace(/^((re|fwd?):\s*)+/i, "").trim();
-  const title = `Reply to ${clientFirstName}${subject ? `: ${subject.slice(0, 80)}` : ""}`;
-  const fields = { title, makes: "email" as const, addedFor: `reply:${email.messageId}`, startedAt: now, fromEmails: [email] };
+  const title = channel === "sms" ? `Reply to ${clientFirstName}'s text` : channel === "chat" ? `Reply to ${clientFirstName}'s message`
+    : `Reply to ${clientFirstName}${subject ? `: ${subject.slice(0, 80)}` : ""}`;
+  const fields = { title, ...(channel === "email" ? { makes: "email" as const } : {}), addedFor: `reply:${email.messageId}`, startedAt: now, fromEmails: [email] };
   const cur = currentStep(subtasks);
   if (cur && asksWhatsNext(cur)) return subtasks.map((s) => (s.id === cur.id ? { ...s, ...fields } : s));
   const list = [...subtasks];

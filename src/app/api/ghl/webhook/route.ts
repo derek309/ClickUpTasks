@@ -6,6 +6,7 @@ import { isClosedReplyTask, resolveOrPromoteTrackedClient, upsertConversationTas
 import { sendInboundReplyEmail } from "@/lib/inboundIngest";
 import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
+import { stepsOnClientMessage } from "@/lib/stepsServer";
 import { promoteQueueForTask, queueRepeatCopy } from "@/lib/queueServer";
 import { bookingClosesRequestsFor } from "@/lib/bookingServer";
 
@@ -197,6 +198,10 @@ async function handleMessageReply(body: any, custom: any) {
     ?? await upsertConversationTask(contact, ghlContactId);
   if (taskId) await supabaseAdmin.from("messages").update({ task_id: taskId }).eq("id", messageId);
   await clientAnsweredOnTask(taskId, "reply");
+  // A text on a task: a finished one opens again with a step to answer it, and
+  // one with no steps gets that step (Derek, 2026-10-16). Emails are left to
+  // the Gmail poll (lib/inboundIngest), which reads the same email.
+  if (taskId && channel === "sms") await stepsOnClientMessage(taskId, { id: messageId, subject: null, body: text, at: new Date().toISOString(), from: contact.name, channel: "sms" }).catch(() => false);
   const snippet = text.replace(/\s+/g, " ").trim().slice(0, 80);
   const notifText = channel === "sms"
     ? `${titleCase(contact.name)} sent a text: ${snippet}`

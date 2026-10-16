@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stepsOnClientChanges } from "@/lib/stepsServer";
+import { stepsOnClientChanges, stepsOnClientMessage } from "@/lib/stepsServer";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin, adminConfigured } from "@/lib/supabaseAdmin";
 import { type Attachment, clientAnswerPatch } from "@/lib/data";
@@ -81,6 +81,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     // On the task's open changes step, whether or not anyone has it open.
     await stepsOnClientChanges(taskId).catch(() => false);
   }
+  // A task with no steps (or on hold) gets a step to answer them, and an on
+  // hold one opens again (Derek, 2026-10-16; Done is refused above).
+  await stepsOnClientMessage(taskId, { id: messageId, subject: null, body: text, at: new Date().toISOString(), from: scope.clientName ?? null, channel: "chat" }).catch(() => false);
   if (notifyRecipient) {
     await notifyTeamOfClientActivity({
       notifyRecipient, clientId: scope.clientId, taskId, projectId: task.project_id ?? null,

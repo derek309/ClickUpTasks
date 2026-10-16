@@ -23,6 +23,7 @@ import { closeAnsweredReplyTask, isClosedReplyTask, resolveOrPromoteTrackedClien
 import { notifyInbound, sendInboundReplyEmail } from "@/lib/inboundIngest";
 import { pushClientWrote } from "@/lib/push";
 import { clientAnsweredOnTask } from "@/lib/clientAnswered";
+import { stepsOnClientMessage } from "@/lib/stepsServer";
 import { matchGhlToLocal, isRealGhlId, MATCH_WINDOW_MS, type MatchCandidate } from "@/lib/ghlMatch";
 import { raiseReplyTasks } from "@/lib/inbox";
 import { insertMessageRow, insertMessageRows } from "@/lib/ghlNumbers";
@@ -309,6 +310,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
     if (closed.get(t)) row.task_id = openTaskId;
   }
 
+  const stored = new Set<string>();
   if (toInsert.length) {
     let rows = toInsert.map((t) => t.row);
     let { error } = await insertMessageRows(rows);
@@ -324,6 +326,7 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
     if (!error) {
       result.inserted += rows.length;
       rows.forEach((r) => known.add(r.ghl_message_id));
+      rows.forEach((r) => stored.add(r.id as string));
       // A text or email answered from inside GoHighLevel only reaches the
       // app through this pull, so this is where it closes the reply task.
       const answeredAt = openTaskId ? toInsert.filter(({ row: r, f }) => rows.includes(r) && r.direction === "outbound" && r.channel !== "call" && r.task_id === openTaskId && !isAutomated(f.m)).map(({ row: r }) => r.created_at as string).sort().at(-1) : undefined;
@@ -353,6 +356,32 @@ export async function pullContactConversations(o: PullOpts): Promise<PullResult>
     if (latest.row.channel === "sms") {
       await pushClientWrote({ recipients, text, taskId, clientId: contact.client_id });
       await sendInboundReplyEmail({ clientId: contact.client_id, contactName: contact.name, channel: "sms", body: latest.row.body, taskId, recipientIds: recipients });
+    }
+  }
+
+  // A text on a conversation linked to a task is the client writing on that
+  // task (Derek, 2026-10-16): a finished task opens again with a step to
+  // answer it, and a task with no steps gets that step (stepsServer
+  // stepsOnClientMessage). Only texts nobody has answered since, as for the
+  // reply task above, the newest one per task.
+  const onTasks = new Map<string, Record<string, any>>();
+  for (const { row } of toInsert) {
+    if (row.direction !== "inbound" || row.channel !== "sms" || !row.task_id || row.task_id === openTaskId || !stored.has(row.id)) continue;
+    const had = onTasks.get(row.task_id);
+    if (!had || String(row.created_at) > String(had.created_at)) onTasks.set(row.task_id, row);
+  }
+  if (onTasks.size) {
+    const { data: lastOut } = await supabaseAdmin
+      .from("messages").select("created_at").eq("contact_id", o.contactId).eq("direction", "outbound")
+      .order("created_at", { ascending: false }).limit(1);
+    const lastOutAt = Math.max(
+      lastOut?.[0]?.created_at ? new Date(lastOut[0].created_at as string).getTime() : 0,
+      ...fetched.filter((f) => f.m.direction !== "inbound" && !isAutomated(f.m)).map((f) => f.at),
+    );
+    const { data: who } = await supabaseAdmin.from("contacts").select("name").eq("id", o.contactId).maybeSingle();
+    for (const [taskId, row] of onTasks) {
+      if (new Date(row.created_at).getTime() <= lastOutAt) continue;
+      await stepsOnClientMessage(taskId, { id: row.id, subject: null, body: String(row.body ?? ""), at: row.created_at, from: (who as { name?: string } | null)?.name ?? null, channel: "sms" }).catch(() => false);
     }
   }
 

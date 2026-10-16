@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { automaticKind, byTime, collectClientDrafts, dayLabel, defaultChannel, emailBeingAnswered, feedFileKey, feedFileSource, feedFiles, feedRows, firstWords, gmailFileHref, messageStamp, newestLine, sinceShort, taskChoices, timeOf, waitingLine, waitingOnReply, whereNewMessageGoes } from "./clientConversation";
+import { automaticKind, isAutomaticFromClient, byTime, collectClientDrafts, dayLabel, defaultChannel, emailBeingAnswered, feedFileKey, feedFileSource, feedFiles, feedRows, firstWords, gmailFileHref, messageStamp, newestLine, sinceShort, taskChoices, timeOf, waitingLine, waitingOnReply, whereNewMessageGoes } from "./clientConversation";
 import type { Attachment, EmailDraft, Message, Task } from "./data";
 
 const msg = (p: Partial<Message> & Pick<Message, "id" | "at" | "direction" | "channel">): Message => ({
@@ -346,5 +346,21 @@ describe("a message's files in the feed", () => {
   });
   it("escapes the ids in the attachment address", () => {
     expect(gmailFileHref("msg a&b", "at/1", true)).toBe("/api/inbox/attachment?message=msg%20a%26b&att=at%2F1&download=1");
+  });
+});
+
+describe("isAutomaticFromClient", () => {
+  const m = (subject: string | null, body: string, extra: { bulk?: boolean } = {}) => ({ channel: "email" as const, subject, body, ...extra });
+  it("knows out of office, calendar replies, receipts and bulk mail", () => {
+    expect(isAutomaticFromClient(m("Automatic reply: Banner", "Thanks for your email."))).toBe(true);
+    expect(isAutomaticFromClient(m("Out of Office", "Back Monday."))).toBe(true);
+    expect(isAutomaticFromClient(m("Re: Banner", "I am currently out of the office until Oct 20."))).toBe(true);
+    expect(isAutomaticFromClient(m("Accepted: Kickoff", ""))).toBe(true);
+    expect(isAutomaticFromClient(m("Receipt", "We received your payment of $40.00"))).toBe(true);
+    expect(isAutomaticFromClient(m("News", "Hello", { bulk: true }))).toBe(true);
+  });
+  it("a person's words are not automatic", () => {
+    expect(isAutomaticFromClient(m("Re: 2026/2027 Hot Chocolate Asset Discussion", "Here are the logos. Can you write a review page too?"))).toBe(false);
+    expect(isAutomaticFromClient({ channel: "sms", subject: null, body: "I'll be out of town Friday, can we talk Monday?" })).toBe(false);
   });
 });

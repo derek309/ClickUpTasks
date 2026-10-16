@@ -18,19 +18,20 @@ import { promoteQueueForTask } from "./queueServer";
 import { pushIfClaudeFinished } from "./push";
 import { bookedOutcome, finishBookedWait } from "./bookingClosesRequest";
 import { cancelStaleClientReminders } from "./clientReminderGuard";
+import { isAutomaticFromClient } from "./clientConversation";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const KIND_NAME: Record<ReviewKindKey, string> = { doc: "the document", image: "the image", page: "the HTML review", video: "the video" };
 
-type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | null; client_id: string; status: TaskStatus; due: string | null; follow_up_at: string | null; updated_at: string };
+type TaskRow = { id: string; subtasks: Subtask[] | null; assignee_id: string | null; client_id: string; status: TaskStatus; priority?: string | null; due: string | null; follow_up_at: string | null; updated_at: string };
 
 /** Reads the task, works out its new steps and writes them only if nobody
  *  changed the task in between (tries again a few times if they did). */
 async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: string) => Promise<Subtask[] | null> | Subtask[] | null, followUpFromNew = false,
   extra?: () => Record<string, unknown> | null): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { data: row } = await supabaseAdmin.from("tasks").select("id, subtasks, assignee_id, client_id, status, due, follow_up_at, updated_at").eq("id", taskId).maybeSingle();
+    const { data: row } = await supabaseAdmin.from("tasks").select("id, subtasks, assignee_id, client_id, status, priority, due, follow_up_at, updated_at").eq("id", taskId).maybeSingle();
     if (!row) return false;
     const { data: client } = await supabaseAdmin.from("clients").select("name").eq("id", (row as TaskRow).client_id).maybeSingle();
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
@@ -562,19 +563,81 @@ export function matchStep<T extends Pick<Subtask, "id" | "title">>(plan: T[], re
 /** A client's email on a task becomes a step to answer it (Derek, 2026-10-12).
  *  always: linked or added on purpose from the Inbox, so it is a step even on
  *  a task without steps and even when short. Otherwise (it arrived on a thread
- *  already linked) only on a task with steps, and not for a plain "thanks". */
+ *  already linked) on a task with steps, and not for a plain "thanks"; on a
+ *  task that is done or on hold, or has no steps, see stepsOnClientMessage. */
 export async function stepsOnClientEmail(taskId: string, m: { id: string; subject: string | null; body: string; at: string; from: string | null; fileKey?: string }, always = false): Promise<boolean> {
-  const text = clientEmailText(m.body ?? "", m.from);
-  if (!always && isJustThanks(text)) return false;
+  return stepsOnClientMessage(taskId, { ...m, channel: "email" }, always);
+}
+
+type ClientMessage = { id: string; subject: string | null; body: string; at: string; from: string | null; fileKey?: string; channel: "email" | "sms" | "chat"; bulk?: boolean };
+
+/** "Oct 16", Pacific. */
+const shortDate = (at: string) => {
+  const d = new Date(at);
+  return (Number.isNaN(d.getTime()) ? new Date() : d).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", month: "short", day: "numeric" });
+};
+
+/** A client wrote on a task: an email, a text or a portal chat (Derek,
+ *  2026-10-16: Chelsea's email landed on Brian's finished "Hot Chocolate"
+ *  task, which stayed Done with no step, so it looked unlinked).
+ *  - A task that is Done or On hold opens again: its "Task done" record goes
+ *    (as reopening it in the app does; completed_at clears with the status,
+ *    by the database's trigger), a "Reply to <First>" step holding what they
+ *    wrote is the current step, the status is that step's stage, and a
+ *    "Reopened: <First> wrote on Oct 16" line goes on its comments.
+ *  - A task with no steps gets that step too, open or not.
+ *  - An email on an open task with steps gets it as before (Derek,
+ *    2026-10-12); a text or chat there changes nothing, as before.
+ *  Never for an automatic message (out of office, receipt, calendar reply,
+ *  bulk) or a plain "thanks", nor on a "Conversation" task, which keeps its
+ *  own rules (it closes itself once answered). The same message twice adds
+ *  nothing (addReplyStep). always: linked on purpose from the Inbox: a step
+ *  whatever it says, and the task's status is left as it is. */
+export async function stepsOnClientMessage(taskId: string, m: ClientMessage, always = false): Promise<boolean> {
+  const text = m.channel === "email" ? clientEmailText(m.body ?? "", m.from) : (m.body ?? "").trim();
+  if (!always && (isJustThanks(text) || isAutomaticFromClient({ channel: m.channel, subject: m.subject, body: m.body ?? "", bulk: m.bulk }))) return false;
   let status: TaskStatus | null = null;
-  return rewriteSteps(taskId, (row, first) => {
+  let reopened: string | null = null;
+  const ok = await rewriteSteps(taskId, (row, first) => {
+    status = null;
+    reopened = null;
     const list = row.subtasks ?? [];
-    if (!always && !planSteps(list).length) return null;
+    const closed = row.status === "done" || row.status === "on_hold";
+    const empty = !planSteps(list).some((x) => x.addedFor !== "finished");
+    const conversation = row.priority === "conversation";
+    if (!always) {
+      if (conversation ? m.channel !== "email" || empty : !closed && !empty && m.channel !== "email") return null;
+    }
+    const reopen = !always && !conversation && closed;
+    // Reopened: the "Task done" record goes, as it does in the app (useTaskEdits).
+    const base = reopen ? list.filter((x) => x.addedFor !== "finished") : list;
     const who = (m.from ?? "").replace(/\s*\(via [^)]*\)\s*$/i, "").trim().split(/\s+/)[0] || first;
-    const made = addReplyStep(list, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) }, who, () => newId("s_"));
-    status = made ? statusForStep(row.status, "in_progress") : null;
+    const made = addReplyStep(base, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) }, who, () => newId("s_"), new Date().toISOString(), m.channel);
+    if (!made) return null;
+    if (reopen) {
+      // The status the new current step implies: the reply step is our work
+      // in progress (its name can hold any word of their subject, so it is
+      // not guessed from it); Needs you follows from the email on it.
+      const cur = currentStep(made);
+      status = !cur || cur.fromEmails?.some((e) => e.messageId === m.id) ? "in_progress" : stepStage(cur, row.assignee_id);
+      reopened = who;
+    } else if (m.channel === "email") {
+      status = statusForStep(row.status, "in_progress");
+    }
+    // A text or chat on an open task leaves its status: the portal already
+    // brought a task waiting on them back to Review (clientAnswerPatch).
     return made;
   }, false, () => (status ? { status } : null));
+  const by = reopened as string | null;
+  if (ok && by) {
+    await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: {
+      id: "cm_" + crypto.randomUUID(), authorId: "u_derek", at: new Date().toISOString(), kind: "event",
+      body: `Reopened: ${by} wrote on ${shortDate(m.at)}`,
+    } });
+    // The app skips live updates stamped with the viewer's own id.
+    await supabaseAdmin.from("tasks").update({ updated_by: null }).eq("id", taskId);
+  }
+  return ok;
 }
 
 /** Client work Claude made or changed over the MCP goes on a step (Derek,

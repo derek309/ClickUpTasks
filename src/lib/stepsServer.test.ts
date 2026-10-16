@@ -25,7 +25,9 @@ function builder(table: string) {
   };
   return b;
 }
-vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t) }, adminConfigured: true }));
+// append_comment: the comments a run wrote, in order.
+const comments: { task_id: string; comment: { body: string } }[] = [];
+vi.mock("./supabaseAdmin", () => ({ supabaseAdmin: { from: (t: string) => builder(t), rpc: (_name: string, args: { task_id: string; comment: { body: string } }) => { comments.push(args); return Promise.resolve({ data: null, error: null }); } }, adminConfigured: true }));
 
 const { stepsOnReviewSent, stepsOnReviewChanges, stepsOnReviewApproved, stepsOnClientReply, stepsOnClientChanges, stepsOnCommentAfterApproval, stepsOnCommentRemoved, tickStep, tickTodo, holdDraftOnStep, releaseDraftFromSteps, stepsOnMeetingTranscript, stepsOnMeetNow } = await import("./stepsServer");
 
@@ -336,5 +338,116 @@ describe("a What's next keeps its suggested next step", () => {
     expect(steps()[1].suggested).toEqual({ name: "Put it in the Bulk customers blast", kind: "page" });
     expect(await setSuggestedNext("t1", "q", { name: "Other" })).toBe(false);
     expect(await setSuggestedNext("t1", "a", { name: "Other" })).toBe(false);
+  });
+});
+
+// Brian's "Hot Chocolate" task, 2026-10-16: Chelsea's email (with a file)
+// landed on it while it was Done with no steps, and nothing happened.
+describe("a client's message on a finished task, or one with no steps", () => {
+  const email = (id = "msg_1", over: Partial<{ subject: string; body: string; from: string }> = {}) => ({
+    id, subject: "Re: 2026/2027 Hot Chocolate Asset Discussion", body: "Here are the logos for next year, can you start on the banner?", at: "2026-10-16T18:28:43Z",
+    from: "Chelsea Proctor", fileKey: "rfc:abc", ...over,
+  });
+  beforeEach(() => { comments.length = 0; });
+
+  it("a Done task opens again with a Reply step holding the email, and says so", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([
+      { id: "a", title: "Design the banner", done: true, doneAt: "2026-10-05T20:01:22Z", outcome: "Closed with the task" },
+      { id: "f", title: "Task done", done: true, addedFor: "finished", outcome: "Done by Derek" },
+    ]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(steps().map((x) => [x.title, x.done])).toEqual([["Design the banner", true], ["Reply to Chelsea: 2026/2027 Hot Chocolate Asset Discussion", false]]);
+    const reply = steps()[1];
+    expect(reply).toMatchObject({ makes: "email", addedFor: "reply:msg_1", assigneeId: "u_derek" });
+    expect(reply.startedAt).toBeTruthy();
+    expect(reply.fromEmails).toEqual([expect.objectContaining({ messageId: "msg_1", from: "Chelsea Proctor", fileKey: "rfc:abc", at: "2026-10-16T18:28:43Z" })]);
+    expect(comments.map((c) => c.comment.body)).toEqual(["Reopened: Chelsea wrote on Oct 16"]);
+  });
+
+  it("an on hold task opens again too", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([{ id: "a", title: "Design the banner", done: false, startedAt: "2026-10-01T00:00:00Z" }]);
+    db.tasks[0].status = "on_hold";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(steps().map((x) => x.title)).toEqual(["Reply to Chelsea: 2026/2027 Hot Chocolate Asset Discussion", "Design the banner"]);
+    expect(comments).toHaveLength(1);
+  });
+
+  it("a task with no steps gets the Reply step, open or Done", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([]);
+    db.tasks[0].status = "get_started";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(steps()).toHaveLength(1);
+    expect(steps()[0]).toMatchObject({ title: "Reply to Chelsea: 2026/2027 Hot Chocolate Asset Discussion", done: false });
+    expect(db.tasks[0].status).toBe("in_progress");
+    // Open, so nothing was reopened.
+    expect(comments).toHaveLength(0);
+    setup([]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(steps()[0].fromEmails?.[0].messageId).toBe("msg_1");
+    expect(comments).toHaveLength(1);
+  });
+
+  it("an automatic message changes nothing", async () => {
+    const { stepsOnClientEmail, stepsOnClientMessage } = await import("./stepsServer");
+    for (const over of [
+      { subject: "Automatic reply: Hot Chocolate", body: "I am out of the office until Monday." },
+      { subject: "Re: Hot Chocolate", body: "I'm currently out of the office with limited access to email." },
+      { subject: "Accepted: Hot Chocolate kickoff", body: "Chelsea accepted this invitation." },
+      { subject: "Your receipt", body: "We received your payment of $250.00. Thank you." },
+    ]) {
+      setup([]);
+      db.tasks[0].status = "done";
+      expect(await stepsOnClientEmail("t1", email("msg_auto", over))).toBe(false);
+      expect(db.tasks[0].status).toBe("done");
+      expect(steps()).toEqual([]);
+    }
+    setup([]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientMessage("t1", { ...email("msg_bulk"), channel: "email", bulk: true })).toBe(false);
+    expect(comments).toHaveLength(0);
+  });
+
+  it("the same message twice adds it once", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([{ id: "f", title: "Task done", done: true, addedFor: "finished" }]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(await stepsOnClientEmail("t1", email())).toBe(false);
+    expect(steps()).toHaveLength(1);
+    expect(steps()[0].fromEmails).toHaveLength(1);
+    expect(comments).toHaveLength(1);
+  });
+
+  it("a text reopens a Done task with a step holding it; on an open task with steps it changes nothing", async () => {
+    const { stepsOnClientMessage } = await import("./stepsServer");
+    setup([{ id: "a", title: "Design the banner", done: true }]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientMessage("t1", { id: "msg_t", subject: null, body: "Can we move the race date on the banner?", at: "2026-10-16T18:00:00Z", from: "Brian Goodell", channel: "sms" })).toBe(true);
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(steps()[1]).toMatchObject({ title: "Reply to Brian's text", addedFor: "reply:msg_t" });
+    expect(steps()[1].makes).toBeUndefined();
+    expect(comments.map((c) => c.comment.body)).toEqual(["Reopened: Brian wrote on Oct 16"]);
+    setup([{ id: "a", title: "Design the banner", done: false }]);
+    expect(await stepsOnClientMessage("t1", { id: "msg_t2", subject: null, body: "Can we move the race date on the banner?", at: "2026-10-16T18:00:00Z", from: "Brian Goodell", channel: "sms" })).toBe(false);
+  });
+
+  it("a Conversation task keeps its own rules, and Inbox links leave the status", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([]);
+    db.tasks[0].priority = "conversation";
+    expect(await stepsOnClientEmail("t1", email())).toBe(false);
+    setup([{ id: "a", title: "Design the banner", done: true }]);
+    db.tasks[0].status = "done";
+    expect(await stepsOnClientEmail("t1", email(), true)).toBe(true);
+    expect(db.tasks[0].status).toBe("done");
+    expect(comments).toHaveLength(0);
   });
 });

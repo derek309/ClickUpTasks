@@ -235,6 +235,25 @@ export function automaticKind(m: Pick<Message, "direction" | "channel" | "subjec
   return m.bulk ? "automatic message" : null;
 }
 
+// An out of office or other automatic answer from the client's own mailbox.
+const AUTO_REPLY_SUBJECT = /^(automatic reply|auto(matic)?[- ]?(reply|response)|autoreply|out of (the )?office|ooo\b|away from (the )?office|on vacation|on leave)/i;
+const AUTO_REPLY_WORDS = /\b(i am|i['’]m|i will be|i['’]ll be) (currently )?(out of (the )?office|away from (the |my )?(office|desk)|on (vacation|holiday|leave|pto))\b|\bthis is an automat(ic|ed) (reply|response|message)\b/i;
+const RECEIPT_KINDS: AutomaticKind[] = ["purchase thank you", "payment receipt", "invoice notice"];
+
+/** A message that came IN from a client's side but no person wrote it
+ *  (Derek, 2026-10-16: a client's message reopens a finished task and asks
+ *  for a reply, an automatic one must not): a calendar reply, a bulk send,
+ *  a receipt or invoice notice, an out of office. Only the receipt rules of
+ *  AUTO_RULES apply here: their review and reminder words are too easy for a
+ *  person to write ("can you write a review page?"). */
+export function isAutomaticFromClient(m: Pick<Message, "channel" | "subject" | "body"> & { bulk?: boolean }): boolean {
+  if (automaticKind({ ...m, direction: "inbound" })) return true;
+  const subject = (m.subject ?? "").trim().replace(/^((re|fwd?):\s*)+/i, "");
+  const words = plainLine(m.body ?? "");
+  if (AUTO_REPLY_SUBJECT.test(subject) || AUTO_REPLY_WORDS.test(words.slice(0, 400))) return true;
+  return AUTO_RULES.some(([kind, rules]) => RECEIPT_KINDS.includes(kind) && rules.some((r) => r.test(subject) || r.test(words)));
+}
+
 // ---------------------------------------------------------------------------
 // The feed's rows: a divider for each day ("Today", "Yesterday", "Tue, Oct
 // 13"), the task the messages are on said once when it changes, a "New since
