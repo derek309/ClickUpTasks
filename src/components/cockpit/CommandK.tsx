@@ -74,14 +74,17 @@ export function CommandK({ tasks, clients, projects, contacts, addedContactIds, 
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/30" onClick={onClose} />
-      <div className={`fixed left-1/2 top-24 z-50 w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-2xl border bg-surface shadow-2xl ${onGo ? "max-w-3xl" : "max-w-xl"}`}>
-        <div className="flex items-center gap-2 border-b px-4 py-3">
+      {/* A full page on a phone, a panel on a desktop (Derek, 2026-10-16:
+          "make search a full page search"). */}
+      <div className={`fixed inset-0 z-50 flex flex-col overflow-hidden bg-surface sm:inset-auto sm:left-1/2 sm:top-24 sm:block sm:w-[calc(100%-2rem)] sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:shadow-2xl ${onGo ? "sm:max-w-3xl" : "sm:max-w-xl"}`}>
+        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top,0px))] sm:pt-3">
           <I.search className="text-muted" />
-          <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey} placeholder="Search clients, projects, and tasks…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted" />
-          <span className="rounded border px-1.5 py-0.5 text-[13px] text-muted">Esc</span>
+          <input autoFocus value={q} onChange={(e) => { setQ(e.target.value); setIdx(0); }} onKeyDown={onKey} placeholder="Search clients, projects, and tasks…" className="min-w-0 flex-1 bg-transparent text-[16px] outline-none placeholder:text-muted" />
+          <span className="hidden rounded border px-1.5 py-0.5 text-[13px] text-muted sm:inline">Esc</span>
+          <button onClick={onClose} className="h-10 shrink-0 rounded-[5px] px-3 text-[16px] font-semibold text-accent sm:hidden">Cancel</button>
         </div>
-        <div className="flex">
-        <div className="max-h-[60vh] min-w-0 flex-1 overflow-y-auto p-1.5">
+        <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-y-auto p-1.5 sm:max-h-[60vh]">
           {total === 0 && <div className="px-3 py-6 text-center text-[13px] text-muted">No matches</div>}
           {clientItems.length > 0 && <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">{q ? "Clients" : "Pinned"}</div>}
           {clientItems.map((c, ci) => { const i = G + ci; const ct = contactOf(c); const sub = [ct?.company, ct?.email].filter(Boolean).join(" · "); return (
