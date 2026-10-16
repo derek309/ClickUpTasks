@@ -2896,7 +2896,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // edge, or the window's left edge when the sidebar is collapsed. Set here
     // (rather than read inside the drawer) so the one place that owns the
     // sidebar's width owns this too.
-    <div className="safe-x safe-y flex h-screen w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
+    // relative and max-w-full, so one too wide child can't widen the page on
+    // a phone and push the header's icons off the right edge (2026-10-16): a
+    // box positioned against the page itself is clipped here too.
+    <div className="safe-x safe-y relative flex h-screen w-full max-w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -3118,9 +3121,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             so the bell, filter and ⋮ menus opening under the header were cut
             off and a tap seemed to do nothing (2026-10-14). */}
         <header className="relative z-10 flex shrink-0 flex-col gap-2 overflow-x-clip border-b bg-surface px-3 py-2 shadow-soft sm:hidden">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <button onClick={toggleSidebar} aria-label="Menu" className="shrink-0 rounded-lg border p-2 text-muted"><I.menu /></button>
-            <div className="flex min-w-0 flex-1 items-center gap-1">
+            {/* Not flex-1: the icons sit right after the name, not pushed
+                into the corner (Derek, 2026-10-16: "a little jammed up there
+                in the top right corner, so move it over by inbox"). The name
+                is what gives way, so nothing at the right is ever cut off. */}
+            <div className="flex min-w-0 items-center gap-1">
               <h1 className="min-w-0 truncate text-[17px] font-semibold">{headerTitleText}</h1>
               {/* The star beside the name, as on a desktop (2026-10-14). */}
               {isClientDetail && !activeProject && (
@@ -3128,41 +3135,41 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   className={`shrink-0 rounded-[5px] p-1.5 ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></button>
               )}
             </div>
-            {/* Three ways round on a phone, top right (Derek, 2026-10-16:
-                "pull some useful icons up to the top like inbox, clients,
-                maybe even a search"). Links, so they open in a new tab too. */}
-            <span className="flex shrink-0 items-center">
-              <button onClick={() => setCmdkOpen(true)} aria-label="Search" title="Search" className="grid h-10 w-9 place-items-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.search className="h-5 w-5" /></button>
+            {/* Four ways round on a phone, beside the name: Search, Inbox,
+                Calendar and Clients (Derek, 2026-10-16). Reminders is in the
+                sidebar. A client's page has its own controls at the right,
+                so there it is Search and Inbox, and the name still shows;
+                Calendar goes below 360px wide. Links, so they open in a new
+                tab too. */}
+            <span className="flex shrink-0 items-center gap-1">
+              <button onClick={() => setCmdkOpen(true)} aria-label="Search" title="Search" className="grid h-10 w-10 place-items-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.search className="h-5 w-5" /></button>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
               <a href="/?view=mail" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("inbox"); }} aria-label="Inbox" title="Inbox"
-                className={`relative grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "inbox" ? "text-accent" : "text-muted"}`}>
-                <I.inbox className="h-5 w-5" />{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-0.5 top-0.5 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
-              </a>
-              {/* Reminders and Calendar too, five in all (Derek, 2026-10-16). */}
-              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
-              <a href="/?view=reminders" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("reminders"); }} aria-label="Reminders" title="Reminders"
-                className={`relative grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "reminders" ? "text-accent" : "text-muted"}`}>
-                <I.bell className="h-5 w-5" />{reminderCount > 0 && <span className="absolute right-0 top-0.5 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{reminderCount}</span>}
+                className={`relative grid h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${dirView === "inbox" ? "text-accent" : "text-muted"}`}>
+                {/* The count sits inside the box, so the header never clips it. */}
+                <I.inbox className="h-5 w-5" />{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-0 top-0 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{inboxUnread > 99 ? "99+" : inboxUnread}</span>}
               </a>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
               <a href="/?view=calendar" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("calendar"); }} aria-label="Calendar" title="Calendar"
-                className={`grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "calendar" ? "text-accent" : "text-muted"}`}><I.calendar className="h-5 w-5" /></a>
+                className={`h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${isClientDetail ? "hidden" : "grid max-[359px]:hidden"} ${dirView === "calendar" ? "text-accent" : "text-muted"}`}><I.calendar className="h-5 w-5" /></a>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
               <a href="/?view=work" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("dashboard"); }} aria-label="Clients" title="Clients"
-                className={`grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${myWork ? "text-accent" : "text-muted"}`}><I.user className="h-5 w-5" /></a>
+                className={`h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${isClientDetail ? "hidden" : "grid"} ${myWork ? "text-accent" : "text-muted"}`}><I.user className="h-5 w-5" /></a>
             </span>
             {/* A client's page keeps everything on this one row (Derek,
-                2026-10-13: "move all to one line on mobile"); the name
-                shortens to make room. */}
-            {/* Who follows them and their links are in ⋮ on a phone (2026-10-14). */}
-            {isClientDetail && clientTab === "tasks" && viewControlPhone}
-            {/* Icon only here — the phone header has a title and two controls
-                already, and a labelled button would push one of them off. */}
-            {!inboxView && !settingsView && !dirView && (
-              <button onClick={openComposer} aria-label="New task" title="New task"
-                className="shrink-0 rounded-lg bg-accent p-2 text-white"><I.plus /></button>
-            )}
-            {isClientDetail && overflowControl}
+                2026-10-13: "move all to one line on mobile"), pushed to the
+                right; the name shortens to make room. */}
+            <span className="ml-auto flex shrink-0 items-center gap-1.5 empty:hidden">
+              {/* Who follows them and their links are in ⋮ on a phone (2026-10-14). */}
+              {isClientDetail && clientTab === "tasks" && viewControlPhone}
+              {/* Icon only here — the phone header has a title and two controls
+                  already, and a labelled button would push one of them off. */}
+              {!inboxView && !settingsView && !dirView && (
+                <button onClick={openComposer} aria-label="New task" title="New task"
+                  className="shrink-0 rounded-lg bg-accent p-2 text-white"><I.plus /></button>
+              )}
+              {isClientDetail && overflowControl}
+            </span>
           </div>
           {isClientDetail ? null : myWork ? (
             <div className="flex flex-col gap-2">

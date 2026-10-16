@@ -87,6 +87,18 @@ body {
   overflow-x: clip;
 }
 
+/* An iPhone zooms the page in when you tap a box to type in that is under
+   16px, and stays zoomed: from a 15px box that is 16/15, so every screen runs
+   about 24px off the right edge, which is what the Inbox looked like (Derek,
+   2026-10-16: header icons, folder menu and search cut off). So on a phone a
+   box you type in is never under 16px: the small ones and the ones with no
+   size of their own (they take the app's 15px). A bigger one keeps its size. */
+@media (max-width: 639px) {
+  :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), select, textarea):is(:not([class*="text-["]), [class*="text-[11px]"], [class*="text-[12px]"], [class*="text-[13px]"], [class*="text-[14px]"], [class*="text-[15px]"]) {
+    font-size: 16px !important;
+  }
+}
+
 * {
   border-color: var(--border);
 }

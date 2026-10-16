@@ -633,7 +633,9 @@ function Row({ t, p, active, checked, picking, draft, where, now, onCheck, onOpe
           })()}
           {draft && <span className="shrink-0 font-bold text-danger">Draft</span>}
           {where && where !== "Inbox" && <span className="shrink-0 rounded-md bg-background px-1.5 font-semibold">{where}</span>}
-          {t.subject && <span className={`max-w-full shrink-0 truncate text-foreground sm:max-w-[55%] ${t.unread ? "font-extrabold" : "font-semibold"}`}>{t.subject}</span>}
+          {/* Shrinks on a phone: shrink-0 beside a waiting badge or Draft ran the
+              row past the screen (2026-10-16). */}
+          {t.subject && <span className={`min-w-0 max-w-full truncate text-foreground sm:max-w-[55%] sm:shrink-0 ${t.unread ? "font-extrabold" : "font-semibold"}`}>{t.subject}</span>}
           <span className={`min-w-0 truncate ${t.subject ? "hidden sm:inline" : ""}`}>{preview}</span>
         </div>
         {p.prefs.showClientAndTask && (client || task) && (
