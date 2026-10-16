@@ -30,9 +30,29 @@ export const finishOpensWhatsNext = (subtasks: Subtask[], doneId: string): boole
 export const NEED_BY_BUSINESS_DAYS = 3;
 export const defaultNeedBy = (today: string): string => addBusinessDaysIso(today, NEED_BY_BUSINESS_DAYS);
 
+/** Words after "Waiting on" that are not a person ("Waiting for approval"),
+ *  or are us. */
+const NOT_A_NAME = new Set(["a", "an", "the", "us", "me", "you", "them", "him", "her", "it", "this", "that", "claude", "team", "approval", "review", "reply", "replies", "payment", "files", "content", "feedback", "info", "information", "answer", "answers", "confirmation", "response", "now", "more", "access", "details"]);
+
+/** An older step that says it waits on the client by name ("Waiting on James
+ *  Reply", "Wait for James to send the logo", "Waiting on the client"): the
+ *  client's turn too, so those tasks are not asked again (Derek, 2026-10-15).
+ *  A step given to someone (a teammate's wait) never is. `first`, when known,
+ *  must be the name it says. */
+export function waitsOnClientByTitle(title: string | undefined, o: { assigneeId?: string | null; first?: string | null } = {}): boolean {
+  if (!title || (o.assigneeId && o.assigneeId !== "client")) return false;
+  const m = /^\s*wait(?:ing)?\s+(?:on|for)\s+(?:(the\s+client)\b|([A-Z][A-Za-z'\u2019-]*))/i.exec(title);
+  if (!m) return false;
+  if (m[1]) return true;
+  const name = m[2].replace(/['\u2019]s?$/i, "");
+  // A name starts with a capital, and is not a plain word.
+  if (!/^[A-Z]/.test(name) || NOT_A_NAME.has(name.toLowerCase())) return false;
+  return !o.first?.trim() || name.toLowerCase() === o.first.trim().toLowerCase();
+}
+
 /** A wait on the client: the client's turn. */
-export const isClientWait = (s: Pick<Subtask, "onClient" | "finishWhen" | "stage">): boolean =>
-  !!s.onClient || s.finishWhen === "reply" || s.stage === "waiting";
+export const isClientWait = (s: Pick<Subtask, "onClient" | "finishWhen" | "stage"> & Partial<Pick<Subtask, "title" | "assigneeId">>): boolean =>
+  !!s.onClient || s.finishWhen === "reply" || s.stage === "waiting" || waitsOnClientByTitle(s.title, { assigneeId: s.assigneeId });
 
 /** Whose turn the next step is: "client", Claude, a person, or null (the task's owner). */
 export function afterThisWho(s: Pick<Subtask, "onClient" | "finishWhen" | "stage" | "assigneeId">, ownerId: string | null): string | null {

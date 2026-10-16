@@ -1,6 +1,6 @@
 "use client";
 
-import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, tickedAStep, todayIso } from "@/lib/data";
+import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, planSteps, tickedAStep, todayIso } from "@/lib/data";
 import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -113,6 +113,8 @@ import { ClientNeeds } from "./cockpit/ClientNeeds";
 import { RemindersView } from "./cockpit/RemindersView";
 import { ClientRequestsList } from "./cockpit/ClientRequestsList";
 import { orderRequests, requestFromTask, type ClientRequest } from "@/lib/clientRequests";
+import { addFoldIns, foldInTasks, type FoldInPick } from "@/lib/foldIn";
+import type { FoldInRow } from "./cockpit/FoldInSheet";
 import { ClientConversation } from "./cockpit/ClientConversation";
 import { sendFromFeed, useClientSavedDraft } from "./cockpit/clientFeedDrafts";
 import { collectClientDrafts, emailBeingAnswered, newestLine, taskChoices, waitingLine, waitingOnReply, whereNewMessageGoes, type TalkChannel } from "@/lib/clientConversation";
@@ -1641,6 +1643,22 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       .map((t) => requestFromTask({ id: t.id, title: t.title, clientId: t.clientId, projectId: t.projectId, due: t.due, subtasks: t.subtasks }))
       .filter((r): r is ClientRequest => !!r);
   }
+  /** Their older tasks only flagged waiting on them, with no step for them:
+   *  the fold in's rows, grouped by list, each by due date (lib/foldIn). */
+  function foldInRowsFor(clientId: string): FoldInRow[] {
+    return foldInTasks(scopedTasksByClientId.get(clientId) ?? [], (id) => (id ? projectById(id)?.name ?? null : null))
+      .map((t) => ({ taskId: t.id, title: t.title, listId: t.projectId ?? null, notes: t.description?.trim() ? t.description : planSteps(t.subtasks)[0]?.notes ?? null }));
+  }
+  /** Adds the fold in's picks: one task write at a time through the ordinary
+   *  task save, each waiting for the one before (never a bulk update). */
+  async function addFoldInsFor(first: string, picks: FoldInPick[], onProgress: (done: number, total: number) => void): Promise<void> {
+    const added = await addFoldIns(picks, {
+      getTask: (id) => tasksRef.current.find((x) => x.id === id),
+      patch: (id, p) => patchTask(id, p),
+      now: () => new Date().toISOString(), makeId: () => newId("s_"), onProgress,
+    });
+    pushToast(added ? `Added ${added} to ${first}'s list. Every reminder waits for review in Reminders.` : `Nothing was added: each one already has a step for ${first}.`);
+  }
   function waitingTasksFor(clientId: string): Task[] {
     return (scopedTasksByClientId.get(clientId) ?? []).filter((t) => t.status !== "done" && t.waitingOnClient);
   }
@@ -2686,6 +2704,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const waiting = waitingTasksFor(cid).sort((x, y) => (x.due ?? "9999").localeCompare(y.due ?? "9999"));
           // Their open steps, the queue the reminders chase (lib/clientRequests).
           const requests = clientRequestsFor(cid);
+          const foldIn = foldInRowsFor(cid);
           const top = orderRequests(requests, TODAY)[0];
           const unanswered = waitingOnReply(said);
           return (
@@ -2695,7 +2714,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 unanswered={unanswered ? waitingLine(first, unanswered.at) : null}
                 draftCount={draftCount} feedOpen={feedFor === cid} onToggleFeed={() => setFeedClient(feedFor === cid ? null : cid)}
                 waiting={requests.length || waiting.length} oldestWaiting={top?.title ?? waiting[0]?.title ?? null}
-                onOpenNeeds={requests.length ? () => setNeedsFor(cid) : null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
+                onOpenNeeds={requests.length || foldIn.length ? () => setNeedsFor(cid) : null} onRemind={canMsg ? () => void remindAsDraft(cid) : null}
                 reminders={clientById(cid)?.reminders} onSetReminders={canAdmin && clientById(cid)?.reminders !== undefined ? setActiveClientReminders : null}
                 canBook={!!ct?.ghlContactId} onBook={() => setBookClient(cid)}
                 requestChannels={[...(ct?.email ? ["email" as const] : []), ...(ct?.phone ? ["sms" as const] : [])]}
@@ -2707,6 +2726,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               {needsFor === cid && (
                 <ClientRequestsList clientId={cid} first={first} requests={requests} today={TODAY}
                   listName={(id) => (id ? projectById(id)?.name ?? null : null)}
+                  foldIn={foldIn}
+                  onFoldIn={(picks, onProgress) => addFoldInsFor(first, picks, onProgress)}
                   onOpenStep={(taskId, stepId) => { setNeedsFor(null); openStepNext(stepId); setOpenTaskId(taskId); }}
                   onReorder={(changes) => {
                     // One write per task whose step moved, never a bulk update.
