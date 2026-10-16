@@ -99,7 +99,9 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
   toEmail?: string | null;
   onRemove?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Open from the start, as the client's are (Derek, 2026-10-16: "default
+  // open emails"); it still folds.
+  const [open, setOpen] = useState(true);
   const previewId = useId();
   const reply = replyTo(message, messages);
   const tone = reviewTone(reply ? "approved" : "with_client");
@@ -155,9 +157,9 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
    *  marks that version approved (Derek, 2026-10-14). */
   approve?: { label: string; onClick: () => void };
 }) {
-  // Open until answered, so what the client wrote reads without a click
-  // (Derek, 2026-10-14); it still folds.
-  const [open, setOpen] = useState(!answered);
+  // Open, answered or not, so what the client wrote reads without a click
+  // (Derek, 2026-10-14 and 10-16); it still folds.
+  const [open, setOpen] = useState(true);
   const tone = reviewTone(answered ? "approved" : "with_client");
   const toggle = () => setOpen((o) => !o);
   return (
@@ -180,7 +182,7 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
         )}
       </div>
       {open && (
-        <div className="max-h-[360px] overflow-y-auto whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
+        <div className="whitespace-pre-wrap border-t bg-surface px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
           <LinkedText text={clientEmailText(email.body, email.from) || email.body || "(no text)"} />
         </div>
       )}
