@@ -335,9 +335,13 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
  *  words say what happens next) and Delegate ▾, Claude first (Derek,
  *  2026-10-15: Give to Claude moved into Delegate). light: another button is
  *  the dark one (Reply, or the reply box's Send). */
-export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, delegate = [], children }: {
+export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, delegate = [], leaveWith, children }: {
   /** Missing where the step ends another way (a wait's own choices): Delegate only. */
   onMarkDone?: () => void;
+  /** Someone else's turn (Claude or a teammate): the button you naturally
+   *  press leaves it with them instead of finishing their step (Derek,
+   *  2026-10-15); Done stays as a quiet link. */
+  leaveWith?: { name: string; onLeave: () => void } | null;
   label?: string;
   light?: boolean;
   onGiveClaude?: () => void;
@@ -346,6 +350,14 @@ export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, del
 }) {
   const items: ActionMenuItem[] = [...(onGiveClaude ? [{ label: "⚡ Claude, due today", onClick: onGiveClaude }] : []), ...delegate];
   const text = label ?? "Done · what's next?";
+  if (leaveWith) return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
+      <button onClick={leaveWith.onLeave} className={`h-10 rounded-[5px] px-4 text-[16px] font-semibold ${light ? "bg-surface ring-1 ring-inset ring-border hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>Leave it with {leaveWith.name}</button>
+      {onMarkDone && <button onClick={onMarkDone} className="font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Mark it done anyway</button>}
+      {items.length > 0 && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={items} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
+      {children}
+    </div>
+  );
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
       {onMarkDone && <button onClick={onMarkDone} aria-label={label ? text : "Done with this step, choose what's next"}
@@ -356,7 +368,7 @@ export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, del
   );
 }
 
-export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, onReopen, onDelete, onToTask,
+export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, leaveWith, onReopen, onDelete, onToTask,
   controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false, transcript, textFrom }: {
   task: Task;
   sub: Subtask;
@@ -374,6 +386,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   onRename: (title: string) => void;
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
+  /** Someone else's turn: leave it with them (StepFinish). */
+  leaveWith?: { name: string; onLeave: () => void } | null;
   /** Hand the step on while working it (Derek, 2026-10-14): Give to Claude
    *  in plain sight beside Done, everyone else under Delegate. */
   onGiveClaude?: () => void;
@@ -927,7 +941,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     </div>
                   ) : (
                     <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open}
-                      onGiveClaude={onGiveClaude} delegate={delegate} />
+                      onGiveClaude={onGiveClaude} delegate={delegate} leaveWith={leaveWith} />
                   )}
                 </div>
               ) : null}

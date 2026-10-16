@@ -24,7 +24,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false, onAddLink, onAttachFiles, transcript }: {
+  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onSendHeldEmail, onOpenStep, onGiveClaude, delegate, leaveWith, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, afterThis, doneLabel, replyPending = false, replyOpen = false, onAddLink, onAttachFiles, transcript }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -68,6 +68,8 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   followBox?: React.ReactNode;
   planBits?: React.ReactNode;
   onMarkDone: () => void;
+  /** Someone else's turn: leave it with them (StepFinish). */
+  leaveWith?: { name: string; onLeave: () => void } | null;
   onSendHeldEmail?: () => void;
   onOpenStep: () => void;
   /** Hand this step on while working it (Derek, 2026-10-14: "I'm going to be
@@ -258,7 +260,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
               <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
             </div>
           ) : (
-            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open} onGiveClaude={onGiveClaude} delegate={delegate}>
+            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open} onGiveClaude={onGiveClaude} delegate={delegate} leaveWith={leaveWith}>
               <button onClick={onOpenStep} title="The step's own page: its history and messages" className={link}>Open the step</button>
             </StepFinish>
           )}

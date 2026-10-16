@@ -2425,7 +2425,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
             followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
             onMarkDone={() => completeStep(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
-            afterThis={afterThisFor(sub)} doneLabel={doneLabelFor(sub)} replyPending={replyPendingOn(sub)} replyOpen={inlineReplyOn(sub)}
+            afterThis={afterThisFor(sub)} doneLabel={doneLabelFor(sub)} leaveWith={leaveWithFor(sub)} replyPending={replyPendingOn(sub)} replyOpen={inlineReplyOn(sub)}
             onAddLink={(url) => { addLinkOn(url, "", sub.id); pushToast("Link added to this step"); }} onAttachFiles={() => { setAddOnStep(sub.id); fileRef.current?.click(); }}
             transcript={pageStepId === sub.id ? undefined : transcriptFor(sub)}
             onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
@@ -4136,6 +4136,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     });
     pushToast(`${firstName}'s turn, need by ${formatDue(due)}. The ask waits in Reminders for you.`);
   };
+  // Claude's or a teammate's step: the dark button leaves it with them and
+  // goes back to the task, never finishing their step (Derek, 2026-10-15:
+  // "I naturally want to click Done"). Your own step keeps Done.
+  const leaveWithFor = (sub: Subtask): { name: string; onLeave: () => void } | null => {
+    if (sub.done || sub.onClient || !sub.assigneeId || sub.assigneeId === meId) return null;
+    const name = sub.assigneeId === CLAUDE_ID ? "Claude" : firstOf(sub.assigneeId);
+    return { name, onLeave: () => {
+      const list = planSteps(taskRef.current.subtasks);
+      const at = list.findIndex((x) => x.id === sub.id);
+      const next = at >= 0 ? list.slice(at + 1).find((x) => !x.done) : undefined;
+      if (stepPageOpen()) setOpenStepPage(null);
+      pushToast(`With ${name} now.${next ? ` Next: step ${stepNumberOf(next.id)}, ${next.title}` : ""}`);
+    } };
+  };
   // Handing a step on while working it, beside Done (Derek, 2026-10-14:
   // "I'm going to be delegating stuff to Claude a lot, and it's hidden"):
   // Give to Claude as its own button, a teammate, you again or the client
@@ -4978,7 +4992,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 body, at: new Date().toISOString(), nextStep: null, nextStepDue: null, nextStepDoneAt: null })}
               clientItems={clientItemsOf(ps.id)} onToggleClientItem={onToggleSub}
               onTodoDone={todoDoneFor(ps)}
-              afterThis={isCur ? afterThisFor(ps) : undefined} doneLabel={isCur ? doneLabelFor(ps) : undefined}
+              afterThis={isCur ? afterThisFor(ps) : undefined} doneLabel={isCur ? doneLabelFor(ps) : undefined} leaveWith={isCur ? leaveWithFor(ps) : null}
               replyPending={replyPendingOn(ps)} replyOpen={inlineReplyOn(ps)} />
           );
         })()}
