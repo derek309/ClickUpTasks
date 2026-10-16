@@ -3128,6 +3128,20 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                   className={`shrink-0 rounded-[5px] p-1.5 ${starred.has(activeClient) ? "text-amber-400" : "text-muted"}`}><I.star filled={starred.has(activeClient)} /></button>
               )}
             </div>
+            {/* Three ways round on a phone, top right (Derek, 2026-10-16:
+                "pull some useful icons up to the top like inbox, clients,
+                maybe even a search"). Links, so they open in a new tab too. */}
+            <span className="flex shrink-0 items-center">
+              <button onClick={() => setCmdkOpen(true)} aria-label="Search" title="Search" className="grid h-10 w-10 place-items-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.search className="h-5 w-5" /></button>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
+              <a href="/?view=mail" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("inbox"); }} aria-label="Inbox" title="Inbox"
+                className={`relative grid h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${dirView === "inbox" ? "text-accent" : "text-muted"}`}>
+                <I.inbox className="h-5 w-5" />{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-0.5 top-0.5 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
+              </a>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
+              <a href="/?view=work" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("dashboard"); }} aria-label="Clients" title="Clients"
+                className={`grid h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${myWork ? "text-accent" : "text-muted"}`}><I.user className="h-5 w-5" /></a>
+            </span>
             {/* A client's page keeps everything on this one row (Derek,
                 2026-10-13: "move all to one line on mobile"); the name
                 shortens to make room. */}
