@@ -8,6 +8,7 @@
 // at a time, with the count as it goes. A sheet along the bottom on a phone,
 // a panel in the middle elsewhere.
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { formatDayDate } from "@/lib/data";
 import { askFromTaskTitle, foldInNeedBys, type FoldInPick } from "@/lib/foldIn";
 import { useEscapeToClose } from "./useEscapeToClose";
@@ -45,11 +46,14 @@ export function FoldInSheet({ first, rows, today, listName, onAdd, onClose }: {
     onClose();
   };
   const toggle = (id: string) => setOff((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  return (
+  // On the page itself, not inside the list's dialog: inside it the sheet
+  // was cut short on a phone and would not scroll (Derek, 2026-10-16).
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <>
       <div className="fixed inset-0 z-[60] bg-black/30" onClick={() => { if (!busy) onClose(); }} />
       <div role="dialog" aria-label={`Add older tasks to ${first}'s list`}
-        className="fixed inset-x-0 bottom-0 z-[70] flex max-h-[90vh] flex-col rounded-t-[5px] bg-surface text-foreground shadow-[var(--shadow-md)] sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-[6vh] sm:w-[min(720px,calc(100vw-32px))] sm:-translate-x-1/2 sm:rounded-[5px]">
+        className="fixed inset-x-0 bottom-0 z-[70] flex max-h-[90dvh] flex-col rounded-t-[5px] bg-surface text-foreground shadow-[var(--shadow-md)] sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-[6vh] sm:w-[min(720px,calc(100vw-32px))] sm:-translate-x-1/2 sm:rounded-[5px]">
         <div className="flex items-center gap-3 border-b px-4 py-3">
           <b className="min-w-0 flex-1 text-[18px] [overflow-wrap:anywhere]">Add to {first}&apos;s list</b>
           <button onClick={onClose} disabled={busy} className="h-10 shrink-0 rounded-[5px] px-3 text-[16px] font-semibold ring-1 ring-inset ring-[var(--border)] hover:bg-background disabled:opacity-40">Close</button>
@@ -90,6 +94,7 @@ export function FoldInSheet({ first, rows, today, listName, onAdd, onClose }: {
           </button>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

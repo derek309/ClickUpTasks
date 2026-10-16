@@ -6,7 +6,7 @@
 // client step in at the current place, one task write at a time. Pure, so
 // the asks, the dates, the step and the one at a time add can be tested.
 
-import { addBusinessDaysIso, currentStep, type Subtask, type TaskStatus } from "./data";
+import { CLAUDE_ID, addBusinessDaysIso, currentStep, type Subtask, type TaskStatus } from "./data";
 import { isClientWait } from "./afterThis";
 
 /** The fields a task needs to be looked at here. */
@@ -21,6 +21,9 @@ export function needsFoldIn(t: FoldInTask): boolean {
   if (t.status === "done" || t.status === "on_hold" || t.private || t.hiddenFromClient) return false;
   if (!t.waitingOnClient && t.status !== "waiting") return false;
   const cur = currentStep(t.subtasks ?? []);
+  // A current step Claude or a teammate is on is theirs to finish first
+  // (Derek, 2026-10-16: Pam's ad task, step 5 given to Claude, was offered).
+  if (cur && cur.assigneeId === CLAUDE_ID) return false;
   return !cur || !isClientWait(cur);
 }
 
