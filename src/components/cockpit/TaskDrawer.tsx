@@ -2026,7 +2026,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* No stage to pick: the step is the stage (Derek, 2026-10-11). */}
         <span className="font-semibold">{face && turnFace(sub) ? <span className="mr-1.5 inline-flex align-middle">{turnFace(sub)}</span> : <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stage].dot }} />}{turnPicks
           // Inline, as the pickers after it are: on its own it took a line.
-          ? <span className="inline-flex items-baseline"><InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word} title="Change whose turn it is">{t.word}</span>} onChange={(a) => assignStep(sub, a, isActive)} /></span>
+          ? <span className="inline-flex items-baseline"><InlineAssignee value={sub.assigneeId ?? null} noFace label={<span className={word} title="Change whose turn it is">{t.word}</span>} onChange={(a) => assignStep(sub, a, isActive)}
+              clientChoice={mayContactClient && !isPersonal && !sub.done ? { label: `${firstName} (client)`, onPick: () => turnToClient(sub) } : null} /></span>
           : t.word}</span>
         {/* The comma rides inside the picker's box: on a phone it wrapped onto
             the start of the next line. */}
@@ -4122,6 +4123,19 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // assigned to Claude. Why would I want to write a document? I want to add
   // directions, maybe a checklist").
   const addOptionsFor = (sub: Subtask) => sub.assigneeId === CLAUDE_ID ? [] : withGiveClaude(sub, stepAddOptions(sub));
+  // Whose turn → the client, from the step's sentence (Derek, 2026-10-15):
+  // the step becomes theirs with a need by date (3 business days out unless
+  // it has one) and reminders on; nothing is emailed here, the reminder
+  // engine asks them and that waits in Reminders for review.
+  const turnToClient = (sub: Subtask) => {
+    const isCur = currentStep(taskRef.current.subtasks)?.id === sub.id;
+    const due = sub.due ?? addBusinessDaysIso(TODAY, 3);
+    onPatch({
+      subtasks: taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, onClient: true, assigneeId: undefined, due, startedAt: x.startedAt ?? new Date().toISOString() } : x)),
+      ...(isCur ? { status: "waiting" as const, waitingOnClient: true } : {}),
+    });
+    pushToast(`${firstName}'s turn, need by ${formatDue(due)}. The ask waits in Reminders for you.`);
+  };
   // Handing a step on while working it, beside Done (Derek, 2026-10-14:
   // "I'm going to be delegating stuff to Claude a lot, and it's hidden"):
   // Give to Claude as its own button, a teammate, you again or the client

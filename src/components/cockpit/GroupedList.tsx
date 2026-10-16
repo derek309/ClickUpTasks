@@ -653,7 +653,9 @@ function InlinePriority({ value, auto = false, onChange }: { value: Priority; au
   );
 }
 
-export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22, label, noFace = false }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number;
+export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client, size = 22, label, noFace = false, clientChoice }: { value: string | null; onChange: (a: string | null) => void; waiting?: boolean; onSetWaiting?: (v: boolean) => void; client?: Client | null; size?: number;
+  /** The client as a choice of whose turn (a step's sentence, Derek 2026-10-15). */
+  clientChoice?: { label: string; onPick: () => void } | null;
   /** Words beside the face, part of the same button (Derek, 2026-10-12: "click the names too"). */
   label?: React.ReactNode;
   /** The name alone, a word in a sentence (the step page's header, 2026-10-13). */
@@ -682,6 +684,9 @@ export function InlineAssignee({ value, onChange, waiting, onSetWaiting, client,
         <div style={menuStyle(pos, 190)} className="z-40 rounded-lg border bg-surface p-1 shadow-xl">
           {onSetWaiting && (
             <button onClick={(e) => { e.stopPropagation(); onSetWaiting(!waiting); setOpen(false); }} title={waiting ? "No longer waiting" : "Waiting on the client, and still yours to follow up"} className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] hover:bg-background ${waiting ? "font-medium text-amber-600" : "text-muted"}`}><I.user /> <span className="min-w-0 flex-1 truncate">{client ? `Waiting on ${client.name}` : "Waiting on client"}</span>{waiting && <I.check />}</button>
+          )}
+          {clientChoice && (
+            <button onClick={(e) => { e.stopPropagation(); clientChoice.onPick(); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[15px] font-medium hover:bg-background"><I.user /> <span className="min-w-0 flex-1 truncate">{clientChoice.label}</span></button>
           )}
           <button onClick={(e) => { e.stopPropagation(); onChange(null); setOpen(false); }} className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[13px] text-muted hover:bg-background">Unassigned</button>
           {assignableUsers().map((u) => (
