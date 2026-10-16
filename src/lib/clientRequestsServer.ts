@@ -20,7 +20,8 @@ import { resolveNotifyRecipient } from "./waitingNotify";
 import { APP_URL } from "./appUrl";
 import { draftLinkAsButton } from "./draftLink";
 import { CLAUDE_ID, toPacificDate, todayPacific, type Subtask } from "./data";
-import { REVIEW_STATUS } from "./portalReminders";
+import { REVIEW_STATUS, STEP_REMINDER_LINK_LABEL } from "./portalReminders";
+import { portalTaskUrl } from "./portalRequests";
 import { reminderQueueStatus } from "./reminderSchedule";
 import { stepAskWords, type AskWords } from "./stepReminders";
 import { REMINDER_MESSAGE_PREFIX } from "./reviewReminders";
@@ -229,9 +230,9 @@ async function buildRequestEmail(st: ClientState, stage: RequestStage, request: 
   const overdue = ordered.filter((r) => daysLate(r.needBy, o.today) > 0).length;
   const clientFirst = first ?? String((client as any).name ?? "").split(" ")[0];
   const firstAsked = request ? (request.startedAt ? toPacificDate(request.startedAt) : o.history.get(request.stepId)?.first ?? o.today) : o.today;
-  // Opens that one request in the portal (its step too, so a request already
-  // answered says so and moves on to the next one).
-  const link = request ? { url: `${portal}?task=${encodeURIComponent(request.taskId)}&step=${encodeURIComponent(request.stepId)}`, label: "Open it in your client portal" } : null;
+  // Opens that request's task page in the portal, which says what we need at
+  // its top (Derek, 2026-10-16; lib/portalRequests portalTaskUrl).
+  const link = request ? { url: portalTaskUrl(portal, request.taskId), label: STEP_REMINDER_LINK_LABEL } : null;
   const words = request ? requestAsk(request, clientFirst, await replySubjects([request])) : null;
   const email = requestEmail({
     stage, firstName: first, ask: words?.ask ?? "", subjectAsk: words?.subject,

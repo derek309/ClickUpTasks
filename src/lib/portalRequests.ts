@@ -2,14 +2,16 @@
 // (Derek and Justin, 2026-10-15, client-reminders-mockup.html section 4).
 // The portal lines up the client's requests in the same order as our side
 // (lib/clientRequests orderRequests: Overdue, Today, This week, Later, then
-// our dragged order and the need by date), opens one of them on its own when
-// a reminder's link carries ?task=, and moves to the next once it is answered.
+// our dragged order and the need by date). Every link to one opens its task
+// page, /waiting/<token>?task=<id> (Derek, 2026-10-16: the one request card
+// left Carol with "Reply to: …" and our email folded shut), with what we need
+// at the top and "1 of 2 · Next ›" to the next one.
 //
 // Pure and safe in the browser, so the order, the words and the next one can
 // be tested; the portal page (app/waiting) renders them.
 
 import { formatDayDate, formatDue, toPacificDate, type Subtask } from "./data";
-import { GROUP_LABEL, daysLate, expectedSentence, orderRequests, requestFromTask, requestGroup, type RequestGroup } from "./clientRequests";
+import { GROUP_LABEL, daysLate, orderRequests, requestFromTask, requestGroup, type RequestGroup } from "./clientRequests";
 import { stepAskWords } from "./stepReminders";
 
 /** What the client is asked to do: look something over, send files, or answer. */
@@ -34,6 +36,9 @@ export type PortalRequest = {
   /** A wait on their reply to an email of ours: that email, to show under
    *  the ask (its subject and first lines). */
   replyTo?: { subject: string; preview: string } | null;
+  /** A wait on their reply: the id of the email it waits on, so the task
+   *  page can bring that email into view. Null for any other ask. */
+  replyToId?: string | null;
 };
 
 /** An email of ours a request can wait on, as the portal shows it. */
@@ -71,6 +76,7 @@ export function portalRequestFromTask(
       taskTitle: t.title, taskDue: t.due,
       kind: reply && !o.reviewOpen ? "question" : requestKind({ reviewOpen: o.reviewOpen, ask: `${r.title} ${words.ask}` }),
       replyTo: reply && email ? email : null,
+      replyToId: reply ? r.replyTo?.messageId ?? null : null,
     };
   }
   if (!t.waitingOnClient) return null;
@@ -86,8 +92,9 @@ export function portalEmail(subject: string | null, text: string): PortalEmail |
   const lines = text.split("\n").map((x) => x.trim()).filter(Boolean);
   const s = (subject ?? "").trim().replace(/^((re|fwd?):\s*)+/i, "");
   if (!s) return null;
-  // Past "Hi Carol,", the first few lines, about two sentences long.
-  const body = (/^(hi|hello|hey|dear)\b/i.test(lines[0] ?? "") ? lines.slice(1) : lines).join(" ");
+  // Past "Hi Carol,", the first few lines, about two sentences long. An email
+  // made one line keeps what follows the greeting (Carol's read empty).
+  const body = lines.join(" ").replace(/^(hi|hello|hey|dear)\b[^,!\n]{0,40}[,!]\s*/i, "").trim();
   const preview = body.length > 220 ? `${body.slice(0, 219).replace(/\s+\S*$/, "")}…` : body;
   return { subject: s, preview };
 }
@@ -118,10 +125,14 @@ export function queuePosition(ordered: Pick<PortalRequest, "key">[], key: string
   return { n: answered + at + 1, of: answered + ordered.length };
 }
 
-/** The next one to show after `key`: the first in the queue that is not it
- *  (nor one already answered on this visit). */
-export function nextRequest<T extends Pick<PortalRequest, "key">>(ordered: T[], key: string | null, answeredKeys: string[] = []): T | null {
-  return ordered.find((r) => r.key !== key && !answeredKeys.includes(r.key)) ?? null;
+/** The requests after the one on this task, in queue order, wrapping round to
+ *  the top, never this task's own: "Next ›" on a task page is the first of
+ *  them, and "See all" counts them. A task with nothing for them starts at the
+ *  top of the queue. */
+export function othersInOrder<T extends Pick<PortalRequest, "taskId">>(ordered: T[], taskId: string): T[] {
+  const at = ordered.findIndex((r) => r.taskId === taskId);
+  const rest = at < 0 ? ordered : [...ordered.slice(at + 1), ...ordered.slice(0, at)];
+  return rest.filter((r) => r.taskId !== taskId);
 }
 
 /** The state word over a request: "1 day late" (red), "Due today" (amber),
@@ -147,11 +158,37 @@ export function rowDate(needBy: string | null, today: string): { text: string; t
 export const doneWord = (kind: PortalRequestKind | "changes"): string =>
   kind === "review" ? "Approved" : kind === "question" ? "Answered" : "Sent";
 
-/** The expected line under a request (lib/clientRequests expectedSentence). */
-export const expectedLine = (taskTitle: string, taskDue: string | null): string | null => expectedSentence(taskTitle, taskDue);
-
 /** "First asked Oct 15", from when it became their turn. */
 export const firstAskedLine = (startedAt: string | null): string | null => (startedAt ? `First asked ${formatDue(toPacificDate(startedAt))}` : null);
 
 /** The thanks once one is answered: "✓ Approved. Thanks, Brian." */
 export const thanksLine = (word: string, firstName: string | null): string => `✓ ${word}. Thanks${firstName?.trim() ? `, ${firstName.trim()}` : ""}.`;
+
+/** The task page a request opens: every link to one, in the reminder emails
+ *  and the portal's own list, is this (Derek, 2026-10-16). No &step=: the
+ *  task page shows whatever we need on it now. */
+export const portalTaskUrl = (portal: string, taskId: string): string => `${portal}?task=${encodeURIComponent(taskId)}`;
+
+/** What a portal address opens: the task page for ?task=<id>. Emails sent
+ *  before 2026-10-16 add &step=<id>; it no longer picks a view, it only says
+ *  whether that request was answered since (`answered`: a thanks line over the
+ *  task page). */
+export function portalLinkOpens(search: string, queue: Pick<PortalRequest, "taskId" | "stepId">[]): { taskId: string | null; answered: boolean } {
+  const q = new URLSearchParams(search);
+  const taskId = q.get("task")?.trim() || null;
+  const stepId = q.get("step")?.trim() || null;
+  if (!taskId) return { taskId: null, answered: false };
+  const open = queue.some((r) => r.taskId === taskId && (!stepId || !r.stepId || r.stepId === stepId));
+  return { taskId, answered: !!stepId && !open };
+}
+
+/** What we need, as the top of the task page says it: a wait on their reply
+ *  to an email of ours names that email ("We need your reply to our email
+ *  "Your website changes are done""), and the task page brings the email into
+ *  view; any other ask is the step's own words (lib/stepReminders
+ *  stepAskWords: its title, or its directions' first line). */
+export function whatWeNeed(r: Pick<PortalRequest, "ask" | "replyTo" | "replyToId">): { line: string; reply: boolean; emailId: string | null } {
+  const subject = r.replyTo?.subject?.trim() || (r.ask.startsWith("Reply to: ") ? r.ask.slice("Reply to: ".length).trim() : "");
+  if (subject && (r.replyTo || r.ask.startsWith("Reply to: "))) return { line: `We need your reply to our email "${subject}"`, reply: true, emailId: r.replyToId ?? null };
+  return { line: r.ask, reply: false, emailId: null };
+}
