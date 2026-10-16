@@ -3132,15 +3132,24 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 "pull some useful icons up to the top like inbox, clients,
                 maybe even a search"). Links, so they open in a new tab too. */}
             <span className="flex shrink-0 items-center">
-              <button onClick={() => setCmdkOpen(true)} aria-label="Search" title="Search" className="grid h-10 w-10 place-items-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.search className="h-5 w-5" /></button>
+              <button onClick={() => setCmdkOpen(true)} aria-label="Search" title="Search" className="grid h-10 w-9 place-items-center rounded-[5px] text-muted hover:bg-background hover:text-foreground"><I.search className="h-5 w-5" /></button>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
               <a href="/?view=mail" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("inbox"); }} aria-label="Inbox" title="Inbox"
-                className={`relative grid h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${dirView === "inbox" ? "text-accent" : "text-muted"}`}>
+                className={`relative grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "inbox" ? "text-accent" : "text-muted"}`}>
                 <I.inbox className="h-5 w-5" />{inboxPrefs.badge && inboxUnread > 0 && <span className="absolute right-0.5 top-0.5 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{inboxUnread}</span>}
               </a>
+              {/* Reminders and Calendar too, five in all (Derek, 2026-10-16). */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
+              <a href="/?view=reminders" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("reminders"); }} aria-label="Reminders" title="Reminders"
+                className={`relative grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "reminders" ? "text-accent" : "text-muted"}`}>
+                <I.bell className="h-5 w-5" />{reminderCount > 0 && <span className="absolute right-0 top-0.5 min-w-5 rounded-full bg-accent px-1 text-center text-[12px] font-semibold leading-5 text-white">{reminderCount}</span>}
+              </a>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
+              <a href="/?view=calendar" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("calendar"); }} aria-label="Calendar" title="Calendar"
+                className={`grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${dirView === "calendar" ? "text-accent" : "text-muted"}`}><I.calendar className="h-5 w-5" /></a>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a click stays in the app; the link is for a new tab */}
               <a href="/?view=work" onClick={(e) => { if (!isPlainLeftClick(e)) return; e.preventDefault(); goToView("dashboard"); }} aria-label="Clients" title="Clients"
-                className={`grid h-10 w-10 place-items-center rounded-[5px] hover:bg-background ${myWork ? "text-accent" : "text-muted"}`}><I.user className="h-5 w-5" /></a>
+                className={`grid h-10 w-9 place-items-center rounded-[5px] hover:bg-background ${myWork ? "text-accent" : "text-muted"}`}><I.user className="h-5 w-5" /></a>
             </span>
             {/* A client's page keeps everything on this one row (Derek,
                 2026-10-13: "move all to one line on mobile"); the name
