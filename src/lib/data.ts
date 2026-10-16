@@ -2536,7 +2536,10 @@ const QUOTE_MARKERS: RegExp[] = [
   // Gmail's other shape: "August 31 at 2:32 PM, Derek Fox <derek@x.com> wrote:"
   /^\s*\w+ \d{1,2}(,| at ).{0,120}\bwrote:\s*$/im,
   /^\s*-{2,}\s*Original Message\s*-{2,}\s*$/im,
-  /^\s*_{5,}\s*$/m,
+  // Outlook's rule over its header block. A rule alone is not a quote: Chelsea
+  // split her list of asks with them and the step showed only her first line
+  // (Derek, 2026-10-16).
+  /^\s*_{5,}\s*\n\s*From:/im,
   // Outlook's header block, which starts a quote without any "wrote:" line.
   /^\s*From:.{0,200}\r?\n\s*Sent:/im,
   /^\s*>{1,}\s?.+$/m,

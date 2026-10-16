@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientFirstName, clientIsBusiness } from "./clientFirstName";
+import { clientFirstName, clientIsBusiness, senderFirstName } from "./clientFirstName";
 
 describe("clientFirstName", () => {
   it("uses the contact's first name when the contact is a person", () => {
@@ -34,5 +34,18 @@ describe("clientFirstName", () => {
   it("tells a business from a person", () => {
     for (const b of ["The Artist Workshop", "Trinity Insurance Partners", "Smith Realty", "Oak Studio", "Hill Club", "Blue LLC", "Red Inc.", "One Two Three Four"]) expect(clientIsBusiness(b)).toBe(true);
     for (const p of ["Carol Lindenmuth", "Pamela Macias", "Jack Flynn", "Mary Ann Smith"]) expect(clientIsBusiness(p)).toBe(false);
+  });
+});
+
+describe("senderFirstName", () => {
+  it("flips a Last, First name", () => {
+    expect(senderFirstName("Proctor, Chelsea")).toBe("Chelsea");
+  });
+  it("takes the first word otherwise, without the via", () => {
+    expect(senderFirstName("Brian Goodell (via BibBoards)")).toBe("Brian");
+    expect(senderFirstName("\"Carol Lindenmuth\"")).toBe("Carol");
+  });
+  it("is empty with no name", () => {
+    expect(senderFirstName(null)).toBe("");
   });
 });

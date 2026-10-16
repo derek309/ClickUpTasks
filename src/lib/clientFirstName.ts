@@ -53,3 +53,12 @@ export function clientIsBusiness(name: string): boolean {
   if (/^the\s/i.test(n) || /[&@\d]|\.com\b|'s\b|’s\b/i.test(n)) return true;
   return words.some((w) => BUSINESS_WORDS.has(w.toLowerCase().replace(/[.,]/g, "")));
 }
+
+/** A sender's first name from how their email names them: "Proctor, Chelsea"
+ *  is Chelsea (the step read "Reply to Proctor,", Derek 2026-10-16), and
+ *  "Brian (via BibBoards)" is Brian. Empty when there is no name. */
+export function senderFirstName(from: string | null | undefined): string {
+  const name = clean(from).replace(/\s*\(via [^)]*\)\s*$/i, "").replace(/^["']|["']$/g, "").trim();
+  const flipped = /^([^,\s]+),\s*(\S+)/.exec(name);
+  return flipped ? flipped[2] : name.split(" ")[0] ?? "";
+}

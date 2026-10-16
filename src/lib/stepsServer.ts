@@ -12,6 +12,7 @@ import {
   todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type ReceivedEmail, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { finishRequestStep } from "./clientRequests";
+import { senderFirstName } from "./clientFirstName";
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
 import { promoteQueueForTask } from "./queueServer";
@@ -611,7 +612,7 @@ export async function stepsOnClientMessage(taskId: string, m: ClientMessage, alw
     const reopen = !always && !conversation && closed;
     // Reopened: the "Task done" record goes, as it does in the app (useTaskEdits).
     const base = reopen ? list.filter((x) => x.addedFor !== "finished") : list;
-    const who = (m.from ?? "").replace(/\s*\(via [^)]*\)\s*$/i, "").trim().split(/\s+/)[0] || first;
+    const who = senderFirstName(m.from) || first;
     const made = addReplyStep(base, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) }, who, () => newId("s_"), new Date().toISOString(), m.channel);
     if (!made) return null;
     if (reopen) {

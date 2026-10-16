@@ -1469,3 +1469,16 @@ describe("restoreStep", () => {
     expect(current.find((x) => x.id === "b")!.startedAt).toBe("y");
   });
 });
+
+describe("an email split by underscore rules", () => {
+  const body = "Hey Derek,\nHere are the items I still need.\n\n________________________________\n\nQUARTERLY EMAIL\n\nHeader image 960 x 960.\n\n________________________________\n\nPARTNERSHIP EMAIL\n\nBY ASAP";
+  it("keeps every section", () => {
+    const text = clientEmailText(body, "Proctor, Chelsea");
+    expect(text).toContain("QUARTERLY EMAIL");
+    expect(text).toContain("PARTNERSHIP EMAIL");
+  });
+  it("still cuts Outlook's quoted header", () => {
+    const quoted = "Thanks, see below.\n\n________________________________\nFrom: Derek Fox\nSent: Monday\nOld words";
+    expect(splitQuotedEmail(quoted).visible).toBe("Thanks, see below.");
+  });
+});
