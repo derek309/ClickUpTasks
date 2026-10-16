@@ -17,6 +17,7 @@ import { closeAnsweredReplyTask } from "./ghlConversationTask";
 import { smsText } from "./smsText";
 import { insertMessageRow, listTextNumbers, textHistory } from "@/lib/ghlNumbers";
 import { ghlTextPayload, resolveFromNumber } from "@/lib/textFrom";
+import { replyBelongs, replyPeer } from "@/lib/replyRecipients";
 
 const GHL = "https://services.leadconnectorhq.com";
 const SEND_DOMAIN = "clickuplocal.com";
@@ -44,29 +45,44 @@ async function pathBelongsToClient(path: string, clientId: string): Promise<bool
   return !!task && task.client_id === clientId;
 }
 
+/** The email `replyToMessageId` (messages.id) when it may be answered from
+ *  this client: their own email, or one linked to one of their tasks (an
+ *  email from someone who is not a contact has no client, only the task it
+ *  is on: Chelsea Proctor's on Brian Goodell's task, 2026-10-16). Null for
+ *  another client's email, or none. */
+async function answerableEmail(clientId: string, replyToMessageId: string | null | undefined, cols: string): Promise<Record<string, unknown> | null> {
+  if (!replyToMessageId) return null;
+  const { data } = await supabaseAdmin.from("messages").select(`client_id, task_id, channel, ${cols}`).eq("id", replyToMessageId).maybeSingle();
+  const r = data as unknown as Record<string, unknown> | null;
+  if (!r || r.channel !== "email") return null;
+  const src = { channel: "email", clientId: (r.client_id as string | null) ?? null, taskId: (r.task_id as string | null) ?? null, peerAddress: null, peerName: null };
+  let taskClientId: string | null = null;
+  if (src.clientId !== clientId && src.taskId) {
+    const { data: t } = await supabaseAdmin.from("tasks").select("client_id").eq("id", src.taskId).maybeSingle();
+    taskClientId = (t?.client_id as string | null) ?? null;
+  }
+  return replyBelongs(src, { clientId, taskClientId }) ? r : null;
+}
+
 /** The reply headers for answering the email `replyToMessageId` (messages.id),
  *  read from the sender's mailbox. Null when it isn't this client's email or
  *  can't be found, and the email then goes out as a new thread. */
 export async function replyHeadersFor(sender: string, clientId: string, replyToMessageId: string | null | undefined): Promise<ReplyHeaders | null> {
-  if (!replyToMessageId) return null;
-  const { data: row } = await supabaseAdmin.from("messages")
-    .select("client_id, channel, gmail_message_id, rfc822_message_id").eq("id", replyToMessageId).maybeSingle();
-  if (!row || row.client_id !== clientId || row.channel !== "email") return null;
+  const row = await answerableEmail(clientId, replyToMessageId, "gmail_message_id, rfc822_message_id");
+  if (!row) return null;
   return readReplyHeaders(sender, { gmailMessageId: row.gmail_message_id as string | null, rfc822: row.rfc822_message_id as string | null }).catch(() => null);
 }
 
 /** Who a reply goes to: the person who wrote the email being answered (or
  *  whom it went to, when it was ours), not the client's main contact. On
  *  Matthew Whitman's task, answering Russell's email went to Matthew (Justin,
- *  2026-10-07). Same rule as replyHeadersFor: only this client's own email.
- *  Null means use the client's contact, as before. */
+ *  2026-10-07). Same rule as replyHeadersFor: this client's own email, or one
+ *  on one of their tasks. Never one of our own addresses. Null means use the
+ *  client's contact, as before. */
 export async function replyRecipientFor(clientId: string, replyToMessageId: string | null | undefined): Promise<{ email: string; name: string | null } | null> {
-  if (!replyToMessageId) return null;
-  const { data: row } = await supabaseAdmin.from("messages")
-    .select("client_id, channel, peer_address, peer_name").eq("id", replyToMessageId).maybeSingle();
-  const email = ((row?.peer_address as string | null) ?? "").trim().toLowerCase();
-  if (!row || row.client_id !== clientId || row.channel !== "email" || !email.includes("@") || email.endsWith(`@${SEND_DOMAIN}`)) return null;
-  return { email, name: (row.peer_name as string | null) ?? null };
+  const row = await answerableEmail(clientId, replyToMessageId, "peer_address, peer_name");
+  if (!row) return null;
+  return replyPeer({ channel: "email", clientId: null, taskId: null, peerAddress: row.peer_address as string | null, peerName: row.peer_name as string | null });
 }
 
 /** The Message-ID Gmail gave an email just sent, kept so a later reply to it threads. */

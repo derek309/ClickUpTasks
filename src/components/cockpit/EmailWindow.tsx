@@ -101,7 +101,7 @@ export function sentEmailFor(draft: EmailDraft, messages: Message[] | null | und
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // Cc and Bcc: type to search the synced contacts by name or email, or type an
 // address and press Enter. Stores plain email strings (what GHL and Gmail take).
-function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
+export function RecipientField({ label, value, onChange, contacts }: { label: string; value: string[]; onChange: (next: string[]) => void; contacts: Contact[] }) {
   const [q, setQ] = useState("");
   const ql = q.trim().toLowerCase();
   const matches = ql
@@ -114,8 +114,8 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
       <span className="w-16 shrink-0 text-[16px] font-semibold text-muted">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {value.map((e) => (
-          <span key={e} className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-0.5 text-[16px] text-accent">
-            {e}<button onClick={() => remove(e)} title="Remove" className="hover:text-foreground">×</button>
+          <span key={e} className="inline-flex max-w-full items-center gap-1 rounded-[5px] bg-accent-soft py-0.5 pl-2 pr-0.5 text-[16px] text-accent [overflow-wrap:anywhere]">
+            {e}<button onClick={() => remove(e)} title="Remove" aria-label={`Remove ${e}`} className="min-h-8 min-w-8 shrink-0 rounded-[5px] hover:text-foreground">×</button>
           </span>
         ))}
         <input value={q} onChange={(e) => setQ(e.target.value)}
@@ -123,11 +123,11 @@ function RecipientField({ label, value, onChange, contacts }: { label: string; v
             if ((e.key === "Enter" || e.key === ",") && EMAIL_RE.test(q.trim())) { e.preventDefault(); add(q); }
             else if (e.key === "Backspace" && !q && value.length) { remove(value[value.length - 1]); }
           }}
-          placeholder={value.length ? "" : "Search contacts or type an email"}
-          className="min-w-[180px] flex-1 bg-transparent py-0.5 text-[16px] outline-none placeholder:text-muted" />
+          placeholder={value.length ? "Add more" : "Name or email"}
+          aria-label={label} className="min-w-[7rem] flex-1 bg-transparent py-0.5 text-[16px] outline-none placeholder:text-muted" />
       </div>
       {matches.length > 0 && (
-        <div className="absolute left-16 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border bg-surface shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-[5px] border bg-surface shadow-lg sm:left-16">
           {matches.map((c) => (
             <button key={c.id} onClick={() => add(c.email)} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-background">
               <span className="truncate text-[16px] font-medium">{c.name}</span>

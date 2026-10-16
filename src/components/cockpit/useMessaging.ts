@@ -13,6 +13,7 @@ import { mergeFetched } from "@/lib/localTaskWrites";
 import type { Attachment, Client, Contact, Message, MessageChannel, ScheduledMessage } from "@/lib/data";
 import { newId } from "./ui";
 import { fromKey, fromPick } from "./FromNumber";
+import { replyBelongs, replyPeer as replyPeerOf } from "@/lib/replyRecipients";
 
 export function useMessaging({ meId, messages, setMessages, loading, openTaskId, conversationContactId, contactForClient, clientById, pushToast, onAnswered }: {
   meId: string;
@@ -88,8 +89,9 @@ export function useMessaging({ meId, messages, setMessages, loading, openTaskId,
     // main contact (answering Russell on Matthew's task went to Matthew,
     // Justin, 2026-10-07). The server checks the same thing.
     const answering = channel === "email" && replyToMessageId ? messages.find((m) => m.id === replyToMessageId) : null;
-    const peerEmail = (answering?.peerAddress ?? "").trim().toLowerCase();
-    const replyPeer = answering && answering.channel === "email" && answering.clientId === clientId && peerEmail.includes("@") && !peerEmail.endsWith("@clickuplocal.com") ? peerEmail : null;
+    // Theirs, or on this task: someone who is not a contact has no client,
+    // only the task (Chelsea on Brian Goodell's task, 2026-10-16).
+    const replyPeer = answering && replyBelongs(answering, { clientId, taskId }) ? replyPeerOf(answering)?.email ?? null : null;
     const toEmail = replyPeer ?? contact.email;
     const target = ghlTargetForContact(contact);
     if (!target) { pushToast("No GoHighLevel connection for this client's sub-account."); return false; }

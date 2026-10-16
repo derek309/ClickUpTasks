@@ -2,23 +2,37 @@
 
 // Reply in place (Derek, 2026-10-15, step-flow-mockup.html): Reply on the
 // client's email opens this box right under it, To and the subject filled
-// in, no trip to the email window. It writes the task's draft email (the same
+// in, no trip to the email window. To is the person who wrote the email, by
+// name and address, with the others on it in Cc (reply all); Cc and Bcc are
+// changed right here (Derek, 2026-10-16). It writes the task's draft email (the same
 // one the window edits), saving as you type, and Send sends it the way the
 // window's Send does (TaskDrawer sendDraft): the step finishes and After this
-// starts. Full window ↗ opens the window on the same draft for Cc, the task's
+// starts. Full window ↗ opens the window on the same draft for the task's
 // files and the rest. While it is open, Send is the page's one dark button.
 // Left as Reply wrote it (clicking away, Escape, Discard), the reply takes
 // itself back (onLeave, lib/undoAction).
 import { useEffect, useRef, useState } from "react";
 import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "@/lib/uploadTypes";
-import { plainTextToHtml, type Attachment } from "@/lib/data";
+import { plainTextToHtml, type Attachment, type Contact } from "@/lib/data";
 import { RichTextEditor } from "./RichTextEditor";
+import { RecipientField } from "./EmailWindow";
 import { I } from "./ui";
 
-export type ReplyDraft = { subject: string; body: string; attachments?: Attachment[] };
+// The subject's height follows its text, where [field-sizing:content] is not supported.
+const fitHeight = (t: HTMLTextAreaElement | null) => {
+  if (!t || (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content"))) return;
+  t.style.height = "auto";
+  t.style.height = `${t.scrollHeight}px`;
+};
 
-export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onFull, onDiscard, onLeave, note, pushToast }: {
-  toName: string;
+export type ReplyDraft = { subject: string; body: string; attachments?: Attachment[]; cc?: string[]; bcc?: string[] };
+
+export function InlineReply({ toName, toEmail, draft, ccContacts, onSave, onSend, onAi, onUpload, onFull, onDiscard, onLeave, note, pushToast }: {
+  /** Who it goes to: their name, and their address. */
+  toName: string | null;
+  toEmail: string | null;
+  /** Searchable contacts for Cc and Bcc. */
+  ccContacts?: Contact[];
   draft: ReplyDraft;
   /** Saves the draft (called a moment after typing stops, and before Send). */
   onSave: (patch: Partial<ReplyDraft>) => void;
@@ -40,6 +54,16 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
   const [nonce, setNonce] = useState(0);
   const [aiBusy, setAiBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [cc, setCc] = useState<string[]>(draft.cc ?? []);
+  const [bcc, setBcc] = useState<string[]>(draft.bcc ?? []);
+  const [showCopies, setShowCopies] = useState(!!(draft.cc?.length || draft.bcc?.length));
+  const who = toName || toEmail || "them";
+  const saveCopies = (next: { cc?: string[]; bcc?: string[] }) => {
+    if (next.cc) setCc(next.cc);
+    if (next.bcc) setBcc(next.bcc);
+    flush();
+    onSave(next);
+  };
   const fileRef = useRef<HTMLInputElement>(null);
   const boxRef = useRef<HTMLElement>(null);
   // Clicking away from the box: not into it, and not to another window.
@@ -87,19 +111,46 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
   };
   const link = "inline-flex min-h-9 items-center gap-1 rounded-[5px] px-1 text-[16px] font-semibold text-accent hover:bg-background disabled:opacity-50";
   return (
-    <section ref={boxRef} aria-label={`Reply to ${toName}`} className="overflow-hidden rounded-[5px] bg-surface ring-2 ring-inset ring-accent"
+    <section ref={boxRef} aria-label={`Reply to ${who}`} className="overflow-hidden rounded-[5px] bg-surface ring-2 ring-inset ring-accent"
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) left(); }}
       // Escape: what was typed is saved first, then the key goes on (the
       // task drawer takes the reply back when nothing was).
       onKeyDown={(e) => { if (e.key === "Escape") flush(); }}>
-      <div className="border-b px-3 py-2 text-[16px] text-muted [overflow-wrap:anywhere]">
-        To <span className="font-semibold text-foreground">{toName}</span>
-        <span aria-hidden> · </span>
-        <input defaultValue={draft.subject} key={`s${nonce}`} aria-label="Subject" onChange={(e) => keep({ subject: e.target.value })}
-          className="w-full min-w-0 bg-transparent font-medium text-foreground outline-none sm:w-auto sm:min-w-[16rem]" />
+      {/* To, Cc, Bcc and the subject, one line each with the labels in one
+          column, as in the email window. The address sits under the name on
+          a phone and after it on a desktop; the subject wraps, never cut off. */}
+      <div className="border-b text-[16px]">
+        <div className="flex items-start gap-3 px-3 py-2 sm:items-center">
+          <span className="w-16 shrink-0 font-semibold text-muted">To</span>
+          {toEmail
+            ? (
+              <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-2">
+                {toName && <span className="font-semibold [overflow-wrap:anywhere]">{toName}</span>}
+                <span className={`[overflow-wrap:anywhere] ${toName ? "text-muted" : ""}`}>{toEmail}</span>
+              </span>
+            )
+            : <span className="min-w-0 flex-1 text-danger">Nobody to send this to yet.</span>}
+          {!showCopies && (
+            <button onClick={() => setShowCopies(true)} className="-my-1 min-h-9 shrink-0 rounded-[5px] px-2 font-medium text-muted hover:bg-background hover:text-foreground">Cc / Bcc</button>
+          )}
+        </div>
+        {showCopies && (
+          <div className="flex flex-col gap-2 border-t px-3 py-2">
+            <RecipientField label="Cc" value={cc} onChange={(next) => saveCopies({ cc: next })} contacts={ccContacts ?? []} />
+            <RecipientField label="Bcc" value={bcc} onChange={(next) => saveCopies({ bcc: next })} contacts={ccContacts ?? []} />
+          </div>
+        )}
+        <label className="flex items-start gap-3 border-t px-3 py-2">
+          <span className="w-16 shrink-0 py-0.5 font-semibold text-muted">Subject</span>
+          {/* Wraps instead of running off the edge; still one line: Enter adds none. */}
+          <textarea defaultValue={draft.subject} key={`s${nonce}`} rows={1} aria-label="Subject" ref={fitHeight}
+            onChange={(e) => { const v = e.target.value.replace(/\s*\n\s*/g, " "); if (v !== e.target.value) e.target.value = v; fitHeight(e.target); keep({ subject: v }); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault(); }}
+            className="min-w-0 flex-1 resize-none bg-transparent py-0.5 font-medium leading-snug text-foreground outline-none [field-sizing:content]" />
+        </label>
       </div>
       <div className="px-1 py-1 text-[16px]">
-        <RichTextEditor key={`b${nonce}`} variant="email" value={draft.body} autoFocus onChange={(html) => keep({ body: html })} placeholder={`Write to ${toName}`} />
+        <RichTextEditor key={`b${nonce}`} variant="email" value={draft.body} autoFocus onChange={(html) => keep({ body: html })} placeholder={`Write to ${who}`} />
       </div>
       {atts.length > 0 && (
         <div className="flex flex-wrap gap-2 border-t px-3 py-2">
@@ -120,7 +171,7 @@ export function InlineReply({ toName, draft, onSave, onSend, onAi, onUpload, onF
         </>}
         <span className="flex-1" />
         <button onClick={() => { flush(); onDiscard(); }} className="min-h-9 px-1 text-[16px] font-medium text-muted hover:text-danger">Discard</button>
-        <button onClick={() => { flush(); onFull(); }} title="The email window, with Cc, the task's files and scheduling" className="min-h-9 px-1 text-[16px] font-medium text-muted hover:text-foreground">
+        <button onClick={() => { flush(); onFull(); }} title="The email window, with the task's files and scheduling" className="min-h-9 px-1 text-[16px] font-medium text-muted hover:text-foreground">
           <span className="sm:hidden">Full ↗</span><span className="max-sm:hidden">Full window ↗</span></button>
       </div>
       {note && <p className="border-t px-3 py-2 text-[16px] text-muted">{note}</p>}

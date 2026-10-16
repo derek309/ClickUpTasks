@@ -12,6 +12,13 @@ const rows: Record<string, Record<string, unknown>> = {
   "messages:m_russell": { client_id: "cl_matt", channel: "email", peer_address: "Russell@Whitman.com", peer_name: "Russell Lathrop", gmail_message_id: null, rfc822_message_id: null },
   "messages:m_other_client": { client_id: "cl_someone_else", channel: "email", peer_address: "stranger@example.com", peer_name: "Stranger" },
   "messages:m_ours": { client_id: "cl_matt", channel: "email", peer_address: "derek@clickuplocal.com", peer_name: "Derek" },
+  // Someone who is not a contact: no client, only the task it is on (Chelsea
+  // Proctor on Brian Goodell's task, 2026-10-16).
+  "messages:m_chelsea": { client_id: null, task_id: "t_1", channel: "email", peer_address: "cproctor@usatventures.com", peer_name: "Proctor, Chelsea", gmail_message_id: null, rfc822_message_id: null },
+  "tasks:t_1": { client_id: "cl_matt" },
+  "messages:m_stray": { client_id: null, task_id: "t_other", channel: "email", peer_address: "someone@elsewhere.com", peer_name: "Someone" },
+  "tasks:t_other": { client_id: "cl_someone_else" },
+  "messages:m_loose": { client_id: null, task_id: null, channel: "email", peer_address: "loose@elsewhere.com", peer_name: "Loose" },
 };
 const inserts: Record<string, unknown>[] = [];
 function query(table: string) {
@@ -65,6 +72,18 @@ describe("who a reply goes to", () => {
     await send(null);
     expect(sent.map((m) => m.to)).toEqual(["matthew@whitman.com"]);
     expect(inserts[0]?.peer_address).toBe("matthew@whitman.com");
+  });
+
+  it("is the writer of an email on this client's task, though they are not a contact", async () => {
+    expect(await replyRecipientFor("cl_matt", "m_chelsea")).toEqual({ email: "cproctor@usatventures.com", name: "Chelsea Proctor" });
+    const r = await send("m_chelsea");
+    expect(r.ok).toBe(true);
+    expect(sent.map((m) => m.to)).toEqual(["cproctor@usatventures.com"]);
+  });
+
+  it("is nobody special for an email with no client on another client's task, or on no task", async () => {
+    expect(await replyRecipientFor("cl_matt", "m_stray")).toBeNull();
+    expect(await replyRecipientFor("cl_matt", "m_loose")).toBeNull();
   });
 
   it("never lets a reply to Russell fall back to Matthew through GoHighLevel", async () => {

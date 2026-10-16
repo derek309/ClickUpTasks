@@ -82,6 +82,7 @@ import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
 import { MeetNowSheet } from "./MeetNowSheet";
 import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
+import { replyAllCc, replyBelongs, replyPeer } from "@/lib/replyRecipients";
 
 // The review lines a task can add beside its client document, in order.
 const REVIEW_LINES: { kind: FileKind; label: string }[] = [
@@ -238,11 +239,20 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const [meetNowFrom, setMeetNowFrom] = useState<{ stepId: string | null } | null>(null);
   // A reply goes to whoever wrote the email it answers, not the client's main
   // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
-  // Same rule as the server's replyRecipientFor.
-  const replyPeerOf = (id?: string | null): { email: string; name: string | null } | null => {
+  // Same rule as the server's replyRecipientFor: the client's own email, or
+  // one on this task or held on one of its steps, from someone who is not a
+  // contact too (Chelsea Proctor on Brian Goodell's task, 2026-10-16).
+  const answerable = (id?: string | null) => {
     const m = id ? (messages ?? []).find((x) => x.id === id) : null;
-    const e = (m?.peerAddress ?? "").trim().toLowerCase();
-    return m && m.channel === "email" && m.clientId === task.clientId && e.includes("@") && !e.endsWith("@clickuplocal.com") ? { email: e, name: m.peerName ?? null } : null;
+    if (!m) return null;
+    const onStep = task.subtasks.some((x) => x.fromEmails?.some((e) => e.messageId === m.id));
+    return replyBelongs(m, { clientId: task.clientId, taskId: task.id, onStep }) ? m : null;
+  };
+  const replyPeerOf = (id?: string | null): { email: string; name: string | null } | null => replyPeer(answerable(id));
+  // Reply all: the others on that email in Cc, less our own addresses.
+  const replyCcOf = (id?: string | null): string[] => {
+    const m = answerable(id);
+    return replyAllCc(m, replyPeer(m)?.email ?? null);
   };
   const ghlSub = linkedContact ? clientById(linkedContact.clientId) : null;
   const ghlContactUrl = linkedContact && ghlSub?.ghlLocationId ? `https://app.gohighlevel.com/v2/location/${ghlSub.ghlLocationId}/contacts/detail/${linkedContact.ghlContactId}` : null;
@@ -1806,8 +1816,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         : (reply?.replyTo ? list.find((x) => !x.done && x.fromEmails?.some((e) => e.messageId === reply.replyTo)) : undefined)
           ?? currentStep(list);
       const moveHold = !!target && !target.onClient && !isHandoffStep(target, task.assigneeId) && !target.holds?.includes("email");
-      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, createdAt: now, updatedAt: now },
+      const cc = replyCcOf(reply?.replyTo);
+      onPatch({ draftEmail: { subject: reply?.subject ?? task.title, body: greetingHtml(replyPeerOf(reply?.replyTo)?.name ?? messageDest?.name), replyTo: reply?.replyTo ?? null, ...(cc.length ? { cc } : {}), createdAt: now, updatedAt: now },
         ...(moveHold ? { subtasks: holdOnStep(list, target!.id, "email") } : {}) });
+    } else if (reply?.replyTo && current && !current.replyTo) {
+      // The draft kept is now the reply to that email: it goes to its writer.
+      const cc = current.cc?.length ? current.cc : replyCcOf(reply.replyTo);
+      onPatch({ draftEmail: { ...current, replyTo: reply.replyTo, ...(cc.length ? { cc } : {}), updatedAt: new Date().toISOString() } });
     }
     if (open) openNewEmail(before);
   };
@@ -3948,15 +3963,28 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const inlineReplyOn = (sub: Subtask) => hasMessaging && !sub.done && !!sub.fromEmails?.length && (sub.holds ?? []).includes("email") && !!task.draftEmail && sub.assigneeId !== CLAUDE_ID;
   // The client's email waits for its Reply: Reply is the dark button.
   const replyPendingOn = (sub: Subtask) => hasMessaging && !sub.done && sub.assigneeId !== CLAUDE_ID && replyWaiting(sub, !!task.draftEmail);
-  const saveDraft = (patch: Partial<NonNullable<Task["draftEmail"]>>) => {
+  // The box under a client's email is a reply to it, even on a draft written
+  // before Reply was pressed (one with no replyTo said "To Brian Goodell"
+  // under Chelsea's email, 2026-10-16): it answers the step's latest email,
+  // with the others on it in Cc, until the draft says otherwise.
+  const inlineDraft = (sub: Subtask): NonNullable<Task["draftEmail"]> | null => {
     const d = taskRef.current.draftEmail;
-    if (d) onPatch({ draftEmail: { ...d, ...patch, updatedAt: new Date().toISOString() } });
+    if (!d) return null;
+    if (d.replyTo) return d;
+    const replyTo = sub.fromEmails?.[sub.fromEmails.length - 1]?.messageId ?? null;
+    if (!replyTo) return d;
+    return { ...d, replyTo, cc: d.cc?.length ? d.cc : replyCcOf(replyTo) };
   };
   const inlineReply = (sub: Subtask) => {
-    const d = task.draftEmail!;
+    const d = inlineDraft(sub) ?? task.draftEmail!;
+    const peer = replyPeerOf(d.replyTo);
+    const toName = peer ? peer.name : messageDest?.name ?? null;
+    const toEmail = peer?.email ?? (messageDest?.email || null);
     return (
-      <InlineReply key={`reply-${sub.id}-${d.createdAt}`} toName={draftToName || firstName} draft={d} pushToast={pushToast}
-        onSave={saveDraft}
+      <InlineReply key={`reply-${sub.id}-${d.createdAt}`} toName={toName || (toEmail ? null : firstName)} toEmail={toEmail} draft={d} pushToast={pushToast}
+        ccContacts={ccContacts}
+        // Saved as the reply it shows: its replyTo and Cc go with the first change.
+        onSave={(patch) => { const e = inlineDraft(sub); if (e) onPatch({ draftEmail: { ...e, ...patch, updatedAt: new Date().toISOString() } }); }}
         onSend={() => sendInlineReply(sub)}
         onAi={onDraftMessage ? () => onDraftMessage("email", undefined, taskRef.current.draftEmail?.aiContext) : undefined}
         onUpload={onUploadMessageImage}
@@ -3976,8 +4004,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Send in the reply box: the window's own Send (sendDraft), with After
   // this taken as it stands (its suggestion saved first).
   const sendInlineReply = (sub: Subtask) => {
-    const d = taskRef.current.draftEmail;
-    if (!d || !sendDraft || !draftTo) { pushToast("There is nobody to send this to yet."); return; }
+    const d = inlineDraft(sub);
+    const to = replyPeerOf(d?.replyTo)?.email ?? draftTo;
+    if (!d || !sendDraft || !to) { pushToast("There is nobody to send this to yet."); return; }
     const body = draftLinkAsButton(d.body, d.link);
     if (!htmlToText(body).trim() && !(d.attachments?.length)) { pushToast("Write the email before sending it."); return; }
     const subject = d.subject.trim() || task.title.trim();
