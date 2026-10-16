@@ -3,6 +3,7 @@
 import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouClearsOn, planSteps, tickedAStep, todayIso } from "@/lib/data";
 import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
+import { isClientWait } from "@/lib/afterThis";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   users,
@@ -1217,9 +1218,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   });
 
   const { hasUnreadReply, markTaskNotifsRead, notify, sendMentionEmail } = useNotify({ tasksRef, me, setNotifications, notifications });
+  // Whose move it is (Derek, 2026-10-15: "I want to see what am I waiting
+  // on"): the client's turn is the flag or a current step that waits on
+  // them; Team is a current step a teammate has (not you, not Claude).
+  const curOpen = (t: Task) => t.subtasks.find((x) => !x.done && !x.fromClient) ?? null;
+  const onClientNow = (t: Task) => { const c = curOpen(t); return !!t.waitingOnClient || (!!c && isClientWait(c)); };
+  const onTeamNow = (t: Task) => { const c = curOpen(t); const who = c?.assigneeId ?? null; return t.status === "delegated" || (!!who && who !== me.id && who !== CLAUDE_ID && !(c && isClientWait(c))); };
   const passesFilters = (t: Task) =>
     (filters.status === "all" || effectiveStatus(t) === filters.status) &&
-    (filters.assignee === "all" || (filters.assignee === "waiting" ? !!t.waitingOnClient : filters.assignee === "unassigned" ? t.assigneeId === null : t.assigneeId === filters.assignee)) &&
+    (filters.assignee === "all" || (filters.assignee === "waiting" ? onClientNow(t) : filters.assignee === "team" ? onTeamNow(t) : filters.assignee === "unassigned" ? t.assigneeId === null : t.assigneeId === filters.assignee)) &&
     (filters.priority === "all" || effectivePriority(t) === filters.priority) &&
     // Explicitly filtering to Done overrides the hide-done toggle — asking
     // to see done tasks and then hiding them would show nothing.
@@ -2517,7 +2524,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             {filtersActive && <button onClick={() => setFilters({ status: "all", assignee: "all", priority: "all" })} className="text-[13px] font-medium text-accent">Clear</button>}
           </div>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Status</span><select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as FilterState["status"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_META[s].label}</option>)}</select></label>
-          <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}<option value={CLAUDE_ID}>Claude</option></select></label>
+          <label className="flex items-center justify-between gap-3"><span className="text-muted">Assignee</span><select value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option><option value="unassigned">Unassigned</option><option value="waiting">⏳ Waiting on client</option><option value="team">With a teammate</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}<option value={CLAUDE_ID}>Claude</option></select></label>
           <label className="flex items-center justify-between gap-3"><span className="text-muted">Priority</span><select value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as FilterState["priority"] }))} className="rounded-md border bg-background px-2 py-1 outline-none"><option value="all">All</option>{PRIORITY_ORDER.filter((p) => p !== "none").map((p) => <option key={p} value={p}>{PRIORITY_META[p].label}</option>)}</select></label>
   </>);
   const columnsPanel = (<>
@@ -2549,12 +2556,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     </div>
   );
   // Everyone, Mine or Claude, full size for the phone's View menu.
-  const whoseOnPhone = filters.assignee === me.id ? "mine" : filters.assignee === CLAUDE_ID ? "claude" : "all";
+  const whoseOnPhone = filters.assignee === me.id ? "mine" : filters.assignee === CLAUDE_ID ? "claude" : filters.assignee === "waiting" ? "client" : filters.assignee === "team" ? "team" : "all";
   const whosePhoneBtn = (on: boolean) => `flex-1 px-2.5 py-2 text-[16px] ${on ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`;
   const mineTogglePhone = (
-    <span className="flex overflow-hidden rounded-[5px] ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
+    // Five on a phone: three, then two, so none is cut off in the View menu.
+    <span className="grid grid-cols-3 gap-px overflow-hidden rounded-[5px] bg-[var(--border)] ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
       <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={whoseOnPhone === "all"} className={whosePhoneBtn(whoseOnPhone === "all")}>Everyone</button>
       <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={whoseOnPhone === "mine"} className={whosePhoneBtn(whoseOnPhone === "mine")}>Mine</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "waiting" }))} aria-pressed={whoseOnPhone === "client"} title="Waiting on the client" className={whosePhoneBtn(whoseOnPhone === "client")}>Client</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "team" }))} aria-pressed={whoseOnPhone === "team"} title="A teammate has it" className={whosePhoneBtn(whoseOnPhone === "team")}>Team</button>
       <button onClick={() => setFilters((f) => ({ ...f, assignee: CLAUDE_ID }))} aria-pressed={whoseOnPhone === "claude"} title="Tasks on Claude" className={whosePhoneBtn(whoseOnPhone === "claude")}>Claude</button>
     </span>
   );
@@ -2594,11 +2604,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // Claude"): the tasks waiting on Claude, a click away.
   const mineOn = filters.assignee === me.id;
   const claudeOn = filters.assignee === CLAUDE_ID;
+  const clientOn = filters.assignee === "waiting";
+  const teamOn = filters.assignee === "team";
+  const everyoneOn = !mineOn && !claudeOn && !clientOn && !teamOn;
   const whoseBtn = (on: boolean) => `px-2.5 py-1.5 text-[13px] ${on ? "bg-accent-soft font-semibold text-accent" : "bg-background text-muted hover:text-foreground"}`;
   const mineToggle = (
     <span className="inline-flex overflow-hidden rounded-md ring-1 ring-[var(--border)]" role="group" aria-label="Whose tasks">
-      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={!mineOn && !claudeOn} className={whoseBtn(!mineOn && !claudeOn)}>Everyone</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} aria-pressed={everyoneOn} className={whoseBtn(everyoneOn)}>Everyone</button>
       <button onClick={() => setFilters((f) => ({ ...f, assignee: me.id }))} aria-pressed={mineOn} className={whoseBtn(mineOn)}>Mine</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "waiting" }))} aria-pressed={clientOn} title="Waiting on the client" className={whoseBtn(clientOn)}>Client</button>
+      <button onClick={() => setFilters((f) => ({ ...f, assignee: "team" }))} aria-pressed={teamOn} title="A teammate has it" className={whoseBtn(teamOn)}>Team</button>
       <button onClick={() => setFilters((f) => ({ ...f, assignee: CLAUDE_ID }))} aria-pressed={claudeOn} title="Tasks on Claude" className={whoseBtn(claudeOn)}>Claude</button>
     </span>
   );
@@ -2661,7 +2676,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           <button onClick={() => setFilters((f) => ({ ...f, status: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
       {filters.assignee !== "all" && filters.assignee !== me.id && (
-        <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : userById(filters.assignee)?.name ?? filters.assignee}
+        <span className="inline-flex items-center gap-1 rounded-[5px] border bg-background px-2 py-0.5 text-[13px]">Assignee: {filters.assignee === "unassigned" ? "Unassigned" : filters.assignee === "waiting" ? "Waiting on client" : filters.assignee === "team" ? "With a teammate" : userById(filters.assignee)?.name ?? filters.assignee}
           <button onClick={() => setFilters((f) => ({ ...f, assignee: "all" }))} className="text-muted hover:text-foreground"><I.close className="h-3 w-3" /></button></span>
       )}
       {filters.priority !== "all" && (
