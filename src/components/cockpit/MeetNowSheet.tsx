@@ -95,9 +95,10 @@ export function MeetNowSheet({ clientId, taskId, stepId, first, email, phone, sa
   const channels = meetNowChannels({ invited: ready?.invited ?? null, email, phone });
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/30" onClick={onClose} />
+      {/* Above a step page (z-80), which Meeting is picked from. */}
+      <div className="fixed inset-0 z-[85] bg-black/30" onClick={onClose} />
       <div role="dialog" aria-label={`Meet with ${first} now`}
-        className="fixed inset-x-3 bottom-3 z-[61] grid max-h-[85vh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[5px] bg-surface pb-[env(safe-area-inset-bottom,0px)] text-[16px] text-foreground shadow-2xl ring-1 ring-[var(--border)] sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-20 sm:w-[min(34rem,calc(100%-2rem))] sm:-translate-x-1/2 sm:pb-0">
+        className="fixed inset-x-3 bottom-3 z-[86] grid max-h-[85vh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[5px] bg-surface pb-[env(safe-area-inset-bottom,0px)] text-[16px] text-foreground shadow-2xl ring-1 ring-[var(--border)] sm:bottom-auto sm:left-1/2 sm:right-auto sm:top-20 sm:w-[min(34rem,calc(100%-2rem))] sm:-translate-x-1/2 sm:pb-0">
         <div className="flex items-start gap-3 border-b px-4 py-3 sm:px-5 sm:py-4">
           <div className="min-w-0 flex-1">
             <h2 className="text-[20px] font-bold leading-tight">{ready ? `Meeting with ${first} is on` : `Meet with ${first} now`}</h2>

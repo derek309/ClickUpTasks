@@ -15,6 +15,7 @@ import { finishRequestStep } from "./clientRequests";
 import { senderFirstName } from "./clientFirstName";
 import { reviewFollowUpDays } from "./reviewReminders";
 import { withMeetNowSteps } from "./meetNow";
+import { bookedDay, withBookedSteps } from "./meetingChoice";
 import { promoteQueueForTask } from "./queueServer";
 import { pushIfClaudeFinished } from "./push";
 import { bookedOutcome, finishBookedWait } from "./bookingClosesRequest";
@@ -310,6 +311,14 @@ export async function stepsOnMeetNow(taskId: string, o: { first: string; attachm
     return next;
   });
   return ok ? made : null;
+}
+
+/** A time booked from a step (Derek, 2026-10-16): the step becomes "Meet
+ *  with <first>" on the meeting's day, with its transcript step after it
+ *  (meetingChoice.withBookedSteps). */
+export async function stepsOnBooked(taskId: string, o: { start: string; first?: string | null; fromStepId?: string | null }): Promise<boolean> {
+  return rewriteSteps(taskId, (row, firstName) =>
+    withBookedSteps(row.subtasks ?? [], { first: o.first?.trim() || firstName, due: bookedDay(o.start), fromStepId: o.fromStepId ?? null }, () => newId("s_")));
 }
 
 export async function ensureMeetingSteps(taskId: string): Promise<boolean> {

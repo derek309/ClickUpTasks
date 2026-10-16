@@ -48,6 +48,9 @@ export function meetNowChannels(o: { invited: string | null; email: string | nul
   return [...(o.email ? ["email" as const] : []), ...(o.phone ? ["sms" as const] : [])];
 }
 
+/** A step with nothing on it yet (just added): one a meeting can become. */
+export const isEmptyStep = (x: Subtask) => !x.holds?.length && !x.notes?.trim() && !x.todos?.length && !x.draftMessage && !x.onClient && !x.fromEmails?.length && !x.makes;
+
 /** The meeting's two steps, as a booked meeting has them (withMeetingSteps):
  *  "Meet with <first>", current, due today and holding the link, then "Add
  *  the meeting transcript" for Granola to fill. Both marked meetNow, so a
@@ -62,9 +65,8 @@ export function withMeetNowSteps(subtasks: Subtask[], o: { first: string; due: s
   const meetFields = { title: `Meet with ${o.first}`, due: o.due, addedFor: "meeting", meetNow: true, startedAt: now, meeting: o.meeting, holds: [`att:${o.attachmentId}`] };
   const transcript: Subtask = { id: makeId(), title: "Add the meeting transcript", done: false, due: o.due, addedFor: "transcript", finishWhen: "transcript", meetNow: true };
   const from = o.fromStepId ? subtasks.find((x) => x.id === o.fromStepId && !x.done && !x.fromClient) : null;
-  const empty = (x: Subtask) => !x.holds?.length && !x.notes?.trim() && !x.todos?.length && !x.draftMessage && !x.onClient && !x.fromEmails?.length && !x.makes;
   const cur = currentStep(subtasks);
-  const reuse = from && (empty(from) || asksWhatsNext(from)) ? from : cur && asksWhatsNext(cur) ? cur : null;
+  const reuse = from && (isEmptyStep(from) || asksWhatsNext(from)) ? from : cur && asksWhatsNext(cur) ? cur : null;
   const meet: Subtask = reuse
     ? { ...reuse, ...meetFields, finishWhen: undefined, namedFrom: undefined }
     : { id: makeId(), done: false, ...meetFields };

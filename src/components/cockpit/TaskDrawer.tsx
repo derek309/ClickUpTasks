@@ -81,6 +81,8 @@ import { QuickLinksBar } from "./ClientLinks";
 import { reviewFollowUpDays } from "@/lib/reviewReminders";
 import { BookAppointment } from "./BookAppointment";
 import { MeetNowSheet } from "./MeetNowSheet";
+import { MeetingChoiceMenu, pickedAtOf, type PickedAt } from "./MeetingChoiceMenu";
+import { meetingStart, type MeetingChoice } from "@/lib/meetingChoice";
 import { MeetingMenu, useNextMeeting } from "./MeetingMenu";
 import { replyAllCc, replyBelongs, replyPeer } from "@/lib/replyRecipients";
 
@@ -237,6 +239,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // Meet now (Derek, 2026-10-14): the sheet that starts a meeting and sends
   // the link, and the step it was picked on (null: in front of the current one).
   const [meetNowFrom, setMeetNowFrom] = useState<{ stepId: string | null } | null>(null);
+  // Meeting on a step (Derek, 2026-10-16): now or book a time, asked under
+  // where it was picked; then Book a time's window for that step.
+  const [meetingAsk, setMeetingAsk] = useState<{ stepId: string | null; at: PickedAt; choices: readonly MeetingChoice[] } | null>(null);
+  const [bookStep, setBookStep] = useState<{ stepId: string | null } | null>(null);
+  // The last row or button pressed in the drawer, measured as it was pressed.
+  const pressedAt = useRef<{ at: PickedAt; ms: number }>({ at: null, ms: 0 });
   // A reply goes to whoever wrote the email it answers, not the client's main
   // contact (Russell's email on Matthew Whitman's task, Justin, 2026-10-07).
   // Same rule as the server's replyRecipientFor: the client's own email, or
@@ -892,6 +900,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // when canMessageClient says yes, so this is that permission arriving by
   // the back door; naming it keeps the three places from drifting.
   const mayContactClient = !!onSendTaskMessage && !noClient;
+  // Booking needs their GoHighLevel contact (the calendar's own Book window).
+  const canBook = mayContactClient && !!messageDest?.ghlContactId;
+  // Meeting on a step: asks now or book a time when they can be booked, else
+  // straight to Meet now (lib/meetingChoice). stepId null: + Add step's, in
+  // front of the current step (Meet now) or a new step (a booked time).
+  const pickMeeting = (stepId: string | null) => {
+    const start = meetingStart({ canBook });
+    if (start.kind === "now") { setMeetNowFrom({ stepId }); return; }
+    const pressed = Date.now() - pressedAt.current.ms < 1500 ? pressedAt.current.at : null;
+    setMeetingAsk({ stepId, at: pressed ?? pickedAtOf(typeof document === "undefined" ? null : document.activeElement), choices: start.choices });
+  };
   // A delegation is stored as an assigned checklist item, but reading it as
   // one buried it: a truncated row inside Checklist, under a "0/1 · 0%"
   // counter, saying nothing about who has it (Derek: "move the delegate out
@@ -1417,7 +1436,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       "page:email": ["Build an email review", `An email on this step, for ${firstName} to review.`],
       "page:page": ["Build a page review", `A web page on this step, for ${firstName} to review.`],
       // Meet now picked here turns this step into "Meet with <first>" (meetNow.ts withMeetNowSteps).
-      meetnow: ["Start a meeting now", `A link to join, sent to ${firstName} now; this step becomes the meeting.`],
+      meetnow: canBook ? [`Meet with ${firstName}`, "Now, with a link to join, or at a time you book; this step becomes the meeting."]
+        : ["Start a meeting now", `A link to join, sent to ${firstName} now; this step becomes the meeting.`],
     };
     const ideas: NextPick[] = sub ? stepAddOptions(sub).filter((o) => !o.disabled && SAYS[o.key] && !o.note).map((o) => ({ key: o.key, label: SAYS[o.key][0], says: SAYS[o.key][1], onClick: o.onPick })) : [];
     // The same as the set up (Derek, 2026-10-14): what the context asks for
@@ -2742,7 +2762,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // starts the wait, and its step's Email a follow up is the reminder.
     ...(hasMessaging && messageDest?.email ? [{ key: "askemail", group: "talk" as const, label: "Request a meeting by email", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("email") }] : []),
     ...(hasMessaging && messageDest?.phone ? [{ key: "asktext", group: "talk" as const, label: "Request a meeting by text", disabled: false, note: "open times and your link", onPick: () => void requestMeetingStep("sms") }] : []),
-    ...(hasMessaging ? [{ key: "meetnow", group: "talk" as const, label: "Start a meeting now", disabled: false, note: "a link to join, sent now", onPick: () => setMeetNowFrom({ stepId: null }) }] : []),
+    ...(hasMessaging ? [{ key: "meetnow", group: "talk" as const, label: canBook ? "Meeting" : "Start a meeting now", disabled: false, note: canBook ? "now or book a time" : "a link to join, sent now", onPick: () => pickMeeting(null) }] : []),
     { key: "checklist", group: "make", label: "Checklist", disabled: false, onPick: checklistStep },
     ...(isPersonal ? [] : [{ key: "delegate", group: "handoff" as const, label: "Delegate to a teammate", disabled: false, onPick: delegateStep }]),
     { key: "claude", group: "handoff", label: "Delegate to Claude", disabled: false, onPick: claudeStep },
@@ -2796,7 +2816,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (key === "text" || key === "chat") { const id = talkStep(key === "text" ? "text" : "client", typed); if (typed) undo.keepStep(id); return; }
     if (key === "askemail" || key === "asktext") { void requestMeetingStep(key === "askemail" ? "email" : "sms"); return; }
     // The meeting's steps are made with it, in front of the current one.
-    if (key === "meetnow") { setMeetNowFrom({ stepId: null }); return; }
+    if (key === "meetnow") { pickMeeting(null); return; }
     const who = key === "claude" ? CLAUDE_ID : key === "toclient" ? "client" : a.who;
     // Delegate with nobody picked: its page opens on the teammate to pick.
     if (key === "delegate" && (!who || who === meId || who === CLAUDE_ID || who === "client")) { delegateStep(); return; }
@@ -2834,7 +2854,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const more: SetupAction[] = [
       ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
       ...act("asktext", "Request a meeting by text", hasMessaging && !!messageDest?.phone),
-      ...act("meetnow", "Start a meeting now: a link to join, sent now", hasMessaging),
+      ...act("meetnow", canBook ? "Meeting: now or book a time" : "Start a meeting now: a link to join, sent now", hasMessaging),
       ...act("followup", `Wait for ${firstName}'s reply`, !noClient),
       ...act("delegate", "Delegate to a teammate", !isPersonal),
       ...act("claude", "Delegate to Claude"),
@@ -4143,7 +4163,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The meeting's Granola transcript as a file on this step (Derek, 2026-10-12).
     ...(isPersonal ? [] : [{ key: "transcript", label: "Transcript", disabled: false, onPick: () => void pullTranscript(sub.id) }]),
     // A meeting now: this step becomes it when it is still empty (Derek, 2026-10-14).
-    ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => setMeetNowFrom({ stepId: sub.id }) }] : []),
+    // With booking, Meeting asks now or a booked time first (2026-10-16).
+    ...(hasMessaging && !sub.done ? [{ key: "meetnow", label: canBook ? "Meeting: now or book a time" : "Start a meeting now: a link to join, sent now", disabled: false, onPick: () => pickMeeting(sub.id) }] : []),
     // Make it a task: the client's email here as a new task's step 1, linked both ways (Derek, 2026-10-15).
     ...(onEmailToTask && sub.fromEmails?.length ? [{ key: "maketask", label: "Make it a task", disabled: false, onPick: () => { setOpenStepPage(null); onEmailToTask(sub.id); } }] : [])];
   };
@@ -4733,7 +4754,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <button onClick={() => { setTopPanel(null); onRenameProject(); }} className="min-h-10 w-full rounded-md px-2 text-left font-medium text-accent hover:bg-background">Rename this list</button>
     </div>);
   const phone = messageDest?.phone && mayContactClient ? messageDest.phone : null;
-  const canBook = mayContactClient && !!messageDest?.ghlContactId;
   // ── One top bar (Derek, 2026-10-14): "← client / list", then the step
   // through the list, Copy for Claude, ⋮ and ×. The arrow and the client go
   // back; the list name opens the move picker. The client icon row that sat
@@ -4908,6 +4928,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           follows the sidebar; below md the sidebar is an overlay, so the
           drawer is full width. */}
       <aside onPaste={handlePaste} {...drawerDropProps}
+        // Where Meeting was picked (menus in portals too: React events bubble
+        // through them), so its choice opens under that row.
+        onPointerDownCapture={(e) => { pressedAt.current = { at: pickedAtOf(e.target as Element), ms: Date.now() }; }}
         className={`safe-top ${full ? "fixed inset-y-0 right-0 left-0 z-50 flex flex-col border-l bg-surface md:left-[var(--drawer-left,0px)]" : slideOver ? "inbox-slide fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-hidden bg-surface shadow-[-24px_0_48px_rgba(15,23,42,.18)] md:w-[clamp(560px,52vw,820px)] md:rounded-l-2xl" : "fixed inset-y-0 right-0 z-20 flex w-full flex-col border-l bg-surface shadow-xl md:left-[var(--drawer-left,16rem)] md:w-auto"}`}>
         {hiddenFileInput}
         <div className="hidden sm:block">{taskBar}</div>
@@ -5065,9 +5088,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           pushToast={pushToast}
           bar={!!slideOver && !full}
         />
-      {bookOpen && messageDest?.ghlContactId && (
+      {(bookOpen || bookStep) && messageDest?.ghlContactId && (
         <BookAppointment target={{ kind: "book", ghlContactId: messageDest.ghlContactId, name: messageDest.name || client.name }}
-          meId={meId} onClose={() => setBookOpen(false)} onDone={() => {}} pushToast={(m) => pushToast(m)} />
+          // Book a time from a step's Meeting: that step becomes the meeting.
+          forStep={bookStep ? { taskId: task.id, stepId: bookStep.stepId, first: firstName } : null}
+          meId={meId} onClose={() => { setBookOpen(false); setBookStep(null); }} onDone={() => {}} pushToast={(m) => pushToast(m)} />
+      )}
+      {meetingAsk && (
+        <MeetingChoiceMenu choices={meetingAsk.choices} at={meetingAsk.at} first={firstName} onClose={() => setMeetingAsk(null)}
+          onPick={(k) => { if (k === "book") setBookStep({ stepId: meetingAsk.stepId }); else setMeetNowFrom({ stepId: meetingAsk.stepId }); }} />
       )}
       {meetNowFrom && (
         <MeetNowSheet clientId={task.clientId} taskId={task.id} stepId={meetNowFrom.stepId} first={firstName}

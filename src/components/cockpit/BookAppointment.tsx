@@ -32,8 +32,11 @@ export type BookTarget =
   | { kind: "book"; ghlContactId: string; name: string; start?: string }
   | { kind: "move"; appointmentId: string; calendarId: string; name: string; title: string };
 
-export function BookAppointment({ target, meId, onClose, onDone, pushToast, defaultCalendarId, onSetDefault }: {
+export function BookAppointment({ target, meId, onClose, onDone, pushToast, defaultCalendarId, onSetDefault, forStep }: {
   target: BookTarget; meId: string; onClose: () => void; onDone: () => void; pushToast: (text: string) => void;
+  /** Booked from a task's step (Meeting, then Book a time, Derek 2026-10-16):
+   *  that step becomes the meeting (null: a new step for it). */
+  forStep?: { taskId: string; stepId: string | null; first: string } | null;
   /** The starred calendar it opens on, and how to star another (saved with Inbox settings). */
   defaultCalendarId?: string | null; onSetDefault?: (id: string | null) => void;
 }) {
@@ -129,7 +132,7 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
     setBusy(true); setError(null);
     try {
       const r = target.kind === "book"
-        ? await authedFetch("/api/calendar/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ghlContactId: target.ghlContactId, start: picked, custom }) })
+        ? await authedFetch("/api/calendar/book", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ calendarId, ghlContactId: target.ghlContactId, start: picked, custom, ...(forStep ? { taskId: forStep.taskId, stepId: forStep.stepId, first: forStep.first } : {}) }) })
         : await authedFetch("/api/calendar/appointment", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target.appointmentId, start: picked, custom }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error ?? "That didn't work.");
@@ -166,9 +169,10 @@ export function BookAppointment({ target, meId, onClose, onDone, pushToast, defa
   // At the page's top level, so a panel it opens from can't clip or trap it.
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[60] bg-black/30" onClick={onClose} />
+      {/* Above a step page (z-80), which Book a time is picked from. */}
+      <div className="fixed inset-0 z-[85] bg-black/30" onClick={onClose} />
       <div role="dialog" aria-label={target.kind === "book" ? `Book ${target.name}` : "Move appointment"}
-        className="fixed left-1/2 top-20 z-[61] grid max-h-[80vh] w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-surface text-[16px] shadow-2xl ring-1 ring-[var(--border)]">
+        className="fixed left-1/2 top-20 z-[86] grid max-h-[80vh] w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-surface text-[16px] shadow-2xl ring-1 ring-[var(--border)]">
         <div className="flex items-start gap-3 border-b px-5 py-4">
           <div className="min-w-0 flex-1">
             <h2 className="text-[20px] font-bold leading-tight">{target.kind === "book" ? `Book ${target.name}` : `Move: ${target.title}`}</h2>
