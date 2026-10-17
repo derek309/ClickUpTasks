@@ -38,6 +38,10 @@ import { useEscapeToClose } from "./useEscapeToClose";
 import { TaskDocument, docApi, type ReviewReminders } from "./TaskDocument";
 import { NextChoices, StepFinish, StepPage, type NextChoice } from "./StepPage";
 import { CurrentStep, sameStepName } from "./CurrentStep";
+import { AiEmailBox } from "./AiEmailBox";
+import { AiAskBox } from "./AiAskBox";
+import { descriptionHtml, draftStepFrom, insertAfter, listForSplit, senderFirst, splitPlan, type AiEmailSuggest, type AiNext, type SplitPlan } from "@/lib/aiSteps";
+import { askSteps } from "@/lib/aiStepsClient";
 import { StepMore, TurnLine, WordMenu, type MoreDate, type MoreGroup, type TurnChoice } from "./TurnLine";
 import { StepMessage } from "./StepMessage";
 import { WhatsNext, type WhatsNextAnswer } from "./WhatsNext";
@@ -108,7 +112,7 @@ const saasChecked = new Map<string, boolean>();
 // CLAUDE_ROUTINE_ID is set). Null until known.
 const claudeCloud: { ready: boolean | null } = { ready: null };
 
-export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, onEmailToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onSaveToClient, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask, onNotify, defaultCalendarId = null }: {
+export function TaskDrawer({ task, clientById, projectById, contactById, full, onToggleFull, navIndex, navTotal, onPrev, onNext, onClose, onPatch: onPatchTask, onClearNeedsYou, onDelete, onAddComment, onAddFiles, onDownloadFile, onDownloadFileAs, onDownloadAll, zippingIds, onRemoveFile, uploadProgress, allClients, onMoveClient, clientProjects, onSetProject, onNewProject, onRenameProject, onToggleSub: onToggleSubProp, onRenameSub, onDeleteSub, onPatchSub: onPatchSubProp, onToggleLabel, onCopyLink, onDuplicate, onStepToTask, onEmailToTask, projectsFor, onOpenMerge, onOpenClientList, templates, onApplyTemplate, onUploadCommentImage, onCopyAttachmentLink, onSaveToClient, onGetSignedUrl, messages, onMarkChannelRead, linkedContactInfo, onSaasSaved, ccContacts, onUploadMessageImage, onSendTaskMessage, onScheduleTaskMessage, sendingMessage, onDraftMessage, draftingMessage, canAdmin, onDeleteMessage, onEditMessage, onCopyClientLink, pushToast, meId, onSendDm, onDelegate, clientPortalUrl, clientLinks, clientMeetings, meetingLink, onSaveMeetingLink, taskLink, onDeleteComment, slideOver, fromInbox, slideBackLabel, openEmail, start, onSaveTemplate, onStepsFromServer, sameClientTasks, historyTasks, onAddStepToTask, onNotify, onMakeTasks, onOpenTask, defaultCalendarId = null }: {
   task: Task;
   /** Opened from the Inbox: a panel sliding in from the right over the
    *  conversation, not the docked view that covers the whole page. */
@@ -184,6 +188,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   /** One notice to a teammate about this task: the bell, and push when set
    *  up (useNotify notify, kind "message"). */
   onNotify?: (recipientId: string, text: string) => void;
+  /** Make N tasks from a client's email (lib/aiSteps splitPlan). */
+  onMakeTasks?: (plan: SplitPlan) => void;
+  /** Opens another task, from "Made from this email". */
+  onOpenTask?: (id: string) => void;
 }) {
   // Every write also updates taskRef at once, so a second write in the same
   // moment builds on the first instead of undoing it (Pam's request was
@@ -2630,7 +2638,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return stepQuietLine({
       draftFor: isDraft(sub) ? (sub.draftFor === "client" ? firstName : firstOf2(sub.draftFor)) : null,
       description: htmlToText(sub.notes ?? ""),
-      wrote: lastEmail && !sub.done ? { first: firstName, ago: timeAgo(lastEmail.at) } : null,
+      wrote: lastEmail && !sub.done ? { first: senderFirst(lastEmail.from, firstName), ago: timeAgo(lastEmail.at) } : null,
       sentAgo: sub.emailedAt ? timeAgo(sub.emailedAt) : sent ? timeAgo(sent.at) : null,
       noReply: waits && !sub.done,
       todos: { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length },
@@ -3503,6 +3511,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       <WhatsNext key={st.id} first={reviewFirst} done={backFromOther(st) && doneStep ? `${firstOf2(doneStep.doneBy)} finished ${doneStep.title}` : doneLine(doneStep?.title ?? sentNext?.done ?? "", doneStep?.doneBy, { meId: meId ?? null, nameOf: firstOf })}
         name={asking ? "" : st.title} suggestion={suggestion} waitName={waitName} who={who} due={due} today={TODAY}
         choices={turnChoicesFor(st).map(({ key, label }) => ({ key, label }))} meId={meId ?? null} clientFirst={firstName} nameOf={firstOf}
+        // Claude fills it in once per step done (lib/aiSteps), the rule's
+        // suggestion showing meanwhile; only when nothing is planned next.
+        {...(asking && doneStep && !isPersonal ? {
+          ai: doneStep.aiNext ?? null,
+          askAi: async () => (await askSteps({ kind: "next", taskId: task.id, stepId: doneStep.id, choices: aiChoices(st) })).next ?? null,
+          onAi: (n: AiNext) => onPatchSub(doneStep.id, { aiNext: n }),
+        } : {})}
         onSave={(a) => saveWhatsNext(st.id, a)}
         onCloseTask={() => {
           closeSentNext();
@@ -4463,6 +4478,74 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     list.splice(j, 0, from);
     onPatchSub(sub.id, { holds: list });
   };
+  // ── ✨ Claude read it (lib/aiSteps, Derek 2026-10-17) ──────────────────────
+  // Whose turn Claude can pick: the step's own choices, "You" said with a name.
+  const aiChoices = (sub: Subtask) => turnChoicesFor(sub).map(({ key, label }) => ({ key, label: key === meId ? `${label} (${firstOf2(meId)})` : label }));
+  const emailRead = (sub: Subtask, e: ReceivedEmail) => {
+    const sender = senderFirst(e.from, firstName);
+    return (
+      <AiEmailBox key={e.messageId} step={sub} email={e} sender={sender} clientFirst={firstName}
+        choices={turnChoicesFor(sub).map(({ key, label }) => ({ key, label }))}
+        turnWord={(k) => turnWord(k, { meId: meId ?? null, clientFirst: firstName, nameOf: firstOf2 })}
+        nameOf={(k) => (!k || k === meId ? "you" : firstOf2(k))}
+        read={async () => {
+          const r = await askSteps({ kind: "email", taskId: task.id, stepId: sub.id, messageId: e.messageId, choices: aiChoices(sub) });
+          return r.off ? "off" : r.suggest ?? null;
+        }}
+        onCache={(s) => onPatchSub(sub.id, { aiSuggest: s })}
+        onUse={(s) => takeEmailSuggestion(sub.id, s)}
+        onSplit={(s) => splitEmailSuggestion(sub.id, s, sender)}
+        onOpenTask={onOpenTask} />
+    );
+  };
+  // ✨ Write it for me on a client's step (lib/aiSteps idea 3): what we need
+  // from them, as its description, and the ask email as the step's draft.
+  const askBoxFor = (sub: Subtask): React.ReactNode => {
+    if (sub.done || isPersonal || noClient) return null;
+    const forClient = isDraft(sub) ? sub.draftFor === "client" : turnOf(sub, { meId: meId ?? null, ownerId: task.assigneeId ?? null }) === "client";
+    if (!forClient || sub.fromEmails?.length) return null;
+    const draft = task.draftEmail;
+    const emailWritten = !!draft && (sub.holds ?? []).includes("email") && !!htmlToText(draft.body).trim();
+    return (
+      <AiAskBox step={sub} first={firstName} emailWritten={emailWritten}
+        read={async () => { const r = await askSteps({ kind: "ask", taskId: task.id, stepId: sub.id, choices: aiChoices(sub) }); return r.off ? "off" : r.ask ?? null; }}
+        onCache={(a) => onPatchSub(sub.id, { aiAsk: a })}
+        onFill={(a) => {
+          const cur = taskRef.current.draftEmail;
+          const canEmail = hasMessaging && !!messageDest?.email && !!a.body;
+          if (canEmail && cur && htmlToText(cur.body).trim() && !window.confirm(`Replace the draft email "${cur.subject || "(no subject)"}" with Claude's?`)) return;
+          const now = new Date().toISOString();
+          const list = taskRef.current.subtasks.map((x) => (x.id === sub.id ? { ...x, ...(a.need ? { notes: descriptionHtml(a.need) } : {}) } : x));
+          onPatch({
+            subtasks: canEmail ? holdOnStep(list, sub.id, "email") : list,
+            ...(canEmail ? { draftEmail: { subject: a.subject || task.title.slice(0, 120), body: plainTextToHtml(a.body), replyTo: null, createdAt: now, updatedAt: now } } : {}),
+          });
+          pushToast(canEmail ? "Written. Read it over; nothing is sent until you send it." : "Written into the description.");
+        }} />
+    );
+  };
+  // Use this: a new draft step right after the email's step, its page open.
+  const takeEmailSuggestion = (stepId: string, s: AiEmailSuggest) => {
+    const step = draftStepFrom(s, { makeId: () => newId("s_"), meId: meId ?? null, owner: stepOwnerFields() });
+    const list = insertAfter(taskRef.current.subtasks, stepId, step)
+      .map((x) => (x.id === stepId ? { ...x, aiSuggest: { ...s, usedStepId: step.id } } : x));
+    onPatch({ subtasks: list });
+    pushToast(step.draftFor ? `Added "${step.title}" as a draft. It reaches ${step.draftFor === "client" ? firstName : firstOf2(step.draftFor)} when you press Give to.` : `Added "${step.title}"`);
+    setOpenStepPage({ taskId: task.id, id: step.id, full: openStepPage?.full ?? false });
+  };
+  // Make N tasks in <list>: the list and its tasks, and links to them here.
+  const splitEmailSuggestion = (stepId: string, s: AiEmailSuggest, sender: string) => {
+    if (!onMakeTasks || !meId) return;
+    const projects = clientProjects;
+    const plan = splitPlan(s, {
+      clientId: task.clientId, contactId: task.contactId ?? null, listName: s.list || s.name, existingId: listForSplit(projects, task.clientId, s.list), projects,
+      listTasks: (sameClientTasks ?? []).filter((t) => t.projectId === listForSplit(projects, task.clientId, s.list)),
+      meId, ownerId: task.assigneeId ?? meId, clientFirst: sender, today: TODAY, now: new Date().toISOString(), makeId: (prefix) => newId(prefix),
+    });
+    onMakeTasks(plan);
+    onPatchSub(stepId, { aiSuggest: { ...s, made: plan.tasks.map((t) => ({ id: t.id, title: t.title })) } });
+    pushToast(`Made ${plan.tasks.length} tasks in ${plan.project?.name ?? projects.find((p) => p.id === plan.projectId)?.name ?? "the list"}`);
+  };
   // light: on the task page, where the current step's Done is the one dark
   // button (Derek, 2026-10-14), its sends and opens are light.
   // part: "work" is what does something (client work, messages, emails),
@@ -4527,6 +4610,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           );
         })}
         {replyBox}
+        {/* What Claude made of the newest email, on the step's page (Derek,
+            2026-10-17): a suggestion only, until a button is pressed. */}
+        {part === "came" && !light && !sub.done && emails.length > 0 && !isPersonal && emailRead(sub, emails[emails.length - 1])}
         {keys.map((k) => {
           const a = k.startsWith("att:") ? task.attachments.find((x) => attachmentKey(x.id) === k)! : null;
           const mail = sentMail(k);
@@ -5230,6 +5316,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onTodoDone={todoDoneFor(ps)}
               replyPending={replyPendingOn(ps)} replyOpen={inlineReplyOn(ps)}
               thread={isPersonal ? undefined : threadOf(ps)}
+              assist={askBoxFor(ps)}
               picked={ps.asked && !ps.done ? { says: pickedSays(ps, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, ps.id); if (list) onPatch({ subtasks: list }); } } : undefined} />
           );
         })()}

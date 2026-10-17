@@ -1044,6 +1044,15 @@ export interface Subtask {
    *  not answered yet (Derek, 2026-10-17): "Question from Michaella" for the
    *  giver until they reply. The turn never moves. */
   question?: { from: string; to: string; text: string; at: string };
+  /** What Claude made of the client's email on this step (lib/aiSteps),
+   *  made once per email: the suggested step or tasks, until used or
+   *  dismissed (Derek, 2026-10-17). */
+  aiSuggest?: import("./aiSteps").AiEmailSuggest;
+  /** On a step just done: Claude's next step for What's next, asked once. */
+  aiNext?: import("./aiSteps").AiNext;
+  /** On a client's step: Claude's "What we need from" and ask email, offered
+   *  until used or dismissed. */
+  aiAsk?: import("./aiSteps").AiAsk3 & { dismissed?: boolean };
 }
 
 /** See Subtask.remind. A client's step with a need by date reminds by

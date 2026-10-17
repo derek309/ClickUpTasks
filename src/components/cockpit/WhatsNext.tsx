@@ -8,7 +8,8 @@
 // that follows whose turn it is. One component, on the task page and at the
 // foot of a step's page. Escape or leaving it keeps the step done with no next
 // step named; the task then asks What's next as it always has.
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { prefill, type AiNext } from "@/lib/aiSteps";
 import { CLAUDE_ID } from "@/lib/data";
 import { turnWord, whatsNextButton, whatsNextSays } from "@/lib/stepThenNext";
 import { TurnLine, type TurnChoice } from "./TurnLine";
@@ -16,7 +17,7 @@ import { friendlyDue } from "./GroupedList";
 
 export type WhatsNextAnswer = { name: string; who: string | null; due: string | null; waits: boolean };
 
-export function WhatsNext({ done, first, name: initialName = "", suggestion, waitName, who: initialWho, due: initialDue, choices, meId, clientFirst, nameOf, onSave, onCloseTask, today }: {
+export function WhatsNext({ done, first, name: initialName = "", suggestion, waitName, who: initialWho, due: initialDue, choices, meId, clientFirst, nameOf, onSave, onCloseTask, today, ai: cachedAi = null, askAi, onAi }: {
   /** The step just done, folded: "✓ Hand off · done by Michaella". */
   done: string;
   /** What comes first, before naming a next step: the HTML review on the
@@ -41,10 +42,31 @@ export function WhatsNext({ done, first, name: initialName = "", suggestion, wai
   onSave: (a: WhatsNextAnswer) => void;
   onCloseTask: () => void;
   today: string;
+  /** Claude's next step, asked once for the step just done and kept on it. */
+  ai?: AiNext | null;
+  /** Asks Claude when nothing is kept yet (never blocks: the rule's
+   *  suggestion shows meanwhile, and a failure says nothing). */
+  askAi?: () => Promise<AiNext | null>;
+  /** Keeps Claude's answer on the step just done. */
+  onAi?: (n: AiNext) => void;
 }) {
-  const [name, setName] = useState(initialName);
-  const [who, setWho] = useState<string | null>(initialWho);
-  const [due, setDue] = useState<string | null>(initialDue);
+  // What was typed or picked, null or undefined until then: any edit wins
+  // over Claude's suggestion, and Claude's over the rule's (lib/aiSteps prefill).
+  const [typed, setName] = useState<string | null>(initialName ? initialName : null);
+  const [picked, setWho] = useState<string | null | undefined>(undefined);
+  const [dated, setDue] = useState<string | null | undefined>(undefined);
+  const [fresh, setFresh] = useState<AiNext | null>(null);
+  const ai = cachedAi ?? fresh;
+  useEffect(() => {
+    if (cachedAi || !askAi) return;
+    let live = true;
+    void askAi().then((n) => { if (n && live) { setFresh(n); onAi?.(n); } }).catch(() => {});
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = prefill({ name: "", who: initialWho, due: initialDue }, ai && choices.some((c) => c.key === ai.who) ? ai : ai ? { ...ai, who: null } : null, { name: typed, who: picked, due: dated });
+  const name = shown.name;
+  const who = shown.who;
+  const due = shown.due;
   const o = { meId, clientFirst, nameOf };
   const finalName = name.trim() || suggestion?.trim() || "";
   const waits = who === "client" && !!waitName && finalName === waitName.trim();
@@ -69,6 +91,7 @@ export function WhatsNext({ done, first, name: initialName = "", suggestion, wai
         dateLead={who === "client" ? "need by" : "due"} date={due} onDate={(d) => setDue(d)}
         formatDate={friendlyDue} />
       <p className="text-[16px] text-muted">{says}</p>
+      {shown.why && <p className="text-[16px] text-muted"><span className="font-semibold text-violet-700 dark:text-violet-300">✨ Why:</span> {shown.why}</p>}
       <div className="flex flex-col-reverse gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
         <button onClick={onCloseTask} className="self-center text-[16px] font-semibold text-accent underline-offset-4 hover:underline sm:self-auto">Nothing next, close the task</button>
         <button onClick={save} disabled={!finalName}
