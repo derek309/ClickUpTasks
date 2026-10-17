@@ -74,6 +74,8 @@ import { clientFirstName } from "@/lib/clientFirstName";
 import { conversationSummary } from "@/lib/conversationSummary";
 import { setupSkipped, preselectWho, preselectWhen, rankTeammates, whoChoices, setupHistory, recommendActions, historyKinds } from "@/lib/stepSetup";
 import { StepSetup, WhatsNextPicks, addRowsOf, type NextPick, type SetupAction, type SetupAnswer } from "./StepSetup";
+import { NewStepBox } from "./NewStepBox";
+import { newStepFields, type NewStepValue } from "@/lib/newStepBox";
 import { planOffer, replyWaiting, suggestStepActions, STEP_SUGGESTIONS_ON } from "@/lib/stepSuggest";
 import { replyWaitTitle, showCheckingAgain, stepRemindersOn, waitChoiceKeys } from "@/lib/stepWait";
 import type { StepSetupProps } from "./StepPage";
@@ -2862,10 +2864,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // An email to the client as a step of its own: the draft sits on it and its
   // window opens to write in. Nothing goes until someone presses Send
   // (Derek, 2026-10-12).
-  const emailStep = (title?: string) => {
+  const emailStep = (title?: string, extra: Partial<Subtask> = {}) => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: title || `Email ${firstName}`, done: false, due: TODAY, ...stepOwnerFields() }], id, "email") });
+    onPatch({ subtasks: holdOnStep([...taskRef.current.subtasks, { id, title: title || `Email ${firstName}`, done: false, due: TODAY, ...stepOwnerFields(), ...extra }], id, "email") });
     // No set up: the email is the work, written now (Derek, 2026-10-14). Its
     // page sits under the window: closing without sending lands there,
     // sending goes back to the task (finishTalkStep).
@@ -2876,10 +2878,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   // A text or a portal chat as a step of its own, like Email (2026-10-13): its
   // page opens on that box; sending it finishes the step and asks what's next.
-  const talkStep = (kind: "text" | "client", title?: string) => {
+  const talkStep = (kind: "text" | "client", title?: string, extra: Partial<Subtask> = {}) => {
     const id = newId("s_");
     if (asking) setAskNext(null);
-    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: title || (kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`), done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields() }] });
+    onPatch({ subtasks: [...taskRef.current.subtasks, { id, title: title || (kind === "text" ? `Text ${firstName}` : `Chat with ${firstName}`), done: false, due: TODAY, draftMessage: { channel: kind === "text" ? "sms" : "chat", body: "" }, ...stepOwnerFields(), ...extra }] });
     talkReturn.current = id;
     setOpenStepPage({ taskId: task.id, id, full: false });
     undo.note(`step:${id}`, task);
@@ -3003,8 +3005,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // offered is an action, + More or a choice of Whose turn.
   const [newOpen, setNewOpen] = useState<false | "inline" | "sheet">(false);
   const newKey = useRef<string | null>(null);
-  const newAnswer = useRef<SetupAnswer | null>(null);
-  const closeNew = () => { setNewOpen(false); setSubDraft(""); newAnswer.current = null; };
+  // What the new step box holds so far (NewStepBox), for Cmd+Enter in the
+  // name row above it.
+  const newValue = useRef<NewStepValue | null>(null);
+  const closeNew = () => { setNewOpen(false); setSubDraft(""); newValue.current = null; };
   const newDraftStep = (): Subtask => ({ id: "s_new", title: subDraft, done: false, ...stepOwnerFields() });
   const newDefaults = (): SetupAnswer => ({ who: meId ?? null, when: preselectWhen(newDraftStep(), TODAY) });
   const newNameFor = (key: string | null, who: string | null): string => {
@@ -3021,7 +3025,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (who && who !== meId) return `For ${firstOf(who)}`;
     return key === "directions" ? "Description" : "";
   };
-  const submitNew = (a: SetupAnswer, run?: () => void) => {
+  const submitNew = (a: SetupAnswer, run?: () => void, extra: Partial<Subtask> = {}) => {
     // One step at a time: a step opened meanwhile (a send, another window).
     if (!canAddStep(taskRef.current)) { closeNew(); pushToast("Finish the current step first. What's next adds the next one."); return; }
     newKey.current = null;
@@ -3032,9 +3036,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (key?.startsWith("tpl:")) { onApplyTemplate(key.slice(4)); return; }
     // A message is written now, in its window (no set up for these). A name
     // typed for the step is something entered: the step stays even when the
-    // message is left empty.
-    if (key === "email") { const id = emailStep(typed); if (typed) undo.keepStep(id); return; }
-    if (key === "text" || key === "chat") { const id = talkStep(key === "text" ? "text" : "client", typed); if (typed) undo.keepStep(id); return; }
+    // message is left empty. So does a description or a to do.
+    const entered = !!typed || !!extra.notes || !!extra.todos?.length;
+    if (key === "email") { const id = emailStep(typed, extra); if (entered) undo.keepStep(id); return; }
+    if (key === "text" || key === "chat") { const id = talkStep(key === "text" ? "text" : "client", typed, extra); if (entered) undo.keepStep(id); return; }
     if (key === "askemail" || key === "asktext") { void requestMeetingStep(key === "askemail" ? "email" : "sms"); return; }
     // The meeting's steps are made with it, in front of the current one.
     if (key === "meetnow") { pickMeeting(null); return; }
@@ -3046,7 +3051,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!title) return;
     const id = newId("s_");
     if (asking) setAskNext(null);
-    const step: Subtask = { id, title, done: false, ...stepOwnerFields(), ...(key === "followup" ? { finishWhen: "reply" as const } : {}) };
+    const step: Subtask = { id, title, done: false, ...stepOwnerFields(), ...(key === "followup" ? { finishWhen: "reply" as const } : {}), ...extra };
     onPatch({ subtasks: [...taskRef.current.subtasks, step] });
     // The work goes on it, shown, not opened (a tap on it opens its editor).
     if (key === "doc" || key === "image" || key === "page" || key === "video") stepAddOptions(step).find((o) => o.key === key)?.onPick();
@@ -3062,39 +3067,32 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // The new row comes into view, nothing else moves.
     else setTimeout(() => document.querySelector(`[data-step="${id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 80);
   };
+  // The new step box (Derek, 2026-10-17; NewStepBox): its name, Description
+  // and Checklist open, + Add ▾, then the turn sentence and the button that
+  // follows whose turn it is. Give to hands it off as it is made.
+  const submitNewStep = (v: NewStepValue, run?: () => void) =>
+    submitNew({ who: v.who, when: v.when }, run, newStepFields(v, () => newId("td_")));
   const newStepSetup = (sheet: boolean) => {
     const props = setupOf(newDraftStep(), {});
-    if (!props) return null;
+    const start = props ? { who: props.whoInitial, when: props.whenInitial } : newDefaults();
     const pick = (key: string) => () => { newKey.current = key; };
     const act = (key: string, label: string, show = true): SetupAction[] => (show ? [{ key, label, onPick: pick(key) }] : []);
+    // + Add ▾: what the step makes or how it talks to the client, and the
+    // rest of what the action row's More held. Whose turn is the sentence's.
     const options: SetupAction[] = [
-      ...act("directions", "Description"), ...act("checklist", "To dos"),
-      ...act("email", `Email ${firstName}`, hasMessaging), ...act("text", `Text ${firstName}`, !!messageDest?.phone), ...act("chat", "Chat in the portal", hasMessaging),
       ...(canHaveDocument ? [...act("doc", "Document"), ...act("image", "Image"), ...pageKindsOffered.flatMap((pk) => act(`page:${pk}`, pageKindLabel(pk))), ...act("video", "Video")] : []),
-    ];
-    const more: SetupAction[] = [
+      ...act("email", `Email ${firstName}`, hasMessaging), ...act("text", `Text ${firstName}`, !!messageDest?.phone), ...act("chat", "Chat in the portal", hasMessaging),
       ...act("askemail", "Request a meeting by email", hasMessaging && !!messageDest?.email),
       ...act("asktext", "Request a meeting by text", hasMessaging && !!messageDest?.phone),
       ...act("meetnow", canBook ? "Meeting: now or book a time" : "Start a meeting now: a link to join, sent now", hasMessaging),
       ...act("followup", `Wait for ${firstName}'s reply`, !noClient),
-      ...act("delegate", "Delegate to a teammate", !isPersonal),
-      ...act("claude", "Delegate to Claude"),
-      ...act("toclient", `Delegate to ${firstName} (client)`, mayContactClient),
       ...(TEMPLATES_ON ? offeredTemplates.map((t) => ({ key: `tpl:${t.id}`, label: `From a template: ${t.name} (${templateSteps(t).length} steps)`, onPick: pick(`tpl:${t.id}`) })) : []),
     ];
-    const lead = suggestStepActions(subDraft, firstName).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
-    const grouped = addRowsOf(options, firstName, new Set(lead.map((x) => x.key)));
     return (
-      <StepSetup {...props} meId={meId ?? null} lead={lead} rows={grouped.rows} more={more} enterSubmits={sheet} submit="Add step" longHint
-        onAnswer={(a) => { newAnswer.current = a; }} onDone={submitNew}
-        name={sheet ? (
-          // No keyboard on open (Derek, 2026-10-14, iPhone: the keyboard and the
-          // AutoFill bar hid the choices). The name is optional; tap it to type.
-          // No "name" in its attributes: Safari offers contact AutoFill on one.
-          <input data-name value={subDraft} onChange={(e) => setSubDraft(e.target.value)} placeholder="What is this step? (optional)" aria-label="Step"
-            name="step-title" autoComplete="off" autoCorrect="on" enterKeyHint="done"
-            className="h-11 w-full rounded-[5px] bg-background px-3 text-[16px] font-semibold outline-none ring-1 ring-inset ring-border focus:ring-accent" />
-        ) : undefined} />
+      <NewStepBox title={subDraft} onTitle={setSubDraft} titleField={sheet} longHint autoFocus={false}
+        choices={turnChoicesFor(newDraftStep()).map(({ key, label }) => ({ key, label }))}
+        whoInitial={start.who} whenInitial={start.when} today={TODAY} meId={meId ?? null} clientFirst={firstName} nameOf={firstOf2}
+        actions={options} onChange={(v) => { newValue.current = v; }} onSave={submitNewStep} onCancel={closeNew} />
     );
   };
   const [showAllSteps, setShowAllSteps] = useState<string | null>(null);
@@ -3225,10 +3223,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length || looseKeys.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onFocus={() => setNewOpen("inline")}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); submitNew(newAnswer.current ?? newDefaults()); }
+              // Enter moves on to the first to do (NewStepBox); Cmd+Enter saves.
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); const v = newValue.current; if (v) submitNewStep({ ...v, title: subDraft }); else submitNew(newDefaults()); }
+              else if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); document.querySelector<HTMLElement>("[data-new-step=todo]")?.focus(); }
               else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeNew(); }
             }}
-            placeholder={newOpen === "inline" ? "Name the step, or pick an action below" : "+ Add step"} aria-label="Add a step"
+            placeholder={newOpen === "inline" ? "Name the step" : "+ Add step"} aria-label="Add a step"
             className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1.5 text-[16px] outline-none transition placeholder:text-accent hover:bg-background focus:border-accent focus:bg-background focus:placeholder:text-muted" />
           {newOpen === "inline" && <button onClick={closeNew} aria-label="Close" title="Close (Escape)" className="h-9 shrink-0 rounded-[5px] px-3 text-[16px] text-muted hover:bg-background hover:text-foreground">×</button>}
         </li>
@@ -3540,6 +3540,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         ...(kept.todos?.length ? { todos: [...(x.todos ?? []), ...kept.todos.map((title) => ({ id: newId("td_"), title, done: false }))] } : {}),
       } : x));
     }
+    // What was written in its Description and Checklist (NewStepBox fields).
+    const typed = newStepFields({ description: a.description ?? "", todos: a.todos ?? [] }, () => newId("td_"));
+    if (typed.notes || typed.todos) list = list.map((x) => (x.id !== stepId ? x : { ...x, ...(typed.notes ? { notes: x.notes?.trim() ? `${x.notes}${typed.notes}` : typed.notes } : {}), ...(typed.todos ? { todos: [...(x.todos ?? []), ...typed.todos] } : {}) }));
     // Waiting on the client's reply: their turn, its need by date, no new email.
     if (a.waits) list = list.map((x) => (x.id === stepId ? { ...x, ...patchForWho(x, "client", { ownerId: task.assigneeId ?? null, meId: meId ?? null, today: TODAY }), ...(a.due ? { due: a.due } : {}) } : x));
     const now = list.find((x) => x.id === stepId)!;

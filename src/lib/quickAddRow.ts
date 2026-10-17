@@ -32,6 +32,8 @@ export type TaskRow = {
   /** Step 1 as the box set it up (Derek, 2026-10-14): whose turn, by when
    *  (whenSet once picked by hand) and the action picked, if one. */
   step1?: StepOneSetup | null;
+  /** The task's own description, typed in the new task box (tasks.description). */
+  taskDescription?: string;
   /** On a queue list: where it joins the line, null to follow its priority. */
   queueAt?: "now" | "next" | "bottom" | null;
   /** Its due is a real deadline (tasks.deadline): a queue never clears it. */
@@ -40,7 +42,9 @@ export type TaskRow = {
 
 /** Step 1's set up from the new task box. `who` is a member id, "client",
  *  or null for whoever is creating it. */
-export type StepOneSetup = { who: string | null; when: string | null; whenSet: boolean; action: string | null };
+export type StepOneSetup = { who: string | null; when: string | null; whenSet: boolean; action: string | null;
+  /** Its Description and to dos, as typed in the box (empty ones dropped). */
+  description?: string; todos?: string[] };
 
 const emptyRow = (): TaskRow => ({
   title: "", description: "", verbatim: "", assignee: null, due: null,

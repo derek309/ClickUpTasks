@@ -11,6 +11,7 @@
 // or Claude's turn is the composer's own handoff (useComposer), not this.
 import { holdOnStep, isLongTitle, planSteps, type Subtask } from "./data";
 import type { StepOneSetup } from "./quickAddRow";
+import { newStepFields } from "./newStepBox";
 
 export type StepOneOpen = "checklist" | "directions" | "email" | "text" | "chat" | "ask";
 
@@ -27,7 +28,8 @@ export function stepNameFor(title: string): string {
  *  turn or a date picked by hand. Left alone it makes no step, as before. */
 export function stepOneWanted(setup: StepOneSetup | null | undefined, meId: string): boolean {
   if (!setup) return false;
-  return !!setup.action || setup.who === "client" || setup.whenSet || (!!setup.who && setup.who !== meId);
+  return !!setup.action || setup.who === "client" || setup.whenSet || (!!setup.who && setup.who !== meId)
+    || !!setup.description?.trim() || !!setup.todos?.some((t) => t.trim());
 }
 
 export function applyStepOne(subtasks: Subtask[], o: {
@@ -54,6 +56,10 @@ export function applyStepOne(subtasks: Subtask[], o: {
   const edit = (f: (x: Subtask) => Subtask) => { list = list.map((x) => (x.id === id ? f(x) : x)); };
   // By when: the step's own date, unless the handoff already gave it one.
   if (s.when && !step.due) edit((x) => ({ ...x, due: s.when! }));
+  // Its Description after any directions it has, and its to dos.
+  const typed = newStepFields({ description: s.description ?? "", todos: s.todos ?? [] }, o.makeId);
+  if (typed.notes) edit((x) => ({ ...x, notes: x.notes?.trim() ? `${x.notes}${typed.notes}` : typed.notes }));
+  if (typed.todos) edit((x) => ({ ...x, todos: [...(x.todos ?? []), ...typed.todos!] }));
   const a = s.action;
   let open: StepOneOpen | null = null;
   // An Email review or a Page review is the HTML review with its kind kept on the step.

@@ -11,11 +11,14 @@
 import { useEffect, useState } from "react";
 import { prefill, type AiNext } from "@/lib/aiSteps";
 import { CLAUDE_ID } from "@/lib/data";
-import { turnWord, whatsNextButton, whatsNextSays } from "@/lib/stepThenNext";
+import { descriptionLabel, turnWord, whatsNextButton, whatsNextSays } from "@/lib/stepThenNext";
 import { TurnLine, type TurnChoice } from "./TurnLine";
 import { friendlyDue } from "./GroupedList";
+import { StepWriteFields } from "./NewStepBox";
 
-export type WhatsNextAnswer = { name: string; who: string | null; due: string | null; waits: boolean };
+export type WhatsNextAnswer = { name: string; who: string | null; due: string | null; waits: boolean;
+  /** Its Description and to dos as typed (empty ones dropped on save). */
+  description?: string; todos?: string[] };
 
 export function WhatsNext({ done, first, name: initialName = "", suggestion, waitName, who: initialWho, due: initialDue, choices, meId, clientFirst, nameOf, onSave, onCloseTask, today, ai: cachedAi = null, askAi, onAi }: {
   /** The step just done, folded: "✓ Hand off · done by Michaella". */
@@ -56,6 +59,10 @@ export function WhatsNext({ done, first, name: initialName = "", suggestion, wai
   const [picked, setWho] = useState<string | null | undefined>(undefined);
   const [dated, setDue] = useState<string | null | undefined>(undefined);
   const [fresh, setFresh] = useState<AiNext | null>(null);
+  // Its Checklist open, its Description once asked for, as on a new step (NewStepBox).
+  const [description, setDescription] = useState("");
+  const [todos, setTodos] = useState<string[]>([]);
+  const [descOpen, setDescOpen] = useState(false);
   const ai = cachedAi ?? fresh;
   useEffect(() => {
     if (cachedAi || !askAi) return;
@@ -72,7 +79,9 @@ export function WhatsNext({ done, first, name: initialName = "", suggestion, wai
   const waits = who === "client" && !!waitName && finalName === waitName.trim();
   const button = waits ? `Wait for ${clientFirst}` : whatsNextButton(who, o);
   const says = waits ? `It waits for ${clientFirst}'s reply.` : whatsNextSays(who, o);
-  const save = () => { if (finalName) onSave({ name: finalName, who, due: who === CLAUDE_ID ? today : due, waits }); };
+  const save = () => { if (finalName) onSave({ name: finalName, who, due: who === CLAUDE_ID ? today : due, waits,
+    // Empty ones are left out.
+    ...(description.trim() ? { description } : {}), ...(todos.some((t) => t.trim()) ? { todos: todos.filter((t) => t.trim()) } : {}) }); };
   const turnChoices: TurnChoice[] = choices.map((c) => ({ ...c, on: c.key === who || (!who && c.key === meId) }));
   const dot = who === "client" ? "#d97706" : who === CLAUDE_ID ? "#7c3aed" : !who || who === meId ? "#ef4444" : "#d97706";
   return (
@@ -85,6 +94,11 @@ export function WhatsNext({ done, first, name: initialName = "", suggestion, wai
         placeholder={suggestion?.trim() || "Name the next step"}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }}
         className="w-full min-w-0 rounded-[5px] bg-surface px-3 py-2 text-[17px] font-semibold outline-none ring-1 ring-inset ring-border placeholder:font-medium placeholder:text-muted focus:ring-2 focus:ring-accent" />
+      {(() => {
+        const d = descriptionLabel(who === "client" ? "client" : who === CLAUDE_ID ? "claude" : !who || who === meId ? "me" : "teammate", clientFirst);
+        return <StepWriteFields label={d.label} tone={d.tone} description={description} onDescription={setDescription} onTodos={setTodos}
+          descriptionOpen={descOpen} onOpenDescription={() => setDescOpen(true)} />;
+      })()}
       <TurnLine word={turnWord(who, o)} choices={turnChoices} onPick={(k) => setWho(k)}
         lead={<span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: dot }} />}
         fixedDate={who === CLAUDE_ID ? "today" : undefined}

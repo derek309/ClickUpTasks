@@ -16,7 +16,7 @@ import { useEscapeToClose } from "./useEscapeToClose";
 
 export type OnStepOption = { key: string; label: string; note?: string; disabled?: boolean; onPick: () => void };
 
-const MAKE = ["doc", "image", "page", "video"];
+const MAKE = ["doc", "image", "page", "page:email", "page:page", "video"];
 const TALK = ["email", "text", "chat", "meetnow"];
 const AFTER = ["maketask", "transcript"];
 /** Kept out of the groups: Checklist and Description lead the menu, and Claude is a turn, not a thing to add. */

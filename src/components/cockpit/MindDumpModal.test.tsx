@@ -24,6 +24,11 @@ afterEach(() => {
 });
 
 const button = (label: string) => Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.trim() === label)!;
+const anyButton = (label: string) => Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.trim() === label)!;
+const fill = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!;
+  act(() => { setter.call(el, value); el.dispatchEvent(new Event("input", { bubbles: true })); });
+};
 const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
 const type = (value: string) => {
   const box = host.querySelector("textarea")!;
@@ -105,26 +110,47 @@ describe("step 1, set up in the box", () => {
     expect(rows[0].step1).toMatchObject({ who: null, action: null });
   });
 
-  it("picking an action adds the task with step 1 holding it", () => {
+  it("an item picked from + Add goes on step 1 when Add makes the task", () => {
     const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
     type("Design the spring flyer");
-    // One row of actions, each once (Derek, 2026-10-14).
-    click(button("Document"));
+    click(button("Add ▾"));
+    click(anyButton("Document"));
+    expect(p.onCreate).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Using");
+    click(button("Add"));
     expect(p.onCreate).toHaveBeenCalledTimes(1);
     expect(p.onCreate.mock.calls[0][0][0].step1).toMatchObject({ action: "doc" });
   });
 
   it("an action with nothing typed adds nothing", () => {
     const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
-    click(button("Document"));
+    click(button("Add ▾"));
+    click(anyButton("Document"));
+    click(button("Add"));
     expect(p.onCreate).not.toHaveBeenCalled();
   });
 
-  it("Escape in the rows is the box's, never an Add", () => {
+  it("shows the task's Description open, then step 1's checklist, and both are kept", () => {
+    const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
+    type("Design the spring flyer");
+    const desc = host.querySelector<HTMLTextAreaElement>("#new-task-description")!;
+    fill(desc, "For the April open house.");
+    const todo = host.querySelector<HTMLInputElement>("input[aria-label='To do 1']")!;
+    expect(todo).not.toBeNull();
+    // The step's own Description waits behind + Add.
+    expect(host.querySelectorAll("textarea[data-new-step=description]")).toHaveLength(0);
+    fill(todo, "Pick the photo");
+    click(button("Add"));
+    const row = p.onCreate.mock.calls[0][0][0];
+    expect(row.taskDescription).toBe("For the April open house.");
+    expect(row.step1).toMatchObject({ todos: ["Pick the photo"] });
+  });
+
+  it("Escape in step 1 is the box's, never an Add", () => {
     const p = open({ meId: "u_derek", clientFirst: "Brian", canMessage: true });
     type("Call Amanda back");
-    const you = button("You");
-    act(() => { you.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    const todo = host.querySelector<HTMLInputElement>("input[aria-label='To do 1']")!;
+    act(() => { todo.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(p.onCreate).not.toHaveBeenCalled();
   });
 });
@@ -214,8 +240,8 @@ describe("the box with no client (Derek, 2026-10-14)", () => {
     const owner = host.querySelector<HTMLSelectElement>('select[aria-label="Owner"]')!;
     expect(owner).not.toBeNull();
     expect([...owner.options].some((o) => o.value === "client")).toBe(false);
-    expect(host.textContent).toContain("Whose turn");
-    click(button("More ▾"));
-    expect(host.textContent).toContain("Email review");
+    expect(host.textContent).toContain("Your turn");
+    click(button("Add ▾"));
+    expect(document.body.textContent).toContain("Email review");
   });
 });

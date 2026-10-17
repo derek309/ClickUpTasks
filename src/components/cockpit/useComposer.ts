@@ -99,7 +99,7 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
     if (personal) {
       const stepped = rows.map((r) => ({
         id: newId("t_"), projectId: PERSONAL_PROJECT_ID, clientId: PERSONAL_CLIENT_ID,
-        title: r.title.trim(), description: "",
+        title: r.title.trim(), description: r.taskDescription?.trim() ? plainTextToHtml(r.taskDescription.trim()) : "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         priority: r.priority, assigneeId: me.id, contactId: null,
         due: r.due, followUpAt: r.followUpAt, size: r.size,
@@ -148,7 +148,7 @@ export function useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pi
       const step: Subtask | null = to ? { id: newId("s_"), title: `For ${userById(to)?.name.split(" ")[0] ?? "them"}`, done: false, assigneeId: to, due: claude ? TODAY : stepDue, startedAt: now } : null;
       const handoff = step ? { status: statusForStep("todo", stepStage(step, owner)) ?? "todo", followUpAt: claude ? null : r.followUpAt ?? null } : null;
       return {
-        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: "",
+        id: newId("t_"), projectId, clientId: targetClient, title: r.title.trim(), description: r.taskDescription?.trim() ? plainTextToHtml(r.taskDescription.trim()) : "",
         status: groupKey && groupBy === "status" ? (groupKey as TaskStatus) : "todo",
         // isManuallyAssignable guards Conversation (auto-created-only, see
         // data.ts): a dump into that group still lands as the row's own

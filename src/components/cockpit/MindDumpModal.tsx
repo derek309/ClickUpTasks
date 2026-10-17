@@ -29,18 +29,16 @@
 //     api/ai/parse-tasks.
 import { useEffect, useRef, useState } from "react";
 import {
-  users, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
+  users, CLAUDE_ID, PRIORITY_META, manualPriorityOptions, formatDue, TODAY, addBusinessDaysIso, dateQuickPicks,
   SIZE_META, SIZE_ORDER, SIZING_ON, userById, type Priority, type TaskSize,
 } from "@/lib/data";
 import { verbatimTaskRow, linesToRows, applyDumpDefaults, type TaskRow, type StepOneSetup } from "@/lib/quickAddRow";
-import { rankTeammates, whoChoices } from "@/lib/stepSetup";
-import { suggestStepActions } from "@/lib/stepSuggest";
 import { defaultQueueAt, previewPlace, queueAtWords, deadlineWords, type QueueAt } from "@/lib/newTaskQueue";
 import type { QTask, QueueSettings } from "../../../mcp/queue.mjs";
 import { I, DateChip, SearchableSelect } from "./ui";
 import { useEscapeToClose } from "./useEscapeToClose";
-import { StepSetup, addRowsOf, type SetupAction, type SetupAnswer } from "./StepSetup";
-import { InlineAssignee } from "./GroupedList";
+import type { SetupAction } from "./StepSetup";
+import { NewStepBox } from "./NewStepBox";
 
 /** A row on its way to a task. Lives in lib/quickAddRow so the two no-AI
  *  paths can build one without importing a React component; re-exported here
@@ -141,18 +139,19 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   // date derived priority every other task in the app has.
   const [priorityTouched, setPriorityTouched] = useState(false);
   const [size, setSize] = useState<TaskSize | null>(null);
-  // Step 1 set up in the box (Derek, 2026-10-14): whose turn (you to start
-  // with), by when, and the action, the same rows as everywhere (StepSetup).
-  // A teammate's or Claude's turn is the handoff "Give step 1 to" made.
-  const [stepWho, setStepWho] = useState<string | null>(meId);
-  const [stepWhen, setStepWhen] = useState<string>(() => addBusinessDaysIso(TODAY, 1));
-  const [whenSet, setWhenSet] = useState(false);
+  // Step 1 set up in the box as a new step is everywhere (Derek, 2026-10-17;
+  // NewStepBox): its Description and Checklist, + Add ▾, then the turn
+  // sentence. A teammate's or Claude's turn is the handoff "Give step 1 to" made.
+  const stepWhenStart = addBusinessDaysIso(TODAY, 1);
+  const [stepOne, setStepOne] = useState<{ who: string | null; when: string; action: string | null; description: string; todos: string[] }>(
+    () => ({ who: meId, when: stepWhenStart, action: null, description: "", todos: [] }));
   // A queue list: where in the line, null while it follows the priority, and
   // the one date it can carry, a deadline.
   const [queueAt, setQueueAt] = useState<QueueAt | null>(null);
   const [deadline, setDeadline] = useState<string | null>(null);
   const deadlinePick = useRef<HTMLInputElement | null>(null);
   const [clientId, setClientId] = useState<string>(defaultClientId ?? "");
+  const [taskDescription, setTaskDescription] = useState("");
   const dumpRef = useRef<HTMLTextAreaElement | null>(null);
   // Which button is waiting on its request — busy alone can't tell the two
   // apart since both routes through the same in-flight flag one level up.
@@ -187,10 +186,11 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const placeAt: QueueAt = queueAt ?? defaultQueueAt(priority);
   // Step 1's date waits for Now on a queue list, unless it is placed now.
   const askWhen = !queue || placeAt === "now";
-  const defaults = (step?: { who: string | null; when: string; action: string | null }) => {
-    const who = step ? step.who : stepWho;
+  const defaults = () => {
+    const who = stepOne.who;
     const member = who && who !== meId && who !== "client" ? who : null;
-    const step1: StepOneSetup = { who: who === meId ? null : who, when: askWhen ? (step?.when ?? stepWhen) : null, whenSet: askWhen && (whenSet || (!!step && step.when !== stepWhen)), action: step?.action ?? null };
+    const step1: StepOneSetup = { who: who === meId ? null : who, when: askWhen ? stepOne.when : null, whenSet: askWhen && stepOne.when !== stepWhenStart, action: stepOne.action,
+      description: stepOne.description, todos: stepOne.todos };
     // A queue list has no due or follow up: the line dates it, or its deadline.
     return queue
       ? { due: deadline, followUpAt: null, assignee: owner, priority, priorityTouched, size, delegateTo: member, step1, queueAt, deadline: !!deadline }
@@ -200,15 +200,15 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   const blocked = !text.trim() || busy || (needsClient && !clientId);
 
   // Add: no network, no model, no rewrite. The whole reason this exists
-  // (Derek, 2026-09-28: "just created without changing the name"). An action
-  // picked in step 1's rows adds it the same way, with step 1 holding it.
-  const addAsTyped = (step?: { who: string | null; when: string; action: string | null }) => {
+  // (Derek, 2026-09-28: "just created without changing the name"). Step 1
+  // is made as the box below set it up.
+  const addAsTyped = () => {
     if (blocked) return;
     // Several lines are the whole request: it all goes to step 1's directions
     // with a short name (lib/tidyTitle), not split into a name and a
     // description (Derek, 2026-10-13).
     const row = text.trim().includes("\n") ? { ...verbatimTaskRow(text), title: text.trim(), description: "" } : verbatimTaskRow(text);
-    onCreate(applyDumpDefaults([row], defaults(step)), attachAll());
+    onCreate(applyDumpDefaults([{ ...row, taskDescription }], defaults()), attachAll());
   };
 
   // One per line: the same promise, for a list that is already a list. No AI,
@@ -245,7 +245,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
     const r = await onAiAdd(text);
     setPending(null);
     if (!r) return;
-    onCreate(applyDumpDefaults([r], defaults()), attachAll());
+    onCreate(applyDumpDefaults([{ ...r, taskDescription }], defaults()), attachAll());
   };
 
   // Enter is the fast path, and only while the text is one line: pasting
@@ -307,30 +307,21 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
   }
   const openDeadline = () => { const el = deadlinePick.current; if (!el) return; try { el.showPicker(); } catch { el.click(); } };
 
-  // Step 1's rows: Whose turn as everywhere (You, two teammates most picked,
-  // Claude, the client; TaskDrawer setupOf), then what the action is.
+  // Step 1's turn sentence: You, teammates, Claude, the client (TaskDrawer
+  // turnChoicesFor); + Add ▾ what it makes or how it talks to the client.
   const firstOf = (id: string) => userById(id)?.name.split(" ")[0] ?? "Someone";
-  let picks: Record<string, number> = {};
-  try { picks = JSON.parse(localStorage.getItem("cut.setup.whoPicks") ?? "{}"); } catch { /* none kept */ }
-  const whoRaw = whoChoices(meId, rankTeammates(users.map((u) => u.id), picks, meId), canMessage && !!clientFirst);
   const first = clientFirst ?? "them";
-  const whoList = whoRaw.map((c) => ({ key: c.key, label: c.kind === "me" ? "You" : c.kind === "claude" ? "Claude" : c.kind === "client" ? (whoRaw.some((o) => o.kind === "teammate" && firstOf(o.key).toLowerCase() === first.toLowerCase()) ? `${first} (client)` : first) : c.kind === "else" ? "Someone else" : firstOf(c.key) }));
-  // Which action a tap picked: the set up hands back the action's own run,
-  // and each run is known by its key.
-  const keyOf = new Map<() => void, string>();
-  const act = (key: string, label: string, show = true): SetupAction[] => {
-    if (!show) return [];
-    const run = () => {};
-    keyOf.set(run, key);
-    return [{ key, label, onPick: run }];
-  };
-  const options: SetupAction[] = [
-    ...act("directions", "Description"), ...act("checklist", "To dos"),
-    ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
-    ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page:email", "Email review"), ...act("page:page", "Page review"), ...act("video", "Video")] : []),
+  const turnChoices = [
+    ...(meId ? [{ key: meId, label: "You" }] : []),
+    ...users.filter((u) => u.id !== meId && u.id !== CLAUDE_ID).map((u) => ({ key: u.id, label: firstOf(u.id) })),
+    { key: CLAUDE_ID, label: "Claude" },
+    ...(canMessage && clientFirst ? [{ key: "client", label: first }] : []),
   ];
-  const lead = suggestStepActions(text, first).flatMap((x) => { const o = options.find((y) => y.key === x.kind); return o ? [{ ...o, label: x.label }] : []; });
-  const grouped = addRowsOf(options, first, new Set(lead.map((x) => x.key)));
+  const act = (key: string, label: string, show = true): SetupAction[] => (show ? [{ key, label, onPick: () => {} }] : []);
+  const options: SetupAction[] = [
+    ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page:email", "Email review"), ...act("page:page", "Page review"), ...act("video", "Video")] : []),
+    ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
+  ];
 
   return (
     <>
@@ -377,6 +368,12 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
               <p className="mt-1.5 shrink-0 text-[14px] text-muted">
                 Enter adds it as you typed it. Shift and Enter for a new line. Paste an image or drop a file in and it rides along.
               </p>
+              {/* The task's own description, open (Derek, 2026-10-17: the task
+                  has the description, its steps are checklists). */}
+              <label htmlFor="new-task-description" className="mt-3 shrink-0 text-[16px] font-semibold">Description</label>
+              <textarea id="new-task-description" value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} rows={2}
+                placeholder="What is happening and why. Links help."
+                className="mt-1.5 w-full shrink-0 resize-y rounded-[5px] bg-background px-3 py-2 text-[16px] leading-snug outline-none ring-1 ring-inset ring-border placeholder:text-muted focus:ring-2 focus:ring-accent" />
 
               {files.length > 0 && (
                 <div className="mt-3 flex shrink-0 flex-wrap gap-2">
@@ -449,23 +446,15 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                   due <DayWord value={due} onChange={setDue} label="Due" />, follow up <DayWord value={followUpAt} onChange={setFollowUpAt} label="Follow up" />
                 </>)}
               </p>
-              {/* Step 1, set up here as it is everywhere (StepSetup): whose
-                  turn, you to start with, by when, and the action, the name's
-                  suggestion first. Picking an action adds the task with step 1
-                  holding it (Derek, 2026-10-14). */}
+              {/* Step 1, set up here as a new step is everywhere (NewStepBox):
+                  its Description, Checklist and + Add ▾, then whose turn and
+                  when. Add makes the task with step 1 holding it (Derek,
+                  2026-10-17). */}
               <div className="mt-3 shrink-0 border-t pt-3">
                 <p className="mb-2 text-[16px] font-semibold text-foreground">Step 1</p>
-                <StepSetup who={whoList} whoInitial={meId} nameOf={firstOf}
-                  someoneElse={(label, pick) => <InlineAssignee value={null} noFace label={label} onChange={(id) => { if (id) pick(id); }} />}
-                  whenInitial={stepWhen} today={TODAY} meId={meId} lead={lead} rows={grouped.rows} preset={null}
-                  hide={[...(personal ? ["who" as const] : []), ...(askWhen ? [] : ["when" as const])]} skip={false}
-                  onAnswer={(a: SetupAnswer) => { if (a.who !== stepWho) setStepWho(a.who); if (a.when !== stepWhen) { setStepWhen(a.when); setWhenSet(true); } }}
-                  onDone={(a: SetupAnswer, run?: () => void) => {
-                    if (!run) return;
-                    const action = keyOf.get(run) ?? null;
-                    if (blocked) { dumpRef.current?.focus(); return; }
-                    addAsTyped({ who: a.who, when: a.when, action });
-                  }} />
+                <NewStepBox titleField={false} choices={turnChoices} whoInitial={meId} whenInitial={stepWhenStart} today={TODAY} meId={meId}
+                  clientFirst={first} nameOf={firstOf} actions={options} hideWho={personal} hideWhen={!askWhen}
+                  onChange={(v) => setStepOne({ who: v.who, when: v.when, action: v.action, description: v.description, todos: v.todos })} />
               </div>
             </div>
             {/* One dark button, Add, as typed. The rest are words beside it
