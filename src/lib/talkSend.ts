@@ -3,22 +3,33 @@
 // finishTalkStep) and the client page's Conversation feed send through the
 // same two functions, so a draft sent from either place moves the steps the
 // same way (Derek, 2026-10-14, client header).
-import { addBusinessDaysIso, addCheckInStep, currentStep, isHandoffStep, recordFollowUp, statusForStep, stepStage, type Subtask, type Task } from "./data";
+import { addBusinessDaysIso, addCheckInStep, answerReceived, currentStep, isHandoffStep, isReplyStep, recordFollowUp, statusForStep, stepStage, unansweredOn, type Subtask, type Task } from "./data";
 import { afterThisFilled, afterThisOf, finishIntoNext, isClientWait } from "./afterThis";
 
 /** An emailing step, by its name: "Email Pam", "Let Pam know…", "Tell", "Send", "Reply". */
 export const EMAILING = /^(email|e-mail|let\b.*\bknow|tell|send|reply|answer|write to)\b/i;
 
 /** after: the step's After this, filled (lib/afterThis): the send finishes
- *  the step and starts it, with no check in of its own and no What's next. */
-export type TalkPlan = { kind: "reminder" | "wait" | "finish"; cur: Subtask; due: string; holder?: Subtask; after?: Subtask };
+ *  the step and starts it, with no check in of its own and no What's next.
+ *  "answered": the reply to the client's message on a step doing other work
+ *  went; the message is answered and the step stays open. */
+export type TalkPlan = { kind: "reminder" | "wait" | "finish" | "answered"; cur: Subtask; due: string; holder?: Subtask; after?: Subtask };
+
+/** A step whose own work is writing to them ("Email Pam", "Text Pam"). */
+const talksByName = (s: Pick<Subtask, "title">) => EMAILING.test(s.title.trim()) || /^(text|chat)\b/i.test(s.title.trim());
 
 /** Which step a send finishes or follows up on, and the check in's date.
  *  Sent from a step's own page: that step. An email from the task's email
- *  window: the open step holding that email, else the current one. */
-export function talkStepPlan(subtasks: Subtask[], taskOwnerId: string | null, channel: "email" | "sms" | "chat", today: string, followUpDate?: string | null, stepId?: string): TalkPlan | null {
+ *  window: the open step holding that email, else the current one. A reply
+ *  (replyTo) to the client's message on a step doing other work only marks
+ *  it answered (Derek, 2026-10-17: their message joins the current step);
+ *  a text or chat answers what waits on its step the same way. */
+export function talkStepPlan(subtasks: Subtask[], taskOwnerId: string | null, channel: "email" | "sms" | "chat", today: string, followUpDate?: string | null, stepId?: string, replyTo?: string | null): TalkPlan | null {
+  const replied = channel === "email" && replyTo ? subtasks.find((x) => !x.done && x.fromEmails?.some((e) => e.messageId === replyTo && !e.answeredAt)) : undefined;
+  if (replied && (!stepId || replied.id === stepId) && !isReplyStep(replied) && !talksByName(replied)) return { kind: "answered", cur: replied, due: today };
   const holder = !stepId && channel === "email" ? subtasks.find((x) => !x.done && x.holds?.includes("email")) : undefined;
   const cur = stepId ? subtasks.find((x) => x.id === stepId && !x.done) : holder ?? currentStep(subtasks);
+  if (cur && channel !== "email" && unansweredOn(cur) && !isReplyStep(cur) && !talksByName(cur)) return { kind: "answered", cur, due: today };
   // A reminder held on a review out with the client: a follow up on that
   // wait, and the email comes off the step.
   if (cur?.onClient && channel === "email" && cur.holds?.includes("email")) return { kind: "reminder", cur, due: followUpDate || addBusinessDaysIso(today, 2) };
@@ -47,6 +58,11 @@ export function talkStepPlan(subtasks: Subtask[], taskOwnerId: string | null, ch
  *  email answered too ("Reply to media" above "Email Brian"). */
 export function talkSendPatch(task: Pick<Task, "subtasks" | "status" | "due" | "assigneeId">, plan: TalkPlan, channel: "email" | "sms" | "chat", firstName: string, makeId: () => string, now = new Date().toISOString(), subject?: string | null): { patch: Partial<Task>; alsoDone?: Subtask } | null {
   const { cur, due, holder } = plan;
+  if (plan.kind === "answered") {
+    const list = answerReceived(task.subtasks, cur.id, now);
+    if (!list) return null;
+    return { patch: { subtasks: channel === "email" ? list : list.map((x) => (x.id === cur.id ? { ...x, draftMessage: undefined } : x)) } };
+  }
   if (plan.kind === "reminder") {
     const list = recordFollowUp(task.subtasks, cur.id, "email", due, now).map((x) => (x.id === cur.id ? { ...x, holds: x.holds?.filter((h) => h !== "email").length ? x.holds.filter((h) => h !== "email") : undefined } : x));
     return { patch: { subtasks: list, followUpAt: due } };

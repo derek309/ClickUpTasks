@@ -55,7 +55,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ taskIds: await extraTaskIds(threadKey) });
 }
 
-/** Their newest email becomes the task's "Reply to …" step (Derek, 2026-10-12). */
+/** Their newest email joins the task's current step, or with none open is
+ *  its "Reply to …" step (Derek, 2026-10-12; one step at a time 2026-10-17). */
 async function replyStepFor(taskId: string, rows: Record<string, unknown>[]) {
   const m = rows.filter((r) => r.direction === "inbound" && r.channel === "email").sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
   if (!m) return;

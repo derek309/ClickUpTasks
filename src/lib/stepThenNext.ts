@@ -258,8 +258,9 @@ export function stepQuietLine(o: {
   draftFor?: string | null;
   /** The step's description, as text. */
   description?: string;
-  /** The client wrote on it: their first name and how long ago. */
-  wrote?: { first: string; ago: string } | null;
+  /** The client wrote on it and nobody has answered: their first name, how
+   *  long ago and the first line of what they wrote. */
+  wrote?: { first: string; ago: string; line?: string } | null;
   /** Its email went out this long ago. */
   sentAgo?: string | null;
   /** What went out, when a send made this wait: the review or email sent
@@ -276,7 +277,8 @@ export function stepQuietLine(o: {
   const parts: string[] = [];
   if (o.draftFor) parts.push(`Draft · not given to ${o.draftFor} yet`);
   if (o.after) parts.push(`After ${o.after}`);
-  if (o.wrote) parts.push(`${o.wrote.first} wrote ${o.wrote.ago}`);
+  // "Brian wrote: Can we move the date? · 2h ago" (Derek, 2026-10-17).
+  if (o.wrote) parts.push(...(o.wrote.line ? [`${o.wrote.first} wrote: ${o.wrote.line}`, o.wrote.ago] : [`${o.wrote.first} wrote ${o.wrote.ago}`]));
   else if (!o.draftFor && o.reason) parts.push(o.reason);
   const desc = (o.description ?? "").replace(/\s+/g, " ").trim();
   if (desc && !o.wrote && !o.after && parts.length < 2) {

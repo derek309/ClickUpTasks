@@ -23,6 +23,25 @@ describe("talkStepPlan", () => {
   });
 });
 
+describe("a reply to the client's message on a step doing other work", () => {
+  const email = { messageId: "m1", from: "Pamela Macias", subject: "Ads", body: "Can we change it?", at: "2026-10-14T10:00:00Z" };
+  it("answers it and leaves the step open", () => {
+    const subs = [step({ id: "a", title: "Build the page", holds: ["page", "email"], fromEmails: [email] })];
+    const plan = talkStepPlan(subs, null, "email", "2026-10-14", null, undefined, "m1")!;
+    expect(plan.kind).toBe("answered");
+    const out = talkSendPatch({ subtasks: subs, status: "in_progress", due: null, assigneeId: null }, plan, "email", "Pamela", makeId, NOW)!;
+    expect(out.patch.subtasks).toHaveLength(1);
+    expect(out.patch.subtasks![0]).toMatchObject({ done: false, fromEmails: [expect.objectContaining({ answeredAt: NOW })] });
+    expect(out.patch.status).toBeUndefined();
+    // Answered: a later send is not a reply to it.
+    expect(talkStepPlan(out.patch.subtasks!, null, "email", "2026-10-14", null, undefined, "m1")?.kind).not.toBe("answered");
+  });
+  it("a Reply step still finishes on Send", () => {
+    const subs = [step({ id: "a", title: "Reply to Pamela: Ads", addedFor: "reply:m1", makes: "email", holds: ["email"], fromEmails: [email] })];
+    expect(talkStepPlan(subs, null, "email", "2026-10-14", null, undefined, "m1")?.kind).toBe("finish");
+  });
+});
+
 describe("talkSendPatch", () => {
   it("ticks the step, clears its draft and adds the check in", () => {
     const subs = [step({ id: "a", title: "Text Pamela", draftMessage: { channel: "sms", body: "Hi" } })];

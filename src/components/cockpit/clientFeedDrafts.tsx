@@ -89,9 +89,9 @@ export function buildFeedDrafts(deps: FeedDraftDeps): FeedDraft[] {
       const marked = addEmailSentRecord(t.subtasks, cur.id, first, () => newId("s_"));
       if (marked) patch = { subtasks: marked };
     } else {
-      const plan = talkStepPlan(t.subtasks, t.assigneeId, "email", TODAY, email.followUpDate ?? null);
+      const plan = talkStepPlan(t.subtasks, t.assigneeId, "email", TODAY, email.followUpDate ?? null, undefined, email.replyTo);
       const out = plan ? talkSendPatch(t, plan, "email", first, () => newId("s_")) : null;
-      if (out && plan) { patch = out.patch; said = plan.kind === "finish" ? `Sent. Finished "${plan.cur.title.trim()}"` : `Sent. Still waiting on ${first}`; }
+      if (out && plan) { patch = out.patch; said = plan.kind === "finish" ? `Sent. Finished "${plan.cur.title.trim()}"` : plan.kind === "answered" ? `Sent. Still on "${plan.cur.title.trim()}"` : `Sent. Still waiting on ${first}`; }
       else if (email.followUpDate && t.status !== "done") patch = { status: "waiting", followUpAt: email.followUpDate, ...(t.due && t.due < email.followUpDate ? { due: email.followUpDate } : {}) };
     }
     const subs = patch.subtasks ?? t.subtasks;
@@ -194,11 +194,11 @@ export async function sendFromFeed(deps: Pick<FeedDraftDeps, "clientId" | "first
   if (!ok || !taskId) return ok;
   const t = deps.tasksNow.current.find((x) => x.id === taskId);
   if (!t || t.status === "done") return true;
-  const plan = talkStepPlan(t.subtasks, t.assigneeId, channel, TODAY);
+  const plan = talkStepPlan(t.subtasks, t.assigneeId, channel, TODAY, null, undefined, replyTo);
   const out = plan ? talkSendPatch(t, plan, channel, deps.first, () => newId("s_"), undefined, subject) : null;
   if (!plan || !out) return true;
   deps.patchTask(taskId, out.patch);
   const what = channel === "sms" ? "Text" : channel === "chat" ? "Chat" : "Email";
-  deps.pushToast(plan.kind === "finish" ? `${what} sent. Finished "${plan.cur.title.trim()}"` : `${what} sent. Still waiting on ${deps.first}; checking again ${formatDue(plan.due)}.`);
+  deps.pushToast(plan.kind === "finish" ? `${what} sent. Finished "${plan.cur.title.trim()}"` : plan.kind === "answered" ? `${what} sent. Still on "${plan.cur.title.trim()}"` : `${what} sent. Still waiting on ${deps.first}; checking again ${formatDue(plan.due)}.`);
   return true;
 }

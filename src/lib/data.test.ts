@@ -1306,18 +1306,53 @@ describe("what's next after the last step", () => {
 });
 
 describe("a client's email as a step", () => {
-  it("is a Reply step in front of the current one; a second email joins it; thanks is nothing", async () => {
+  const e = (messageId: string, at = "2026-10-12T10:00:00Z") => ({ messageId, from: "Pamela Macias", subject: "Re: Class ads", body: "Can we change the radius?\nThanks, Pam", at });
+
+  it("joins the open step and adds none; the same email twice joins once; thanks is nothing", async () => {
     const { addReplyStep, isJustThanks } = await import("./data");
     let n = 0; const id = () => `s${++n}`;
-    const e = (messageId: string) => ({ messageId, from: "Pamela Macias", subject: "Re: Class ads", body: "Can we change the radius?", at: "2026-10-12T10:00:00Z" });
     const list = addReplyStep([{ id: "a", title: "Write", done: true }, { id: "b", title: "Review ads", done: false }], e("m1"), "Pamela", id)!;
-    expect(list.map((x) => x.title)).toEqual(["Write", "Reply to Pamela: Class ads", "Review ads"]);
+    expect(list.map((x) => x.title)).toEqual(["Write", "Review ads"]);
+    expect(list[1].fromEmails?.map((x) => x.messageId)).toEqual(["m1"]);
+    expect(list.filter((x) => !x.done)).toHaveLength(1);
     expect(addReplyStep(list, e("m1"), "Pamela", id)).toBeNull();
     const two = addReplyStep(list, e("m2"), "Pamela", id)!;
-    expect(two).toHaveLength(3);
+    expect(two).toHaveLength(2);
     expect(two[1].fromEmails?.map((x) => x.messageId)).toEqual(["m1", "m2"]);
     expect(isJustThanks("Thanks so much!\n\nOn Mon, Derek wrote:\n> hi")).toBe(true);
     expect(isJustThanks("Thanks! Can we move it to Friday?")).toBe(false);
+  });
+
+  it("with no step open it is the Reply step; a What's next becomes it", async () => {
+    const { addReplyStep } = await import("./data");
+    const id = () => "s_new";
+    const done = addReplyStep([{ id: "a", title: "Write", done: true }], e("m1"), "Pamela", id, "2026-10-12T11:00:00Z")!;
+    expect(done.map((x) => [x.title, x.done])).toEqual([["Write", true], ["Reply to Pamela: Class ads", false]]);
+    expect(done[1]).toMatchObject({ addedFor: "reply:m1", makes: "email", startedAt: "2026-10-12T11:00:00Z" });
+    const asked = addReplyStep([{ id: "a", title: "Write", done: true }, { id: "q", title: "Write: what's next?", done: false, addedFor: "next:a" }], e("m1"), "Pamela", id)!;
+    expect(asked.map((x) => x.title)).toEqual(["Write", "Reply to Pamela: Class ads"]);
+    expect(asked[1].id).toBe("q");
+  });
+
+  it("Needs you counts an email on the current step until its reply goes", async () => {
+    const { addReplyStep, answerReceived, needsYou, unansweredLine } = await import("./data");
+    const base = [{ id: "a", title: "Write", done: true }, { id: "b", title: "Build the page", done: false, startedAt: "2026-10-12T09:00:00Z" }];
+    const task = (subtasks: typeof base) => ({ status: "in_progress" as const, assigneeId: "u_derek", subtasks });
+    expect(needsYou(task(base), "u_derek", "Pamela")).toBeNull();
+    const list = addReplyStep(base, e("m1"), "Pamela", () => "x")!;
+    expect(needsYou(task(list), "u_derek", "Pamela")).toBe("Pamela wrote. Reply");
+    expect(unansweredLine(list[1])).toEqual({ line: "Can we change the radius?", at: "2026-10-12T10:00:00Z", from: "Pamela Macias" });
+    // On Claude's step the owner replies.
+    const claude = list.map((x) => (x.id === "b" ? { ...x, assigneeId: "u_claude" } : x));
+    expect(needsYou(task(claude), "u_derek", "Pamela")).toBe("Pamela wrote. Reply");
+    // Answered from the step: it stays open and leaves Needs you.
+    const answered = answerReceived(list, "b", "2026-10-12T12:00:00Z")!;
+    expect(answered[1]).toMatchObject({ done: false, fromEmails: [expect.objectContaining({ messageId: "m1", answeredAt: "2026-10-12T12:00:00Z" })] });
+    expect(needsYou(task(answered), "u_derek", "Pamela")).toBeNull();
+    expect(unansweredLine(answered[1])).toBeNull();
+    expect(answerReceived(answered, "b")).toBeNull();
+    // A new email after that brings it back.
+    expect(needsYou(task(addReplyStep(answered, e("m2", "2026-10-12T13:00:00Z"), "Pamela", () => "x")!), "u_derek", "Pamela")).toBe("Pamela wrote. Reply");
   });
 });
 

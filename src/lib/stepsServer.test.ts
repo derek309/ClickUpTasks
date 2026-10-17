@@ -396,8 +396,56 @@ describe("a client's message on a finished task, or one with no steps", () => {
     db.tasks[0].status = "on_hold";
     expect(await stepsOnClientEmail("t1", email())).toBe(true);
     expect(db.tasks[0].status).toBe("in_progress");
-    expect(steps().map((x) => x.title)).toEqual(["Reply to Chelsea: 2026/2027 Hot Chocolate Asset Discussion", "Design the banner"]);
+    // Its open step takes the email: one open step, no Reply step in front.
+    expect(steps().map((x) => x.title)).toEqual(["Design the banner"]);
+    expect(steps()[0].fromEmails?.map((x) => x.messageId)).toEqual(["msg_1"]);
     expect(comments).toHaveLength(1);
+  });
+
+  it("an email on an open task joins its current step and adds none", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([{ id: "a", title: "Design the banner", done: true }, { id: "b", title: "Build the page", done: false, startedAt: "2026-10-15T00:00:00Z" }]);
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(steps().map((x) => [x.title, x.done])).toEqual([["Design the banner", true], ["Build the page", false]]);
+    expect(steps()[1].fromEmails).toEqual([expect.objectContaining({ messageId: "msg_1", from: "Chelsea Proctor", fileKey: "rfc:abc" })]);
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(comments).toHaveLength(0);
+    // The same email again: nothing.
+    expect(await stepsOnClientEmail("t1", email())).toBe(false);
+    expect(steps()[1].fromEmails).toHaveLength(1);
+  });
+
+  it("an email on a step waiting on them finishes the wait, leaving one open step", async () => {
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    setup([{ id: "a", title: "Design the banner", done: true }, { id: "w", title: "Waiting on Chelsea for the logos", done: false, onClient: true, startedAt: "2026-10-15T00:00:00Z" }]);
+    db.tasks[0].status = "waiting";
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    expect(steps().find((x) => x.id === "w")).toMatchObject({ done: true, outcome: "Chelsea replied", doneBy: "client" });
+    const open = steps().filter((x) => !x.done);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ title: "Chelsea replied: check it", fromEmails: [expect.objectContaining({ messageId: "msg_1" })] });
+    expect(db.tasks[0].status).toBe("in_progress");
+    expect(db.tasks[0].waiting_on_client).toBe(false);
+    // An older email linked from the Inbox only joins a wait that began after it.
+    setup([{ id: "w", title: "Waiting on Chelsea for the logos", done: false, onClient: true, startedAt: "2026-10-17T00:00:00Z" }]);
+    expect(await stepsOnClientEmail("t1", email(), true)).toBe(true);
+    expect(steps()).toHaveLength(1);
+    expect(steps()[0]).toMatchObject({ done: false, fromEmails: [expect.objectContaining({ messageId: "msg_1" })] });
+  });
+
+  it("a reply that finishes a check in leaves one open step holding it", async () => {
+    setup([
+      { id: "a", title: "Email Chelsea", done: true },
+      { id: "c", title: "Chelsea's reply", done: false, finishWhen: "reply", addedFor: "checkin:a", startedAt: "2026-10-15T00:00:00Z" },
+    ]);
+    db.tasks[0].status = "waiting";
+    const { stepsOnClientEmail } = await import("./stepsServer");
+    // The inbound path: the reply finishes the wait first, then the email lands.
+    expect(await stepsOnClientReply("t1")).toBe(true);
+    expect(await stepsOnClientEmail("t1", email())).toBe(true);
+    const open = steps().filter((x) => !x.done);
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ title: "Reply to Chelsea: 2026/2027 Hot Chocolate Asset Discussion", addedFor: "reply:msg_1" });
   });
 
   it("a task with no steps gets the Reply step, open or Done", async () => {

@@ -9,7 +9,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { backToGiver, giverOf } from "./stepThenNext";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
-  dropDuplicateOpenSteps, isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
+  dropDuplicateOpenSteps, isHandoffStep, isLongTitle, isReplyStep, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
   todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type ReceivedEmail, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { finishRequestStep } from "./clientRequests";
@@ -22,6 +22,7 @@ import { pushIfClaudeFinished } from "./push";
 import { bookedOutcome, finishBookedWait } from "./bookingClosesRequest";
 import { cancelStaleClientReminders } from "./clientReminderGuard";
 import { isAutomaticFromClient } from "./clientConversation";
+import { isClientWait } from "./afterThis";
 
 type ReviewKindKey = "doc" | "image" | "page" | "video";
 const newId = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -611,8 +612,10 @@ const shortDate = (at: string) => {
  *    wrote is the current step, the status is that step's stage, and a
  *    "Reopened: <First> wrote on Oct 16" line goes on its comments.
  *  - A task with no steps gets that step too, open or not.
- *  - An email on an open task with steps gets it as before (Derek,
- *    2026-10-12); a text or chat there changes nothing, as before.
+ *  - An email on an open task with steps joins its current step, no step
+ *    added (Derek, 2026-10-17: one step at a time); a current step waiting
+ *    on them is finished instead, with "<First> replied: check it" holding
+ *    it after. A text or chat there changes nothing, as before.
  *  Never for an automatic message (out of office, receipt, calendar reply,
  *  bulk) or a plain "thanks", nor on a "Conversation" task, which keeps its
  *  own rules (it closes itself once answered). The same message twice adds
@@ -623,9 +626,11 @@ export async function stepsOnClientMessage(taskId: string, m: ClientMessage, alw
   if (!always && (isJustThanks(text) || isAutomaticFromClient({ channel: m.channel, subject: m.subject, body: m.body ?? "", bulk: m.bulk }))) return false;
   let status: TaskStatus | null = null;
   let reopened: string | null = null;
+  let finishedWait = false;
   const ok = await rewriteSteps(taskId, (row, first) => {
     status = null;
     reopened = null;
+    finishedWait = false;
     const list = row.subtasks ?? [];
     const closed = row.status === "done" || row.status === "on_hold";
     const empty = !planSteps(list).some((x) => x.addedFor !== "finished");
@@ -637,22 +642,41 @@ export async function stepsOnClientMessage(taskId: string, m: ClientMessage, alw
     // Reopened: the "Task done" record goes, as it does in the app (useTaskEdits).
     const base = reopen ? list.filter((x) => x.addedFor !== "finished") : list;
     const who = senderFirstName(m.from) || first;
-    const made = addReplyStep(base, { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) }, who, () => newId("s_"), new Date().toISOString(), m.channel);
+    const received: ReceivedEmail = { messageId: m.id, from: (m.from ?? "").trim() || first, subject: (m.subject ?? "").trim(), body: text.slice(0, 6000), at: m.at, ...(m.fileKey ? { fileKey: m.fileKey } : {}) };
+    if (base.some((x) => x.fromEmails?.some((e) => e.messageId === m.id))) return null;
+    // One step at a time (Derek, 2026-10-17). The current step waiting on
+    // them (their ask, or a wait a reply did not already finish) is done:
+    // the turn is ours, and "<First> replied: check it" holding what they
+    // wrote starts after it (clientRequests finishRequestStep), the one open
+    // step. A message from before that wait began (an old email linked from
+    // the Inbox) only joins it.
+    const now = new Date().toISOString();
+    const open = currentStep(base);
+    const answersWait = !!open && isClientWait(open) && !(open.startedAt && Date.parse(m.at) < Date.parse(open.startedAt));
+    const made = (answersWait ? finishRequestStep(base, open!.id, { first: who, email: received, now, today: todayPacific(), makeId: () => newId("s_") }) : null)
+      // Otherwise it joins the current step, or with none open it is the
+      // "Reply to <First>" step (addReplyStep).
+      ?? addReplyStep(base, received, who, () => newId("s_"), now, m.channel);
     if (!made) return null;
+    finishedWait = answersWait;
+    // The status the step holding it implies: a Reply or check it step is
+    // our work in progress (its name can hold any word of their subject, so
+    // it is not guessed from it); a step it joined keeps its own stage.
+    // Needs you follows from the message on it.
+    const cur = currentStep(made);
+    const stage: TaskStatus = !cur || isReplyStep(cur) ? "in_progress" : stepStage(cur, row.assignee_id);
     if (reopen) {
-      // The status the new current step implies: the reply step is our work
-      // in progress (its name can hold any word of their subject, so it is
-      // not guessed from it); Needs you follows from the email on it.
-      const cur = currentStep(made);
-      status = !cur || cur.fromEmails?.some((e) => e.messageId === m.id) ? "in_progress" : stepStage(cur, row.assignee_id);
+      status = stage;
       reopened = who;
-    } else if (m.channel === "email") {
-      status = statusForStep(row.status, "in_progress");
+    } else if (m.channel === "email" || answersWait) {
+      status = statusForStep(row.status, stage);
     }
     // A text or chat on an open task leaves its status: the portal already
     // brought a task waiting on them back to Review (clientAnswerPatch).
     return made;
-  }, false, () => (status ? { status } : null));
+  }, false, () => (status || finishedWait ? { ...(status ? { status } : {}), ...(finishedWait ? { waiting_on_client: false } : {}) } : null));
+  // Their answer ends the chase on the wait it finished (stepsOnClientReply).
+  if (ok && finishedWait) await cancelStaleClientReminders({ taskId }).catch(() => 0);
   const by = reopened as string | null;
   if (ok && by) {
     await supabaseAdmin.rpc("append_comment", { task_id: taskId, comment: {

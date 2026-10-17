@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, dropDuplicateOpenSteps, canAddStep, addReviewApproval, addEmailSentRecord, addTellClientStep, checkInTitle, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
+  assignableUsers, laterWord, unansweredLine, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, dropDuplicateOpenSteps, canAddStep, addReviewApproval, addEmailSentRecord, addTellClientStep, checkInTitle, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -2499,7 +2499,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       : state === "waiting" ? (sub.onClient || st === "waiting" || sub.finishWhen === "reply" ? `${firstName}'s turn` : `${userById(person ?? null)?.name.split(" ")[0] ?? "A teammate"}'s turn`)
       : state === "mine" ? (
         tp.total > tp.done && (fromPortal.length || sub.addedFor === "changes") ? `${firstName} sent changes. Your turn: ${tp.total - tp.done} to do`
-        : sub.fromEmails?.length ? `${firstName} wrote. Your turn to reply`
+        : unansweredLine(sub) ? `${firstName} wrote. Your turn to reply`
         : turnReason(steps[steps.findIndex((x) => x.id === sub.id) - 1], meId, firstName, (id) => userById(id)?.name.split(" ")[0] ?? "Someone") ?? "Your turn"
       ) : null;
     // The short word the step page's sentence opens with ("● Your turn,
@@ -2647,7 +2647,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const t = stepTone(sub);
     const own = todoProgress(sub.todos);
     const fromPortal = clientItemsOf(sub.id);
-    const lastEmail = sub.fromEmails?.[sub.fromEmails.length - 1];
+    // The newest message nobody has answered: "Brian wrote: <first line> · 2h ago".
+    const waitingMsg = unansweredLine(sub);
     const waits = waitingStep(sub);
     const sent = waits ? waitedEmail(sub) : null;
     // A wait a send made: what went out from the step before (the review,
@@ -2657,7 +2658,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return stepQuietLine({
       draftFor: isDraft(sub) ? (sub.draftFor === "client" ? firstName : firstOf2(sub.draftFor)) : null,
       description: htmlToText(sub.notes ?? ""),
-      wrote: lastEmail && !sub.done ? { first: senderFirst(lastEmail.from, firstName), ago: timeAgo(lastEmail.at) } : null,
+      wrote: waitingMsg ? { first: senderFirst(waitingMsg.from, firstName), ago: timeAgo(waitingMsg.at), line: waitingMsg.line } : null,
       sentAgo: out ? timeAgo(out.at) : sub.emailedAt ? timeAgo(sub.emailedAt) : sent ? timeAgo(sent.at) : null,
       sentWhat: out?.what ?? null,
       noReply: waits && !sub.done,
@@ -3693,13 +3694,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // is worked out once (lib/talkSend, shared with the client page's
   // Conversation): finishTalkStep acts on it and the email window says it
   // under Send before it goes.
-  const talkStepPlan = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string): TalkPlan | null =>
-    planTalkStep(taskRef.current.subtasks, task.assigneeId, channel, TODAY, followUpDate, stepId);
-  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string, subject?: string | null): boolean => {
+  const talkStepPlan = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string, replyTo?: string | null): TalkPlan | null =>
+    planTalkStep(taskRef.current.subtasks, task.assigneeId, channel, TODAY, followUpDate, stepId, replyTo);
+  const finishTalkStep = (channel: "email" | "sms" | "chat", followUpDate?: string | null, stepId?: string, subject?: string | null, replyTo?: string | null): boolean => {
     // After this's suggestion is taken by the send, as by Done (Derek, 2026-10-15).
-    const first = talkStepPlan(channel, followUpDate, stepId);
+    const first = talkStepPlan(channel, followUpDate, stepId, replyTo);
     if (first?.kind === "finish") takeAfterSuggestion(first.cur);
-    const plan = talkStepPlan(channel, followUpDate, stepId);
+    const plan = talkStepPlan(channel, followUpDate, stepId, replyTo);
     if (!plan) return false;
     const { cur, due } = plan;
     // Sent from a message step made from Quick step: back to the task, where
@@ -3707,6 +3708,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (talkReturn.current === cur.id) { talkReturn.current = null; setOpenStepPage(null); }
     const out = talkSendPatch({ subtasks: taskRef.current.subtasks, status: task.status, due: task.due, assigneeId: task.assigneeId }, plan, channel, firstName, () => newId("s_"), undefined, subject);
     if (!out) return false;
+    // The reply to their message on a step doing other work: answered, and
+    // the step carries on (Derek, 2026-10-17: one step at a time).
+    if (plan.kind === "answered") {
+      onPatch(out.patch);
+      pushToast(`Sent. Still on "${cur.title.trim()}"`);
+      return true;
+    }
     if (plan.kind === "reminder") {
       onPatch(out.patch);
       pushToast(`${cur.followUps?.length || cur.waitsOn ? "Reminder sent" : "Sent"}. Waiting on ${firstName}; checking again ${formatDue(due)}.`);
@@ -3794,6 +3802,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // in Fri, Oct 16.", the check in left off with no follow up day picked.
   const sendNote = (followUpDate: string | null): string | null => {
     if (taskRef.current.draftEmail?.asks) return null;
+    const answers = talkStepPlan("email", followUpDate, undefined, taskRef.current.draftEmail?.replyTo);
+    if (answers?.kind === "answered") return `Sending answers ${firstName} on "${answers.cur.title.trim()}". The step stays open.`;
     if (activeStep && sendReviewKind()) return `Sending finishes "${activeStep.title.trim()}". Checking in ${formatDayDate(addBusinessDaysIso(TODAY, reviewFollowUpDays(1)))}.`;
     if (activeStep?.onClient && !activeStep.holds?.includes("email")) return null;
     const plan = talkStepPlan("email", followUpDate);
@@ -3813,6 +3823,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // A question about to-dos: they are marked asked, nothing else moves
     // (Derek, 2026-10-12: "without blowing up the whole steps situation").
     const asks = taskRef.current.draftEmail?.asks;
+    // A reply to the client's message on a step doing other work (its review,
+    // its document): it answers them, and the step's own work does not go.
+    if (!asks && email.replyTo && talkStepPlan("email", email.followUpDate, undefined, email.replyTo)?.kind === "answered"
+      && finishTalkStep("email", email.followUpDate, undefined, email.subject, email.replyTo)) return;
     if (asks) {
       const at = new Date().toISOString();
       onPatch({ subtasks: taskRef.current.subtasks.map((x) => (x.id === asks.stepId ? { ...x, todos: (x.todos ?? []).map((t) => (asks.todoIds.includes(t.id) ? { ...t, askedAt: at } : t)) } : x)) });

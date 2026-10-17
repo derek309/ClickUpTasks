@@ -101,10 +101,10 @@ export function suggestStepActions(title: string, firstName: string): StepSugges
 
 /** The client's email on a step not answered yet: its Reply is the one way to
  *  write back (Derek, 2026-10-14: "+ Make the draft email", "Email Brian" and
- *  Reply all sat on one step). Answered once the step is done or a reply
- *  draft sits on it. */
-export function replyWaiting(step: { done?: boolean; fromEmails?: unknown[] | null; holds?: string[] | null }, hasDraftEmail: boolean): boolean {
-  if (step.done || !step.fromEmails?.length) return false;
+ *  Reply all sat on one step). Answered once the step is done, a reply
+ *  draft sits on it, or the reply went from it (data.ts answerReceived). */
+export function replyWaiting(step: { done?: boolean; fromEmails?: { messageId?: string; answeredAt?: string }[] | null; holds?: string[] | null }, hasDraftEmail: boolean): boolean {
+  if (step.done || !step.fromEmails?.some((e) => !e.answeredAt)) return false;
   return !(hasDraftEmail && (step.holds ?? []).includes("email"));
 }
 

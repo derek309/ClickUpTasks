@@ -3484,7 +3484,40 @@ export function datesForCurrentStep(before: Subtask[], after: Subtask[], task: {
 /** fileKey: the email's key for its files (lib/emailFiles emailMessageKey),
  *  so the files copied from it onto the task show with it (Derek, 2026-10-13:
  *  Brian's PDF sat in Links and files but not with his email). */
-export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string; fileKey?: string };
+/** answeredAt: when the reply to it went from the step it sits on, for a
+ *  message attached to a step doing other work (attachReceived); a Reply
+ *  step's own messages are answered when the step is done. */
+export type ReceivedEmail = { messageId: string; from: string; subject: string; body: string; at: string; fileKey?: string; answeredAt?: string };
+
+/** The client's messages on a step that nobody has answered yet: none once
+ *  the step is done, or once its reply went from the step (answerReceived). */
+export function unansweredOn(s: { done?: boolean; fromEmails?: Pick<ReceivedEmail, "answeredAt">[] | null }): number {
+  return s.done ? 0 : (s.fromEmails ?? []).filter((e) => !e.answeredAt).length;
+}
+
+/** A step made to answer the client: a Reply step ("reply:"), or "<First>
+ *  replied: check it" (clientRequests CHECK_IT_PREFIX). Sending from one
+ *  finishes it, as any emailing step; a step doing other work only marks its
+ *  messages answered (talkSend). */
+export const isReplyStep = (s: Pick<Subtask, "addedFor">): boolean => /^(reply|checkit):/.test(s.addedFor ?? "");
+
+/** Their reply went from the step: its messages are answered, the step stays
+ *  as it is. Null when nothing on it was waiting. */
+export function answerReceived(subtasks: Subtask[], stepId: string, now = new Date().toISOString()): Subtask[] | null {
+  const s = subtasks.find((x) => x.id === stepId);
+  if (!s || !unansweredOn(s)) return null;
+  return subtasks.map((x) => (x.id === stepId ? { ...x, fromEmails: (x.fromEmails ?? []).map((e) => (e.answeredAt ? e : { ...e, answeredAt: now })) } : x));
+}
+
+/** "Brian wrote: Can we move the date?": the first line of the newest
+ *  message on the step nobody has answered, cut to `max`. Null when none waits. */
+export function unansweredLine(s: { done?: boolean; fromEmails?: Pick<ReceivedEmail, "answeredAt" | "body" | "at" | "from">[] | null }, max = 70): { line: string; at: string; from: string } | null {
+  if (s.done) return null;
+  const e = [...(s.fromEmails ?? [])].reverse().find((x) => !x.answeredAt);
+  if (!e) return null;
+  const first = (e.body ?? "").split(/\n/).map((x) => x.replace(/\s+/g, " ").trim()).find(Boolean) ?? "";
+  return { line: first.length > max ? `${first.slice(0, max - 1).trimEnd()}…` : first, at: e.at, from: e.from };
+}
 
 /** The email's own words: quoted history and signatures' "On … wrote:" cut off. */
 export function emailOwnWords(text: string): string {
@@ -3573,12 +3606,20 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   // 2026-10-17): the giver's, though the turn stays hers.
   const q = cur.question;
   if (q && q.to === meId && !(cur.seenAt && cur.seenAt >= q.at)) return `${userById(q.from)?.name.split(" ")[0] ?? (q.from === CLAUDE_ID ? "Claude" : "Someone")} wrote: ${q.text}`;
+  // The client wrote and nobody has answered: whatever the step is, the reply
+  // is ours (Derek, 2026-10-17: their message joins the current step rather
+  // than a Reply step in front of it). The step's own person answers it; on
+  // Claude's step or the client's own, the task's owner does.
+  const seen = !!cur.seenAt && cur.seenAt >= needsYouSince(task.subtasks, cur);
+  if (unansweredOn(cur)) {
+    const replier = cur.assigneeId && cur.assigneeId !== CLAUDE_ID && !cur.onClient ? cur.assigneeId : task.assigneeId;
+    if (replier === meId && !seen) return `${clientFirst} wrote. Reply`;
+  }
   if ((cur.assigneeId ?? task.assigneeId) !== meId) return null;
-  if (cur.seenAt && cur.seenAt >= needsYouSince(task.subtasks, cur)) return null;
+  if (seen) return null;
   // A step being set up for someone else and not given yet (stepThenNext isDraft).
   if (cur.draftFor) return `Finish setting up ${cur.title.trim() || "the step"}`;
   if (cur.onClient || cur.assigneeId === CLAUDE_ID || cur.finishWhen === "reply" || stepStage(cur, task.assigneeId) === "waiting") return null;
-  if (cur.fromEmails?.length) return `${clientFirst} wrote. Reply`;
   const portal = task.subtasks.filter((x) => x.fromClient && !x.done && x.stepId === cur.id).length;
   if (portal || cur.addedFor === "changes") return `${clientFirst} sent changes${portal ? `: ${portal} to do` : ""}`;
   if (/^(doc|image|page|video):\d+$/.test(cur.addedFor ?? "")) return `${clientFirst} asked for changes`;
@@ -3736,24 +3777,25 @@ export function withMeetingSteps(subtasks: Subtask[], name: string, due: string,
   ];
 }
 
-/** A client's email becomes the step answering it: "Reply to Pam: <subject>",
- *  current, with the email on it. Another email while that step is open joins
- *  it; the same email twice adds nothing. A "what's next?" step becomes it.
- *  A text or portal chat (channel) makes the same step, holding their words,
- *  named "Reply to Pam's text" / "Reply to Pam's message", making no email. */
+/** A client's message on a task (Derek, 2026-10-17: one step at a time).
+ *  With a step open, it joins THAT step, the current one, whatever it is
+ *  doing: no step is added, and the step shows it with Reply until the reply
+ *  goes from it (answerReceived). A "what's next?" step becomes the Reply
+ *  step. With no step open it becomes the step answering it: "Reply to Pam:
+ *  <subject>", current, with the email on it. The same message twice adds
+ *  nothing. A text or portal chat (channel) makes the same step, holding
+ *  their words, named "Reply to Pam's text" / "Reply to Pam's message",
+ *  making no email. */
 export function addReplyStep(subtasks: Subtask[], email: ReceivedEmail, clientFirstName: string, makeId: () => string, now = new Date().toISOString(), channel: "email" | "sms" | "chat" = "email"): Subtask[] | null {
   if (subtasks.some((s) => s.fromEmails?.some((e) => e.messageId === email.messageId))) return null;
-  const open = planSteps(subtasks).find((s) => !s.done && s.addedFor?.startsWith("reply:"));
-  if (open) return subtasks.map((s) => (s.id === open.id ? { ...s, fromEmails: [...(s.fromEmails ?? []), email] } : s));
+  const cur = currentStep(subtasks);
+  if (cur && !asksWhatsNext(cur)) return subtasks.map((s) => (s.id === cur.id ? { ...s, fromEmails: [...(s.fromEmails ?? []), email] } : s));
   const subject = email.subject.replace(/^((re|fwd?):\s*)+/i, "").trim();
   const title = channel === "sms" ? `Reply to ${clientFirstName}'s text` : channel === "chat" ? `Reply to ${clientFirstName}'s message`
     : `Reply to ${clientFirstName}${subject ? `: ${subject.slice(0, 80)}` : ""}`;
   const fields = { title, ...(channel === "email" ? { makes: "email" as const } : {}), addedFor: `reply:${email.messageId}`, startedAt: now, fromEmails: [email] };
-  const cur = currentStep(subtasks);
-  if (cur && asksWhatsNext(cur)) return subtasks.map((s) => (s.id === cur.id ? { ...s, ...fields } : s));
-  const list = [...subtasks];
-  list.splice(cur ? list.findIndex((x) => x.id === cur.id) : list.length, 0, { id: makeId(), done: false, ...fields });
-  return list;
+  if (cur) return subtasks.map((s) => (s.id === cur.id ? { ...s, ...fields } : s));
+  return [...subtasks, { id: makeId(), done: false, ...fields }];
 }
 /** A sent email, kept on the step it was written on so it never gets lost
  *  (Derek, 2026-10-12: "keep the client box and just show sent"). */

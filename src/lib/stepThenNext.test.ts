@@ -222,6 +222,9 @@ describe("the task view reads, it does nothing (Derek, 2026-10-17)", () => {
   it("one quiet line: what the send sent, and when", () => {
     expect(stepQuietLine({ sentAgo: "2h ago", sentWhat: "Holiday Pre Order Email: Run Specialty Stores", noReply: true })).toBe("Holiday Pre Order Email: Run Specialty Stores sent 2h ago · no reply yet");
   });
+  it("one quiet line: an unanswered message says its first line", () => {
+    expect(stepQuietLine({ wrote: { first: "Brian", ago: "2h ago", line: "Can we move the date?" }, description: "Build the page." })).toBe("Brian wrote: Can we move the date? · 2h ago");
+  });
   it("one quiet line: the client wrote, with the to dos", () => {
     expect(stepQuietLine({ wrote: { first: "Chelsea", ago: "1h ago" }, description: "ignored", todos: { done: 1, total: 5 } })).toBe("Chelsea wrote 1h ago · 1 of 5 to do");
   });
