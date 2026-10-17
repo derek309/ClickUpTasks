@@ -313,12 +313,29 @@ export default function InboxView(p: InboxViewProps) {
                 <button onClick={() => p.setPrefs({ sortWaiting: !p.prefs.sortWaiting })} aria-pressed={!!p.prefs.sortWaiting}
                   title={p.prefs.sortWaiting ? "Back to newest first" : "The ones waiting longest on a reply first"}
                   className={`h-10 rounded-lg border px-3 font-semibold ${p.prefs.sortWaiting ? "border-accent bg-accent-soft text-accent" : "hover:bg-background"}`}>{p.prefs.sortWaiting ? "⏱ Longest waiting" : "Newest first"}</button>
-                <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}${searchingOlder ? ", searching older…" : ""}` : `${visible.length} conversation${visible.length === 1 ? "" : "s"}`}</span>
+                <span className="ml-auto text-muted">{q.trim() ? `${visible.length} result${visible.length === 1 ? "" : "s"}${searchingOlder ? ", searching older…" : ""}` : inbox.ready ? `${visible.length} conversation${visible.length === 1 ? "" : "s"}` : ""}</span>
                 <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setOpenKey(null); }} placeholder="Search people, words, files" aria-label="Search the Inbox"
                   className="h-10 w-full rounded-lg border bg-surface px-3 outline-none focus:border-accent sm:w-72" />
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
-                {inbox.error && <div className="m-4 rounded-lg bg-danger-soft p-3 text-danger">{inbox.error}</div>}
+                {/* Nothing shows until messages and your marks are both in: a quiet
+                    Loading, never the app's own messages as all new (Derek,
+                    2026-10-17: 131, then 0). A first read that failed says so
+                    instead of All caught up; a refresh that failed keeps the list. */}
+                {inbox.status === "loading" && <div className="px-6 py-16 text-center text-muted">Loading…</div>}
+                {inbox.status === "failed" && (
+                  <div className="px-6 py-16 text-center text-muted">
+                    <div className="text-[21px] font-bold text-foreground">Couldn&apos;t load the Inbox.</div>
+                    {inbox.error && <div className="mt-1">{inbox.error}</div>}
+                    <button onClick={() => { void inbox.reload(); }} className="mt-3 h-10 rounded-lg border px-4 font-semibold text-foreground hover:bg-background">Retry</button>
+                  </div>
+                )}
+                {inbox.status === "ready" && inbox.error && (
+                  <div className="flex items-center gap-2 border-b px-4 py-2 text-muted">
+                    <span>Couldn&apos;t refresh the Inbox. What you see is from the last good read.</span>
+                    <button onClick={() => { void inbox.reload(); }} className="font-semibold text-accent hover:underline">Retry</button>
+                  </div>
+                )}
                 {folder === "inbox" && !q && p.canAdmin && <RemindersGoingOut p={p} />}
                 {/* Every draft waiting on you in one list, one look, newest first
                     (Derek, 2026-10-10: the Claude cards and the task rows "feel
@@ -356,7 +373,7 @@ export default function InboxView(p: InboxViewProps) {
                     ))}
                   </div>
                 )}
-                {!inbox.loading && !visible.length && !(folder === "drafts" && (queued.length || workDrafts.length)) && !(folder === "inbox" && !q && reviewsBack.length) && (
+                {inbox.ready && !visible.length && !(folder === "drafts" && (queued.length || workDrafts.length)) && !(folder === "inbox" && !q && reviewsBack.length) && (
                   <div className="px-6 py-16 text-center text-muted">
                     <div className="text-[21px] font-bold text-foreground">{folder === "inbox" && !q ? "All caught up" : folder === "trash" ? "Trash is empty" : "Nothing here"}</div>
                     {folder === "inbox" && !q && <div className="mt-1">{p.prefs.unreadOnly ? "Nothing unread." : "Every message is answered, snoozed or archived."}</div>}

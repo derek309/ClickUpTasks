@@ -2116,11 +2116,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (error) { setTeamFeed((f) => f.filter((x) => x.id !== row.id)); throw new Error(error.message); }
   };
   const inbox = useInbox({ meMemberId: me.id, isAdmin: me.role === "admin", liveMessages: messages, extraMessages: inboxExtra, tasks, nameOf: inboxNameOf, gmailSync: inboxGmailSync, allows: inboxPrefs.allowSenders, hide: inboxPrefs.hideKinds, pushToast, ready: !loading });
-  // Updates don't count toward the badge or pop alerts: they are robots.
-  const inboxUnread = useMemo(() => inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length, [inbox.threads]);
+  // Updates don't count toward the badge or pop alerts: they are robots. No
+  // badge until the Inbox's own read is in (inbox.ready): before it, every
+  // conversation looked unread (131, then 0, Derek, 2026-10-17).
+  const inboxUnread = useMemo(() => (inbox.ready ? inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.trashed && !t.updates).length : 0), [inbox.ready, inbox.threads]);
   // A browser alert for a new message while ClickUpTasks is in another tab.
   const alertedRef = useRef<Set<string> | null>(null);
   useEffect(() => {
+    // Not before the first read: what is already there is not new.
+    if (!inbox.ready) return;
     const unread = inbox.threads.filter((t) => t.unread && !t.done && !t.snoozed && !t.updates);
     const seen = alertedRef.current;
     alertedRef.current = new Set(unread.map((t) => `${t.key}|${t.latest.id}`));
@@ -2133,7 +2137,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     const n = new Notification(`${t.peerName}`, { body: (t.subject ? `${t.subject}: ` : "") + t.latest.body.replace(/\s+/g, " ").slice(0, 140), tag: t.key });
     n.onclick = () => { window.focus(); goToViewRef.current("inbox"); n.close(); };
     if (inboxPrefs.sound) { try { new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAABErAAABAAgAZGF0YQAAAAA=").play().catch(() => {}); } catch { /* no sound */ } }
-  }, [inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
+  }, [inbox.ready, inbox.threads, inboxPrefs.popup, inboxPrefs.sound]);
   // opts: what was typed in the Inbox's new task form (Derek, 2026-10-06:
   // "more custom control"); without it, the old one click version.
   const newTaskFromThread = async (t: InboxThread, opts?: { title?: string; clientId?: string | null; projectId?: string | null; assigneeId?: string | null; due?: string | null }): Promise<string | null> => {

@@ -327,3 +327,34 @@ export function isHiddenKind(t: { channel: string }, hide: string[] | undefined)
   if (!hide?.length) return false;
   return hide.includes(t.channel) || (hide.includes("social") && (SOCIAL as readonly string[]).includes(t.channel));
 }
+
+// ── Loading (Derek, 2026-10-17: "it shows hundreds of notifications but then
+// it cleared out") ─────────────────────────────────────────────────────────
+// On a reload the app's own messages arrived before the Inbox's read of your
+// marks, so for a moment every conversation looked unarchived and unread:
+// 131 in the list and on both badges, then 0 once the marks came in.
+
+/** Where the Inbox's own read stands. Nothing shows, and nothing counts,
+ *  until messages and your marks have both come in once. A refresh that
+ *  fails after that leaves the list as it was. */
+export type InboxLoad = "loading" | "ready" | "failed";
+export function inboxLoadState(hasLoaded: boolean, error: string | null): InboxLoad {
+  if (hasLoaded) return "ready";
+  return error ? "failed" : "loading";
+}
+
+/** How much a read brought back. */
+export type ReadSize = { messages: number; states: number; convs: number };
+
+/** Whether a read may replace what is loaded. A read that comes back empty
+ *  on something already there is a bad read (a lost session reads no rows,
+ *  with no error), not news: your marks are never deleted, and 30 days of
+ *  mail and conversations do not vanish between two reads. A refresh of
+ *  changed rows only (partial) may well bring no messages. */
+export function shouldApplyRead(prev: ReadSize | null, next: ReadSize & { partial: boolean }): boolean {
+  if (!prev) return true;
+  if (prev.states > 0 && next.states === 0) return false;
+  if (prev.convs > 0 && next.convs === 0) return false;
+  if (!next.partial && prev.messages > 0 && next.messages === 0) return false;
+  return true;
+}

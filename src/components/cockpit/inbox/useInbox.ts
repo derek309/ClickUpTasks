@@ -11,7 +11,7 @@ import { supabase, authedFetch } from "@/lib/supabase";
 import { rowToMessage } from "@/lib/db";
 import type { Message, Task } from "@/lib/data";
 import { threadKeyOf as thKey, isBlocked } from "@/lib/inbox";
-import { buildThreads, isHiddenKind, mergeById, mergeStates, type GhlConv, type InboxState, type InboxThread } from "./inboxModel";
+import { buildThreads, inboxLoadState, isHiddenKind, mergeById, mergeStates, shouldApplyRead, type GhlConv, type InboxState, type InboxThread, type ReadSize } from "./inboxModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -50,7 +50,10 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   const [blocks, setBlocks] = useState<string[]>([]);
   // Older than 30 days, brought in by a search.
   const [older, setOlder] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
+  // True once messages and your marks have both come in: until then the
+  // list and every count stay empty, or the app's own messages showed with
+  // no marks, all unarchived and unread (131, then 0, Derek, 2026-10-17).
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // GoHighLevel conversations you assigned to a teammate: out of your list at once.
@@ -69,16 +72,26 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
   // changed since then.
   const lastReadRef = useRef<number | null>(null);
   type Loaded = Awaited<ReturnType<typeof fetchInbox>>;
+  // What the last good read held: a read that comes back empty on any of it
+  // is a bad read and leaves the list as it was.
+  const sizeRef = useRef<ReadSize | null>(null);
   const apply = useCallback((r: Loaded) => {
+    const next = { messages: r.messages.length, states: r.states.size, convs: r.convs.size };
+    if (!shouldApplyRead(sizeRef.current, { ...next, partial: r.partial })) return;
+    sizeRef.current = r.partial && sizeRef.current ? { ...next, messages: Math.max(sizeRef.current.messages, next.messages) } : next;
     if (r.partial) setLoaded((prev) => mergeById(prev, r.messages));
     else setLoaded(r.messages);
     setConvs(r.convs);
     setStates((cur) => mergeStates(cur, r.states, touchedRef.current, r.startedAt));
-    setBlocks(r.blocks); setError(null); setLoading(false);
+    setBlocks(r.blocks); setError(null); setHasLoaded(true);
     lastReadRef.current = r.startedAt;
   }, []);
-  const fail = useCallback((e: any) => { setError(e?.message ?? "The Inbox could not load."); setLoading(false); }, []);
+  // A failed read never touches what is loaded.
+  const fail = useCallback((e: any) => { setError(e?.message ?? "The Inbox could not load."); }, []);
   const load = useCallback(() => fetchInbox(meMemberId, myTaskIds).then(apply, fail), [meMemberId, myTaskIds, apply, fail]);
+  // Retry after a failed first read: back to Loading while it reads.
+  const reload = useCallback(() => { setError(null); return load(); }, [load]);
+  const status = inboxLoadState(hasLoaded, error);
 
   useEffect(() => {
     if (!ready) return;
@@ -110,6 +123,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     || (m.channel === "chat" && m.taskId && myTaskIds.has(m.taskId))), [liveMessages, meMemberId, convs, myTaskIds]);
 
   const threads: InboxThread[] = useMemo(() => {
+    if (!hasLoaded) return [];
     const byId = new Map<string, Message>();
     for (const m of loaded) byId.set(m.id, m);
     for (const m of live) byId.set(m.id, m);
@@ -119,7 +133,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     // does a conversation you just handed to someone else.
     return buildThreads([...byId.values()], states, { now, nameOf, convs, allows })
       .filter((t) => (t.trashed || !isBlocked(t.peerAddress, blocks)) && !(t.ghlConversationId && handedOff.has(t.ghlConversationId)) && !isHiddenKind(t, hide));
-  }, [loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff, allows, hide]);
+  }, [hasLoaded, loaded, live, extraMessages, older, states, now, nameOf, convs, blocks, handedOff, allows, hide]);
 
   // ── Your own state on a conversation ────────────────────────────────────
   const statesRef = useRef(states);
@@ -285,7 +299,7 @@ export function useInbox({ meMemberId, isAdmin, liveMessages, extraMessages, tas
     return (j.reviews ?? []) as { id: string; kind: string; name: string; url: string; opened: boolean; status: string }[];
   }, []);
 
-  return { threads, loading, error, reload: load, pullNow, pullGmail, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, unlinkTask, moreTasks, loadMoreTasks, assign, send, improve, draftReply, proposeTimes, taskReviews };
+  return { threads, status, ready: status === "ready", loading: status === "loading", error, reload, pullNow, pullGmail, isAdmin, convs, blocks, block, unblock, markRead, markUnread, markDone, trash, star, snooze, addContact, searchOlder, linkTask, unlinkTask, moreTasks, loadMoreTasks, assign, send, improve, draftReply, proposeTimes, taskReviews };
 }
 
 async function fetchInbox(meMemberId: string, myTaskIds: Set<string>, changedSince?: string) {
