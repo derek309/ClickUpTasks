@@ -8,7 +8,17 @@ import * as React from "react";
 import { newId } from "./ui";
 import { formatDue, todayIso, userById, type Me, type NotificationKind, type Project, type Task } from "@/lib/data";
 import { appendCommentDb, saveTaskEdit, upsertProject } from "@/lib/db";
-import { DEFAULT_QUEUE, queueMove, queueMoveUp, queueOffPatches, queueOnPatches, queuePromotions, queueSettings, type QPatch } from "../../../mcp/queue.mjs";
+import { DEFAULT_QUEUE, PULL_DAYS, queueMove, queueMoveUp, queueOffPatches, queueOnPatches, queuePromotions, queueSettings, type QPatch, type QueueSettings } from "../../../mcp/queue.mjs";
+import { listPlan, type ListPlan } from "../../../mcp/listKinds.mjs";
+import { authedFetch } from "@/lib/supabase";
+
+/** A list's queue setting with its kind's pull: a finishing list brings an Up
+ *  next task up to Now 3 weeks before it is needed; no other kind does. */
+export function queueForKind(q: QueueSettings, kind: ListPlan["kind"]): QueueSettings {
+  const { pull: _pull, ...rest } = q;
+  void _pull;
+  return kind === "finishes" ? { ...rest, pull: PULL_DAYS } : rest;
+}
 
 export type UseQueueDeps = {
   projectById: (id: string) => Project | null;
@@ -58,7 +68,7 @@ export function useQueue({ projectById, setProjects, tasksRef, setTasks, me, not
 
   /** The Queue switch. On: the list is lined up by due date and only Now
    *  keeps a date. Off: every date the queue saved comes back. */
-  const toggleQueue = (projectId: string) => {
+  const toggleQueue = (projectId: string, start?: Partial<QueueSettings>) => {
     const p = projectById(projectId);
     if (!p || p.queue === undefined) return;
     if (p.queue) {
@@ -69,7 +79,7 @@ export function useQueue({ projectById, setProjects, tasksRef, setTasks, me, not
       pushToast(`${p.name} is a plain list again; its dates are back`);
       return;
     }
-    const q = { ...DEFAULT_QUEUE };
+    const q = queueForKind(queueSettings({ ...DEFAULT_QUEUE, ...start })!, listPlan(p.plan).kind);
     const np = { ...p, queue: q };
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     void upsertProject(np);
@@ -84,11 +94,48 @@ export function useQueue({ projectById, setProjects, tasksRef, setTasks, me, not
   /** How many are Now at once, and the spacing in business days. */
   const setQueueSettings = (projectId: string, next: { now: number; spacing: number }) => {
     const p = projectById(projectId);
-    const q = queueSettings(next);
+    // The kind's pull stays whatever the form sends.
+    const q = p?.queue ? queueSettings({ ...p.queue, ...next }) : null;
     if (!p || !p.queue || !q) return;
     const np = { ...p, queue: q };
     setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
     void upsertProject(np);
+    // More at a time can bring the next ones up now.
+    void writeAll(queuePromotions(listTasks(projectId), q, todayIso()), (t, patch) => (patch.due && patch.due !== t.due ? `came up next in the queue, due ${formatDue(patch.due)}` : null));
+  };
+
+  /** "queue 2 at a time" on a finishing list's header: off, or N at a time. */
+  const setQueueNow = (projectId: string, now: number | null) => {
+    const p = projectById(projectId);
+    if (!p || p.queue === undefined) return;
+    if (now == null) { if (p.queue) toggleQueue(projectId); return; }
+    if (!p.queue) { toggleQueue(projectId, { now }); return; }
+    setQueueSettings(projectId, { now, spacing: p.queue.spacing });
+  };
+
+  /** A list's kind and its settings (mcp/listKinds.mjs). On a queue the kind
+   *  decides the pull, and the Now check runs with it. A repeating list with a
+   *  recipe gets its first round, if it has none open (the server makes it
+   *  once). */
+  const setListPlan = (projectId: string, plan: ListPlan) => {
+    const p = projectById(projectId);
+    if (!p || p.plan === undefined) return;
+    const queue = p.queue ? queueForKind(p.queue, plan.kind) : p.queue;
+    const np: Project = { ...p, plan: plan.kind === "holds" ? null : plan, queue };
+    setProjects((ps) => ps.map((x) => (x.id === projectId ? np : x)));
+    void (async () => {
+      await upsertProject(np);
+      if (queue && (queue.pull ?? 0) !== (p.queue?.pull ?? 0)) await writeAll(queuePromotions(listTasks(projectId), queue, todayIso()), (t, patch) => (patch.due && patch.due !== t.due ? `came up next in the queue, due ${formatDue(patch.due)}` : null));
+      if (plan.kind === "repeats" && plan.recipe?.length) await askForNextRound(projectId);
+    })();
+  };
+
+  /** The server makes a repeating list's next round when one is due. */
+  const askForNextRound = async (projectId: string) => {
+    const res = await authedFetch("/api/lists/next-round", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) }).catch(() => null);
+    const j = res?.ok ? await res.json().catch(() => null) as { made?: string | null; goesOut?: string | null } | null : null;
+    if (j?.made && j.goesOut) pushToast(`Next round made, goes out ${formatDue(j.goesOut)}`);
+    return j?.made ?? null;
   };
 
   /** Someone else's task moved: they hear why. */
@@ -124,5 +171,5 @@ export function useQueue({ projectById, setProjects, tasksRef, setTasks, me, not
   };
 
   // A deadline is set on the task page's ⋯ menu (TaskDrawer deadlineItem).
-  return { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue };
+  return { toggleQueue, setQueueSettings, setQueueNow, setListPlan, askForNextRound, moveInQueue, moveUpInQueue };
 }

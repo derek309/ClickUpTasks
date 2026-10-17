@@ -15,7 +15,8 @@ import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
 //   ?view=reminders                        Reminders, every reminder to a client (2026-10-15)
 //   ?view=mail&thread=<key>                one conversation in it, a link to
 //                                          paste into a Claude chat (2026-10-09)
-//   ?client=<id>[&project=<id>]   a client (optionally scoped to one project)
+//   ?client=<id>[&project=<id>]   a client (its Lists), or one of its lists
+//   ?client=<id>&tab=all          a client's All tasks, across its lists
 //   ?assignee=<id>|all            All Tasks scoped to one person or everyone
 //                                  (the default "mine" is never encoded)
 //   ?sub=reviews                  My Work showing what is out with a client
@@ -29,7 +30,7 @@ import { PERSONAL_CLIENT_ID, PERSONAL_PROJECT_ID } from "./data";
 // to anyone, and the completed log had no way in at all except landing on All
 // Tasks and pressing its button.
 export type NavSub = "reviews" | "drafts" | "completed";
-export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "reminders" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | null; vaultFolder: string | null; dm: string | null; thread?: string | null; assignee: string | null; sub: NavSub | null };
+export type NavState = { view: "work" | "personal" | "inbox" | "mail" | "reminders" | "calendar" | "clients" | "projects" | "settings" | null; client: string; project: string | null; task: string | null; clientTab: "tasks" | "chat" | "all" | null; vaultFolder: string | null; dm: string | null; thread?: string | null; assignee: string | null; sub: NavSub | null };
 export function buildSearch(s: NavState): string {
   const p = new URLSearchParams();
   if (s.view) {
@@ -72,7 +73,9 @@ export function parseSearch(search: string): NavState {
     task: p.get("task"),
     // "vault" was a separate tab pre-merge — old bookmarked/shared links
     // still resolve it into Journal (now the only place attachments live).
-    clientTab: tab === "chat" || tab === "vault" ? "chat" : null,
+    // "all" is All tasks on a client's page (2026-10-17): every task across
+    // its lists. Without it the page opens on its Lists.
+    clientTab: tab === "chat" || tab === "vault" ? "chat" : tab === "all" ? "all" : null,
     vaultFolder: p.get("folder"),
     dm: p.get("dm"),
     thread: p.get("thread"),

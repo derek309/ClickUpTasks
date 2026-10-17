@@ -12,6 +12,7 @@ import { newId } from "./ui";
 import { type Client, type ClientNote, type Folder, type Me, type Message, type Project, type Stage, type Task, type TaskStatus } from "@/lib/data";
 import { deleteFolderDb, deleteProjectDb, deleteStageDb, deleteTaskDb, reassignMessagesTaskDb, upsertFolder, upsertProject, upsertStage, upsertTask } from "@/lib/db";
 import { placedPosition } from "@/lib/listOrder";
+import { DEFAULT_RHYTHM, type ListKind, type ListPlan } from "../../../mcp/listKinds.mjs";
 import { broadcastListOrder } from "@/lib/realtime";
 
 export type UseListsDeps = {
@@ -46,13 +47,20 @@ export type UseListsDeps = {
 };
 
 export function useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes }: UseListsDeps) {
-  const addProject = (clientId: string, folderId: string | null = null) => {
-    setPromptDialog({ title: folderId ? "New list" : "New list / project", placeholder: "Name", confirmLabel: "Create", onSubmit: (name) => {
+  // With a kind (mcp/listKinds.mjs, 2026-10-17): picked from + New list,
+  // saved once the database has projects.plan. A finishing list's end date
+  // and a repeating list's rhythm and recipe are set on its header after.
+  const addProject = (clientId: string, folderId: string | null = null, kind: ListKind = "holds", onMade?: (id: string) => void) => {
+    const what = kind === "finishes" ? "New list that finishes" : kind === "repeats" ? "New list that repeats" : folderId ? "New list" : "New list / project";
+    setPromptDialog({ title: what, placeholder: "Name", confirmLabel: "Create", onSubmit: (name) => {
       setPromptDialog(null);
       const pos = projects.filter((p) => p.clientId === clientId && (p.folderId ?? null) === folderId).length;
-      const p: Project = { id: newId("p_"), clientId, name, description: "", folderId, position: pos };
+      const kindsReady = projects.some((p) => p.plan !== undefined);
+      const plan: ListPlan | null = kind === "finishes" ? { kind, endsOn: null } : kind === "repeats" ? { kind, rhythm: { ...DEFAULT_RHYTHM }, recipe: [], owner: me.id } : null;
+      const p: Project = { id: newId("p_"), clientId, name, description: "", folderId, position: pos, ...(kindsReady ? { plan } : {}) };
       setProjects((ps) => [...ps, p]);
       upsertProject(p);
+      onMade?.(p.id);
     } });
   };
   // Folder CRUD (a folder groups lists). Mirrors createVaultFolder's optimistic

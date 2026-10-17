@@ -66,3 +66,25 @@ export function urgencyKeyFrom(open: Task[]): UrgencyKey {
   const atSoonest = candidates.filter((c) => c.date === soonest);
   return { tier: tierForDate(soonest), due: soonest, priorityRank: Math.max(...atSoonest.map((c) => c.priorityRank)) };
 }
+
+/** The one order for urgency keys: tier, then the soonest date, then the
+ *  strongest priority on it. The sidebar's clients and a client's lists both
+ *  sort by it, so the two can never disagree. */
+export const compareUrgency = (a: UrgencyKey, b: UrgencyKey): number =>
+  a.tier - b.tier || a.due.localeCompare(b.due) || b.priorityRank - a.priorityRank;
+
+/** The red and orange counts beside a client or a list: open work late, and
+ *  due today, by the date it counts as urgent on (its follow up first). On
+ *  hold is not counted; `skip` leaves out what is not today's work (a
+ *  queue's Up next). */
+export function lateAndToday(list: Task[], today: string = TODAY, skip?: (t: Task) => boolean): { late: number; today: number } {
+  let late = 0, due = 0;
+  for (const t of list) {
+    if (t.status === "done" || t.status === "on_hold") continue;
+    if (skip?.(t)) continue;
+    const d = urgencyDateOf(t);
+    if (!d) continue;
+    if (d < today) late++; else if (d === today) due++;
+  }
+  return { late, today: due };
+}

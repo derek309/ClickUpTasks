@@ -127,7 +127,9 @@ import { theirTimeZone } from "@/lib/theirTimeZone";
 
 // Read when a click needs the time, never while rendering.
 const nowMs = () => Date.now();
-import { FolderRail } from "./cockpit/FolderRail";
+import { ClientLists, ListMenu } from "./cockpit/ClientLists";
+import { ListTop } from "./cockpit/ListTop";
+import { listPlan, roundGoesOut, DEFAULT_RHYTHM, type ListKind } from "../../mcp/listKinds.mjs";
 import { QueueList } from "./cockpit/QueueList";
 import { useQueue } from "./cockpit/useQueue";
 import { queueSettings, upNextIds } from "../../mcp/queue.mjs";
@@ -140,7 +142,7 @@ import { inboxKind, latestCommentBy } from "@/lib/extensionInbox";
 
 
 import { sortTasks as sortTasksBy } from "@/lib/taskSort";
-import { URGENCY_TIER, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
+import { URGENCY_TIER, compareUrgency, lateAndToday, tierForDate, urgencyDateOf, urgencyKeyFrom } from "@/lib/urgency";
 import { type NavState, buildSearch, parseSearch, NAV_KEY_VIEWS, ALL_TASKS_HREF, isPlainLeftClick } from "@/lib/navState";
 import { shortcut } from "@/lib/platform";
 import { clientFirstName, senderFirstName } from "@/lib/clientFirstName";
@@ -197,6 +199,9 @@ const undoTooOld = (at: number) => Date.now() - at > 60_000;
  *  rule can tell it's never read while drawing). */
 const clockNow = () => Date.now();
 
+/** One empty list for a list with no tasks, so it never reads as a change. */
+const NO_TASKS: Task[] = [];
+
 export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   // Your sign in address, which is your Gmail: shown as From in the Inbox.
   const [myEmail, setMyEmail] = useState<string | null>(null);
@@ -227,7 +232,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const [vaultFolders, setVaultFolders] = useState<VaultFolder[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
-  const [clientTab, setClientTab] = useState<"tasks" | "chat">("tasks");
+  // "tasks" is the client's Lists (or the list open on it), "all" every task
+  // across its lists (All tasks), "chat" the Journal.
+  const [clientTab, setClientTab] = useState<"tasks" | "chat" | "all">("tasks");
   // Set once from a deep link's ?folder= param (see applyNav); ClientJournal
   // reads it only as its initial folder-filter value, not a live prop.
   const [initialVaultFolder, setInitialVaultFolder] = useState<string | null>(null);
@@ -906,6 +913,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     if (navChanged("activeClient", "myWork", "personalView", "inboxView", "dirView")) setActiveFolder(null);
     if (navChanged("activeClient", "activeProject", "myWork", "personalView", "inboxView")) setSelectedTaskIds(new Set());
     if (navChanged("activeClient", "myWork")) setClientTab("tasks");
+    // Opening a list from All tasks: Back from the list is the Lists.
+    else if (navChanged("activeProject") && activeProject && clientTab === "all") setClientTab("tasks");
     if (!dmEnabled && dmUserId !== null) setDmUserId(null);
   }
 
@@ -930,7 +939,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     setDirView(s.view === "clients" || s.view === "projects" || s.view === "calendar" || s.view === "reminders" ? s.view : s.view === "mail" ? "inbox" : null);
     setActiveClient(s.view ? "all" : s.client); setActiveProject(s.view ? null : s.project);
     setOpenTaskId(s.task);
+    // On a client, no tab is its Lists: Back from All tasks lands there.
     if (s.clientTab) setClientTab(s.clientTab);
+    else if (!s.view && s.client !== "all") setClientTab("tasks");
     setInitialVaultFolder(s.vaultFolder);
     // Explicit reset to "mine" when absent, not a no-op — a shared link with
     // no ?assignee= (or the back button landing on one) has to show the
@@ -1380,6 +1391,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     }
     return m;
   }, [scopedTasks]);
+  // Every task on a list, done ones too: a client's Lists and a list's header.
+  const tasksForList = useCallback((projectId: string) => scopedTasksByProjectId.get(projectId) ?? NO_TASKS, [scopedTasksByProjectId]);
   // Sub-accounts (Agency/Directory) are the contact source; clients (cl_*) are contacts you've added.
   const subAccounts = useMemo(() => clients.filter((c) => !c.id.startsWith("cl_")), [clients]);
   // Only type 'client' gets sidebar/⌘K/task presence — prospects/past
@@ -1592,7 +1605,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // (highest first), then recency (fetch order is created_at asc, so a
       // higher original index is more recently added).
       const withIndex = base.map((c, i) => ({ c, i, k: clientUrgencyKey(c.id) }));
-      withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
+      withIndex.sort((a, b) => compareUrgency(a.k, b.k) || b.i - a.i);
       base.splice(0, base.length, ...withIndex.map((x) => x.c));
     }
     else if (clientSort === "mine") {
@@ -1601,7 +1614,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
       // myWorkGroups already uses) — a client only lands in "Overdue"/"Due
       // today" here because of a task assigned to me, not a teammate's.
       const withIndex = base.map((c, i) => ({ c, i, k: clientUrgencyKey(c.id, me.id) }));
-      withIndex.sort((a, b) => a.k.tier - b.k.tier || a.k.due.localeCompare(b.k.due) || b.k.priorityRank - a.k.priorityRank || b.i - a.i);
+      withIndex.sort((a, b) => compareUrgency(a.k, b.k) || b.i - a.i);
       base.splice(0, base.length, ...withIndex.map((x) => x.c));
     }
     else if (manualOrder.length) base.sort((a, b) => { const ia = manualOrder.indexOf(a.id), ib = manualOrder.indexOf(b.id); return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib); });
@@ -2171,7 +2184,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // client's Journal (that client's). Once each per session.
   const olderTasksLoaded = useRef(new Set<string>());
   const wantsAllDone = showCompletedLog || !hideDone || filters.status === "done" || cmdkOpen;
-  const journalClient = activeClient !== "all" && clientTab === "chat" ? activeClient : null;
+  // A client's Journal, or their page when a list of theirs finishes or
+  // repeats: its progress and its rounds count the older finished tasks too.
+  const plannedClient = activeClient !== "all" && projects.some((p) => p.clientId === activeClient && listPlan(p.plan).kind !== "holds");
+  const journalClient = activeClient !== "all" && (clientTab === "chat" || plannedClient) ? activeClient : null;
   useEffect(() => {
     const scope = wantsAllDone ? null : journalClient ? { clientId: journalClient } : undefined;
     if (loading || scope === undefined) return;
@@ -2390,8 +2406,15 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const clientCompany = (c: Client | null) => (c && c.id.startsWith("cl_") ? c.ghlLocationId : "");
   const { restoreClient, restoreProjectFromTrash, restoreTaskFromTrash, purgeClient, purgeProject, purgeTask, renameClient, deleteClient, addClientContact, addRemoteContact, mergeClients } = useClientAdmin({ subAccounts, setContacts, clients, setActiveClient, setMyWork, setPersonalView, setInboxView, setDmUserId, setSettingsView, setDirView, setAddClientOpen, pushToast, clientById, setClients, markOwnClientWrite, tasks, projects, setProjects, setTasks, me, setPromptDialog, setConfirmDialog, setClientLinks, setClientNotes, activeClient, contactById, setMessages, setFolders, setVaultFolders, setNotifications, syncMarks, olderTasksLoaded, resetConversations });
   const { saveTemplate, deleteTemplate, useTemplateAsTask, applyTemplate } = useTemplates({ setTaskTemplates, taskTemplates, setConfirmDialog, tasks, update, pushToast, me, setTasks });
-  const { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, createFolder, renameFolder, deleteFolder, moveListToFolder, reorderFolders, reorderLists, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
-  const { toggleQueue, setQueueSettings, moveInQueue, moveUpInQueue } = useQueue({ projectById, setProjects, tasksRef, setTasks, me, notify, pushToast });
+  const { createStage, addProject, renameProject, deleteProject, toggleProjectHidden, railHidden, moveListToFolder, setTaskStage, quickAddInStage, renameStage, toggleStageIsDone, deleteStage, reorderStages, requestMerge, bulkMoveTo, moveTaskToClient, moveTaskToNewProject } = useLists({ setPromptDialog, projects, setProjects, folders, setFolders, folderById, setConfirmDialog, projectById, stages, setStages, setTasks, tasks, finishHandoffInstead, update, activeClient, foldersForClient, projectsForClient, canAdmin, me, patchTask, pushToast, tasksRef, clientById, selectedTaskIds, clearSelection, setMessages, setOpenTaskId, setClientNotes });
+  const { toggleQueue, setQueueSettings, setQueueNow, setListPlan, moveInQueue, moveUpInQueue } = useQueue({ projectById, setProjects, tasksRef, setTasks, me, notify, pushToast });
+  // A list's kind from its "…": a finishing list keeps its end date if it had
+  // one; a repeating one starts monthly, the first Thursday, with no recipe.
+  const setListKind = (projectId: string, kind: ListKind) => {
+    const was = listPlan(projectById(projectId)?.plan);
+    setListPlan(projectId, kind === "finishes" ? { kind, endsOn: was.kind === "finishes" ? was.endsOn ?? null : null }
+      : kind === "repeats" ? { kind, rhythm: was.rhythm ?? { ...DEFAULT_RHYTHM }, recipe: was.recipe ?? [], owner: was.owner ?? me.id } : { kind: "holds" });
+  };
   const { addNote, deleteLink, reorderLinks, saveClientFile, sendDmMessage, deleteDmMessage, pinDmMessage, editNote, deleteNote, saveLink } = useClientRecords({ setClientLinks, clientLinks, setLinkModal, setConfirmDialog, me, dmMessages, setDmMessages, notify, setClientNotes, projectById, clientById });
   const { createTasksFromDump, targetProjectId } = useComposer({ dumpGroup, activeClient, groupBy, me, setTasks, pinJustAdded, setDumpGroup, pushToast, activeProject, projects, setProjects, notify, addFiles,
     tasksRef, applyQueuePatches, today: todayIso(), openTaskWith: (start) => { setOpenTaskStart(start); setOpenTaskId(start.taskId); } });
@@ -2418,6 +2441,16 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   const allTasksView = !settingsView && !inboxView && !dirView && !personalView && !myWork && activeClient === "all";
   const headerTitleText = settingsView ? "Settings" : inboxView ? (userById(dmUserId)?.name ?? "Direct Message") : dirView === "inbox" ? "Inbox" : dirView === "reminders" ? "Reminders" : dirView === "calendar" ? "Calendar" : dirView === "clients" ? "All clients" : dirView === "projects" ? "Projects" : personalView ? "Personal" : myWork ? "Clients" : activeClient === "all" ? "Tasks" : (activeProject && projectById(activeProject) ? projectById(activeProject)!.name : (clientById(activeClient)?.name ?? ""));
   const isClientDetail = !myWork && !personalView && !inboxView && !settingsView && !dirView && activeClient !== "all" && !!clientById(activeClient);
+  // A client's page opens on its Lists (Derek, 2026-10-17): no list open, not
+  // All tasks, not the Journal.
+  const listsHome = clientView && clientTab === "tasks" && !activeProject && !activeFolder;
+  const kindsReady = projects.some((p) => p.plan !== undefined);
+  const activeClientFirst = activeClient !== "all" ? clientFirstName(contactForClient(activeClient), clientById(activeClient)?.name ?? "", "The client") : "";
+  // A repeating list shows its rounds in its header; the list below holds
+  // only its other tasks.
+  const openList = activeProject ? projectById(activeProject) : null;
+  const activeRepeats = !!openList && listPlan(openList.plan).kind === "repeats";
+  const shownTasks = activeRepeats && activeProject ? baseTasks.filter((t) => !roundGoesOut(t.id, activeProject)) : baseTasks;
   const showFilterControl = !inboxView && !dirView && !myWork && !settingsView && !(activeClient !== "all" && clientTab === "chat");
   // Whose tasks All Tasks is showing: me, everyone, or one named member.
   // The old Mine/All pair could only ask "me or everyone" (Derek: "make this
@@ -3032,19 +3065,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           const fold = (k: string) => setInboxPrefs({ sideFolded: folded.has(k) ? [...folded].filter((x) => x !== k) : [...folded, k] });
           // Clients, the workspace's own projects (Lincoln, Tracy, Administration…)
           // and Personal, all counted the same way: your open work, late or due today.
-          const tally = (list: Task[]) => {
-            let late = 0, today = 0;
-            for (const t of list) {
-              if (t.status === "done" || t.status === "on_hold") continue;
-              // Waiting in line on a queue (Up next) is not today's work, even
-              // with a follow up left on it (Derek, 2026-10-14: Amanda showed
-              // here for a queued meeting task with nothing late or due).
-              if (inLineOnly(t)) continue;
-              const d = urgencyDateOf(t); if (!d) continue;
-              if (d < TODAY) late++; else if (d === TODAY) today++;
-            }
-            return { late, today };
-          };
+          // Waiting in line on a queue (Up next) is not today's work, even
+          // with a follow up left on it (Derek, 2026-10-14: Amanda showed
+          // here for a queued meeting task with nothing late or due).
+          const tally = (list: Task[]) => lateAndToday(list, TODAY, inLineOnly);
           const openClient = (clientId: string, projectId: string | null) => { setMyWork(false); setPersonalView(false); setInboxView(false); setDmUserId(null); setSettingsView(false); setDirView(null); setActiveClient(clientId); setActiveProject(projectId); setClientTab("tasks"); setSidebarOpen(false); setOpenTaskId(null); };
           const rows: { key: string; name: string; sub?: string; href: string; active: boolean; open: () => void; late: number; today: number }[] = [
             ...myAssignedClients.map((c) => ({ key: c.id, name: c.name, href: `/?client=${encodeURIComponent(c.id)}`,
@@ -3185,7 +3209,7 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
                 right; the name shortens to make room. */}
             <span className="ml-auto flex shrink-0 items-center gap-1.5 empty:hidden">
               {/* Who follows them and their links are in ⋮ on a phone (2026-10-14). */}
-              {isClientDetail && clientTab === "tasks" && viewControlPhone}
+              {isClientDetail && (clientTab === "all" || (clientTab === "tasks" && (!!activeProject || !!activeFolder))) && viewControlPhone}
               {/* Icon only here — the phone header has a title and two controls
                   already, and a labelled button would push one of them off. */}
               {!inboxView && !settingsView && !dirView && (
@@ -3370,7 +3394,8 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             // going shifted every other icon sideways between pages.
             // A client page keeps these in one View button on the list row
             // (mockup C); with no list row, the View button sits here.
-            clientView ? (railHidden ? <span className="inline-flex items-center gap-1.5">{mineToggle}{viewControl}</span> : null) : (
+            // A client's page has them on its list's top line (ListTop).
+            clientView ? null : (
             <div className="flex items-center gap-1.5">
               {followingControl}
               {groupSortControl}
@@ -3582,23 +3607,41 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           />
         ) : (
           <>
-          {activeClient !== "all" && !railHidden && (() => {
-            const cf = foldersForClient(activeClient);
-            const cl = projectsForClient(activeClient);
-            return (
-              <FolderRail folders={cf} lists={cl} activeFolder={activeFolder} activeProject={activeProject} canAdmin={canAdmin}
-                starredLists={starredLists} onToggleStarList={toggleStarList}
-                onSelectAll={() => { setActiveFolder(null); setActiveProject(null); }}
-                onCopyAllForClaude={() => void copyClientForClaude()}
-                onSelectFolder={(id) => { setActiveFolder(id); setActiveProject(null); setGroupBy("project"); }}
-                onSelectList={(id) => { setActiveProject(id); setActiveFolder(null); }}
-                onCreateFolder={() => createFolder(activeClient)} onCreateList={(fid) => addProject(activeClient, fid)}
-                onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onRenameList={renameProject} onDeleteList={deleteProject} onToggleListHidden={toggleProjectHidden} onToggleListQueue={toggleQueue} onMoveList={moveListToFolder}
-                onReorderFolders={(ids) => reorderFolders(activeClient, ids)} onReorderLists={(fid, ids) => reorderLists(activeClient, fid, ids)}
-                trailing={<span className="hidden items-center gap-1.5 sm:inline-flex">{mineToggle}{viewControl}</span>} onCopyListForClaude={(id) => void copyClientForClaude(id)} />
-            );
-          })()}
-          {activeProject && stagesForProject(activeProject).length > 0 ? (
+          {/* A client's page (Derek, 2026-10-17): its Lists, sorted like the
+              sidebar's clients, in place of the row of list tabs. A list
+              opens from its row; All tasks is every task across them. */}
+          {listsHome ? (
+            <ClientLists lists={projectsForClient(activeClient)} tasksFor={tasksForList} clientFirst={activeClientFirst} today={TODAY}
+              canAdmin={canAdmin} kindsReady={kindsReady} onOpen={(id) => { setActiveProject(id); setActiveFolder(null); }}
+              onNew={(kind) => addProject(activeClient, null, kind, (id) => setActiveProject(id))} onAllTasks={() => { setActiveFolder(null); setActiveProject(null); setClientTab("all"); }}
+              allOpen={(scopedTasksByClientId.get(activeClient) ?? []).filter((t) => t.status !== "done" && !inLineOnly(t)).length}
+              onCopyAllForClaude={() => void copyClientForClaude()} />
+          ) : activeClient !== "all" && openList ? (
+              <ListTop list={openList} tasks={tasksForList(openList.id)} clientFirst={activeClientFirst} today={TODAY} canAdmin={canAdmin}
+                backLabel={`${activeClientFirst}'s lists`} onBack={() => { setActiveProject(null); setActiveFolder(null); setClientTab("tasks"); }}
+                trailing={<>{mineToggle}{viewControl}</>} team={users} meId={me.id}
+                onSetPlan={(plan) => setListPlan(openList.id, plan)} onSetQueueNow={(n) => setQueueNow(openList.id, n)} onOpenTask={setOpenTaskId}
+                menu={<ListMenu list={openList} folders={foldersForClient(openList.clientId)} canAdmin={canAdmin} starred={starredLists.has(openList.id)} kindsReady={kindsReady}
+                  onRename={() => renameProject(openList.id)} onKind={(k) => setListKind(openList.id, k)} onToggleQueue={() => toggleQueue(openList.id)}
+                  onToggleHidden={() => toggleProjectHidden(openList.id)} onTogglePin={() => toggleStarList(openList.id)} onCopyForClaude={() => void copyClientForClaude(openList.id)}
+                  onMoveToFolder={(fid) => moveListToFolder(openList.id, fid)} onDelete={() => deleteProject(openList.id)} />} />
+          ) : activeClient !== "all" ? (
+            // All tasks (or an old folder view): back to the Lists, and the view controls.
+            <div className="bg-background px-4 pt-4 sm:px-5 sm:pt-5">
+              <div className="mx-auto flex max-w-[1280px] min-w-0 items-center gap-2">
+                <button type="button" onClick={() => { setActiveFolder(null); setActiveProject(null); setClientTab("tasks"); }}
+                  className="-ml-2 inline-flex h-11 min-w-0 items-center gap-1.5 rounded-[5px] px-2 text-[16px] font-semibold text-muted hover:bg-surface hover:text-foreground">
+                  <span aria-hidden>←</span><span className="min-w-0 truncate">{activeClientFirst}&apos;s lists</span>
+                </button>
+                <h2 className="min-w-0 truncate text-[16px] font-semibold">{activeFolder ? folderById(activeFolder)?.name ?? "Folder" : "All tasks"}</h2>
+                <span className="ml-auto" />
+                <span className="hidden items-center gap-1.5 sm:inline-flex">{mineToggle}{viewControl}</span>
+                <button type="button" onClick={() => void copyClientForClaude()} title="Copy every list for Claude" aria-label="Copy every list for Claude"
+                  className="inline-flex h-11 items-center rounded-[5px] border bg-surface px-3 text-[16px] text-muted hover:text-foreground"><span aria-hidden>✳</span></button>
+              </div>
+            </div>
+          ) : null}
+          {listsHome ? null : activeProject && stagesForProject(activeProject).length > 0 ? (
             <StageBoard stages={stagesForProject(activeProject)} tasks={baseTasks.filter(passesFilters)} canAdmin={canAdmin}
               onOpenTask={setOpenTaskId} onSetTaskStage={setTaskStage} onQuickAdd={(stageId, title) => quickAddInStage(activeProject, stageId, title)}
               onCreateStage={() => createStage(activeProject)} onRenameStage={renameStage} onToggleStageIsDone={toggleStageIsDone} onDeleteStage={deleteStage}
@@ -3609,10 +3652,10 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
               meId={me.id} clientFirst={(clientById(activeClient)?.name ?? "").trim().split(/\s+/)[0] || "The client"} today={TODAY}
               onOpen={setOpenTaskId} onMove={(id, beforeId, reason) => moveInQueue(activeProject, id, beforeId, reason)}
               onMoveUp={(id, reason) => moveUpInQueue(activeProject, id, reason)} onSettings={(q) => setQueueSettings(activeProject, q)} onPatch={patchTask} />
-          ) : (
+          ) : activeRepeats && !shownTasks.length ? null : (
             <>
             {activeFilterBar}
-            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(baseTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
+            <GroupedList key={`${groupBy}:${activeClient === "all"}`} lensId={lensUserId} listsFor={projectsForClient} groupKind={groupBy} collapseFarBuckets={activeClient === "all"} meId={me.id} onOpenClient={(cid) => openClientList(cid, null)} groups={buildGroups(sortTasks(shownTasks.filter(passesFilters)))} showClient={activeClient === "all"} clientById={clientById} projectById={projectById} folderById={folderById} contactById={contactById} previewByTask={previewByTask} visibleCols={visibleCols} sortKey={sortBy} sortDir={sortDir} onSort={sortByCol} onOpen={setOpenTaskId} onPatch={patchTask} onClearNeedsYou={clearNeedsYou} canQuickAdd quickAddHint="" onAddInGroup={railHidden ? (k) => setDumpGroup({ key: k, personal: false, clientId: activeClient.startsWith("cl_") ? activeClient : lastUsedClientId() }) : undefined} onToggleSub={toggleSubSeen} onAddSub={addSub} onDeleteSub={deleteSub} onDropInGroup={groupBy === "status" || groupBy === "priority" ? dropTaskInGroup : undefined} onMergeTasks={requestMerge} colOrder={colOrder} onReorderCols={reorderCols} selectedIds={selectedTaskIds} onToggleSelect={toggleTaskSelection} />
             </>
           )}
           </>

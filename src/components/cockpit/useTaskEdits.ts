@@ -14,6 +14,8 @@ import { taskFromEmail } from "@/lib/emailToTask";
 import { PRIORITY_META, STATUS_META, todayIso, applyWaitingStatusSync, clearedFromNeedsYou, currentStep, datesForCurrentStep, needsYou, stepChangeEvents, taskDoneStep, closeOpenSteps, dropOpenWhatsNext, taskFromStep, waitingFollowUp, followUpWithDue, delegatedItemFor, formatDue, hasFreshClone, htmlToText, mentionsUser, nextDueAhead, nextOccurrence, type Attachment, type Comment, type Me, type NotificationKind, type Client, type Project, type Task, type TaskStatus, userById, users } from "@/lib/data";
 import { appendCommentDb, appendSubtasksDb, deleteTaskDb, patchSubtaskDb, removeSubtaskDb, saveTaskDraftEmail, saveTaskEdit, upsertTask } from "@/lib/db";
 import { queueEntry, queueExit, queuePromotions, queueSettings, type QPatch } from "../../../mcp/queue.mjs";
+import { roundGoesOut } from "../../../mcp/listKinds.mjs";
+import { authedFetch } from "@/lib/supabase";
 
 export type UseTaskEditsDeps = {
   tasksRef: React.RefObject<Task[]>;
@@ -67,6 +69,19 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     const q = queueOf(projectId);
     if (!q || !projectId) return;
     applyQueuePatches(queuePromotions(listOf(projectId, without), q, todayIso()));
+  };
+  /** A repeating list's round just finished (mcp/listKinds.mjs): the server
+   *  makes the next one (once, whoever asks). Rounds finished anywhere else
+   *  are caught by the daily sweep. */
+  const followRound = (cur: Task, status: TaskStatus | undefined, saved: Promise<unknown> | undefined) => {
+    if (status !== "done" || cur.status === "done" || !roundGoesOut(cur.id, cur.projectId)) return;
+    // After the done is saved, or the server still sees the round open.
+    void Promise.resolve(saved).catch(() => {}).then(() => authedFetch("/api/lists/next-round", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: cur.projectId }) }))
+      .then(async (res) => {
+        const j = res.ok ? await res.json().catch(() => null) as { made?: string | null; goesOut?: string | null } | null : null;
+        if (j?.made && j.goesOut) pushToast(`🔁 The next round is set up, goes out ${formatDue(j.goesOut)}`);
+      })
+      .catch(() => {});
   };
   /** A move to another list: into a queue it takes the place its priority
    *  gives it and its date is saved; out of one, its saved date comes back.
@@ -158,15 +173,16 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     tasksRef.current = tasksRef.current.map((t) => (t.id === id ? { ...t, ...synced } : t));
     // Only the columns this edit changed (saveTaskEdit), so a checklist tick
     // from this window can't carry stale comments or fields over newer ones.
+    let savedEdit: Promise<unknown> | undefined;
     if (cur) {
-      void saveTaskEdit(cur, { ...cur, ...synced, comments: cur.comments, ...(item ? { subtasks: cur.subtasks } : {}) }, me.id);
+      savedEdit = saveTaskEdit(cur, { ...cur, ...synced, comments: cur.comments, ...(item ? { subtasks: cur.subtasks } : {}) }, me.id);
       for (const e of stepEvents) void appendCommentDb(id, e);
       if (item) saveChecklistChange(id, item, me.id);
       if (clone) upsertTask(clone, me.id);
     }
     // The draft email is never part of a task save (db.ts taskToRow), only its own write.
     if (cur && "draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
-    if (cur) { followQueue(cur.projectId); if (synced.projectId && synced.projectId !== cur.projectId) followQueue(synced.projectId); }
+    if (cur) { followQueue(cur.projectId); if (synced.projectId && synced.projectId !== cur.projectId) followQueue(synced.projectId); followRound(cur, synced.status, savedEdit); }
   };
 
   // Field changes on a task that are worth a line in its Activity feed. Stored
@@ -329,6 +345,7 @@ export function useTaskEdits({ tasksRef, pushToast, keepDoneVisible, setTasks, m
     if ("draftEmail" in synced) saveTaskDraftEmail(id, synced.draftEmail ?? null, me.id);
     followQueue(before.projectId);
     if (synced.projectId && synced.projectId !== before.projectId) followQueue(synced.projectId);
+    followRound(before, synced.status, saved);
     if (patch.assigneeId && patch.assigneeId !== me.id && patch.assigneeId !== before.assigneeId) {
       notify(patch.assigneeId, `${me.name} assigned you “${before.title}”`, id);
       pushToast(`Notified ${userById(patch.assigneeId)?.name}`);

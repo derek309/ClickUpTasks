@@ -53,6 +53,12 @@ describe("the deep-link URL", () => {
     expect(parseSearch(buildSearch({ ...base, client: "cl_1", clientTab: "chat" }))).toMatchObject({ clientTab: "chat" });
   });
 
+  it("links a client's All tasks, and still opens a list by its project (2026-10-17)", () => {
+    expect(buildSearch({ ...base, client: "cl_1", clientTab: "all" })).toBe("?client=cl_1&tab=all");
+    expect(parseSearch("?client=cl_1&tab=all")).toMatchObject({ client: "cl_1", clientTab: "all", project: null });
+    expect(parseSearch("?client=cl_1&project=p_2")).toMatchObject({ client: "cl_1", project: "p_2", clientTab: null });
+  });
+
   it("refuses a view it does not recognise instead of trusting the URL", () => {
     expect(parseSearch("?view=../../etc/passwd").view).toBeNull();
     expect(parseSearch("?view=admin").view).toBeNull();
