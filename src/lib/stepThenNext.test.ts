@@ -218,6 +218,10 @@ describe("the task view reads, it does nothing (Derek, 2026-10-17)", () => {
   it("one quiet line: sent and waiting", () => {
     expect(stepQuietLine({ description: "Your website changes are done. More words here.", sentAgo: "2d ago", noReply: true })).toBe("Your website changes are done. · sent 2d ago · no reply yet");
   });
+  // A wait a send made says what the send sent (Brian's task, 2026-10-17).
+  it("one quiet line: what the send sent, and when", () => {
+    expect(stepQuietLine({ sentAgo: "2h ago", sentWhat: "Holiday Pre Order Email: Run Specialty Stores", noReply: true })).toBe("Holiday Pre Order Email: Run Specialty Stores sent 2h ago · no reply yet");
+  });
   it("one quiet line: the client wrote, with the to dos", () => {
     expect(stepQuietLine({ wrote: { first: "Chelsea", ago: "1h ago" }, description: "ignored", todos: { done: 1, total: 5 } })).toBe("Chelsea wrote 1h ago · 1 of 5 to do");
   });

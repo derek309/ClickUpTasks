@@ -124,7 +124,8 @@ describe("what the MCP tools may see", () => {
     await call(await connect(), "check_item", { id: "t_1", item: "book" });
     expect(writes).toEqual([{ method: "POST", url: expect.stringContaining("/rpc/patch_subtask"), body: { task_id: "t_1", subtask_id: "s_2", patch: { done: true }, author: null } }]);
 
-    fakeSupabase([...names, { table: "tasks", rows: [withList] }]);
+    // One step at a time: the next step is added once the open ones are done.
+    fakeSupabase([...names, { table: "tasks", rows: [task({ subtasks: withList.subtasks.map((x: Record<string, unknown>) => ({ ...x, done: true })) })] }]);
     await call(await connect(), "add_checklist_items", { id: "t_1", items: ["Invoice", " "] });
     expect(writes).toHaveLength(1);
     expect(writes[0].url).toContain("/rpc/append_subtasks");

@@ -123,31 +123,48 @@ describe("add_checklist_items set up", () => {
   const people = { table: "profiles", rows: [{ member_id: "u_derek", name: "Derek Fox" }, { member_id: "u_justin", name: "Justin Lee" }] };
   const added = () => writes.find((w) => w.url.includes("rpc/append_subtasks"))!.body.items;
 
-  it("writes who, when, what it holds, to-dos and directions on each step", async () => {
-    fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task()] }]);
-    const text = await call(await connect(), "add_checklist_items", { id: "t_1", items: [
-      { title: "Design the flyer", assignee: "u_justin", due: "2026-10-20", directions: "Use the **brand** colors", holds: "image" },
-      { title: "Check the copy", assignee: "claude" },
-      { title: "Approve", assignee: "me", due: "2026-10-22", holds: "checklist", todos: ["Read it", " ", "Sign off"] },
-      { title: "Text the client", holds: "text", due: "2026-10-23" },
-      "Plain one",
-    ] });
-    const [flyer, copy, approve, textStep, plain] = added();
-    expect(flyer).toMatchObject({ title: "Design the flyer", assigneeId: "u_justin", due: "2026-10-20", notes: "<p>Use the <strong>brand</strong> colors</p>", holds: ["image"], madeHere: ["image"], followUpAt: expect.any(String) });
+  // One step at a time (Derek, 2026-10-17): each is added on its own, to a
+  // task whose steps are all done.
+  const allDone = () => task({ subtasks: [{ id: "s_c", title: "Test a signup", done: true }] });
+  const addOne = async (item: unknown) => {
+    fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [allDone()] }]);
+    const text = await call(await connect(), "add_checklist_items", { id: "t_1", items: [item] });
+    return { text, step: added()[0] };
+  };
+  it("writes who, when, what it holds, to-dos and directions on the step", async () => {
+    const flyer = await addOne({ title: "Design the flyer", assignee: "u_justin", due: "2026-10-20", directions: "Use the **brand** colors", holds: "image" });
+    expect(flyer.step).toMatchObject({ title: "Design the flyer", assigneeId: "u_justin", due: "2026-10-20", notes: "<p>Use the <strong>brand</strong> colors</p>", holds: ["image"], madeHere: ["image"], followUpAt: expect.any(String), startedAt: expect.any(String) });
+    expect(flyer.text).toContain("Design the flyer");
+    expect(flyer.text).toContain("Justin Lee · due 2026-10-20 · holds the image review");
+    const copy = (await addOne({ title: "Check the copy", assignee: "claude" })).step;
     expect(copy).toMatchObject({ assigneeId: "u_claude", due: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
     expect(copy.followUpAt).toBeUndefined();
+    const approve = (await addOne({ title: "Approve", assignee: "me", due: "2026-10-22", holds: "checklist", todos: ["Read it", " ", "Sign off"] })).step;
     expect(approve).toMatchObject({ assigneeId: "u_derek", due: "2026-10-22", todos: [{ title: "Read it", done: false }, { title: "Sign off", done: false }] });
     expect(approve.holds).toBeUndefined();
-    expect(textStep).toMatchObject({ draftMessage: { channel: "sms", body: "" }, assigneeId: "u_derek" });
-    expect(plain).toMatchObject({ title: "Plain one", done: false, assigneeId: "u_derek" });
-    expect(plain.due).toBeUndefined();
-    expect(text).toContain("Design the flyer");
-    expect(text).toContain("Justin Lee · due 2026-10-20 · holds the image review");
-    expect(text).toContain("Not set up: \"Plain one\" (when)");
+    expect((await addOne({ title: "Text the client", holds: "text", due: "2026-10-23" })).step).toMatchObject({ draftMessage: { channel: "sms", body: "" }, assigneeId: "u_derek" });
+    const plain = await addOne("Plain one");
+    expect(plain.step).toMatchObject({ title: "Plain one", done: false, assigneeId: "u_derek" });
+    expect(plain.step.due).toBeUndefined();
+    expect(plain.text).toContain("Not set up: \"Plain one\" (when)");
+  });
+
+  it("one step at a time: with a step open, or more than one given, nothing is added and it says to use to-dos", async () => {
+    fake([people, { table: "tasks", rows: [task()] }]);
+    const open = await call(await connect(), "add_checklist_items", { id: "t_1", items: ["Invoice", "Chase it"] });
+    expect(open).toContain("One step at a time");
+    expect(open).toContain('"Create the pipeline" [s_a] is still open');
+    expect(open).toContain('add_todos: ["Invoice","Chase it"]');
+    expect(writes).toHaveLength(0);
+    fake([people, { table: "tasks", rows: [allDone()] }]);
+    const many = await call(await connect(), "add_checklist_items", { id: "t_1", items: ["Invoice", "Chase it", "Thank them"] });
+    expect(many).toContain("add only the next step");
+    expect(many).toContain('["Chase it","Thank them"]');
+    expect(writes).toHaveLength(0);
   });
 
   it("a client step is an ask holding the email, and the email comes off the step that held it", async () => {
-    const holding = { id: "s_e", title: "Email Pam", done: false, holds: ["email", "doc"], namedFrom: { title: "Draft", key: "email", as: "Email Pam" } };
+    const holding = { id: "s_e", title: "Email Pam", done: true, holds: ["email", "doc"], namedFrom: { title: "Draft", key: "email", as: "Email Pam" } };
     fake([people, { table: "clients", rows: [{ name: "Pam Macias" }] }, { table: "tasks", rows: [task({ client_id: "cl_1", subtasks: [holding], draft_email: null })] }]);
     const text = await call(await connect(), "add_checklist_items", { id: "t_1", items: [{ title: "Send the logo", assignee: "client", due: "2026-10-21" }] });
     expect(added()[0]).toMatchObject({ title: "Ask Pam: Send the logo", holds: ["email"], madeHere: ["email"], assigneeId: "u_derek", due: "2026-10-21" });
@@ -164,14 +181,14 @@ describe("add_checklist_items set up", () => {
     expect(writes.find((w) => w.url.includes("rpc/remove_subtask"))?.body).toMatchObject({ subtask_id: "s_n" });
   });
 
-  it("refuses, writing nothing: a checklist with no to-dos, an unknown person, two steps holding one review, a client step on a private task", async () => {
+  it("refuses, writing nothing: a checklist with no to-dos, an unknown person, two steps at once, a client step on a private task", async () => {
     for (const [items, said, over] of [
       [[{ title: "List", holds: "checklist" }], "give its todos", {}],
       [[{ title: "X", assignee: "u_nobody" }], "Unknown member", {}],
-      [[{ title: "A", holds: "page" }, { title: "B", holds: "page" }], "Only one step", {}],
+      [[{ title: "A", holds: "page" }, { title: "B", holds: "page" }], "One step at a time", {}],
       [[{ title: "Ask", assignee: "client" }], "no client to ask", { is_private: true, assignee_id: ME }],
     ] as [unknown[], string, Record<string, unknown>][]) {
-      fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task(over)] }]);
+      fake([people, { table: "task_documents", rows: [] }, { table: "tasks", rows: [task({ subtasks: [{ id: "s_c", title: "Test a signup", done: true }], ...over })] }]);
       expect(await call(await connect(), "add_checklist_items", { id: "t_1", items })).toContain(said);
       expect(writes).toHaveLength(0);
     }

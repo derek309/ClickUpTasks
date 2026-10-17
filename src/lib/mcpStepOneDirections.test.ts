@@ -55,6 +55,18 @@ describe("create_task description", () => {
   });
 });
 
+// One step at a time (Derek, 2026-10-17): a plan keeps only its first step.
+describe("create_task steps", () => {
+  it("makes the first step only, the rest its to-dos, and says so", async () => {
+    fake([{ table: "clients", rows: [{ id: "cl_1", name: "Acme" }] }, { table: "projects", rows: [{ id: "p_1", name: "Tasks" }] }, { table: "profiles", rows: [] }]);
+    const text = await call(await connect(), "create_task", { client_id: "cl_1", title: "Fix the hero", description: "Swap it", steps: ["Make the photo", "You check it", "Acme approves"] });
+    const made = writes.find((w) => w.method === "POST" && w.url.includes("/rest/v1/tasks"))?.body;
+    expect(made.subtasks).toHaveLength(1);
+    expect(made.subtasks[0]).toMatchObject({ title: "Make the photo", notes: "<p>Swap it</p>", todos: [{ title: "You check it", done: false }, { title: "Acme approves", done: false }] });
+    expect(text).toContain('only "Make the photo" is a step; the other 2 are its to-dos');
+  });
+});
+
 describe("update_task description", () => {
   it("goes on the end of step 1's directions, never the task's description", async () => {
     fake([{ table: "tasks", rows: [task({ subtasks: [{ id: "s_c", title: "Their ask", done: false, fromClient: true }, { id: "s_1", title: "Draft", done: false, notes: "<p>Mine</p>" }] })] }]);

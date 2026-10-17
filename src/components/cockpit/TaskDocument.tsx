@@ -118,7 +118,7 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
   onPresence: (exists: boolean) => void;
   /** Just sent to the client. The drawer sets the follow up from it; without
    *  it the task is only moved to Waiting. */
-  onSent?: (kind: TaskDocumentKind, name: string, reminderEveryDays: number) => void;
+  onSent?: (kind: TaskDocumentKind, name: string, reminderEveryDays: number, serverSteps?: Subtask[] | null) => void;
   /** The client reminders on this review while it is with the client, or null.
    *  The drawer's Reminders chip shows and changes them from the task itself. */
   onReminders?: (r: ReviewReminders | null) => void;
@@ -731,7 +731,9 @@ export function TaskDocument({ task, kind = "doc", onPatch, pushToast, canAdmin,
     const name = reviewEmailName([titleDraft, fresh ? fresh.title : d.title], task.title);
     // The drawer moves the task to Waiting and sets the follow up in one edit;
     // anywhere else the task is only moved.
-    if (onSent) onSent(kind, name, d.reminderEveryDays);
+    // The server already moved the steps (stepsOnReviewSent): they come back
+    // with the send, so the drawer shows those and adds no step of its own.
+    if (onSent) onSent(kind, name, d.reminderEveryDays, Array.isArray(j.subtasks) ? j.subtasks as Subtask[] : null);
     else if (task.status !== "waiting") onPatch({ status: "waiting" });
     const url = j.url as string | null;
     const copied = !!url && await copy(url);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminConfigured } from "@/lib/supabaseAdmin";
+import { adminConfigured, supabaseAdmin } from "@/lib/supabaseAdmin";
 import { teamDocAccess, teamActor, kindOf, NO_STORE } from "@/lib/taskDocumentServer";
 import { sendReview } from "@/lib/reviewService";
 
@@ -23,5 +23,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const r = await sendReview(access.task, kindOf(req), teamActor(access.user), baseVersion, req.nextUrl.origin);
   if (!r.ok) return json({ error: r.error, current: r.current ?? null }, r.status);
-  return json({ version: r.version, url: r.url, linkLive: true });
+  // The steps the send made on the server (the client's waiting step) come
+  // back with it, so the task page shows them instead of adding its own copy
+  // (2026-10-17: two "Waiting on Brian's approval" 0.4s apart, one from here
+  // and one from the page, both kept by the save's merge).
+  const { data } = await supabaseAdmin.from("tasks").select("subtasks").eq("id", id).maybeSingle();
+  return json({ version: r.version, url: r.url, linkLive: true, subtasks: (data as { subtasks?: unknown } | null)?.subtasks ?? null });
 }

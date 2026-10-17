@@ -4,8 +4,10 @@
 // 1b): under a client's email on its step's page, what Claude made of it: a
 // step (its name, Description, the asks as a checklist with their dates, whose
 // turn and when, and why), or, when the asks have their own dates, designs or
-// approvals, the choice of one task each in a list. Use this makes a NEW
-// draft step after this one; Make N tasks makes the list and its tasks;
+// approvals, the choice of one task each in a list. Use this fills the
+// current step when it is the email's reply step or empty, else keeps it for
+// What's next (one step at a time, Derek 2026-10-17); Make N tasks makes the
+// list and its tasks, one step each;
 // Change it opens the same fields to edit first; No thanks hides it for this
 // email. Nothing is given, sent or saved until one of those is pressed.
 // Read once per email (kept on the step), when the page first opens with it.
@@ -40,7 +42,7 @@ export function AiEmailBox({ step, email, sender, clientFirst, choices, turnWord
   read: () => Promise<AiEmailSuggest | "off" | null>;
   /** Keeps it on the step (aiSuggest). */
   onCache: (s: AiEmailSuggest) => void;
-  /** Use this: a new draft step after this one. */
+  /** Use this: fills the current step, or keeps it for What's next. */
   onUse: (s: AiEmailSuggest) => void;
   /** Make N tasks in the list. */
   onSplit: (s: AiEmailSuggest) => void;
@@ -77,6 +79,9 @@ export function AiEmailBox({ step, email, sender, clientFirst, choices, turnWord
     </section>
   );
   if (busy) return <p className={`${AI_BOX} ${AI_LABEL}`} aria-live="polite">✨ Claude is reading it…</p>;
+  if (step.aiSuggest?.messageId === email.messageId && step.aiSuggest.savedOn && !step.aiSuggest.dismissed) return (
+    <p className="text-[16px] text-muted">✨ Saved for What&apos;s next. It comes up when the current step is done.</p>
+  );
   if (!suggestionShows(step, email.messageId)) return null;
   const s = edit ?? step.aiSuggest!;
   const choice = splitChoice(s);
@@ -98,8 +103,8 @@ export function AiEmailBox({ step, email, sender, clientFirst, choices, turnWord
       {choice.offer && (
         <div className="flex flex-col gap-2">
           {s.ownWork && <p className="text-[16px] text-foreground">Each needs its own design and {sender}&apos;s OK, so I&apos;d keep them apart.</p>}
-          {([["split", `Make ${n} tasks in "${s.list || s.name || "a new list"}"`, `A list on ${clientFirst} that finishes, as a queue, 2 at a time in order of the dates. Each task: ${nameOf(s.who) === "you" ? "you make it" : `${nameOf(s.who)} makes it`}, you check it, ${sender} approves.`],
-            ["one", "Keep it as one step", "One checklist on a new step. Fine for small things done in one go."]] as const).map(([k, title, sub]) => (
+          {([["split", `Make ${n} tasks in "${s.list || s.name || "a new list"}"`, `A list on ${clientFirst} that finishes, as a queue, 2 at a time in order of the dates. Each task starts with one step: ${nameOf(s.who) === "you" ? "you make it" : `${nameOf(s.who)} makes it`}. What's next adds the check and ${sender}'s approval.`],
+            ["one", "Keep it as one step", "One checklist on this task's step. Fine for small things done in one go."]] as const).map(([k, title, sub]) => (
             <button key={k} type="button" aria-pressed={(k === "split") === split} onClick={() => setPick(k)}
               className={`flex flex-col items-start gap-0.5 rounded-[5px] bg-surface px-3 py-2.5 text-left ring-inset ${(k === "split") === split ? "ring-2 ring-accent" : "ring-1 ring-border hover:bg-background"}`}>
               <span className="text-[16px] font-semibold">{title}</span>
@@ -163,7 +168,7 @@ export function AiEmailBox({ step, email, sender, clientFirst, choices, turnWord
         <button onClick={go} disabled={!s.items.length && !s.name.trim()}
           className="h-11 w-full rounded-[5px] bg-accent px-5 text-[16px] font-semibold text-white hover:opacity-90 disabled:opacity-40 sm:w-auto">{split ? `Make ${n} tasks` : "Use this"}</button>
       </div>
-      {!split && <p className="text-[16px] text-muted">Use this adds it as the next step. It stays a draft until you press Give to.</p>}
+      {!split && <p className="text-[16px] text-muted">Use this fills in the current step, or saves it for What&apos;s next when that step is not this email&apos;s. Someone else&apos;s turn stays a draft until you press Give to.</p>}
     </section>
   );
 }

@@ -593,3 +593,47 @@ describe("Needs you for giving and asking (Derek, 2026-10-17)", () => {
     expect(needsYou(task([s("a", "Hand off", { assigneeId: "u_mich" })]), "u_derek")).toBeNull();
   });
 });
+
+// ── One step at a time, and never two of the same open step (2026-10-17) ──
+import { canAddStep, dropDuplicateOpenSteps, mayAddFor } from "./data";
+
+describe("one step at a time (canAddStep)", () => {
+  it("a step can be added only while no step is open", () => {
+    expect(canAddStep({ subtasks: [] })).toBe(true);
+    expect(canAddStep({ subtasks: [{ done: true }] })).toBe(true);
+    expect(canAddStep({ subtasks: [{ done: true }, { done: false }] })).toBe(false);
+    // A client's portal request is not a step.
+    expect(canAddStep({ subtasks: [{ done: true }, { done: false, fromClient: true }] })).toBe(true);
+    // Older tasks with several open steps: still nothing added by hand.
+    expect(canAddStep({ subtasks: [{ done: false }, { done: false }] })).toBe(false);
+  });
+});
+
+describe("never two open steps made for the same thing", () => {
+  const wait = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: "Waiting on Brian's approval", done: false, onClient: true, addedFor: "sent:s_etkz5rpo", ...extra });
+  it("keeps the first, taking a field only the later copy had", () => {
+    const out = dropDuplicateOpenSteps([{ id: "s_etkz5rpo", title: "Derek reviews", done: true }, wait("w1"), wait("w2", { emailedAt: "x" })] as never[]);
+    expect(out.map((x: { id: string }) => x.id)).toEqual(["s_etkz5rpo", "w1"]);
+    expect(out[1]).toMatchObject({ id: "w1", emailedAt: "x" });
+  });
+  it("leaves a done copy and other steps alone, and returns the same list when there is nothing to drop", () => {
+    const list = [{ ...wait("w0"), done: true }, wait("w1"), { id: "x", title: "Mine", done: false }] as never[];
+    expect(dropDuplicateOpenSteps(list)).toBe(list);
+  });
+  it("mayAddFor says no while an open step was made for the same thing", () => {
+    expect(mayAddFor([wait("w1")], "sent:s_etkz5rpo")).toBe(false);
+    expect(mayAddFor([{ ...wait("w1"), done: true }], "sent:s_etkz5rpo")).toBe(true);
+    expect(mayAddFor([wait("w1")], undefined)).toBe(true);
+  });
+  // Brian's task (t_b0798233, 2026-10-17): the server's send made one waiting
+  // step, the page made its own from its older copy, and the save's merge kept both.
+  it("a browser save merged over the server's same step keeps one", () => {
+    const base = [{ id: "s_etkz5rpo", title: "Derek reviews", done: false }] as Subtask[];
+    const done = { ...base[0], done: true };
+    const local = [done, wait("w_page", { startedAt: "2026-10-17T17:38:13.547Z" })] as Subtask[];
+    const remote = [done, wait("w_server", { startedAt: "2026-10-17T17:38:13.122Z" })] as Subtask[];
+    const out = mergeSubtasks(base, local, remote);
+    expect(out.filter((x) => x.addedFor === "sent:s_etkz5rpo")).toHaveLength(1);
+    expect(out.map((x) => x.id)).toEqual(["s_etkz5rpo", "w_server"]);
+  });
+});

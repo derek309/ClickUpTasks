@@ -65,8 +65,11 @@ export type AiEmailSuggest = {
   list: string;
   /** Hidden for this email (No thanks). */
   dismissed?: boolean;
-  /** The draft step Use this made. */
+  /** The step Use this filled (or, before 2026-10-17, made). */
   usedStepId?: string;
+  /** Use this kept it for What's next on this step, offered when it is done
+   *  (one step at a time, Derek 2026-10-17). */
+  savedOn?: string;
   /** The tasks a split made: "Made from this email". */
   made?: { id: string; title: string }[];
 };
@@ -134,7 +137,7 @@ export const needsReading = (s: Pick<Subtask, "aiSuggest" | "done">, messageId: 
 /** The suggestion shows: read, for this email, asking something, not
  *  dismissed and not used yet. */
 export const suggestionShows = (s: Pick<Subtask, "aiSuggest" | "done">, messageId: string): boolean =>
-  !s.done && !!s.aiSuggest && s.aiSuggest.messageId === messageId && s.aiSuggest.asks && !s.aiSuggest.dismissed && !s.aiSuggest.usedStepId && !s.aiSuggest.made?.length;
+  !s.done && !!s.aiSuggest && s.aiSuggest.messageId === messageId && s.aiSuggest.asks && !s.aiSuggest.dismissed && !s.aiSuggest.usedStepId && !s.aiSuggest.savedOn && !s.aiSuggest.made?.length;
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 /** A plain paragraph as the step's description (HTML, like every step's notes). */
@@ -143,29 +146,49 @@ export const descriptionHtml = (text: string) => text.trim() ? text.trim().split
 /** An item as a to do: its title and, when the email gives one, its date. */
 export const todoTitle = (i: Pick<AiAsk, "title" | "whenLabel">) => (i.whenLabel ? `${i.title} · ${i.whenLabel}` : i.title);
 
-/** Use this: a NEW step after the email's step, as a draft for whoever's
- *  turn it is, so nothing reaches them until Give to. Your own turn is your
- *  own step, live. */
-export function draftStepFrom(s: Pick<AiEmailSuggest, "name" | "description" | "items" | "who" | "due" | "messageId">, o: { makeId: () => string; meId: string | null; owner: Partial<Subtask> }): Subtask {
-  const todos: StepTodo[] = s.items.map((i) => ({ id: o.makeId(), title: todoTitle(i), done: false }));
+/** A step with nothing in it yet: no description, to dos, work or email. */
+export const isEmptyStep = (s: Pick<Subtask, "notes" | "todos" | "holds" | "fromEmails">): boolean =>
+  !(s.notes ?? "").replace(/<[^>]+>/g, "").trim() && !(s.todos ?? []).length && !(s.holds ?? []).length && !(s.fromEmails ?? []).length;
+
+/** Where Use this goes (one step at a time, Derek 2026-10-17): it fills the
+ *  current step when that is the email's own reply step or still empty;
+ *  otherwise it waits on the current step, offered in What's next when that
+ *  step is done. No current step: it fills the email's step. */
+export function suggestionTarget(list: Subtask[], emailStepId: string): { fill: string } | { wait: string } {
+  const cur = list.find((x) => !x.fromClient && !x.done) ?? null;
+  if (!cur) return { fill: emailStepId };
+  const own = cur.id === emailStepId && (cur.addedFor ?? "").startsWith("reply:");
+  // The reply step holds the email it came in on; empty means nothing else.
+  const empty = isEmptyStep(cur.id === emailStepId ? { ...cur, fromEmails: [] } : cur);
+  return own || empty ? { fill: cur.id } : { wait: cur.id };
+}
+
+/** Use this, filling `step`: its name, Description, the asks added as to
+ *  dos, its due date, and a draft for whoever's turn it is (as a new step
+ *  was), so nothing reaches them until Give to. */
+export function fillStepFrom(step: Subtask, s: Pick<AiEmailSuggest, "name" | "description" | "items" | "who" | "due">, o: { makeId: () => string; meId: string | null }): Subtask {
+  const have = new Set((step.todos ?? []).map((t) => t.title.trim().toLowerCase()));
+  const todos: StepTodo[] = [...(step.todos ?? []), ...s.items.map((i) => todoTitle(i)).filter((t) => !have.has(t.trim().toLowerCase())).map((title) => ({ id: o.makeId(), title, done: false }))];
   const forOther = !!s.who && s.who !== o.meId;
+  const notes = descriptionHtml(s.description);
   return {
-    id: o.makeId(), title: s.name.trim() || "Do what the email asks", done: false,
-    ...o.owner,
-    notes: descriptionHtml(s.description),
+    ...step,
+    title: s.name.trim() || step.title,
+    ...(notes ? { notes } : {}),
     ...(todos.length ? { todos } : {}),
     ...(s.due ? { due: s.due } : {}),
     ...(forOther ? { draftFor: s.who! } : {}),
-    addedFor: `ai:${s.messageId}`,
   };
 }
 
-/** The list with `step` right after `afterId` (at the end when it is gone). */
-export function insertAfter(list: Subtask[], afterId: string, step: Subtask): Subtask[] {
-  const at = list.findIndex((x) => x.id === afterId);
-  const out = [...list];
-  out.splice(at < 0 ? out.length : at + 1, 0, step);
-  return out;
+/** Use this kept for What's next: Claude's next step, with the Description
+ *  and to dos it brings when it is taken. */
+export function nextFromSuggestion(s: Pick<AiEmailSuggest, "name" | "description" | "items" | "who" | "due">, sender: string): AiNext {
+  return {
+    name: s.name.trim() || "Do what the email asks", who: s.who, due: s.due, why: `From ${sender}'s email`,
+    ...(s.description.trim() ? { notes: s.description.trim() } : {}),
+    ...(s.items.length ? { todos: s.items.map((i) => todoTitle(i)) } : {}),
+  };
 }
 
 // ── 1b. A big request becomes its own list ─────────────────────────────────
@@ -187,8 +210,8 @@ export type SplitPlan = { project: Project | null; projectId: string; tasks: Tas
 /** Make N tasks in <list> (section 1b): a "Finishes" list on the client
  *  (ending on the latest date, a queue two at a time with the 21 day pull),
  *  or the existing list picked, and one task per ask in date order. Each
- *  task: its Description and small checklist on step 1, a draft for whoever
- *  makes it; then "You check it" and "<client> approves", titled only. Its
+ *  task: its Description and small checklist on its one step, a draft for
+ *  whoever makes it (the steps after come through What's next). Its
  *  deadline is its date; an ASAP one has none and comes up to Now first. */
 export function splitPlan(s: Pick<AiEmailSuggest, "items" | "who" | "due" | "list" | "description">, o: {
   clientId: string; contactId: string | null; listName: string; existingId: string | null; projects: Project[]; listTasks: Task[];
@@ -218,16 +241,14 @@ export function splitPlan(s: Pick<AiEmailSuggest, "items" | "who" | "due" | "lis
       ...(who ? { draftFor: who } : {}),
       due: i.when && i.when < firstDue ? i.when : firstDue,
     };
-    const later: Subtask[] = [
-      { id: o.makeId("s_"), title: "You check it", done: false },
-      { id: o.makeId("s_"), title: `${o.clientFirst} approves`, done: false },
-    ];
+    // One step at a time (Derek, 2026-10-17): the first step only; checking
+    // it and the client's approval come later, through What's next.
     return {
       id: o.makeId("t_"), projectId, clientId: o.clientId, title: i.title, description: "",
       status: "todo", priority: "normal", assigneeId: o.ownerId, contactId: o.contactId,
       due: i.when ?? firstDue, ...(i.when ? { deadline: true } : {}),
       recurrence: "none", labelIds: [], ghlTaskId: null, private: false,
-      subtasks: [step1, ...later], attachments: [], comments: [], createdAt: o.now, createdBy: o.meId,
+      subtasks: [step1], attachments: [], comments: [], createdAt: o.now, createdBy: o.meId,
       ...(queue ? { queuePos: startPos + (n + 1) * POS_STEP } : {}),
     } as Task;
   });
@@ -251,7 +272,9 @@ export function splitPlan(s: Pick<AiEmailSuggest, "items" | "who" | "due" | "lis
 
 /** Claude's next step after a Done, kept on the step just done (aiNext), so
  *  reopening What's next does not ask again. */
-export type AiNext = { name: string; who: string | null; due: string | null; why: string };
+export type AiNext = { name: string; who: string | null; due: string | null; why: string;
+  /** From an email's Use this: the Description and to dos the step takes. */
+  notes?: string; todos?: string[] };
 
 export function parseNext(j: Record<string, unknown> | null, o: { today: string; choices: string[] }): AiNext | null {
   if (!j) return null;

@@ -262,6 +262,9 @@ export function stepQuietLine(o: {
   wrote?: { first: string; ago: string } | null;
   /** Its email went out this long ago. */
   sentAgo?: string | null;
+  /** What went out, when a send made this wait: the review or email sent
+   *  from the step before ("Holiday Pre Order Email"). */
+  sentWhat?: string | null;
   /** Waiting on the client's reply to it. */
   noReply?: boolean;
   todos?: { done: number; total: number };
@@ -280,7 +283,7 @@ export function stepQuietLine(o: {
     const first = desc.split(/(?<=[.!?])\s/)[0];
     parts.push(first.length > 80 ? `${first.slice(0, 78).trimEnd()}…` : first);
   }
-  if (o.sentAgo) parts.push(`sent ${o.sentAgo}`);
+  if (o.sentAgo) parts.push(o.sentWhat?.trim() ? `${o.sentWhat.trim()} sent ${o.sentAgo}` : `sent ${o.sentAgo}`);
   if (o.noReply) parts.push("no reply yet");
   if (o.todos && o.todos.total > 0) parts.push(`${o.todos.done} of ${o.todos.total} to do`);
   return parts.join(" · ");

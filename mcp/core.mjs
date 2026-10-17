@@ -23,7 +23,8 @@ How a task is built:
 - A task is the outcome. Its steps are turns, in order: each step is one person's turn (you, a teammate, Claude, or the client). get_task marks the current one.
 - If someone else does it, or you wait for it, it is a step. If the same person does it straight after, it is a to-do inside that step. One thing per step.
 - A task has no description: what it needs is step 1's directions (create_task and update_task description write there). Directions are context: the why, the links, what done looks like. They are not a list of actions; actions are to-dos.
-- Set up every step you add (add_checklist_items): who (assignee: "me", a member id, "claude", or "client" for an ask the client answers), when (due), what it holds (email, text, chat, doc, image, page = HTML review, video, or checklist with its to-dos), and its directions.
+- One step at a time (Derek, 2026-10-17): a task has at most one open step, the current one. Add the next step (add_checklist_items, one step) only when no step is open, which is after the current one is ticked done. Anything else you know is coming goes as to-dos on the current step (update_step add_todos), or waits until that step is done.
+- Set up the step you add (add_checklist_items): who (assignee: "me", a member id, "claude", or "client" for an ask the client answers), when (due), what it holds (email, text, chat, doc, image, page = HTML review, video, or checklist with its to-dos), and its directions.
 - Change who or when on a step that already exists with update_step (assignee, due, follow_up; also its name, directions and more to-dos), never by removing and re-adding it. As in the app: given to Claude it is due today; to a teammate it lands on their list today and the task is Delegated while it is the current step; to the client it becomes an ask holding the email; a new due date on the owner's current step moves the task's due date.
 
 Queues: a list can be a queue (list_client_tasks and get_task say so).
@@ -42,11 +43,36 @@ When you WORK on a task (not when you only read or look one up), keep the task c
    - "done" only when nothing is left for anyone,
    - "waiting" when it's waiting on the client,
    - leave it "in_progress" if you're stopping partway; say so in the comment.
-4. Tick each step you finished (check_item), which starts the next turn the way the app does, and each to-do as you finish it (check_todo). Before you stop, tick every step and to-do your work finished, not only the step you were given ("For Claude"), so the current step is the person's next move. Add the turns you discovered as steps (add_checklist_items) rather than listing them in a comment. A client's question answered in an email still to be sent: put that email on the step holding the question (draft_email with step), so sending it finishes that step.
+4. Tick each step you finished (check_item), which starts the next turn the way the app does, and each to-do as you finish it (check_todo). Before you stop, tick every step and to-do your work finished, not only the step you were given ("For Claude"), so the current step is the person's next move. Turns you discovered go as to-dos on the current step (update_step add_todos), or, once it is done and no step is open, as the next step (add_checklist_items, one step), rather than listed in a comment. A client's question answered in an email still to be sent: put that email on the step holding the question (draft_email with step), so sending it finishes that step.
 5. Review comments you deal with get resolved, always: pass their ids as resolve_comments on the new version (write_document, add_review_version), or update_review_comment with done, or check_todo for the step's to-do it came from. Leave open only the ones you did not finish, and say why in your Done comment.
 6. Several tasks in one session: do this per task. A quick lookup, a draft for someone to review, or a question answered in chat doesn't need it.
 
 Keep comments short and plain, written for a teammate skimming the task later. Never paste secrets, keys or passwords into a comment.`;
+
+// One step at a time (Derek, 2026-10-17: "I don't want future steps created
+// until one step is done"). The open step, leaving out the "what's next?" a
+// task asks with after its last step (a new step answers that one).
+const asksNextStep = (x) => !!x.addedFor?.startsWith("next:") && /: what's next\?$/.test(x.title || "");
+/** Why add_checklist_items adds nothing, or null when it may add: a step is
+ *  open, or more than one step was given. */
+export function oneStepRefusal(subs, titles) {
+  const open = (subs || []).filter((x) => !x.fromClient && !x.done && !asksNextStep(x));
+  const extra = titles;
+  if (open.length) {
+    const cur = open[0];
+    return `Nothing added. One step at a time: "${cur.title}" [${cur.id}] is still open. Put ${extra.length > 1 ? "these" : "this"} as to-dos on it (update_step with step_id "${cur.id}" and add_todos: ${JSON.stringify(extra)}), or wait until it is done (check_item) and add the next step then.`;
+  }
+  if (titles.length > 1) return `Nothing added. One step at a time: add only the next step. Add "${titles[0]}" on its own (with the rest as its todos: ${JSON.stringify(titles.slice(1))}), or add each when the step before it is done.`;
+  return null;
+}
+/** create_task's plan, one step at a time: the first as the step, the rest
+ *  as its to-dos, and what the result says about it. */
+export function onePlanStep(steps) {
+  const list = (steps || []).map((x) => String(x).trim()).filter(Boolean);
+  if (!list.length) return { first: "", todos: [], note: "" };
+  const todos = list.slice(1);
+  return { first: list[0].slice(0, 200), todos, note: todos.length ? ` One step at a time: only "${list[0]}" is a step; the other ${todos.length} ${todos.length === 1 ? "is its to-do" : "are its to-dos"}. Add the next step after it is done.` : "" };
+}
 
 const STATUSES = ["todo", "get_started", "in_progress", "review", "changes_requested", "waiting", "on_hold", "approved", "delegated", "done"];
 const GHL = "https://services.leadconnectorhq.com";
@@ -664,7 +690,7 @@ export function createServer(opts = {}) {
     });
 
   server.tool("create_task",
-    "Create a new task (the outcome) under a client, optionally on a specific list. Defaults match the app's quick-add: due tomorrow, priority normal, except assignee, which defaults to unassigned since you're creating on the user's behalf. Get ids from list_clients/list_projects. A task has no description: what it needs (description) is step 1's directions (the why, links, what done looks like), and step 1 is made for it, named for the task; add the other turns with add_checklist_items. On a list that is a queue the task joins the line where its priority puts it, with no due date (it gets one when it comes up to Now); place picks the spot, and deadline: true with due keeps a real deadline.",
+    "Create a new task (the outcome) under a client, optionally on a specific list. Defaults match the app's quick-add: due tomorrow, priority normal, except assignee, which defaults to unassigned since you're creating on the user's behalf. Get ids from list_clients/list_projects. A task has no description: what it needs (description) is step 1's directions (the why, links, what done looks like), and step 1 is made for it, named for the task. One step at a time: steps (a plan) keeps only the first as its step and puts the rest as that step's to-dos; the next step is added after step 1 is done. On a list that is a queue the task joins the line where its priority puts it, with no due date (it gets one when it comes up to Now); place picks the spot, and deadline: true with due keeps a real deadline.",
     {
       client_id: z.string(),
       project_id: z.string().optional().describe("omit to use (or create) the client's default \"Tasks\" list"),
@@ -679,8 +705,9 @@ export function createServer(opts = {}) {
       priority: z.enum(["none", "normal", "urgent"]).optional().describe("defaults to \"normal\"; \"conversation\" is reserved/auto-created only. On a queue list, urgent joins at the top of Up next"),
       assignee_id: z.string().optional().describe("roster member id (get one from list_members), or \"me\" for yourself; defaults to unassigned"),
       waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned)"),
+      steps: z.array(z.string()).optional().describe("the plan, first to last: only the first becomes the task's one step (one step at a time); the rest become its to-dos"),
     },
-    async ({ client_id, project_id, list_name, list_kind, list_ends_on, title, description, due, deadline, place, priority, assignee_id, waiting_on_client }) => {
+    async ({ client_id, project_id, list_name, list_kind, list_ends_on, title, description, due, deadline, place, priority, assignee_id, waiting_on_client, steps }) => {
       if (deadline && !due) return { content: [{ type: "text", text: "A deadline needs its date: pass due (yyyy-mm-dd) with deadline: true." }] };
       if (project_id && list_name) return { content: [{ type: "text", text: "Pass project_id or list_name, not both." }] };
       await names();
@@ -721,6 +748,9 @@ export function createServer(opts = {}) {
           projectNames[pid] = "Tasks";
         }
       }
+      // One step at a time (Derek, 2026-10-17): the plan's first step only,
+      // the rest as its to-dos (onePlanStep).
+      const plan = onePlanStep(steps);
       let assigneeIdResolved = null;
       if (waiting_on_client) {
         assigneeIdResolved = null;
@@ -732,7 +762,11 @@ export function createServer(opts = {}) {
       const t = {
         id: rid("t_"), project_id: pid, client_id, title: title.trim(), description: "",
         // What it needs is step 1's directions (Derek, 2026-10-14).
-        ...(stripHtml(description || "") ? { subtasks: [{ id: rid("s_"), title: stepOneName(title), done: false, notes: directionsHtml(description), startedAt: nowIso() }] } : {}),
+        ...(stripHtml(description || "") || plan.first ? { subtasks: [{
+          id: rid("s_"), title: plan.first || stepOneName(title), done: false, startedAt: nowIso(),
+          ...(stripHtml(description || "") ? { notes: directionsHtml(description) } : {}),
+          ...(plan.todos.length ? { todos: plan.todos.map((x) => ({ id: rid("td_"), title: x, done: false })) } : {}),
+        }] } : {}),
         // "waiting" status and waiting_on_client always move together (see
         // data.ts's applyWaitingStatusSync) — this tool bypasses that helper
         // (separate Node process, no app import), so it replicates the same
@@ -776,7 +810,7 @@ export function createServer(opts = {}) {
       const renamed = tidied?.ok ? ` Its name was the whole request, so it is now "${tidied.title}" and the request is step 1's directions.` : "";
       await members();
       const assigneeLabel = t.waiting_on_client ? "waiting on client" : (t.assignee_id ? (memberNames[t.assignee_id] || t.assignee_id) : "unassigned");
-      const onStep = t.subtasks ? ` The description is step 1's directions ("${t.subtasks[0].title}").` : "";
+      const onStep = (t.subtasks && stripHtml(description || "") ? ` The description is step 1's directions ("${t.subtasks[0].title}").` : "") + plan.note;
       let queued = "";
       if (q) {
         const fresh = await queueOf(pid);
@@ -1193,7 +1227,7 @@ export function createServer(opts = {}) {
   server.tool("draft_email",
     "Prepare an email on a task for a human to review and send — never sends anything itself. The draft appears in the task's own review panel in the app (subject + body, editable), where a teammate edits if needed and hits Send. A task holds one draft: this won't replace a draft already waiting unless replace is true. Body should be plain text (paragraphs separated by a blank line) — it's converted to formatted HTML for the review panel. " + EMAIL_FORMAT + "",
     { id: z.string(), subject: z.string(), body: z.string(), replace: z.boolean().optional().describe("replace a draft already waiting on the task"),
-      step: z.string().optional().describe("a step's id or title to put the draft on; left out, the email gets a step of its own (\"Email <client>: <subject>\") right after the current step, unless the current step is already about emailing them. Finish the current step with check_item afterwards and the email step is next.") },
+      step: z.string().optional().describe("a step's id or title to put the draft on; left out, it goes on the current step (one step at a time), or, with no step open, on a step of its own (\"Email <client>: <subject>\").") },
     async ({ id, subject, body: rawBody, replace, step }) => {
       const body = stripSignOff(rawBody);
       if (!await loadTask(id, "id")) return noTask(id);
@@ -1738,14 +1772,17 @@ export function createServer(opts = {}) {
     }),
   ]);
   server.tool("add_checklist_items",
-    "Add steps to the end of a task's plan, in the order given. Each step is one person's turn: if someone else does it or you wait for it, it is a step; if the same person does it straight after, it is a to-do inside the step (todos). One thing per step. Set every step up: assignee (whose turn), due (by when), holds (what it holds) and directions (context). A plain string still adds a bare step. Check get_task first so you don't add duplicates.",
-    { id: z.string(), items: z.array(STEP_ITEM).min(1).describe("the steps, first to last: objects with title, assignee, due, directions, holds and todos, or plain titles") },
+    "Add the next step to a task. One step at a time (Derek, 2026-10-17): a task has at most one open step, so this adds ONE step, and only when no step is open (the current one is done, or the task asks what's next). With a step open, or more than one item, nothing is added: put the extra items as to-dos on the current step (update_step add_todos), or wait until it is done. The step is one person's turn: if someone else does it or you wait for it, it is a step; if the same person does it straight after, it is a to-do inside the step (todos). Set it up: assignee (whose turn), due (by when), holds (what it holds) and directions (context). A plain string still adds a bare step. Check get_task first.",
+    { id: z.string(), items: z.array(STEP_ITEM).min(1).describe("the one next step: an object with title, assignee, due, directions, holds and todos, or a plain title") },
     async ({ id, items }) => {
       const t = await loadTask(id, "subtasks,title,status,draft_email");
       if (!t) return noTask(id);
       const specs = items.map((it) => (typeof it === "string" ? { title: it } : it)).map((it) => ({ ...it, title: String(it.title).trim() })).filter((it) => it.title);
       if (!specs.length) return reply("No items to add.");
       const subs = t.subtasks || [];
+      // One step at a time: refused, nothing added, with what to do instead.
+      const refused = oneStepRefusal(subs, specs.map((x) => x.title));
+      if (refused) return reply(refused);
       const today = pacificToday();
       const owner = t.assignee_id || null;
       const usesClient = specs.some((x) => String(x.assignee ?? "").trim().toLowerCase() === "client");

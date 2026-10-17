@@ -9,7 +9,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 import { backToGiver, giverOf } from "./stepThenNext";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
-  isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
+  dropDuplicateOpenSteps, isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
   todayPacific, withMeetingSteps, CLAUDE_ID, nameDoneWhatsNext, type DeliverableKey, type ReceivedEmail, type StepTodo, type Subtask, type TaskStatus,
 } from "./data";
 import { finishRequestStep } from "./clientRequests";
@@ -40,7 +40,8 @@ async function rewriteSteps(taskId: string, change: (row: TaskRow, firstName: st
     const firstName = String((client as { name?: string } | null)?.name ?? "the client").split(" ")[0];
     const changed = await change(row as TaskRow, firstName);
     if (!changed) return false;
-    const next = nameDoneWhatsNext(ownNewSteps((row as TaskRow).subtasks ?? [], changed, (row as TaskRow).assignee_id));
+    // Never two open steps made for the same thing (data.ts dropDuplicateOpenSteps).
+    const next = dropDuplicateOpenSteps(nameDoneWhatsNext(ownNewSteps((row as TaskRow).subtasks ?? [], changed, (row as TaskRow).assignee_id)));
     // A changes step just made: the task's follow up is its due date (Derek, 2026-10-11).
     const before = new Set(((row as TaskRow).subtasks ?? []).map((x) => x.id));
     const made = followUpFromNew ? next.find((x) => !before.has(x.id) && x.stage === "changes_requested" && x.due) : null;
@@ -541,11 +542,13 @@ export async function holdDraftOnStep(taskId: string, subject: string, stepRef?:
       on = title;
       return holdOnStep(list.map((x) => (x.id === cur.id ? { ...x, title, makes: "email" as const } : x)), cur.id, "email");
     }
-    // Its own step, right after the current one: the email follows the work
-    // under way (Derek, 2026-10-12: research was step 1, its email step 2).
+    // One step at a time (Derek, 2026-10-17): with a step open, the email
+    // goes on it, and sending it is part of that step.
+    if (cur) { on = cur.title; return holdOnStep(list, cur.id, "email"); }
+    // No step open: its own step, the next one.
     const id = newId("s_");
-    const step: Subtask = { id, title, done: false, makes: "email" };
-    const at = cur ? list.findIndex((x) => x.id === cur.id) + 1 : list.length;
+    const step: Subtask = { id, title, done: false, makes: "email", startedAt: new Date().toISOString() };
+    const at = list.length;
     const next = [...list];
     next.splice(at, 0, step);
     on = title;

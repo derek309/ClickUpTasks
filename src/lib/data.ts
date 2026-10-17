@@ -3213,6 +3213,39 @@ export function currentStep<T extends Pick<Subtask, "done" | "fromClient">>(subt
   return planSteps(subtasks).find((s) => !s.done) ?? null;
 }
 
+/** One step at a time (Derek, 2026-10-17: "I don't want future steps
+ *  created until one step is done"): a step can be added by hand only when
+ *  the task has no open step. The next one comes from What's next after
+ *  Done, or from what Done or Send makes by itself. */
+export function canAddStep(task: { subtasks: Pick<Subtask, "done" | "fromClient">[] }): boolean {
+  return !currentStep(task.subtasks);
+}
+
+/** Never two open steps made for the same thing (2026-10-17: two "Waiting on
+ *  Brian's approval", sent:s_etkz5rpo, 0.4s apart, one from the server's
+ *  send and one from the page, both kept by the save's merge). The first
+ *  open step for each addedFor stays, taking any field only the later copy
+ *  had (its emailedAt); the later copies go. The same list when there are none. */
+export function dropDuplicateOpenSteps<T extends Pick<Subtask, "id" | "done" | "addedFor">>(subtasks: T[]): T[] {
+  const first = new Map<string, number>();
+  const extra = new Map<number, T>();
+  const gone = new Set<number>();
+  subtasks.forEach((x, i) => {
+    if (x.done || !x.addedFor) return;
+    const at = first.get(x.addedFor);
+    if (at === undefined) { first.set(x.addedFor, i); return; }
+    gone.add(i);
+    extra.set(at, { ...x, ...(extra.get(at) ?? subtasks[at]) });
+  });
+  if (!gone.size) return subtasks;
+  return subtasks.flatMap((x, i) => (gone.has(i) ? [] : [extra.get(i) ?? x]));
+}
+
+/** Whether a step made for `addedFor` may be added: no open step was made
+ *  for the same thing already. */
+export const mayAddFor = (subtasks: Pick<Subtask, "done" | "addedFor">[], addedFor: string | undefined): boolean =>
+  !addedFor || !subtasks.some((x) => !x.done && x.addedFor === addedFor);
+
 /** The step that starts once `doneId` is finished: the first other step not done. */
 export function stepAfter<T extends Pick<Subtask, "id" | "done" | "fromClient">>(subtasks: T[], doneId: string): T | null {
   return planSteps(subtasks).find((s) => !s.done && s.id !== doneId) ?? null;
@@ -4126,7 +4159,9 @@ export function mergeSubtasks(base: Subtask[], local: Subtask[], remote: Subtask
     const at = prev ? out.findIndex((o) => o.id === prev.id) + 1 : out.length;
     out.splice(at, 0, item);
   });
-  return out;
+  // The server and this page can each make the same step at once (a send's
+  // waiting step): one copy, never two.
+  return dropDuplicateOpenSteps(out);
 }
 
 /** The step a review's news belongs to (audit 2026-10-11): the client's

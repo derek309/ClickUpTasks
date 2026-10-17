@@ -232,13 +232,19 @@ describe("steps added on the server", () => {
     expect(db.task_document_comments[0].completed_at).toBeTruthy();
   });
 
-  it("a drafted email gets its own step right after the current one", async () => {
-    expect((await holdDraftOnStep("t1", "Your newsletter")).on).toBe("Email Brian: Your newsletter");
-    expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Email Brian: Your newsletter", "Schedule it"]);
-    expect(steps()[1].holds).toEqual(["email"]);
+  // One step at a time (Derek, 2026-10-17): with a step open the email goes
+  // on it; only with none open is it a step of its own.
+  it("a drafted email goes on the current step, and gets its own step only when none is open", async () => {
+    expect((await holdDraftOnStep("t1", "Your newsletter")).on).toBe("Write the newsletter");
+    expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Schedule it"]);
+    expect(steps()[0].holds).toEqual(["email"]);
     // A second draft keeps to the step that holds one.
-    expect((await holdDraftOnStep("t1", "Other")).on).toBe("Email Brian: Your newsletter");
-    expect(steps()).toHaveLength(3);
+    expect((await holdDraftOnStep("t1", "Other")).on).toBe("Write the newsletter");
+    expect(steps()).toHaveLength(2);
+    setup([{ id: "a", title: "Write the newsletter", done: true }]);
+    expect((await holdDraftOnStep("t1", "Your newsletter")).on).toBe("Email Brian: Your newsletter");
+    expect(steps().map((x) => x.title)).toEqual(["Write the newsletter", "Email Brian: Your newsletter"]);
+    expect(steps()[1]).toMatchObject({ holds: ["email"], startedAt: expect.any(String) });
   });
 
   // Seen 2026-10-12 on t_mv5ma65g8: replace with a step left the draft on step 1.

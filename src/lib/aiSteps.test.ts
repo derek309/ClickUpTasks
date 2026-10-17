@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("./supabase", () => ({ authedFetch: vi.fn() }));
 vi.mock("./rateLimit", () => ({ rateLimitBy: vi.fn(async () => null) }));
-import { byDate, draftStepFrom, emailWorthReading, insertAfter, listForSplit, needsReading, offersAskOnItsOwn, parseClientAsk, parseEmailSuggestion, parseNext, prefill, readJson, senderFirst, splitChoice, splitPlan, stripDashes, suggestionShows, type AiEmailSuggest } from "./aiSteps";
+import { byDate, emailWorthReading, fillStepFrom, listForSplit, nextFromSuggestion, suggestionTarget, needsReading, offersAskOnItsOwn, parseClientAsk, parseEmailSuggestion, parseNext, prefill, readJson, senderFirst, splitChoice, splitPlan, stripDashes, suggestionShows, type AiEmailSuggest } from "./aiSteps";
 import { askKey, askSteps } from "./aiStepsClient";
 import { emailPrompt } from "./aiStepsServer";
 import type { Project, Subtask, Task } from "./data";
@@ -84,23 +84,38 @@ describe("split or one step", () => {
   });
 });
 
-describe("the draft step Use this makes", () => {
+// One step at a time (Derek, 2026-10-17): Use this fills the current step
+// when it is the email's reply step or empty, else waits for What's next.
+describe("where Use this goes", () => {
   let n = 0;
   const makeId = () => `id${++n}`;
-  it("a new step after the email's, a draft for the suggested person, one to do per ask with its date", () => {
-    const s = parse(chelsea);
-    const step = draftStepFrom(s, { makeId, meId: "u_derek", owner: { assigneeId: "u_derek" } });
-    expect(step.title).toBe("Hot Chocolate email headers for Chelsea");
-    expect(step.draftFor).toBe("u_mich");
-    expect(step.assigneeId).toBe("u_derek");
-    expect(step.due).toBe("2026-10-21");
+  const reply = { id: "r", title: "Reply to Chelsea", done: false, addedFor: "reply:m1", fromEmails: [{ messageId: "m1" }] } as unknown as Subtask;
+  it("fills the email's own reply step, a draft for the suggested person, one to do per ask with its date", () => {
+    expect(suggestionTarget([{ id: "a", title: "Brief", done: true }, reply] as Subtask[], "r")).toEqual({ fill: "r" });
+    const step = fillStepFrom(reply, parse(chelsea), { makeId, meId: "u_derek" });
+    expect(step).toMatchObject({ id: "r", title: "Hot Chocolate email headers for Chelsea", draftFor: "u_mich", due: "2026-10-21", addedFor: "reply:m1" });
     expect(step.todos!.map((t) => t.title)).toEqual(["November quarterly email header · ASAP", "Partnership announcement header · ASAP", "April co branded email: 960 x 300 · Feb 26", "January co branded email: 960 x 300 · Dec 4"]);
     expect(step.notes).toContain("<p>Chelsea (USA TODAY events)");
-    const list = insertAfter([{ id: "a", title: "Reply", done: false }, { id: "b", title: "Later", done: false }] as Subtask[], "a", step);
-    expect(list.map((x) => x.id)).toEqual(["a", step.id, "b"]);
+    // To dos already there stay, and are not doubled.
+    const again = fillStepFrom(step, parse(chelsea), { makeId, meId: "u_derek" });
+    expect(again.todos).toHaveLength(4);
   });
-  it("your own turn is your own live step, no draft", () => {
-    expect(draftStepFrom({ ...parse(chelsea), who: "u_derek" }, { makeId, meId: "u_derek", owner: {} }).draftFor).toBeUndefined();
+  it("fills an empty current step; your own turn is no draft", () => {
+    const empty = { id: "e", title: "Next", done: false } as Subtask;
+    expect(suggestionTarget([empty, reply], "r")).toEqual({ fill: "e" });
+    expect(fillStepFrom(empty, { ...parse(chelsea), who: "u_derek" }, { makeId, meId: "u_derek" }).draftFor).toBeUndefined();
+  });
+  it("waits on a current step with work in it, offered in What's next with its Description and to dos", () => {
+    const busy = { id: "w", title: "Design the header", done: false, todos: [{ id: "t", title: "Sketch", done: false }] } as Subtask;
+    expect(suggestionTarget([busy, reply], "r")).toEqual({ wait: "w" });
+    const next = nextFromSuggestion(parse(chelsea), "Chelsea");
+    expect(next).toMatchObject({ name: "Hot Chocolate email headers for Chelsea", who: "u_mich", due: "2026-10-21", why: "From Chelsea's email" });
+    expect(next.todos).toHaveLength(4);
+    expect(next.notes).toContain("Chelsea (USA TODAY events)");
+    expect(suggestionShows({ done: false, aiSuggest: { ...parse(chelsea), savedOn: "w" } }, "m1")).toBe(false);
+  });
+  it("with no step open it fills the email's step", () => {
+    expect(suggestionTarget([{ ...reply, done: true }], "r")).toEqual({ fill: "r" });
   });
 });
 
@@ -114,12 +129,13 @@ describe("Make N tasks in a list", () => {
     const p = plan();
     expect(p.project).toMatchObject({ name: "Hot Chocolate 2026/27", clientId: "cl_b", plan: { kind: "finishes", endsOn: "2027-02-26" }, queue: { now: 2, pull: 21 } });
   });
-  it("one task per ask in date order, each its deadline, step 1 a draft for the maker, then you check it and the client approves", () => {
+  it("one task per ask in date order, each its deadline, one step only: a draft for the maker", () => {
     const { tasks } = plan();
     expect(tasks.map((t) => t.title)).toEqual(["November quarterly email header", "Partnership announcement header", "January co branded email: 960 x 300", "April co branded email: 960 x 300"]);
     expect(tasks[2]).toMatchObject({ due: "2026-12-04", deadline: true });
     expect(tasks[0].deadline).toBeUndefined();
-    expect(tasks[0].subtasks.map((s) => s.title)).toEqual(["November quarterly email header", "You check it", "Chelsea approves"]);
+    // One step at a time (Derek, 2026-10-17): the check and the approval come through What's next.
+    expect(tasks[0].subtasks.map((s) => s.title)).toEqual(["November quarterly email header"]);
     expect(tasks[0].subtasks[0]).toMatchObject({ draftFor: "u_mich", todos: [{ title: "Header image, 960 x 960" }, { title: "Copy, CTA and URL" }] });
     expect(tasks[0].subtasks[0].notes).toContain("Header for the November email.");
     // In line by date: the two ASAP ones are Now and dated, the rest wait.

@@ -9,7 +9,7 @@ import {
   TaskAction, TaskActionKind, prettyLinkName, effectiveStatus, openNextStep, followUpAfterStepDone, initialsOf,
   STATUS_META, pickableStatuses, stepDateLabel, needsYou, restoreStep, addBusinessDaysIso, TODAY, dateQuickPicks, CLAUDE_ID, TEMPLATES_ON, recordFollowUp, followUpsLine, 
   parseStepWatch, stepWatchState, suggestNextSteps, handoffLink, handoffIntoStep, todoWaiting, SIZING_ON, describeRecurrence, RECURRENCE_LABEL, type Recurrence, type DelegateSpec, type ClientLink, type ClientNote, PRIORITY_META, manualPriorityOptions, parseDaysOfMonth, WEEKDAY_LABEL, daysUntilDue, formatDue, formatDayDate, dueCountdown,
-  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, addReviewApproval, addEmailSentRecord, addTellClientStep, checkInTitle, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
+  assignableUsers, laterWord, withoutPlaceholders, statusForClaudeStep, tickedSteps, turnReason, nameDoneWhatsNext, clientEmailText, pickStepTitle, answerWhatsNext, reopenWhatsNext, pickedSays, carryForward, addClientReviewStep, dropDuplicateOpenSteps, canAddStep, addReviewApproval, addEmailSentRecord, addTellClientStep, checkInTitle, changesTelling, addedReason, changesStepFor, stepWindow, inWindow, todoProgress, planFromSteps, needMet, templatesFor, holdOnStep, releaseFromSteps, stepHolding, attachmentKey, sentEmailKey, asksWhatsNext, addWhatsNextStep, type DeliverableKey, ownNewSteps, approvalToReopen, homeStepFor, reviewRound, namedForWork, quickStepName, templateSteps, stepStage, planSteps, currentStep, stepAfter, stepForWork, stepProgress, statusForStep, addChangesRound, isHandoffStep, addTargetStep, linkDisplayName, attachSavedToStep, savedCountLine, taskDatesForStepDue, isApprovalOutcome, doneWhen,
   type Task, type Client, type Project, type Contact, type Attachment, type Priority, type RecurrenceUnit, type Subtask, type StepTodo, type ReceivedEmail, type TaskTemplate, type MessageChannel, type Message, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, Row, CollapsibleText, SearchableSelect, newId, LinkFavicon } from "./ui";
@@ -40,7 +40,7 @@ import { NextChoices, StepFinish, StepPage, type NextChoice } from "./StepPage";
 import { CurrentStep, sameStepName } from "./CurrentStep";
 import { AiEmailBox } from "./AiEmailBox";
 import { AiAskBox } from "./AiAskBox";
-import { descriptionHtml, draftStepFrom, insertAfter, listForSplit, senderFirst, splitPlan, type AiEmailSuggest, type AiNext, type SplitPlan } from "@/lib/aiSteps";
+import { descriptionHtml, fillStepFrom, listForSplit, nextFromSuggestion, senderFirst, splitPlan, suggestionTarget, type AiEmailSuggest, type AiNext, type SplitPlan } from "@/lib/aiSteps";
 import { askSteps } from "@/lib/aiStepsClient";
 import { StepMore, TurnLine, WordMenu, type MoreDate, type MoreGroup, type TurnChoice } from "./TurnLine";
 import { StepMessage } from "./StepMessage";
@@ -199,7 +199,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // unticked that way, 2026-10-12). Steps the app adds by itself go on the
   // task's owner (data.ts ownNewSteps).
   const onPatch = (patch: Partial<Task>) => {
-    const p = patch.subtasks ? { ...patch, subtasks: nameDoneWhatsNext(ownNewSteps(taskRef.current.subtasks, patch.subtasks, task.assigneeId ?? null)) } : patch;
+    const p = patch.subtasks ? { ...patch, subtasks: dropDuplicateOpenSteps(nameDoneWhatsNext(ownNewSteps(taskRef.current.subtasks, patch.subtasks, task.assigneeId ?? null))) } : patch;
     taskRef.current = { ...taskRef.current, ...p };
     return onPatchTask(p);
   };
@@ -1637,11 +1637,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const name = reviews[k]?.title?.trim() || (k === "doc" ? "the document" : "the review");
     const from = task.subtasks.find((x) => x.id === stepId);
     if (what === "sent") {
-      // Already waiting on them for this review (the send itself made it): no second one.
-      if (taskRef.current.subtasks.some((x) => !x.done && x.onClient && x.waitsOn === k)) return;
-      const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
-      const list = addClientReviewStep(taskRef.current.subtasks, stepId, firstName, name, k, due, () => newId("s_"));
-      if (list) onPatch({ subtasks: list, ...(statusForStep(task.status, "waiting") ? { status: "waiting" as TaskStatus } : {}) });
+      // The server makes the client's waiting step on every send
+      // (stepsServer stepsOnReviewSent) and it comes back with the send or
+      // live. Making it here too gave two (2026-10-17, Brian's task): this
+      // page's copy was saved beside the server's. Only the task moves.
+      const st = statusForStep(task.status, "waiting");
+      if (st && task.status !== st) onPatch({ status: st });
       return;
     }
     if (what === "ok") {
@@ -1721,8 +1722,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // The step a review is being sent from, when it is not the current one
   // (What's next's "Email Ryan to review" for the step just ticked).
   const reviewSendFrom = useRef<string | null>(null);
-  const followUpOnReview = (kind: TaskDocumentKind, name: string, reminderEveryDays = 1) => {
+  const followUpOnReview = (kind: TaskDocumentKind, name: string, reminderEveryDays = 1, serverSteps?: Subtask[] | null) => {
     const watch = `approved:${kind}`;
+    // The send moved the steps on the server (stepsOnReviewSent): those are
+    // the steps, shown at once, and this page adds none of its own (two
+    // "Waiting on Brian's approval" 0.4s apart, 2026-10-17).
+    const fromServer = Array.isArray(serverSteps) && serverSteps.some((x) => !x.done && x.onClient && x.waitsOn === kind);
+    if (fromServer) {
+      taskRef.current = { ...taskRef.current, subtasks: serverSteps! };
+      onStepsFromServer?.(serverSteps!);
+    }
     // Sent from What's next for the step just ticked: the client's waiting
     // step follows that step, not whatever is current now.
     const fromId = reviewSendFrom.current;
@@ -1733,7 +1742,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     // Once: a step already waiting on them for this review (made by the send
     // itself) is not doubled (Derek, 2026-10-13: Justin got two "Waiting on").
     const alreadyWaiting = taskRef.current.subtasks.some((x) => !x.done && x.onClient && x.waitsOn === kind);
-    if (from && !from.onClient && !alreadyWaiting && !isHandoffStep(from, task.assigneeId)) {
+    if (fromServer) {
+      const waiting = serverSteps!.find((x) => !x.done && x.onClient && x.waitsOn === kind);
+      if (waiting) setSentNext({ taskId: task.id, stepId: waiting.id, said: `${name} sent to ${firstName}. Waiting for ${firstName} to review it.` });
+    } else if (from && !from.onClient && !alreadyWaiting && !isHandoffStep(from, task.assigneeId)) {
       const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(reminderEveryDays));
       const list = addClientReviewStep(taskRef.current.subtasks, from.id, firstName, name, kind as DeliverableKey, due, () => newId("s_"));
       if (list) {
@@ -2636,12 +2648,16 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     const lastEmail = sub.fromEmails?.[sub.fromEmails.length - 1];
     const waits = waitingStep(sub);
     const sent = waits ? waitedEmail(sub) : null;
+    // A wait a send made: what went out from the step before (the review,
+    // else its email) and when; the newest email only when there is neither.
+    const out = waits ? sentOut(sub) : null;
     const prev = asksWhatsNext(sub) ? sub.title.replace(/: what's next\?$/, "").trim() : null;
     return stepQuietLine({
       draftFor: isDraft(sub) ? (sub.draftFor === "client" ? firstName : firstOf2(sub.draftFor)) : null,
       description: htmlToText(sub.notes ?? ""),
       wrote: lastEmail && !sub.done ? { first: senderFirst(lastEmail.from, firstName), ago: timeAgo(lastEmail.at) } : null,
-      sentAgo: sub.emailedAt ? timeAgo(sub.emailedAt) : sent ? timeAgo(sent.at) : null,
+      sentAgo: out ? timeAgo(out.at) : sub.emailedAt ? timeAgo(sub.emailedAt) : sent ? timeAgo(sent.at) : null,
+      sentWhat: out?.what ?? null,
       noReply: waits && !sub.done,
       todos: { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length },
       reason: t.say && t.say !== t.word && !["Your turn", "Claude's turn"].includes(t.say) ? t.say : null,
@@ -3006,6 +3022,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     return key === "directions" ? "Description" : "";
   };
   const submitNew = (a: SetupAnswer, run?: () => void) => {
+    // One step at a time: a step opened meanwhile (a send, another window).
+    if (!canAddStep(taskRef.current)) { closeNew(); pushToast("Finish the current step first. What's next adds the next one."); return; }
     newKey.current = null;
     run?.();
     const key = newKey.current as string | null;
@@ -3200,7 +3218,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* One + Add step (Derek, 2026-10-14: "one flow everywhere"): the
             name, optional, then the set up under it. A desktop types in place;
             a phone opens it as a page of its own, full screen, nothing
-            focused (Derek, 2026-10-14). */}
+            focused (Derek, 2026-10-14). One step at a time (Derek,
+            2026-10-17): only while no step is open; the next one comes from
+            What's next after Done (data.ts canAddStep). */}
+        {canAddStep(task) && (<>
         <li className={`hidden items-center gap-2 px-3 py-2 sm:flex ${steps.length || asking || (openStep || followUp) || clientChanges.length || looseKeys.length ? "border-t" : ""}`}>
           <input value={subDraft} onChange={(e) => setSubDraft(e.target.value)} onFocus={() => setNewOpen("inline")}
             onKeyDown={(e) => {
@@ -3220,6 +3241,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {newOpen === "sheet" && (
           <PhonePage label="Add a step" back={task.title.trim() || "Back"} title="New step" onClose={closeNew}>{newStepSetup(true)}</PhonePage>
         )}
+        </>)}
       </ol>
     </section>
   );
@@ -3534,6 +3556,17 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (!st) return;
     let list = asksWhatsNext(st) ? answerWhatsNext(taskRef.current.subtasks, stepId, a.name)
       : a.name !== st.title ? taskRef.current.subtasks.map((x) => (x.id === stepId ? { ...x, title: a.name } : x)) : taskRef.current.subtasks;
+    // Use this, kept for What's next on the step just done (lib/aiSteps
+    // nextFromSuggestion): taken as named, it brings its Description and to dos.
+    const doneId = sentNext?.doneId ?? (st.addedFor?.startsWith("next:") ? st.addedFor.slice(5) : null);
+    const kept = doneId ? taskRef.current.subtasks.find((x) => x.id === doneId)?.aiNext : null;
+    if (kept && (kept.notes || kept.todos?.length) && a.name.trim() === kept.name.trim()) {
+      list = list.map((x) => (x.id === stepId ? {
+        ...x,
+        ...(kept.notes && !(x.notes ?? "").replace(/<[^>]+>/g, "").trim() ? { notes: descriptionHtml(kept.notes) } : {}),
+        ...(kept.todos?.length ? { todos: [...(x.todos ?? []), ...kept.todos.map((title) => ({ id: newId("td_"), title, done: false }))] } : {}),
+      } : x));
+    }
     // Waiting on the client's reply: their turn, its need by date, no new email.
     if (a.waits) list = list.map((x) => (x.id === stepId ? { ...x, ...patchForWho(x, "client", { ownerId: task.assigneeId ?? null, meId: meId ?? null, today: TODAY }), ...(a.due ? { due: a.due } : {}) } : x));
     const now = list.find((x) => x.id === stepId)!;
@@ -3820,10 +3853,15 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (activeStep && reviewKind) {
       const name = reviews[reviewKind]?.title?.trim() || (reviewKind === "doc" ? "the document" : "the review");
       const due = addBusinessDaysIso(TODAY, reviewFollowUpDays(1));
-      const made = addClientReviewStep(task.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
+      // The latest steps, not this render's: a send that just landed may
+      // have made the waiting step already.
+      const made = addClientReviewStep(taskRef.current.subtasks, activeStep.id, firstName, name, reviewKind, due, () => newId("s_"));
       // The email that started it shows on the waiting step itself.
       const sentAt = new Date().toISOString();
-      const list = made?.map((x) => (x.addedFor === `sent:${activeStep.id}` ? { ...x, emailedAt: sentAt } : x));
+      // Already waiting on them for it (the send made it): the email is noted
+      // on that step, no second wait.
+      const list = (made ?? (taskRef.current.subtasks.some((x) => !x.done && x.addedFor === `sent:${activeStep.id}`) ? taskRef.current.subtasks : null))
+        ?.map((x) => (x.addedFor === `sent:${activeStep.id}` && !x.done ? { ...x, emailedAt: sentAt } : x));
       if (list) {
         onPatch({ subtasks: list, status: "waiting", followUpAt: due });
         const made2 = list.find((x) => x.addedFor === `sent:${activeStep.id}`);
@@ -4459,8 +4497,26 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       const near = out.filter((m) => Math.abs(Date.parse(m.at) - at) < 15 * 60_000).sort((a, b) => Math.abs(Date.parse(a.at) - at) - Math.abs(Date.parse(b.at) - at))[0];
       if (near) return near;
     }
+    // A wait a send made (sent:<step>): only an email sent from that step,
+    // never an older one to the client (2026-10-17: Brian's review wait read
+    // "sent 10d ago" off an email from ten days before).
+    if (sub.addedFor?.startsWith("sent:")) {
+      const home = task.subtasks.find((x) => x.id === sub.addedFor!.slice(5));
+      const ids = (home?.holds ?? []).filter((k) => k.startsWith("mail:")).map((k) => k.slice(5));
+      return out.filter((m) => ids.includes(m.id)).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+    }
     const before = sub.startedAt ? Date.parse(sub.startedAt) + 5 * 60_000 : Date.now();
     return out.filter((m) => Date.parse(m.at) <= before).sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
+  };
+  // What a send's wait waits on (sent:<step>): the review sent from that
+  // step, else the email sent from it, and when. Null for any other step.
+  const sentOut = (sub: Subtask): { what: string; at: string } | null => {
+    if (!sub.addedFor?.startsWith("sent:")) return null;
+    const names = sentReviews(sub).map((k) => reviews[k]?.title?.trim() || deliverableName(k));
+    const mail = waitedEmail(sub);
+    const at = sub.emailedAt ?? sub.startedAt ?? mail?.at ?? null;
+    const what = names.join(", ") || mail?.subject?.trim() || "";
+    return what && at ? { what, at } : null;
   };
   // A check in reads as what it waits for, "Carol's reply to: <the email's
   // subject>", not "Check in if Carol hasn't replied" (Derek, 2026-10-16).
@@ -4495,7 +4551,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           return r.off ? "off" : r.suggest ?? null;
         }}
         onCache={(s) => onPatchSub(sub.id, { aiSuggest: s })}
-        onUse={(s) => takeEmailSuggestion(sub.id, s)}
+        onUse={(s) => takeEmailSuggestion(sub.id, s, sender)}
         onSplit={(s) => splitEmailSuggestion(sub.id, s, sender)}
         onOpenTask={onOpenTask} />
     );
@@ -4526,14 +4582,25 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         }} />
     );
   };
-  // Use this: a new draft step right after the email's step, its page open.
-  const takeEmailSuggestion = (stepId: string, s: AiEmailSuggest) => {
-    const step = draftStepFrom(s, { makeId: () => newId("s_"), meId: meId ?? null, owner: stepOwnerFields() });
-    const list = insertAfter(taskRef.current.subtasks, stepId, step)
-      .map((x) => (x.id === stepId ? { ...x, aiSuggest: { ...s, usedStepId: step.id } } : x));
+  // Use this (one step at a time, Derek 2026-10-17): it fills the current
+  // step when that is the email's own reply step or still empty; otherwise it
+  // is kept for What's next, offered when the current step is done
+  // (lib/aiSteps suggestionTarget).
+  const takeEmailSuggestion = (stepId: string, s: AiEmailSuggest, sender: string) => {
+    const latest = taskRef.current.subtasks;
+    const on = suggestionTarget(latest, stepId);
+    if ("wait" in on) {
+      const cur = latest.find((x) => x.id === on.wait);
+      onPatch({ subtasks: latest.map((x) => (x.id === on.wait ? { ...x, aiNext: nextFromSuggestion(s, sender) } : x))
+        .map((x) => (x.id === stepId ? { ...x, aiSuggest: { ...s, savedOn: on.wait } } : x)) });
+      pushToast(`Saved for What's next. It comes up when "${cur?.title.trim() || "this step"}" is done.`);
+      return;
+    }
+    const list = latest.map((x) => (x.id === on.fill ? fillStepFrom(x, s, { makeId: () => newId("td_"), meId: meId ?? null }) : x))
+      .map((x) => (x.id === stepId ? { ...x, aiSuggest: { ...s, usedStepId: on.fill } } : x));
     onPatch({ subtasks: list });
-    pushToast(step.draftFor ? `Added "${step.title}" as a draft. It reaches ${step.draftFor === "client" ? firstName : firstOf2(step.draftFor)} when you press Give to.` : `Added "${step.title}"`);
-    setOpenStepPage({ taskId: task.id, id: step.id, full: openStepPage?.full ?? false });
+    const filled = list.find((x) => x.id === on.fill);
+    pushToast(filled?.draftFor ? `"${filled.title}" is a draft now. It reaches ${filled.draftFor === "client" ? firstName : firstOf2(filled.draftFor)} when you press Give to.` : `Filled in "${filled?.title ?? "the step"}"`);
   };
   // Make N tasks in <list>: the list and its tasks, and links to them here.
   const splitEmailSuggestion = (stepId: string, s: AiEmailSuggest, sender: string) => {
