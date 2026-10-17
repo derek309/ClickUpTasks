@@ -813,7 +813,13 @@ export interface Project {
    *  how many business days out the next one is due. null is off;
    *  undefined means the database has no queue column yet
    *  (supabase/task-queues.sql), so the switch is not offered. */
-  queue?: { now: number; spacing: number } | null;
+  queue?: { now: number; spacing: number; pull?: number } | null;
+  /** What kind of list it is (mcp/listKinds.mjs, Derek 2026-10-17): null is
+   *  holds work, as every list was before; finishes or repeats with their
+   *  settings. Undefined means the database has no plan column yet
+   *  (supabase/list-kinds.sql), so the kinds are not offered. Read it through
+   *  listPlan. */
+  plan?: import("../../mcp/listKinds.mjs").ListPlan | null;
 }
 
 export interface Label {

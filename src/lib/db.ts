@@ -3,6 +3,7 @@
 
 import { supabase, authedFetch } from "./supabase";
 import { htmlToText, isLongTitle, longStepsNamed } from "./data";
+import { listPlan } from "../../mcp/listKinds.mjs";
 import { queueSettings } from "../../mcp/queue.mjs";
 import { noteTaskWrite } from "./localTaskWrites";
 import { sumStoredVideo } from "./videoStorage";
@@ -74,9 +75,12 @@ const projectToRow = (p: Project) => ({ id: p.id, client_id: p.clientId, name: p
   // As with a task's: only once set, so a save never names a column the SQL hasn't added.
   ...(p.hiddenFromClient !== undefined ? { hidden_from_client: p.hiddenFromClient } : {}),
   // The queue only once the column exists (supabase/task-queues.sql).
-  ...(p.queue !== undefined ? { queue: p.queue } : {}) });
+  ...(p.queue !== undefined ? { queue: p.queue } : {}),
+  // The list's kind the same way (supabase/list-kinds.sql); holds work is null.
+  ...(p.plan !== undefined ? { plan: p.plan && p.plan.kind !== "holds" ? p.plan : null } : {}) });
 const rowToProject = (r: any): Project => ({ id: r.id, clientId: r.client_id, name: r.name, description: r.description ?? "", assignedTo: r.assigned_to ?? [], folderId: r.folder_id ?? null, position: r.position ?? 0, shareToken: r.share_token ?? null, hiddenFromClient: r.hidden_from_client ?? undefined,
-  ...("queue" in r ? { queue: queueSettings(r.queue) } : {}) });
+  ...("queue" in r ? { queue: queueSettings(r.queue) } : {}),
+  ...("plan" in r ? { plan: r.plan ? listPlan(r.plan) : null } : {}) });
 const folderToRow = (f: Folder) => ({ id: f.id, client_id: f.clientId, name: f.name, position: f.position, created_at: f.createdAt });
 const rowToFolder = (r: any): Folder => ({ id: r.id, clientId: r.client_id, name: r.name, position: r.position ?? 0, createdAt: r.created_at });
 const stageToRow = (s: Stage) => ({ id: s.id, project_id: s.projectId, name: s.name, position: s.position, is_done: s.isDone, created_at: s.createdAt });

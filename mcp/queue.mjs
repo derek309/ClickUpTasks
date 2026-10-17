@@ -28,14 +28,18 @@
 //                  yours, not Claude's): the same rule as the step's colour on
 //                  the task page (TaskDrawer stepTone).
 
-/** @typedef {{ now: number; spacing: number }} QueueSettings */
-/** @typedef {{ id?: string; title?: string; done?: boolean; fromClient?: boolean; assigneeId?: string | null; stage?: string; onClient?: boolean; finishWhen?: string }} QStep */
+/** @typedef {{ now: number; spacing: number; pull?: number }} QueueSettings */
+/** @typedef {{ id?: string; title?: string; done?: boolean; fromClient?: boolean; assigneeId?: string | null; stage?: string; onClient?: boolean; finishWhen?: string; due?: string | null }} QStep */
 /** @typedef {{ id: string; title: string; status: string; due: string | null; deadline?: boolean; queuePos?: number | null; queueSavedDue?: string | null; createdAt: string; priority?: string; assigneeId?: string | null; waitingOnClient?: boolean; subtasks?: QStep[] }} QTask */
 /** @typedef {{ id: string; queuePos?: number | null; due?: string | null; queueSavedDue?: string | null }} QPatch */
 
 export const CLAUDE_ID = "u_claude";
 export const POS_STEP = 1000;
 export const DEFAULT_QUEUE = Object.freeze({ now: 1, spacing: 3 });
+/** A list that finishes (mcp/listKinds.mjs, Derek 2026-10-17): an Up next task
+ *  comes up to Now on its own this many days before it is needed. Kept in the
+ *  queue setting as `pull`, so every reader of the line agrees on it. */
+export const PULL_DAYS = 21;
 
 /** The list's queue setting, or null when it is off (projects.queue null, or
  *  a database the queue SQL has not reached). Out of range numbers are
@@ -45,7 +49,10 @@ export function queueSettings(raw) {
   if (!raw || typeof raw !== "object") return null;
   const r = /** @type {Record<string, unknown>} */ (raw);
   const int = (v, d, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-  return { now: int(r.now, DEFAULT_QUEUE.now, 1, 10), spacing: int(r.spacing, DEFAULT_QUEUE.spacing, 0, 30) };
+  const out = { now: int(r.now, DEFAULT_QUEUE.now, 1, 10), spacing: int(r.spacing, DEFAULT_QUEUE.spacing, 0, 30) };
+  // Only when set: a queue without it reads exactly as before.
+  const pull = int(r.pull, 0, 0, 90);
+  return pull > 0 ? { ...out, pull } : out;
 }
 
 // --- dates (copies of data.ts's, so the MCP needs no app import) -------------
@@ -68,6 +75,10 @@ export function addBusinessDaysIso(iso, days) {
     if (dow !== 0 && dow !== 6) left--;
   }
   return out;
+}
+/** @param {string} a @param {string} b whole days from a to b */
+function daysBetween(a, b) {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 /** Today in the team's timezone, for server code (the server clock is UTC). */
 export function pacificToday() {
@@ -142,11 +153,32 @@ export function entryIndex(line, settings, priority) {
   return at;
 }
 
-/** @template {QTask} T @param {T[]} line @param {QueueSettings} settings @returns {{ now: T[]; waiting: T[]; upNext: T[] }} */
-function splitLine(line, settings) {
+/** When it is needed: its deadline (the only due date a task in line keeps)
+ *  or its client's step's due, whichever comes first. The date a finishing
+ *  list brings it up to Now ahead of (settings.pull). A plain due date is not
+ *  one: it is the date the queue gave it.
+ *  @param {QTask} t @returns {string | null} */
+export function needsBy(t) {
+  const dates = [t.deadline ? t.due ?? null : null, ...(t.subtasks ?? []).filter((s) => s.onClient && !s.done && !s.fromClient).map((s) => s.due ?? null)]
+    .filter((d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d));
+  return dates.length ? /** @type {string} */ (dates.sort()[0]) : null;
+}
+
+/** Pulled up to Now: not started yet, and needed within settings.pull days.
+ *  @param {QTask} t @param {QueueSettings} settings @param {string} today */
+function isPulled(t, settings, today) {
+  if (!settings.pull) return false;
+  const by = needsBy(t);
+  return !!by && daysBetween(today, by) <= settings.pull;
+}
+
+/** @template {QTask} T @param {T[]} line @param {QueueSettings} settings @param {string} [today] @returns {{ now: T[]; waiting: T[]; upNext: T[] }} */
+function splitLine(line, settings, today) {
   const waiting = line.filter(isQueueWaiting);
   const free = line.filter((t) => !isQueueWaiting(t));
-  const now = free.filter(isStarted);
+  // A list without `pull` never reads the clock here.
+  const day = settings.pull ? today ?? pacificToday() : "";
+  const now = free.filter((t) => isStarted(t) || (settings.pull ? isPulled(t, settings, day) : false));
   for (const t of free) {
     if (now.length >= settings.now) break;
     if (!now.includes(t)) now.push(t);
@@ -165,11 +197,11 @@ export function ordinal(n) {
 
 /** The list as the queue shows it: Now, Waiting, Up next ("2nd", "3rd"...,
  *  counted after the Now tasks) and done, newest finished first.
- *  @template {QTask} T @param {T[]} tasks @param {QueueSettings} settings
+ *  @template {QTask} T @param {T[]} tasks @param {QueueSettings} settings @param {string} [today]
  *  @returns {{ now: T[]; waiting: T[]; done: T[]; upNext: { task: T; place: number; label: string }[] }} */
-export function groupQueue(tasks, settings) {
+export function groupQueue(tasks, settings, today) {
   const line = queueOrder(tasks, settings);
-  const { now, waiting, upNext } = splitLine(line, settings);
+  const { now, waiting, upNext } = splitLine(line, settings, today);
   const done = tasks.filter((t) => t.status === "done");
   return {
     now, waiting, done,
@@ -268,13 +300,17 @@ export function placesFor(ordered) {
  *  @param {QTask[]} tasks @param {QueueSettings} settings @param {string} today @returns {QPatch[]} */
 export function queuePromotions(tasks, settings, today) {
   const line = queueOrder(tasks, settings);
-  const { now } = splitLine(line, settings);
-  const due = addBusinessDaysIso(today, settings.spacing);
+  const { now } = splitLine(line, settings, today);
+  const spaced = addBusinessDaysIso(today, settings.spacing);
   // Tasks not placed yet are placed on the way (where they already show).
   /** @type {Map<string, QPatch>} */
   const out = new Map(placesFor(line).map((p) => [p.id, p]));
   for (const t of now) {
     if (isStarted(t) || t.deadline) continue;
+    // Pulled up for a date it is needed by: due no later than that (and not
+    // before today). A due date never sets a follow up.
+    const by = settings.pull ? needsBy(t) : null;
+    const due = by && by < spaced ? (by < today ? today : by) : spaced;
     out.set(t.id, { ...(out.get(t.id) ?? { id: t.id }), due, queueSavedDue: null });
   }
   return [...out.values()];
@@ -361,9 +397,10 @@ export function queueMove(tasks, settings, id, beforeId, today) {
   const unmoved = ordered.map((t) => (t.id === id ? { ...t, queuePos: null } : t));
   for (const p of placesFor(unmoved)) put(p);
   const placed = ordered.map((t) => ({ ...t, queuePos: out.get(t.id)?.queuePos ?? t.queuePos }));
-  const wasNow = new Set(splitLine(line, settings).now.map((t) => t.id));
+  const wasNow = new Set(splitLine(line, settings, today).now.map((t) => t.id));
   const free = placed.filter((t) => !isQueueWaiting(t));
-  const nowIds = new Set(free.slice(0, settings.now).map((t) => t.id));
+  // A task pulled up for the date it is needed by stays Now wherever it is dragged.
+  const nowIds = new Set([...free.slice(0, settings.now), ...(settings.pull ? free.filter((t) => isPulled(t, settings, today)) : [])].map((t) => t.id));
   const due = addBusinessDaysIso(today, settings.spacing);
   for (const t of free) {
     if (wasNow.has(t.id) && !nowIds.has(t.id) && !t.deadline && t.due) put({ id: t.id, due: null, queueSavedDue: t.due });
@@ -375,7 +412,7 @@ export function queueMove(tasks, settings, id, beforeId, today) {
 /** Moves `id` to the top of Up next ("Move it up" on a deadline warning).
  *  @param {QTask[]} tasks @param {QueueSettings} settings @param {string} id @param {string} today */
 export function queueMoveUp(tasks, settings, id, today) {
-  const { upNext } = groupQueue(tasks, settings);
+  const { upNext } = groupQueue(tasks, settings, today);
   const first = upNext.find((u) => u.task.id !== id)?.task ?? null;
   if (!first || upNext[0]?.task.id === id) return [];
   return queueMove(tasks, settings, id, first.id, today);
@@ -387,7 +424,7 @@ export function queueMoveUp(tasks, settings, id, today) {
  *  @param {QTask[]} tasks @param {QueueSettings} settings @param {string} today
  *  @returns {{ id: string; title: string; deadline: string; lands: string }[]} */
 export function deadlineWarnings(tasks, settings, today) {
-  const { now, upNext } = groupQueue(tasks, settings);
+  const { now, upNext } = groupQueue(tasks, settings, today);
   const slots = now.map((t) => (t.due && t.due > today ? t.due : today));
   while (slots.length < settings.now) slots.push(today);
   const out = [];

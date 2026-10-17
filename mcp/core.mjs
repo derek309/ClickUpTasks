@@ -9,6 +9,7 @@ import { z } from "zod";
 import { contactForMovedTask, listForMovedTask, clientMoveLine } from "./taskMove.mjs";
 import { parseThreadInput, messageText, replySubject } from "./inboxThread.mjs";
 import { QUEUE_TASK_COLS, entryIndex, groupQueue, isQueueWaiting, pacificToday, placesFor, promoteQueueStore, queueMove, queueOrder, queuePatchRow, queuePromotions, queueSettings, queueTaskFromRow } from "./queue.mjs";
+import { listPlan, planLine } from "./listKinds.mjs";
 
 // Must stay in step with TaskStatus in src/lib/data.ts — a status missing here
 // is one Claude can neither read back nor set, and the app shows plenty of them.
@@ -30,6 +31,8 @@ Queues: a list can be a queue (list_client_tasks and get_task say so).
 - Never give an Up next task a due date; it gets one when it comes up to Now. Finishing or handing off a Now task brings the next one up (set_task_status and check_item do this).
 - A new task in a queue list joins the line by its priority (create_task; place overrides). The order is the team's working order and changes with priorities: anyone may move tasks (move_in_queue). Moving someone else's task tells them, with your reason.
 - Needs you means only two things: the client wrote, or Claude finished its step. So tick your step when it is done; that is what puts it in front of the person.
+
+Kinds of list (list_projects says which): holds work (loose tasks), finishes (a job with an end date; done when every task is done; on a queue, an Up next task comes up to Now 3 weeks before it is needed) or repeats (a recipe of steps on a rhythm; each round is one task the app makes, named "<list>: <month or date>", so never make a round yourself). create_task with list_name and list_kind makes a new list of that kind.
 
 When you WORK on a task (not when you only read or look one up), keep the task current so the team can look back and see what Claude did:
 1. When you start: set_task_status to "in_progress" (unless it already is), and add_comment one short note: "Started: <what you're about to do, in a sentence or two>".
@@ -331,6 +334,22 @@ export function createServer(opts = {}) {
       ...g.waiting.map((t) => row(t, "Waiting")),
       ...g.upNext.map((u) => row(u.task, `Up next · ${u.label}`)),
     ].join("\n") || "(nothing open)";
+  }
+
+  // A list's kind, end date or rhythm, and progress (mcp/listKinds.mjs), one
+  // line each, for list_projects and get_client_overview. Lists that only
+  // hold work need no task read. select=* so a database without
+  // projects.plan (supabase/list-kinds.sql) reads every list as holds work.
+  async function planLines(projects) {
+    const planned = projects.filter((p) => listPlan(p.plan).kind !== "holds");
+    const tasksBy = new Map();
+    if (planned.length) {
+      const ids = planned.map((p) => `"${String(p.id).replace(/"/g, "")}"`).join(",");
+      const rows = await sb(`tasks?select=id,project_id,client_id,is_private,assignee_id,status,due,deadline,subtasks&project_id=in.(${enc(ids)})${LIVE}`).catch(() => []);
+      for (const t of rows || []) tasksBy.set(t.project_id, [...(tasksBy.get(t.project_id) || []), t]);
+    }
+    const today = pacificToday();
+    return new Map(projects.map((p) => [p.id, listPlan(p.plan).kind === "holds" ? null : planLine(p.plan, (tasksBy.get(p.id) || []).filter(maySee), p.id, today)]));
   }
 
   // Push a status change to GoHighLevel for a GHL-linked task (best-effort).
@@ -649,6 +668,9 @@ export function createServer(opts = {}) {
     {
       client_id: z.string(),
       project_id: z.string().optional().describe("omit to use (or create) the client's default \"Tasks\" list"),
+      list_name: z.string().optional().describe("instead of project_id: put it on the client's list with this name, made if there is none"),
+      list_kind: z.enum(["holds", "finishes", "repeats"]).optional().describe("with list_name, for a new list: holds work (the default), finishes (a job with an end), or repeats (set its rhythm and recipe in the app)"),
+      list_ends_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("with list_kind finishes: the whole job's end date, yyyy-mm-dd"),
       title: z.string().min(1),
       description: z.string().optional().describe("what the task needs: written to step 1's directions (step 1 is made, named for the task), not a task description. Plain text with a little markdown"),
       due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("yyyy-mm-dd; defaults to tomorrow. On a queue list it is not used unless deadline is true (it is kept for when the queue is turned off)"),
@@ -658,12 +680,36 @@ export function createServer(opts = {}) {
       assignee_id: z.string().optional().describe("roster member id (get one from list_members), or \"me\" for yourself; defaults to unassigned"),
       waiting_on_client: z.boolean().optional().describe("mark this task as waiting on the client instead of assigned to a teammate; mutually exclusive with assignee_id (forces it unassigned)"),
     },
-    async ({ client_id, project_id, title, description, due, deadline, place, priority, assignee_id, waiting_on_client }) => {
+    async ({ client_id, project_id, list_name, list_kind, list_ends_on, title, description, due, deadline, place, priority, assignee_id, waiting_on_client }) => {
       if (deadline && !due) return { content: [{ type: "text", text: "A deadline needs its date: pass due (yyyy-mm-dd) with deadline: true." }] };
+      if (project_id && list_name) return { content: [{ type: "text", text: "Pass project_id or list_name, not both." }] };
       await names();
       if (!clientNames[client_id]) await names(true);
       if (!clientNames[client_id]) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
       let pid = project_id;
+      let listNote = "";
+      if (!pid && list_name?.trim()) {
+        // The client's list of that name, or a new one of the kind asked for
+        // (mcp/listKinds.mjs). Before supabase/list-kinds.sql the list is made
+        // without its kind, and says so.
+        const name = list_name.trim();
+        const found = (await sb(`projects?select=id,name&client_id=eq.${enc(client_id)}&deleted_at=is.null`)).find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+        if (found) pid = found.id;
+        else {
+          pid = rid("p_");
+          const kind = list_kind ?? "holds";
+          const plan = kind === "finishes" ? { kind, endsOn: list_ends_on ?? null } : kind === "repeats" ? { kind, owner: ME } : null;
+          try {
+            await sb("projects", "POST", { id: pid, client_id, name, description: "", ...(plan ? { plan } : {}) });
+            listNote = ` Made the list "${name}" (${kind === "holds" ? "holds work" : kind}${plan?.endsOn ? `, finishes ${plan.endsOn}` : ""}${kind === "repeats" ? "; set its rhythm and recipe in the app" : ""}).`;
+          } catch (e) {
+            if (!plan) throw e;
+            await sb("projects", "POST", { id: pid, client_id, name, description: "" });
+            listNote = ` Made the list "${name}" as holds work: list kinds need supabase/list-kinds.sql run first.`;
+          }
+          projectNames[pid] = name;
+        }
+      }
       if (pid && !projectNames[pid]) await names(true);
       if (pid && !projectNames[pid]) return { content: [{ type: "text", text: `No project ${pid}.` }] };
       if (!pid) {
@@ -737,7 +783,7 @@ export function createServer(opts = {}) {
         const spot = fresh ? queueSpot(fresh, t.id) : null;
         queued = ` On the queue ${projectNames[pid] || pid}: ${spot ?? "in line"}${t.due ? "" : ", no due date until it comes up to Now"}.`;
       }
-      return { content: [{ type: "text", text: `Created ${t.id}: "${tidied?.ok ? tidied.title : t.title}" in ${clientNames[client_id]} · due ${t.due ?? "none"}${deadline ? " (deadline)" : ""} · priority ${t.priority} · assignee: ${assigneeLabel}.${queued}${onStep}${renamed}` }] };
+      return { content: [{ type: "text", text: `Created ${t.id}: "${tidied?.ok ? tidied.title : t.title}" in ${clientNames[client_id]} · due ${t.due ?? "none"}${deadline ? " (deadline)" : ""} · priority ${t.priority} · assignee: ${assigneeLabel}.${listNote}${queued}${onStep}${renamed}` }] };
     });
 
   server.tool("update_task",
@@ -2156,14 +2202,16 @@ export function createServer(opts = {}) {
     });
 
   server.tool("list_projects",
-    "List projects (lists) and the id of the client each belongs to, so you can filter list_notes/add_note by project.",
+    "List projects (lists) and the id of the client each belongs to, so you can filter list_notes/add_note by project. Each says its kind: holds work (loose tasks), finishes (an end date and progress) or repeats (a rhythm and a recipe; each round is one task).",
     { client: z.string().optional().describe("filter by client name (substring, case-insensitive)") },
     async ({ client }) => {
       await names();
-      let rows = await sb("projects?select=id,name,client_id&deleted_at=is.null&order=name");
+      let rows = await sb("projects?select=*&deleted_at=is.null&order=name");
       if (client) { const cl = client.toLowerCase(); rows = rows.filter((p) => (clientNames[p.client_id] || "").toLowerCase().includes(cl)); }
+      rows = rows.filter((p) => clientOk(p.client_id));
       if (!rows.length) return { content: [{ type: "text", text: "No matching projects." }] };
-      return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}`).join("\n") }] };
+      const lines = await planLines(rows);
+      return { content: [{ type: "text", text: rows.map((p) => `${p.name}  [${p.id}]  · ${clientNames[p.client_id] || p.client_id}${lines.get(p.id) ? `  · ${lines.get(p.id)}` : ""}`).join("\n") }] };
     });
 
   server.tool("list_notes",
@@ -2234,14 +2282,17 @@ export function createServer(opts = {}) {
     async ({ client_id }) => {
       const [client] = await sb(`clients?select=name,status,ai_summary,ai_summary_at&id=eq.${enc(client_id)}&deleted_at=is.null`);
       if (!client) return { content: [{ type: "text", text: `No client ${client_id}.` }] };
-      const [notes, links, openTasks] = await Promise.all([
+      const [notes, links, openTasks, lists] = await Promise.all([
         sb(`client_notes?select=type,body,created_at&client_id=eq.${enc(client_id)}&project_id=is.null&order=created_at.desc&limit=8`),
         sb(`client_links?select=label,url,group_label&client_id=eq.${enc(client_id)}&order=position.asc`),
-        sb(`tasks?select=id,is_private,assignee_id&client_id=eq.${enc(client_id)}&status=neq.done${LIVE}`),
+        sb(`tasks?select=id,is_private,assignee_id,project_id&client_id=eq.${enc(client_id)}&status=neq.done${LIVE}`),
+        sb(`projects?select=*&client_id=eq.${enc(client_id)}&deleted_at=is.null&order=name`).catch(() => []),
       ]);
       const open = openTasks.filter(maySee);
+      const lines = await planLines(lists || []);
       const text = [
         `${client.name} — status: ${client.status ?? "unknown"} · ${open.length} open task(s)`,
+        (lists || []).length ? `\nLists:\n${lists.map((p) => `  - ${p.name} [${p.id}]: ${lines.get(p.id) ?? `holds work · ${open.filter((t) => t.project_id === p.id).length} open`}`).join("\n")}` : "",
         client.ai_summary ? `\nAI summary (as of ${client.ai_summary_at || "?"}):\n${client.ai_summary}` : "",
         links.length ? `\nLinks:\n${links.map((l) => `  - ${l.group_label ? `[${l.group_label}] ` : ""}${l.label}: ${l.url}`).join("\n")}` : "",
         notes.length ? `\nRecent journal notes (newest first):\n${notes.map((n) => `  - [${n.type}] ${(n.body || "").slice(0, 300)} (${n.created_at})`).join("\n")}` : "",

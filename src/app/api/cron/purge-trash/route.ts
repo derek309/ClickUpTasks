@@ -3,6 +3,7 @@ import { adminConfigured } from "@/lib/supabaseAdmin";
 import { authorizeCron } from "@/lib/cronAuth";
 import { purgeExpiredTrash, purgeOldUnmatched } from "@/lib/trashCleanupServer";
 import { purgeOldMentionThreads } from "@/lib/mentionReply";
+import { runListKindsDaily } from "@/lib/listKindsServer";
 
 // Daily sweep — permanently deletes clients/projects/tasks past their
 // 30-day Trash window (see supabase/soft-delete.sql). Same cron auth as the
@@ -12,6 +13,11 @@ import { purgeOldMentionThreads } from "@/lib/mentionReply";
 // are only worth keeping while a reply might still arrive
 // (supabase/mention-email-threads.sql), and unmatched emails and meeting notes
 // older than 90 days.
+//
+// And a list's kind (mcp/listKinds.mjs, 2026-10-17): a repeating list's next
+// round when one is due, and the Now check on a finishing list's queue, so an
+// Up next task needed within 3 weeks comes up on its own. It never fails the
+// sweep.
 
 export const maxDuration = 60;
 
@@ -29,5 +35,6 @@ async function run(req: NextRequest) {
   const result = await purgeExpiredTrash();
   const mentionThreads = await purgeOldMentionThreads();
   const unmatched = await purgeOldUnmatched();
-  return NextResponse.json({ ok: true, ...result, mentionThreads, unmatched });
+  const lists = await runListKindsDaily().catch((e) => ({ rounds: 0, pulled: 0, skipped: String(e?.message ?? e) }));
+  return NextResponse.json({ ok: true, ...result, mentionThreads, unmatched, lists });
 }
