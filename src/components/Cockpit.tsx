@@ -4,7 +4,7 @@ import { addBusinessDaysIso, addReplyStep, clientEmailText, needsYou, needsYouCl
 import { emailMessageKey } from "@/lib/emailFiles";
 import { STEP_TOOLS, currentStepLine } from "@/lib/claudeBrief";
 import { isClientWait } from "@/lib/afterThis";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   users,
   setUsers,
@@ -392,6 +392,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   // the view changes, not in an effect.
   const [mailDir, setMailDir] = useState(dirView);
   if (mailDir !== dirView) { setMailDir(dirView); if (dirView !== "inbox" && mailThread) setMailThread(null); }
+  // On a phone the page scrolls as one, top bar and all (Derek, 2026-10-16:
+  // "Let's not do sticky headers please"), so a view opened after scrolling
+  // down another would open part way down: each new view starts at its top.
+  // A layout effect, so it runs before a conversation's own "to the newest"
+  // effect. On a computer the window never scrolls and this does nothing.
+  const pageViewKey = [dirView, inboxView, dmUserId, mailThread, settingsView, myWork, personalView, activeClient, activeProject, clientTab].join("|");
+  useLayoutEffect(() => { window.scrollTo(0, 0); }, [pageViewKey]);
   // Shared, admin-controlled — "we don't need DMs for now... make it so we
   // can turn it on and off in case we want it later" (Derek). Off by
   // default; see supabase/app-settings.sql. Fails soft to false (DMs hidden)
@@ -2901,7 +2908,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
     // relative and max-w-full, so one too wide child can't widen the page on
     // a phone and push the header's icons off the right edge (2026-10-16): a
     // box positioned against the page itself is clipped here too.
-    <div className="safe-x safe-y relative flex h-screen w-full max-w-full overflow-hidden text-[15px]" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
+    // On a phone (below sm) it is not a screen tall box: it grows with its
+    // content and the page itself scrolls, so the top bar and each view's own
+    // header rows scroll away with it (Derek, 2026-10-16: never a sticky
+    // header). min-h-dvh, not 100vh, so the address bar can't make it jump.
+    <div className="safe-x safe-y relative flex min-h-dvh w-full max-w-full overflow-x-clip text-[15px] sm:h-screen sm:min-h-0 sm:overflow-hidden" style={{ "--drawer-left": sidebarHidden ? "0px" : `${sidebarPx}px` } as React.CSSProperties}>
       {/* mobile backdrop */}
       {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -3115,7 +3126,11 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
           list tabs): in this scrolling column a long list squeezed them to a
           sliver on phones (Derek, 2026-10-02). Views that scroll inside
           themselves are flex-1 and keep shrinking. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-background [&>:not(.flex-1)]:shrink-0">
+      {/* On a phone it scrolls nothing itself (overflow-x clip keeps y
+          visible): the page does, and the boxes below that scroll inside
+          themselves on a computer (Inbox, Calendar, Reminders) have no
+          height to stop at, so they grow and go with it. */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-x-clip bg-background sm:overflow-y-auto sm:overflow-x-hidden [&>:not(.flex-1)]:shrink-0">
         {/* Mobile header (Option A) — compact title bar + full-width segmented
             tabs. Reuses the shared bell/filter/overflow controls. The full
             desktop header below is hidden on phones. */}

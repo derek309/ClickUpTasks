@@ -7,6 +7,7 @@ import { authedFetch } from "@/lib/supabase";
 import { users, userById, labelById, linkSpans, ghlConfirmState, type Attachment, type TaskStatus, type Priority, type Message } from "@/lib/data";
 import { shortLinkLabel } from "@/lib/linkify";
 import { isPlainLeftClick } from "@/lib/navState";
+import { scrollToEnd } from "@/lib/pageScroll";
 
 // --- tiny inline icons ------------------------------------------------------
 
@@ -357,7 +358,8 @@ export function useStickyBottom<T extends HTMLElement>() {
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const el = ref.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    // The page on a phone, where this box grows instead of scrolling (2026-10-16).
+    scrollToEnd(el, behavior);
     atBottomRef.current = true;
     setAtBottom(true);
   };

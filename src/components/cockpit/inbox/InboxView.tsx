@@ -35,6 +35,7 @@ import { FromNote, FromNumberLine, fromKey, fromPick } from "../FromNumber";
 import { readsAsApproval, reviewToApprove } from "@/lib/approvalWords";
 import { kindQuery } from "@/lib/reviewKinds";
 import { fetchTaskDocument } from "@/lib/db";
+import { keepBottomTop, scrollToEnd, scrollerFor } from "@/lib/pageScroll";
 
 type Inbox = ReturnType<typeof useInbox>;
 type Member = { id: string; name: string };
@@ -814,7 +815,8 @@ function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive
   const [shown, setShown] = useState(CHAT_PAGE);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Show earlier keeps your place: the height added above is scrolled past.
-  const keepFrom = useRef<number | null>(null);
+  // Whichever scrolls, the box (a computer) or the page (a phone, 2026-10-16).
+  const keepFrom = useRef<{ s: HTMLElement; scrollHeight: number; scrollTop: number } | null>(null);
   const oldestFirst = useMemo(() => [...t.messages].reverse(), [t.messages]);
   const visible = useMemo(() => oldestFirst.slice(-shown), [oldestFirst, shown]);
   const hidden = oldestFirst.length - visible.length;
@@ -825,13 +827,24 @@ function ChatView({ p, t, typing, onDraft, onClaudeDone, emailInstead, onArchive
   // Which number each of our texts went from, and where that changed.
   const fromNotes = useMemo(() => fromNumberNotes(oldestFirst), [oldestFirst]);
   const newest = t.messages[0]?.id;
+  // Opens at the newest. On a phone the page scrolls, not this box, so it is
+  // the page that goes to the end; in an effect, after the shell has put a
+  // newly opened view back at its top (Cockpit's layout effect).
   useLayoutEffect(() => {
+    const k = keepFrom.current;
+    if (k) { k.s.scrollTop = keepBottomTop(k, k.s.scrollHeight); keepFrom.current = null; return; }
     const el = scrollRef.current;
-    if (!el) return;
-    if (keepFrom.current !== null) { el.scrollTop = el.scrollHeight - keepFrom.current; keepFrom.current = null; return; }
-    el.scrollTop = el.scrollHeight;
+    if (el && scrollerFor(el) === el) el.scrollTop = el.scrollHeight;
   }, [t.key, newest, shown]);
-  const showEarlier = () => { keepFrom.current = scrollRef.current?.scrollHeight ?? null; setShown((n) => n + CHAT_PAGE * 2); };
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && scrollerFor(el) !== el && !keepFrom.current) scrollToEnd(el);
+  }, [t.key, newest]);
+  const showEarlier = () => {
+    const el = scrollRef.current;
+    if (el) { const s = scrollerFor(el); keepFrom.current = { s, scrollHeight: s.scrollHeight, scrollTop: s.scrollTop }; }
+    setShown((n) => n + CHAT_PAGE * 2);
+  };
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="flex items-center gap-3 border-b px-4 py-3 sm:px-6">
