@@ -12,6 +12,7 @@ import { I, LinkedText } from "./ui";
 import { ActionMenu } from "./ActionMenu";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { shortcut } from "@/lib/platform";
+import { displayFileName } from "@/lib/attachFiles";
 
 export const quietButton = "rounded-[5px] border bg-surface px-3 py-1.5 text-[16px] font-medium text-muted transition hover:bg-background hover:text-foreground disabled:opacity-50";
 
@@ -848,10 +849,10 @@ export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
   const step = (delta: number) => (e: React.MouseEvent) => { e.stopPropagation(); onIndex((index + delta + images.length) % images.length); };
   const control = "rounded-[5px] border border-white/40 px-3 py-1.5 text-[16px] font-medium text-white hover:bg-white/10";
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label={img.name} onClick={onClose} className="fixed inset-0 z-[110] flex flex-col bg-black/85">
+    <div role="dialog" aria-modal="true" aria-label={displayFileName(img.name)} onClick={onClose} className="fixed inset-0 z-[110] flex flex-col bg-black/85">
       <div onClick={(e) => e.stopPropagation()} className="flex flex-wrap items-center gap-3 px-4 py-3">
         <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white max-sm:basis-full">
-          {img.name}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
+          {displayFileName(img.name)}{images.length > 1 ? ` · ${index + 1} of ${images.length}` : ""}
         </span>
         {onDownload
           ? <button onClick={() => onDownload(img)} className="rounded-[5px] bg-white px-3 py-1.5 text-[16px] font-semibold text-black hover:bg-white/90">⬇ Download</button>
@@ -863,7 +864,7 @@ export function ImageLightbox({ images, index, onIndex, onClose, onDownload }: {
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-6">
         {images.length > 1 && <button onClick={step(-1)} aria-label="Previous image" className="absolute left-3 rounded-[5px] bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">‹</button>}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={img.url} alt={img.name} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-[5px] object-contain shadow-2xl" />
+        <img src={img.url} alt={displayFileName(img.name)} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-[5px] object-contain shadow-2xl" />
         {images.length > 1 && <button onClick={step(1)} aria-label="Next image" className="absolute right-3 rounded-[5px] bg-white/15 px-4 py-2 text-[28px] text-white hover:bg-white/25">›</button>}
       </div>
     </div>,

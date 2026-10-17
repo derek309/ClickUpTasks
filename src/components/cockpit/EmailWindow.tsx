@@ -12,13 +12,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   htmlToText, looksLikeHtml, plainTextToHtml, timeAgo, addDaysIso, formatDayDate, TODAY,
   type Attachment, type Contact, type EmailDraft, type Message, type ScheduledMessage,
-  linkDisplayName,
 } from "@/lib/data";
 import { authedFetch } from "@/lib/supabase";
 import { safeMessageHtml } from "@/lib/safeHtml";
-import { MAX_SHARED_FILE_BYTES, isPreviewableImage, isShareableFileName } from "@/lib/uploadTypes";
-import { signedUrlForFile } from "@/lib/db";
-import { placeDraftLink, draftLinkAsButton, escapeHtml } from "@/lib/draftLink";
+import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "@/lib/uploadTypes";
+import { attachCopy, canShowPicture, displayFileName } from "@/lib/attachFiles";
+import { placeDraftLink, draftLinkAsButton } from "@/lib/draftLink";
 import { emailWindowTitle, recipientName } from "@/lib/emailHeader";
 import { RichTextEditor } from "./RichTextEditor";
 import { BookingLinkMenu } from "./BookingLinkMenu";
@@ -29,6 +28,7 @@ import {
   quietButton as quiet, type PreviewImage,
 } from "./TaskWorkItem";
 import { newId } from "./ui";
+import { EmailAttachments, useFileThumbs } from "./EmailAttachments";
 
 /** replyTo: messages.id this answers, so the send routes thread it as a reply. */
 export type OutgoingEmail = { subject: string; body: string; attachments: Attachment[]; cc: string[]; bcc: string[]; replyTo: string | null;
@@ -189,8 +189,7 @@ export function EmailWindow({
   const [editorNonce, setEditorNonce] = useState(0);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
-  // Signed links for image thumbnails, by storage path, and the open preview.
-  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  // The open full size preview.
   const [lightbox, setLightbox] = useState<number | null>(null);
   // The kept draft as of the last render, for saves and AI results that land after it changed.
   const draftRef = useRef(draft);
@@ -290,16 +289,7 @@ export function EmailWindow({
   };
 
   // The attached pictures and the task's own, for their thumbnails.
-  const imagePaths = [...new Set([...attachments, ...(taskItems ?? [])].filter((a) => a.path && isPreviewableImage(a.name)).map((a) => a.path!))].join("|");
-  useEffect(() => {
-    const missing = imagePaths ? imagePaths.split("|").filter((p) => !thumbs[p]) : [];
-    if (!missing.length) return;
-    let cancelled = false;
-    void Promise.all(missing.map(async (p) => [p, await signedUrlForFile(p, 3600)] as const)).then((pairs) => {
-      if (!cancelled) setThumbs((t) => ({ ...t, ...Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => !!pair[1])) }));
-    });
-    return () => { cancelled = true; };
-  }, [imagePaths]); // eslint-disable-line react-hooks/exhaustive-deps
+  const thumbs = useFileThumbs([...attachments, ...(taskItems ?? [])]);
 
   const setSubject = (next: string) => { setSubjectState(next); keep({ subject: next }); };
   const setAttachments = (next: Attachment[]) => { setAttachmentsState(next); keep({ attachments: next }); };
@@ -320,24 +310,14 @@ export function EmailWindow({
     setAttachments(next);
   };
 
-  // Something already on the task: a stored file goes in as an attachment (the
-  // send route takes files kept under the task), a saved link goes at the end of
-  // the email as a link.
-  const taskFiles = (taskItems ?? []).filter((a) => a.path && !isPreviewableImage(a.name) && !attachments.some((x) => x.path === a.path));
-  // The task's pictures stay in the list, ticked once attached; a tap
-  // attaches or takes it off again (Derek, 2026-10-14).
-  const taskPics = (taskItems ?? []).filter((a) => a.path && isPreviewableImage(a.name));
-  const togglePic = (a: Attachment) => {
+  // A stored file on the task goes in as an attachment (the send route takes
+  // files kept under the task), under its readable name. It stays in the
+  // task's list, ticked once attached; a second tap takes it off (Derek,
+  // 2026-10-14). Links are never offered (Derek, 2026-10-17).
+  const toggleFromTask = (a: Attachment) => {
+    if (!a.path) return;
     const on = attachments.find((x) => x.path === a.path);
-    setAttachments(on ? attachments.filter((x) => x.id !== on.id) : [...attachments, { ...a, id: newId("a_") }]);
-  };
-  const taskLinks = (taskItems ?? []).filter((a) => a.kind === "link" && a.url);
-  const addFromTask = (a: Attachment) => {
-    if (a.path) { setAttachments([...attachments, { ...a, id: newId("a_") }]); return; }
-    if (!a.url) return;
-    keep({ body: `${currentBody()}<p><a href="${escapeHtml(a.url)}">${escapeHtml(a.name || a.url)}</a></p>` });
-    commit.flush();
-    setEditorNonce((n) => n + 1);
+    setAttachments(on ? attachments.filter((x) => x.path !== a.path) : [...attachments, attachCopy(a, newId("a_"))]);
   };
 
   const outgoing = (): OutgoingEmail | null => {
@@ -394,10 +374,10 @@ export function EmailWindow({
   };
 
   const count = attachments.length;
-  // The viewer shows the attached pictures, then the task's not attached.
-  const previewImages: PreviewImage[] = [...attachments, ...taskPics.filter((a) => !attachments.some((x) => x.path === a.path))]
-    .filter((a) => a.path && isPreviewableImage(a.name) && thumbs[a.path])
-    .map((a) => ({ id: a.id, name: a.name, url: thumbs[a.path!] }));
+  // The viewer shows the attached pictures.
+  const previewImages: PreviewImage[] = attachments
+    .filter((a) => canShowPicture(a) && thumbs[a.path!])
+    .map((a) => ({ id: a.id, name: displayFileName(a.name), url: thumbs[a.path!] }));
   const openPic = (a: Attachment) => { const i = previewImages.findIndex((x) => x.url === thumbs[a.path ?? ""]); if (i >= 0) setLightbox(i); };
   const saveLabel = saveState === "unsaved" ? "Unsaved changes" : saveState === "saved" ? "Draft saved" : `Edited ${timeAgo(draft.updatedAt ?? draft.createdAt)}`;
   const shownName = recipientName(toName);
@@ -500,67 +480,11 @@ export function EmailWindow({
                 2026-10-14): its files; Send with the follow up day; what
                 sending finishes; then the quiet controls. */}
             <div className="mt-4">
-              <FileDropLine label="Attachments" count={count} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
-                {count > 0 && (
-                  <ul className="mt-1.5 divide-y">
-                    {attachments.map((a) => (
-                      <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-[16px]">
-                        {/* An attached picture as itself; a tap shows it full size. */}
-                        {a.path && thumbs[a.path] && isPreviewableImage(a.name) && (
-                          <button onClick={() => openPic(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`} className="shrink-0">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={thumbs[a.path]} alt="" className="h-10 w-10 rounded-[5px] object-cover ring-1 ring-[var(--border)]" />
-                          </button>
-                        )}
-                        <span className="min-w-0 break-words font-medium">{a.name}</span>
-                        {a.size && <span className="text-muted">{a.size}</span>}
-                        <button onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))} className="ml-auto text-muted hover:text-danger hover:underline">Remove</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {(taskPics.length > 0 || taskFiles.length > 0 || taskLinks.length > 0) && (
-                  <div className="mt-2 flex flex-col gap-2 border-t pt-2 text-[16px]">
-                    <span className="text-muted">From this task:</span>
-                    {/* Pictures as small squares with their names; + to attach, ✓ attached. */}
-                    {taskPics.length > 0 && (
-                      <div className="flex flex-wrap gap-3">
-                        {taskPics.map((a) => {
-                          const on = attachments.some((x) => x.path === a.path);
-                          return (
-                            <div key={a.id} className="flex w-[72px] flex-col items-start gap-1">
-                              <div className="relative">
-                                <button onClick={() => togglePic(a)} aria-pressed={on} title={on ? `Attached. Tap to take ${a.name} off` : `Attach ${a.name}`}
-                                  className={`block h-14 w-14 overflow-hidden rounded-[5px] bg-background ring-inset ${on ? "ring-2 ring-accent" : "ring-1 ring-[var(--border)] hover:ring-accent"}`}>
-                                  {a.path && thumbs[a.path]
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    ? <img src={thumbs[a.path]} alt="" className="h-full w-full object-cover" />
-                                    : <span className="grid h-full w-full place-items-center text-muted">🖼️</span>}
-                                  <span aria-hidden className={`absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full text-[14px] font-bold shadow ${on ? "bg-accent text-white" : "bg-surface text-accent ring-1 ring-[var(--border)]"}`}>{on ? "✓" : "+"}</span>
-                                </button>
-                                {a.path && thumbs[a.path] && (
-                                  <button onClick={() => openPic(a)} title={`View ${a.name}`} aria-label={`View ${a.name}`}
-                                    className="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-surface text-[13px] shadow ring-1 ring-[var(--border)] hover:text-accent">🔍</button>
-                                )}
-                              </div>
-                              <span className="w-full truncate text-[16px]" title={a.name}>{a.name}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {(taskFiles.length > 0 || taskLinks.length > 0) && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {taskFiles.map((a) => (
-                          <button key={a.id} onClick={() => addFromTask(a)} title="Attach this file" className="rounded-[5px] border px-3 py-0.5 hover:border-accent hover:text-accent">+ {a.name}</button>
-                        ))}
-                        {taskLinks.map((a) => (
-                          <button key={a.id} onClick={() => addFromTask(a)} title="Add this link to the end of the email" className="rounded-[5px] border px-3 py-0.5 hover:border-accent hover:text-accent">🔗 {linkDisplayName(a) || a.url}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+              {/* What is attached, as pictures, then the task's files to add
+                  (Derek, 2026-10-17: "what's attached, what's not attached"). */}
+              <FileDropLine label={count ? `Attached · ${count}` : "Nothing attached yet"} count={0} busy={uploading} disabled={!onUpload} onFiles={(list) => void addFiles(list)}>
+                <EmailAttachments attached={attachments} taskItems={taskItems} thumbs={thumbs} onOpen={openPic}
+                  onRemove={(a) => setAttachments(attachments.filter((x) => x.id !== a.id))} onToggle={toggleFromTask} />
               </FileDropLine>
             </div>
             {/* One line (Derek, 2026-10-14): Send, the follow up day, Send later,

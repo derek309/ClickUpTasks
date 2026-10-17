@@ -7,6 +7,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { clientEmailText, looksLikeHtml, timeAgo, type Attachment, type Message, type ReceivedEmail } from "@/lib/data";
 import { isPicture } from "@/lib/pictures";
+import { displayFileName } from "@/lib/attachFiles";
 import { I, LinkedText } from "./ui";
 import { reviewTone } from "@/lib/reviewTone";
 import { safeMessageHtml } from "@/lib/safeHtml";
@@ -71,7 +72,7 @@ export function EmailPreview({ id, toName, toEmail, subject, body, attachments, 
         <div className={`${row} items-start border-b-0 border-t`}>
           <span className={label}>Files</span>
           <span className="flex min-w-0 flex-1 flex-col">
-            {attachments.map((a) => <span key={a.id} className="[overflow-wrap:anywhere]">{a.name}</span>)}
+            {attachments.map((a) => <span key={a.id} className="[overflow-wrap:anywhere]">{displayFileName(a.name)}</span>)}
           </span>
         </div>
       )}
@@ -212,13 +213,13 @@ export function EmailFiles({ files, urls, onOpenPicture, onOpenFile, small }: {
       {pics.length > 0 && (
         <div className={`flex flex-wrap items-start ${small ? "gap-2" : "gap-3"}`}>
           {pics.map((a) => (
-            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenPicture(a); }} title={`View ${a.name}`} aria-label={`View ${a.name}`}
+            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenPicture(a); }} title={`View ${displayFileName(a.name)}`} aria-label={`View ${displayFileName(a.name)}`}
               className={`group flex ${small ? "max-w-[124px]" : "max-w-[240px]"} min-w-0 flex-col items-start gap-1 text-left`}>
               <span className="block max-w-full overflow-hidden rounded-[5px] border bg-background group-hover:border-accent">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={urlOf(a)} alt={a.name} className={`block h-auto ${small ? "max-h-[88px]" : "max-h-[160px]"} w-auto max-w-full object-contain`} />
+                <img src={urlOf(a)} alt={displayFileName(a.name)} className={`block h-auto ${small ? "max-h-[88px]" : "max-h-[160px]"} w-auto max-w-full object-contain`} />
               </span>
-              <span className="block w-full truncate text-[16px] font-medium text-accent">{a.name}</span>
+              <span className="block w-full truncate text-[16px] font-medium text-accent">{displayFileName(a.name)}</span>
             </button>
           ))}
         </div>
@@ -226,10 +227,10 @@ export function EmailFiles({ files, urls, onOpenPicture, onOpenFile, small }: {
       {rest.length > 0 && (
         <div className="flex flex-wrap items-start gap-2">
           {rest.map((a) => (
-            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenFile(a); }} title={`Open ${a.name}`}
+            <button key={a.id} onClick={(e) => { e.stopPropagation(); onOpenFile(a); }} title={`Open ${displayFileName(a.name)}`}
               className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-[5px] border bg-background px-2.5 py-1 text-left text-[16px] hover:border-accent">
               <I.clip className="h-4 w-4 shrink-0 text-muted" />
-              <span className="min-w-0 truncate font-medium text-accent">{a.name}</span>
+              <span className="min-w-0 truncate font-medium text-accent">{displayFileName(a.name)}</span>
               {a.size && <span className="shrink-0 text-muted">{a.size}</span>}
             </button>
           ))}

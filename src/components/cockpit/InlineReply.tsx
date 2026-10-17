@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MAX_SHARED_FILE_BYTES, isShareableFileName } from "@/lib/uploadTypes";
 import { plainTextToHtml, type Attachment, type Contact } from "@/lib/data";
+import { EmailAttachments, useFileThumbs } from "./EmailAttachments";
 import { RichTextEditor } from "./RichTextEditor";
 import { RecipientField } from "./EmailWindow";
 import { I } from "./ui";
@@ -84,6 +85,7 @@ export function InlineReply({ toName, toEmail, draft, ccContacts, onSave, onSend
   // Closing the page right after typing still saves it.
   useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
   const atts = draft.attachments ?? [];
+  const thumbs = useFileThumbs(atts);
   const writeWithAi = async () => {
     if (!onAi || aiBusy) return;
     flush();
@@ -152,14 +154,12 @@ export function InlineReply({ toName, toEmail, draft, ccContacts, onSave, onSend
       <div className="px-1 py-1 text-[16px]">
         <RichTextEditor key={`b${nonce}`} variant="email" value={draft.body} autoFocus onChange={(html) => keep({ body: html })} placeholder={`Write to ${who}`} />
       </div>
+      {/* What is attached, as pictures with an × each, as in the email window
+          (Derek, 2026-10-17). The task's own files are in Full window. */}
       {atts.length > 0 && (
-        <div className="flex flex-wrap gap-2 border-t px-3 py-2">
-          {atts.map((a) => (
-            <span key={a.id} className="inline-flex max-w-full items-center gap-1.5 rounded-[5px] bg-background py-1 pl-2.5 pr-1 text-[16px]">
-              <I.clip className="h-4 w-4 shrink-0 text-muted" /><span className="min-w-0 truncate">{a.name}</span>
-              <button onClick={() => { flush(); onSave({ attachments: atts.filter((x) => x.id !== a.id) }); }} aria-label={`Remove ${a.name}`} className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
-            </span>
-          ))}
+        <div className="border-t px-3 py-2">
+          <p className="text-[16px] font-semibold">Attached · {atts.length}</p>
+          <EmailAttachments attached={atts} thumbs={thumbs} onRemove={(a) => { flush(); onSave({ attachments: atts.filter((x) => x.id !== a.id) }); }} />
         </div>
       )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t bg-background/60 px-3 py-2">

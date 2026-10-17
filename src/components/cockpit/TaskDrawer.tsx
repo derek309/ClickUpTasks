@@ -79,6 +79,7 @@ import { replyWaitTitle, showCheckingAgain, stepRemindersOn, waitChoiceKeys } fr
 import type { StepSetupProps } from "./StepPage";
 import { filesOfEmail } from "@/lib/emailFiles";
 import { isPicture } from "@/lib/pictures";
+import { displayFileName } from "@/lib/attachFiles";
 import { ClientWebsite } from "./ClientWebsite";
 import { loadBookingLinks, type BookingLink } from "./useCalendar";
 import { TaskBrief } from "./TaskBrief";
@@ -1808,12 +1809,12 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                   onOpen={isPicture(a) && a.path ? () => openPreview(a) : !isLink && a.path ? () => onDownloadFile(a.path!) : undefined}
                   actions={a.path ? (
                     <>
-                      <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => onDownloadFileAs(a.path!, displayFileName(a.name))} title="Download" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.download className="h-3.5 w-3.5" /></button>
                       <button onClick={() => onCopyAttachmentLink(a.path!)} title="Copy direct link" className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white transition hover:bg-black/80"><I.link className="h-3.5 w-3.5" /></button>
                     </>
                   ) : undefined}
                 />
-                <div className="truncate text-center text-[16px]" title={a.name}>{a.name}</div>
+                <div className="truncate text-center text-[16px]" title={displayFileName(a.name)}>{displayFileName(a.name)}</div>
               </div>
             );
           })}
@@ -3302,7 +3303,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 onDragOver={own ? (e) => { if (!e.dataTransfer.types.includes("Files")) e.preventDefault(); } : undefined}
                 onDrop={own ? (e) => { if (e.dataTransfer.types.includes("Files")) return; e.preventDefault(); reorderAttachments(a.id); } : undefined}
                 className={`min-w-0 overflow-hidden rounded-[5px] bg-background ring-1 ring-[var(--border)] sm:w-[140px] ${dragAttId === a.id ? "opacity-40" : ""}`}>
-                <button onClick={() => openPreview(a)} title={step ? `${a.name}, on ${step}` : a.name} aria-label={`View ${a.name}`} className="block h-[120px] w-full hover:opacity-90">
+                <button onClick={() => openPreview(a)} title={step ? `${displayFileName(a.name)}, on ${step}` : displayFileName(a.name)} aria-label={`View ${displayFileName(a.name)}`} className="block h-[120px] w-full hover:opacity-90">
                   {a.path && attImageUrls[a.path]
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={attImageUrls[a.path]} alt={a.name} className="block h-[120px] w-full object-cover" />
@@ -3310,7 +3311,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 </button>
                 <div className="flex items-center justify-between border-t py-0.5">
                   <button onClick={() => openPreview(a)} title="Open" aria-label={`Open ${a.name}`} className={tool}><I.expand className="h-4 w-4" /></button>
-                  {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" aria-label={`Download ${a.name}`} className={tool}><I.download className="h-4 w-4" /></button>}
+                  {a.path && <button onClick={() => onDownloadFileAs(a.path!, displayFileName(a.name))} title="Download" aria-label={`Download ${a.name}`} className={tool}><I.download className="h-4 w-4" /></button>}
                   {own && a.path && (
                     <button onClick={() => void sendToWebsite(a)} disabled={sendingSite === a.id}
                       title={a.website ? "On the website. Click to copy its link" : "Send to the client's website Media Library"}
@@ -3339,7 +3340,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           {conversationFiles.filter((a) => !isPicture(a)).map((a) => (
             <button key={a.id} onClick={() => openPreview(a)} title={`Open ${a.name}`}
               className="flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-2 text-left text-[16px] font-medium text-accent hover:underline">
-              <I.link className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 truncate">{a.name}</span><span className="shrink-0 font-normal text-muted">· from the conversation</span>
+              <I.link className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 truncate">{displayFileName(a.name)}</span><span className="shrink-0 font-normal text-muted">· from the conversation</span>
             </button>
           ))}
         </div>
@@ -3352,7 +3353,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             return (
               <span key={a.id} className="group flex min-w-0 items-center gap-1.5 rounded-[5px] border bg-background py-1 pl-2.5 pr-1 text-[16px]">
                 {editing ? (
-                  <input autoFocus defaultValue={isLink ? linkDisplayName(a) : a.name}
+                  <input autoFocus defaultValue={isLink ? linkDisplayName(a) : displayFileName(a.name)}
                     onBlur={(e) => { renameAttachment(a.id, e.target.value); setRenamingAttId(null); }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") { renameAttachment(a.id, e.currentTarget.value); setRenamingAttId(null); }
@@ -3361,14 +3362,14 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                     className="min-w-0 flex-1 rounded border bg-surface px-1.5 py-0.5 text-[16px] outline-none focus:border-accent" />
                 ) : (
                 <a href={isLink ? a.url! : undefined} onClick={!isLink && a.path ? () => onDownloadFile(a.path!) : undefined} target={isLink ? "_blank" : undefined} rel={isLink ? "noreferrer" : undefined}
-                  title={isLink ? a.url! : a.name}
+                  title={isLink ? a.url! : displayFileName(a.name)}
                   className="flex min-w-0 flex-1 items-center gap-1.5 font-medium text-accent hover:underline">
                   {isLink ? <LinkFavicon url={a.url!} /> : <I.link className="h-3.5 w-3.5 shrink-0" />}
                   {/* The name on its own line and the size and step under it: side
                       by side, a phone squeezed the name to a letter a line
                       (Derek, 2026-10-13). */}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{isLink ? linkDisplayName(a) : a.name}</span>
+                    <span className="block truncate">{isLink ? linkDisplayName(a) : displayFileName(a.name)}</span>
                     {(a.size || stepNoHolding(attachmentKey(a.id)) > 0) && (
                       <span className="block truncate font-normal text-muted" title={stepTitleHolding(attachmentKey(a.id)) ?? undefined}>{[a.size, stepNoHolding(attachmentKey(a.id)) > 0 && `Step ${stepNoHolding(attachmentKey(a.id))}`].filter(Boolean).join(" · ")}</span>
                     )}
@@ -3382,7 +3383,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                 {!editing && (
                   <button onClick={() => setRenamingAttId(a.id)} title="Rename" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.pencil className="h-3 w-3" /></button>
                 )}
-                {a.path && <button onClick={() => onDownloadFileAs(a.path!, a.name)} title="Download" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
+                {a.path && <button onClick={() => onDownloadFileAs(a.path!, displayFileName(a.name))} title="Download" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100"><I.download className="h-3 w-3" /></button>}
                 {a.path && onSaveToClient && saveToClientButton(a, "shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-foreground group-hover:opacity-100 [@media(hover:none)]:opacity-100")}
                 <button onClick={() => onRemoveFile(a)} title="Remove" className="shrink-0 rounded-full p-1 text-muted opacity-0 hover:bg-surface hover:text-danger group-hover:opacity-100"><I.trash className="h-3 w-3" /></button>
               </span>

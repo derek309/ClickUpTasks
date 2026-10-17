@@ -1,4 +1,5 @@
 import type { Attachment } from "@/lib/data";
+import { displayFileName } from "@/lib/attachFiles";
 
 // A file that is a picture, by its kind or, when the kind says otherwise, by
 // its name (Derek, 2026-10-14: a client's "m and m art.png" showed as a file
@@ -7,7 +8,8 @@ import type { Attachment } from "@/lib/data";
 // every browser draws; a HEIC or an SVG stays a file.
 const PICTURE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 
-export const isPictureName = (name: string) => PICTURE_EXT.test(name.trim());
+// Read through the clean name, so a clipped "rack.jpg:https://mail.google.com/…" counts.
+export const isPictureName = (name: string) => PICTURE_EXT.test(displayFileName(name));
 
 export function isPicture(a: Pick<Attachment, "kind" | "name"> & Partial<Pick<Attachment, "url">>): boolean {
   if (a.kind === "image") return true;
