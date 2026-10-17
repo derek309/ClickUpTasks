@@ -32,7 +32,7 @@ export const ADD_ROWS = [
   { row: "make", keys: ["doc", "image", "page:email", "page:page", "video"] },
 ] as const;
 export const ADD_SHORT: Record<string, string> = {
-  directions: "Directions", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
+  directions: "Description", checklist: "To dos", email: "Email", text: "Text", chat: "Chat in the portal",
   doc: "Document", image: "Image", page: "HTML review", "page:email": "Email review", "page:page": "Page review", video: "Video",
 };
 // ui's icons have no image, HTML review or video; these match their stroke.
@@ -239,7 +239,7 @@ export function StepSetup({ name, who, whoInitial, nameOf, someoneElse, whenInit
   return (
     <section aria-label="Set up this step" onKeyDown={onKeyDown} className="flex min-w-0 flex-col gap-3 sm:gap-2">
       {name}
-      {longHint && isLongTitle(stepName) && <p className="-mt-1 text-[16px] text-muted">The full request goes into the step&apos;s directions</p>}
+      {longHint && isLongTitle(stepName) && <p className="-mt-1 text-[16px] text-muted">The full request goes into the step&apos;s description</p>}
       {shown.includes(0) && Row({ i: 0, label: "Whose turn?", short: "Who", children: who.map((c) => c.key === "else" && someoneElse ? (
         <span key={c.key} data-choice className="shrink-0">
           {someoneElse(<span aria-pressed={!known && !!whoPick} className={!known && !!whoPick ? ON : OFF}>{whoLabel(c)}</span>, pickWho)}

@@ -325,7 +325,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
     return [{ key, label, onPick: run }];
   };
   const options: SetupAction[] = [
-    ...act("directions", "Directions"), ...act("checklist", "To dos"),
+    ...act("directions", "Description"), ...act("checklist", "To dos"),
     ...act("email", `Email ${first}`, canMessage), ...act("text", `Text ${first}`, canMessage && hasPhone), ...act("chat", "Chat in the portal", canMessage),
     ...(!personal ? [...act("doc", "Document"), ...act("image", "Image"), ...act("page:email", "Email review"), ...act("page:page", "Page review"), ...act("video", "Video")] : []),
   ];
@@ -511,7 +511,7 @@ export function MindDumpModal({ clientName, listName, destinationHint, suggested
                         <input value={r.title} onChange={(e) => patch(i, { title: e.target.value })}
                           className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-[17px] font-semibold outline-none hover:border-border focus:border-accent focus:bg-background" />
                         <textarea value={r.description} onChange={(e) => patch(i, { description: e.target.value })} rows={2}
-                          placeholder="Directions for step 1…"
+                          placeholder="Description for step 1…"
                           className="mt-1 w-full resize-y rounded-md border border-transparent bg-transparent px-2 py-1 text-[15px] text-muted outline-none placeholder:text-muted/60 hover:border-border focus:border-accent focus:bg-background" />
 
                         {r.verbatim && <VerbatimBlock value={r.verbatim} onChange={(v) => patch(i, { verbatim: v })} />}

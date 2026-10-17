@@ -29,7 +29,7 @@ const WED = "2026-10-14";
 function setup(p: Partial<React.ComponentProps<typeof StepSetup>> = {}) {
   const onDone = vi.fn();
   render(<StepSetup who={[{ key: "u_me", label: "You" }, { key: CLAUDE_ID, label: "Claude" }]} whoInitial="u_me" whenInitial="2026-10-15" today={WED} meId="u_me"
-    rows={[{ label: "Write", items: [a("directions", "Directions"), a("checklist", "To dos")] }, { label: "Make to review", items: [a("doc", "Document"), a("image", "Image"), a("page", "HTML review")] }]}
+    rows={[{ label: "Write", items: [a("directions", "Description"), a("checklist", "To dos")] }, { label: "Make to review", items: [a("doc", "Document"), a("image", "Image"), a("page", "HTML review")] }]}
     onDone={onDone} {...p} />);
   return onDone;
 }
@@ -38,19 +38,19 @@ describe("StepSetup's action row", () => {
   it("is one row, each action once, no find box and no All actions", () => {
     setup({ lead: [{ ...a("image", "Make the flyer") }] });
     expect(buttons("Make the flyer").length).toBeGreaterThan(0);
-    expect(buttons("Directions").length).toBeGreaterThan(0);
+    expect(buttons("Description").length).toBeGreaterThan(0);
     expect(buttons("HTML review").length).toBeGreaterThan(0);
     expect(buttons("All actions")).toHaveLength(0);
     expect(host.querySelector("input[name=find-action]")).toBeNull();
   });
   it("puts four in the row and the rest in More", () => {
-    setup({ rows: [{ label: "Write", items: [a("directions", "Directions"), a("checklist", "To dos")] }, { label: "Make to review", items: [a("doc", "Document"), a("image", "Image"), a("page", "HTML review"), a("video", "Video")] }] });
+    setup({ rows: [{ label: "Write", items: [a("directions", "Description"), a("checklist", "To dos")] }, { label: "Make to review", items: [a("doc", "Document"), a("image", "Image"), a("page", "HTML review"), a("video", "Video")] }] });
     expect(buttons("Video")).toHaveLength(0);
     click(buttons("More ▾")[0]);
     expect(host.textContent).toContain("Video");
   });
   it("never offers Give to Claude as an action while Claude is in Whose turn", () => {
-    setup({ rows: [{ label: "Write", items: [a("directions", "Directions")] }] });
+    setup({ rows: [{ label: "Write", items: [a("directions", "Description")] }] });
     expect(buttons("Give to Claude")).toHaveLength(0);
   });
   it("Claude's turn asks only what Claude should do: no date, Directions or To dos, Give to Claude", () => {
@@ -66,7 +66,7 @@ describe("StepSetup's action row", () => {
   it("Claude then Directions hands it over with the directions to write", () => {
     const onDone = setup({ submit: "Save next step" });
     click(buttons("Claude")[0]);
-    click(buttons("Directions")[0]);
+    click(buttons("Description")[0]);
     expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ who: CLAUDE_ID, when: WED }), expect.any(Function));
   });
   it("Add step sets it up with what is picked", () => {
@@ -81,7 +81,7 @@ describe("StepSetup's action row", () => {
   it("a whole request as the name says where it goes", () => {
     const long = "Please put the spring sale in the bulk customers blast and make sure the coupon code works on the landing page before Friday";
     setup({ stepName: long, longHint: true });
-    expect(host.textContent).toContain("The full request goes into the step's directions");
+    expect(host.textContent).toContain("The full request goes into the step's description");
     act(() => root!.unmount()); root = null; host.remove();
     setup({ stepName: "Make the flyer", longHint: true });
     expect(host.textContent).not.toContain("The full request goes");

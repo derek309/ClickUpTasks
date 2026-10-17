@@ -207,7 +207,7 @@ describe("the box with no client (Derek, 2026-10-14)", () => {
     expect(host.querySelector('select[aria-label="Owner"]')).toBeNull();
     expect(host.textContent).not.toContain("Whose turn");
     expect(host.textContent).not.toContain("HTML review");
-    expect(host.textContent).toContain("Directions");
+    expect(host.textContent).toContain("Description");
   });
   it("on a list in Projects keeps the owner but never offers waiting on a client", () => {
     open({ meId: "u_derek", clientFirst: null, clientName: "ClickUpLocal" });
