@@ -3254,22 +3254,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     ...sortedAttachments.filter((a) => isPicture(a)).map((a) => ({ a, own: true })),
     ...conversationFiles.filter((a) => isPicture(a)).map((a) => ({ a, own: false })),
   ];
-  // Each heading gets a small coloured icon tile, so the sections tell apart
-  // at a glance without boxing the page in (Derek, 2026-10-11: "it's very
-  // flat", mockup A).
-  const HEAD_ICONS: Record<string, [React.ReactNode, string]> = {
-    List: [<I.list key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
-    "In GoHighLevel": [<I.bolt key="i" className="h-4 w-4" />, "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"],
-    Files: [<I.clip key="i" className="h-4 w-4" />, "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"],
-    Conversation: [<I.comment key="i" className="h-4 w-4" />, "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"],
-    "Where it lives": [<I.folder key="i" className="h-4 w-4" />, "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"],
-  };
-  const headingText = (title: string, extra?: React.ReactNode) => (
-    <h2 className="flex items-center gap-2 text-[16px] font-bold text-foreground">
-      {HEAD_ICONS[title] && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] ${HEAD_ICONS[title][1]}`}>{HEAD_ICONS[title][0]}</span>}
-      {title}{extra}
-    </h2>
-  );
   // Files and Conversation fold away (Derek, 2026-10-13: "the steps are good
   // at containing everything"). Folded by default; each one's choice is
   // remembered in this browser. Files is the old Actions ("Client work") and
@@ -3281,17 +3265,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   const toggleFold = (title: string) => setFolded(isFolded(title)
     ? folded.filter((x) => x !== title && !(title === "Files" && (x === "Client work" || x === "Links and files")))
     : [...folded, title]);
-  const heading = (title: string, extra?: React.ReactNode) => FOLDABLE.includes(title) ? (
-    <button onClick={() => toggleFold(title)} aria-expanded={!isFolded(title)} title={isFolded(title) ? "Show" : "Hide"} className="flex min-w-0 items-center gap-1 text-left hover:opacity-80">
-      {headingText(title, extra)}
-      <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isFolded(title) ? "rotate-180" : "-rotate-90"}`} />
-    </button>
-  ) : headingText(title, extra);
-  // Client work and Links and files look alike: a card, and while empty one
-  // line, the hint beside the heading (Derek, 2026-10-12: "make these
-  // consistent and make it one line, not two, if nothing is there").
-  const CARD = "mt-8 rounded-[5px] border bg-surface p-4 shadow-soft";
-  const emptyHint = (text: string) => <span className="hidden min-w-0 flex-1 truncate text-[16px] text-muted sm:block">{text}</span>;
   // The files part of the Files card: the link being added, an upload under
   // way, pictures as a gallery, then files and links one per row.
   const filesBody = (
@@ -4562,6 +4535,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     if (sub.done || isPersonal || noClient) return null;
     const forClient = isDraft(sub) ? sub.draftFor === "client" : turnOf(sub, { meId: meId ?? null, ownerId: task.assigneeId ?? null }) === "client";
     if (!forClient || sub.fromEmails?.length) return null;
+    // Only while the ask has not gone out (Derek, 2026-10-17): a draft client
+    // step, or a live one with no ask email or review sent. Once sent, never.
+    const askSent = !!sub.emailedAt || !!sub.addedFor?.startsWith("sent:") || (sub.holds ?? []).some((k) => k.startsWith("mail:")) || sentReviews(sub).length > 0 || !!sub.followUps?.length;
+    if (!isDraft(sub) && askSent) return null;
     const draft = task.draftEmail;
     const emailWritten = !!draft && (sub.holds ?? []).includes("email") && !!htmlToText(draft.body).trim();
     return (
@@ -4924,54 +4901,68 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </select>
     </label>
   );
-  const filesCard = (
-    <section id="task-files"
-      onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
-      // The drawer around it adds the files (onto the step being added to);
-      // adding here as well uploaded each file twice.
-      onDrop={() => setAttFileDragOver(false)}
-      className={`${CARD} transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
-      <div className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 ${filesOpen ? "mb-3" : ""}`}>
-        {filesEmpty ? headingText("Files") : heading("Files", fileCount > 0 && <span className="font-normal text-muted">· {fileCount}</span>)}
-        {filesEmpty && emptyHint("Drop, paste or attach · max 25MB each")}
-        {(filesOpen || filesEmpty) && (
-          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            {/* Sorting two things is not a job. It earns its place at five. */}
-            {task.attachments.length >= 5 && (
-              <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
-                <option value="added">Sort: Added</option>
-                <option value="name">Sort: Name</option>
-                <option value="type">Sort: Type</option>
-              </select>
-            )}
-            {addMenu}
-            {stepPicker}
-            <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
-            <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
-          </span>
-        )}
-      </div>
-      {filesOpen && actionRows.map((row) => (
-        <Fragment key={row.key}>
-          {actionLine(row)}
-          {sentShown && row.key === `mail:${sentShown.id}` && (
-            <div className="mb-2 ml-2 max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-[5px] border bg-background px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
-              {htmlToText(sentShown.body).trim()}
-              {!!sentShown.attachments?.length && (
-                <div className="mt-2 whitespace-normal border-t pt-2"><EmailFiles files={sentShown.attachments} urls={attImageUrls} onOpenPicture={(f) => void openPreview(f)} onOpenFile={openEmailFile} /></div>
-              )}
-            </div>
-          )}
-        </Fragment>
-      ))}
-      {filesOpen && filesBody}
-      <div className={deletedOpen > 0 ? "" : "h-0 overflow-hidden"}>{workBlocks}</div>
-      {filesOpen && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
-      {filesEmpty && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
-    </section>
+  // Files and Conversation under the steps (Derek, 2026-10-17: "too many
+  // boxes"): no cards. Folded, one plain line, "Files · 7 ›  Conversation ·
+  // 2 · a team note, 12m ago ›", each word opening its own part below it with
+  // a rule above; the same word folds it again. The steps keep their card.
+  const filesControls = (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      {/* Sorting two things is not a job. It earns its place at five. */}
+      {task.attachments.length >= 5 && (
+        <select value={attSort} onChange={(e) => setAttSort(e.target.value as typeof attSort)} className="rounded-md border bg-background px-1.5 py-1 text-[16px] outline-none" title="Sort attachments">
+          <option value="added">Sort: Added</option>
+          <option value="name">Sort: Name</option>
+          <option value="type">Sort: Type</option>
+        </select>
+      )}
+      {addMenu}
+      {stepPicker}
+      <button onClick={() => { setLinkOpen((o) => !o); setLinkTarget(null); }} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.link /> Link</button>
+      <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1 text-[16px] font-medium text-accent"><I.plus /> Attach</button>
+    </span>
   );
-
+  const foldWord = (title: "Files" | "Conversation", open: boolean, count: React.ReactNode, rest?: React.ReactNode) => (
+    <button onClick={() => toggleFold(title)} aria-expanded={open} aria-controls={title === "Files" ? "task-files-body" : "task-conversation-body"} title={open ? `Hide ${title.toLowerCase()}` : `Show ${title.toLowerCase()}`}
+      className="inline-flex min-w-0 max-w-full items-center gap-1 text-left text-[16px] hover:text-accent">
+      <span className="shrink-0 font-semibold text-foreground">{title}</span>
+      <span className="shrink-0 whitespace-nowrap text-muted">· {count}</span>
+      {rest && <span className="min-w-0 truncate text-muted">· {rest}</span>}
+      <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "-rotate-90" : "rotate-180"}`} />
+    </button>
+  );
+  const filesWord = filesEmpty ? (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[16px]">
+      <span className="font-semibold text-foreground">Files</span>
+      <span className="text-muted">· Drop, paste or attach · max 25MB each</span>
+      {filesControls}
+    </span>
+  ) : foldWord("Files", filesOpen, fileCount);
+  const filesBodyBlock = (
+    <>
+      {filesOpen && (
+        <div id="task-files-body" className="mt-3 border-t pt-4">
+          <div className="mb-3 flex flex-wrap items-center justify-end gap-x-3 gap-y-1">{filesControls}</div>
+          {actionRows.map((row) => (
+            <Fragment key={row.key}>
+              {actionLine(row)}
+              {sentShown && row.key === `mail:${sentShown.id}` && (
+                <div className="mb-2 ml-2 max-h-[360px] overflow-y-auto whitespace-pre-wrap rounded-[5px] border bg-background px-3 py-2.5 text-[16px] leading-relaxed [overflow-wrap:anywhere]">
+                  {htmlToText(sentShown.body).trim()}
+                  {!!sentShown.attachments?.length && (
+                    <div className="mt-2 whitespace-normal border-t pt-2"><EmailFiles files={sentShown.attachments} urls={attImageUrls} onOpenPicture={(f) => void openPreview(f)} onOpenFile={openEmailFile} /></div>
+                  )}
+                </div>
+              )}
+            </Fragment>
+          ))}
+          {filesBody}
+          {restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
+        </div>
+      )}
+      <div className={deletedOpen > 0 ? "" : "h-0 overflow-hidden"}>{workBlocks}</div>
+      {filesEmpty && restoreLink && <div className="mt-2 px-1">{restoreLink}</div>}
+    </>
+  );
 
   // The task in reading order: what it is, when we follow up, what has been
   // made for it, then everything said and done about it. The description is
@@ -5215,34 +5206,30 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       </div>
       {renderPlan()}
       {clientResponseBlock}
-      {filesCard}
-      {/* The composer the floating dock opens for a text, chat or note. */}
-      {composerFooter}
-      {/* Folded, one useful line (Derek, 2026-10-14): how many and the newest,
-          "Conversation · 8 · last from Pam, 2h ago: Looks great…"; on a phone
-          the newest goes on a second line. A tap opens the whole history. */}
-      {isFolded("Conversation") ? (() => {
+      {(() => {
         const convo = conversationSummary({ comments: task.comments, messages, actions, meetings: clientMeetings, taskCreatedAt: task.createdAt, firstName });
         const newest = convo.count ? convo.line.replace(/^\d+ · /, "") : null;
+        const convoOpen = !isFolded("Conversation");
         return (
-          <section className={CARD}>
-            <button onClick={() => toggleFold("Conversation")} aria-expanded={false} title="Show the conversation"
-              className="flex w-full min-w-0 flex-col gap-1 text-left hover:opacity-80 sm:flex-row sm:items-center sm:gap-2">
-              <span className="flex shrink-0 items-center gap-1">
-                {headingText("Conversation", <span className="font-normal text-muted">· {convo.count || "nothing yet"}</span>)}
-                <I.chevron className={`h-3.5 w-3.5 shrink-0 rotate-180 text-muted ${newest ? "sm:hidden" : ""}`} />
-              </span>
-              {newest && <span className="min-w-0 truncate text-[16px] text-muted sm:flex-1"><span className="sm:hidden">{newest[0].toUpperCase()}{newest.slice(1)}</span><span className="max-sm:hidden">· {newest}</span></span>}
-              {newest && <I.chevron className="h-3.5 w-3.5 shrink-0 rotate-180 text-muted max-sm:hidden" />}
-            </button>
+          <section id="task-files" aria-label="Files and conversation"
+            onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setAttFileDragOver(true); } }}
+            onDragLeave={(e) => { if (e.currentTarget === e.target) setAttFileDragOver(false); }}
+            // The drawer around it adds the files (onto the step being added
+            // to); adding here as well uploaded each file twice.
+            onDrop={() => setAttFileDragOver(false)}
+            className={`mt-8 rounded-[5px] transition ${attFileDragOver ? "outline-2 outline-dashed outline-accent bg-accent-soft/30" : ""}`}>
+            {/* One line, wrapping on a phone; the counts never cut. */}
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+              {filesWord}
+              {foldWord("Conversation", convoOpen, convo.count || "nothing yet", newest)}
+            </div>
+            {filesBodyBlock}
+            {/* The composer the floating dock opens for a text, chat or note. */}
+            {composerFooter}
+            {convoOpen && <div id="task-conversation-body" className="mt-3 border-t pt-4">{feedArea}</div>}
           </section>
         );
-      })() : (
-        <section className="mt-7">
-          <div className="mb-2">{heading("Conversation")}</div>
-          <div className="mt-4">{feedArea}</div>
-        </section>
-      )}
+      })()}
     </>
   );
 

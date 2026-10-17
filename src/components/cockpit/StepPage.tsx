@@ -661,7 +661,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           <span className="order-last min-w-0 basis-full text-[16px] text-muted sm:order-none sm:basis-auto sm:truncate">{saidSummary}</span>
           <I.chevron className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${showSaid ? "-rotate-90" : "rotate-180"}`} />
         </button>}
-        <button onClick={() => setTalk("team")} className="text-[16px] font-semibold text-accent hover:underline">{talk === "team" ? "Close the note" : own ? "Add a note" : "Note to the team"}</button>
+        {/* Quiet until something is said (Derek, 2026-10-17). */}
+        <button onClick={() => setTalk("team")} className={`text-[16px] hover:underline ${anySaid || talk === "team" ? "font-semibold text-accent" : "font-medium text-muted hover:text-foreground"}`}>{talk === "team" ? "Close the note" : own ? "Add a note" : "Note to the team"}</button>
       </div>
       {/* The chat from when this step was a handoff, kept to read (Derek,
           2026-10-12: handoffs are steps now). */}
@@ -812,7 +813,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           <button onClick={close} title="Close" aria-label="Close" className="shrink-0 rounded-lg p-2 text-muted hover:bg-background hover:text-foreground"><I.close /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className={`mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-8 ${full ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:gap-10" : ""}`}>
+          {/* Full page is one centred column (Derek, 2026-10-17: "full page is
+              odd", the step in a narrow left column and only a Note to the
+              team link on the right): the step, then what was said on it,
+              then the note link. The side panel stays as it was. */}
+          <div className={`mx-auto w-full px-4 py-5 sm:px-8 ${full ? "max-w-[860px]" : "max-w-[1280px]"}`}>
             <div className={`flex min-w-0 flex-col gap-5 ${isDraft ? "rounded-[5px] p-3 outline-dashed outline-2 outline-offset-0 outline-muted/50" : ""}`}>
               {banner}
               <div className="flex flex-col gap-2">
@@ -978,10 +983,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 </div>
               ) : null}
             </div>
-            <div className={`min-w-0 ${full ? "mt-8 md:mt-0" : "mt-8"}`}>{conversation}</div>
+            <div className="mt-8 min-w-0">{conversation}</div>
           </div>
           {(onDelete || onToTask) && (
-            <div className="mx-auto mt-10 flex w-full max-w-[1280px] flex-wrap justify-end gap-2 border-t px-4 pb-8 pt-4 sm:px-8">
+            <div className={`mx-auto mt-10 flex w-full flex-wrap justify-end gap-2 border-t px-4 pb-8 pt-4 sm:px-8 ${full ? "max-w-[860px]" : "max-w-[1280px]"}`}>
               {onToTask && <button onClick={onToTask} title="Moves this step, its description and to dos into a new task for the same client" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Make it its own task</button>}
               {onDelete && <button onClick={onDelete} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>}
             </div>
