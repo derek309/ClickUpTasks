@@ -19,7 +19,8 @@ import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { dedupeSuggestions, suggestStepActions, STEP_SUGGESTIONS_ON, type StepSuggestKind } from "@/lib/stepSuggest";
-import { lastTickFinishes } from "@/lib/stepThenNext";
+import { lastTickFinishes, type ThreadLine } from "@/lib/stepThenNext";
+import { StepThread } from "./StepThread";
 import { ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
 import { OnThisStep } from "./OnThisStep";
 import type { HistoryStep } from "@/lib/stepSetup";
@@ -375,7 +376,7 @@ export function StepFinish({ onMarkDone, label = "Done", light = false, children
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onLastTick, describe, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, finish, message, banner, isDraft = false, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, replyPending = false, replyOpen = false, transcript, textFrom }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, finish, message, banner, isDraft = false, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, replyPending = false, replyOpen = false, transcript, textFrom, thread, assist, picked }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -515,6 +516,12 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** Add the transcript (TranscriptBox), or the line offering it; open, its
    *  Save is the dark button and Done goes light. */
   transcript?: { node: React.ReactNode; open: boolean };
+  /** The step's team thread, oldest first (StepThread), above its Message box. */
+  thread?: ThreadLine[];
+  /** Claude's suggestion for this step, under its description (✨ Write it for me). */
+  assist?: React.ReactNode;
+  /** A What's next answered by a pick: what it became, and Change to ask again. */
+  picked?: { says: string; onChange: () => void };
 }) {
   const close = () => onClose({ dirty: dir.dirty() || !!todo.typing.trim() || !!draft.trim() });
   useEscapeToClose(close);
@@ -599,7 +606,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   const w = stepWindow(task.subtasks, sub.id, task.createdAt);
   const said = [
     ...messages.filter((m) => inWindow(m.at, w) && m.channel !== "call").map((m) => ({ key: `m_${m.id}`, at: m.at, kind: "message" as const, m })),
-    ...actions.filter((a) => !!a.body.trim() && !a.parentId && inWindow(a.at, w)).map((a) => ({ key: `a_${a.id}`, at: a.at, kind: "action" as const, a })),
+    // The team's own thread shows on its own, under the step (StepThread).
+    ...actions.filter((a) => !!a.body.trim() && !a.parentId && inWindow(a.at, w) && !(thread && (a.kind === "team" || a.kind === "note"))).map((a) => ({ key: `a_${a.id}`, at: a.at, kind: "action" as const, a })),
   ].sort((x, y) => y.at.localeCompare(x.at));
 
   // One line for what was said: "2 emails, 1 text · last from Pamela, 2h ago".
@@ -844,6 +852,11 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                     {sub.cloudSession?.url && <a href={sub.cloudSession.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:opacity-80">Watch Claude work ↗</a>}
                   </div>
                 )}
+                {picked && (
+                  <p className="text-[16px] text-foreground">{picked.says}{" · "}
+                    <button onClick={picked.onChange} title="Put the question back and pick again" className="font-semibold text-accent underline-offset-4 hover:underline">Change</button>
+                  </p>
+                )}
                 {sub.meeting && !sub.done && <JoinNowLine meeting={sub.meeting} />}
                 {(sub.done || round) && (
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] text-muted">
@@ -853,6 +866,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   </div>
                 )}
                 {directions}
+                {assist}
                 {asked}
               </div>
               {/* Top to bottom (Derek, 2026-10-17): the Description above,
@@ -928,6 +942,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   })()}
                 </section>
               )}
+              {thread && <StepThread lines={thread} />}
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>

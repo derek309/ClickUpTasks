@@ -4,7 +4,7 @@
 // + Add and one Done. What comes after it is asked only once it is done, in
 // What's next. The rules the card and What's next follow live here, so they
 // can be read and tested without drawing anything.
-import { CLAUDE_ID, stepAfter, type StepTodo, type Subtask } from "./data";
+import { CLAUDE_ID, inWindow, stepAfter, type StepTodo, type Subtask, type TaskAction } from "./data";
 import { isClientWait } from "./afterThis";
 
 /** Whose turn a step is, as the card reads it. */
@@ -239,4 +239,80 @@ export function turnWord(who: string | null, o: { meId: string | null; clientFir
   if (who === CLAUDE_ID) return "Claude's turn";
   if (!who || who === o.meId) return "Your turn";
   return `${o.nameOf(who)}'s turn`;
+}
+
+// ── The task view (Derek, 2026-10-17): each step reads, it does nothing. Its
+// number and name, the turn line to read ("Carol's turn, need by Fri, Oct 16,
+// reminded every 3 days") and one quiet line about what it holds. A click
+// anywhere on it opens its page, where all the working happens.
+
+/** The turn line as words: "Carol's turn, need by Fri, Oct 16, reminded every 3 days". */
+export function turnSentence(word: string, ...rest: (string | null | undefined | false)[]): string {
+  return [word, ...rest.filter((x): x is string => !!x && !!x.trim())].join(", ");
+}
+
+/** The one quiet line under a step on the task view: what it holds and where
+ *  it stands, a few facts at most, or "" for none. A draft says so first. */
+export function stepQuietLine(o: {
+  /** Whose turn it will be once given, by name. */
+  draftFor?: string | null;
+  /** The step's description, as text. */
+  description?: string;
+  /** The client wrote on it: their first name and how long ago. */
+  wrote?: { first: string; ago: string } | null;
+  /** Its email went out this long ago. */
+  sentAgo?: string | null;
+  /** Waiting on the client's reply to it. */
+  noReply?: boolean;
+  todos?: { done: number; total: number };
+  /** The longer reason it is whose turn ("Claude is working"). */
+  reason?: string | null;
+  /** A "what's next?" step: the step it follows. */
+  after?: string | null;
+}): string {
+  const parts: string[] = [];
+  if (o.draftFor) parts.push(`Draft · not given to ${o.draftFor} yet`);
+  if (o.after) parts.push(`After ${o.after}`);
+  if (o.wrote) parts.push(`${o.wrote.first} wrote ${o.wrote.ago}`);
+  else if (!o.draftFor && o.reason) parts.push(o.reason);
+  const desc = (o.description ?? "").replace(/\s+/g, " ").trim();
+  if (desc && !o.wrote && !o.after && parts.length < 2) {
+    const first = desc.split(/(?<=[.!?])\s/)[0];
+    parts.push(first.length > 80 ? `${first.slice(0, 78).trimEnd()}…` : first);
+  }
+  if (o.sentAgo) parts.push(`sent ${o.sentAgo}`);
+  if (o.noReply) parts.push("no reply yet");
+  if (o.todos && o.todos.total > 0) parts.push(`${o.todos.done} of ${o.todos.total} to do`);
+  return parts.join(" · ");
+}
+
+// ── The step's thread (Derek, 2026-10-17: a Message Michaella showed nowhere
+// on the step, so it read as not sent). Team messages and notes written while
+// the step ran, the same window threadPeople and stepWindow use.
+
+export type ThreadLine = { id: string; who: string; text: string; at: string };
+
+/** The step's thread, oldest first: who wrote ("You to Michaella",
+ *  "Michaella"), the words and when. */
+export function stepThread(actions: Pick<TaskAction, "id" | "kind" | "authorId" | "toId" | "body" | "at">[], w: { from: string; to: string | null }, o: { meId: string | null; nameOf: (id: string) => string }): ThreadLine[] {
+  return actions
+    .filter((a) => (a.kind === "team" || a.kind === "note") && !!a.body.trim() && inWindow(a.at, w))
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map((a) => {
+      const from = !a.authorId ? "Someone" : a.authorId === o.meId ? "You" : o.nameOf(a.authorId);
+      const to = a.toId && a.toId !== a.authorId ? (a.toId === o.meId ? "you" : o.nameOf(a.toId)) : null;
+      // Someone writing to you reads as just their name.
+      const who = to && !(to === "you" && from !== "You") ? `${from} to ${to}` : from;
+      return { id: a.id, who, text: a.body.trim(), at: a.at };
+    });
+}
+
+/** The step's latest message as one quiet line for the task view: "You to
+ *  Michaella: Did this one get sent out? · just now", or null for none. */
+export function latestStepLine(thread: ThreadLine[], ago: (iso: string) => string): string | null {
+  const last = thread[thread.length - 1];
+  if (!last) return null;
+  const first = last.text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  const text = first.length > 90 ? `${first.slice(0, 88).trimEnd()}…` : first;
+  return `${last.who}: ${text} · ${ago(last.at)}`;
 }

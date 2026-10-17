@@ -41,7 +41,7 @@ import { CurrentStep, sameStepName } from "./CurrentStep";
 import { StepMore, TurnLine, WordMenu, type MoreDate, type MoreGroup, type TurnChoice } from "./TurnLine";
 import { StepMessage } from "./StepMessage";
 import { WhatsNext, type WhatsNextAnswer } from "./WhatsNext";
-import { backToGiver, descriptionLabel, doneLandsWith, doneLine, finishButton, giveLabel, giverOf, isDraft, lineExtras, messageTo, pickOnStep, questionAfter, questionFor, remindWord, stepMessageNotices, turnOf, turnWord } from "@/lib/stepThenNext";
+import { backToGiver, descriptionLabel, doneLandsWith, doneLine, finishButton, giveLabel, giverOf, isDraft, lineExtras, messageTo, pickOnStep, questionAfter, questionFor, latestStepLine, remindWord, stepMessageNotices, stepQuietLine, stepThread, turnOf, turnSentence, turnWord } from "@/lib/stepThenNext";
 import { remindEvery } from "@/lib/clientRequests";
 import { AskedLog } from "./AskedLog";
 import { InlineReply } from "./InlineReply";
@@ -2528,6 +2528,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
       ...(["doc", "image", "page", "video", "brief"] as DeliverableKey[]).filter((k) => holds.includes(k) && deliverablePresent(k)).map((k) => `${WORK_ICON[k]} 1`),
       // A done step's email with nothing written is not shown at all.
       ...(holds.includes("email") && !writeEmail && (!sub.done || !!task.draftEmail) ? [`${WORK_ICON.email} ${emailMarker}`] : []),
+      ...(writeEmail ? [`${WORK_ICON.email} to write`] : []),
       ...(() => { const n = holds.filter((k) => k.startsWith("mail:") && !!sentMail(k)).length; return n ? [`✉ ${n} sent`] : []; })(),
       ...(() => { const n = holds.filter((k) => k.startsWith("att:")).length; return n ? [`🔗 ${n}`] : []; })(),
       ...(sub.fromEmails?.length ? [`📨 ${sub.fromEmails.length}`] : []),
@@ -2548,11 +2549,10 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         {/* Drag the grip to reorder (Derek, 2026-10-06). */}
         <span onMouseDown={() => setDragSub(sub.id)} onMouseUp={() => setDragSub(null)} title="Drag to reorder" aria-hidden
           className="hidden w-6 shrink-0 cursor-grab select-none items-center justify-center text-[16px] text-muted opacity-0 group-hover/sub:opacity-100 active:cursor-grabbing sm:flex">⋮⋮</span>
-        {/* The circle is the tick (Derek, 2026-10-12: "how can I mark a step
-            complete"); the rest of the row opens the step. The client's own
-            step is answered on its page instead. */}
+        {/* The circle shows where the step stands; it is not a button: the
+            task view reads, the step's page works (Derek, 2026-10-17). The
+            whole row opens the page. */}
         {(() => {
-          const tickable = !sub.onClient && !asksWhatsNext(sub);
           // An approval is green, any other done step navy (Derek, 2026-10-14).
           const mark = sub.done ? (
             <span className={`flex h-6 w-6 items-center justify-center rounded-full text-white ${isApprovalOutcome(sub.outcome) ? "bg-success" : "bg-accent"}`}><I.check className="h-3.5 w-3.5" /></span>
@@ -2561,15 +2561,11 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           ) : (
             <span className="flex h-6 w-6 items-center justify-center rounded-full text-accent ring-2 ring-inset ring-accent/60 group-hover/tick:bg-accent group-hover/tick:text-white"><I.check className="h-3.5 w-3.5 opacity-30 group-hover/tick:opacity-100" /></span>
           );
-          return tickable ? (
-            <button onClick={() => (sub.done ? onToggleSub(sub.id, false) : completeStep(sub.id))} aria-pressed={sub.done}
-              title={sub.done ? "Done. Click to reopen" : "Mark this step done"} aria-label={sub.done ? `Reopen ${sub.title}` : `Mark ${sub.title} done`}
-              className="group/tick shrink-0 self-start rounded-full py-3 pl-3 hover:opacity-80 sm:pl-1">{mark}</button>
-          ) : <span aria-hidden className="shrink-0 self-start py-3 pl-3 sm:pl-1">{mark}</span>;
+          return <span aria-hidden className="shrink-0 self-start py-3 pl-3 sm:pl-1">{mark}</span>;
         })()}
         <div className="flex min-w-0 flex-1 flex-col">
         <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} aria-label={`Open ${sub.title}`}
-          className={`flex min-w-0 flex-1 items-start gap-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4 ${writeEmail ? "pb-2 pt-3" : "py-3"}`}>
+          className="flex min-w-0 flex-1 items-start gap-3 py-3 pl-3 pr-3 text-left hover:bg-background sm:pr-4">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className={`text-[17px] leading-snug [overflow-wrap:anywhere] ${isActive ? "font-bold" : "font-semibold"} ${upcoming || sub.done ? "text-muted" : ""}`}>
               {/* Numbered, so "step 2" means the same to everyone (Derek, 2026-10-12). */}
@@ -2605,23 +2601,55 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
             <I.chevron className="h-4 w-4 -rotate-180 text-muted" />
           </span>
         </button>
-        {writeEmail && (
-          <div className="pb-3 pl-3 pr-3 sm:pr-4">
-            <button onClick={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })}
-              className="inline-flex min-h-9 items-center gap-2 rounded-[5px] border bg-surface px-3 py-1 text-left text-[16px] font-semibold text-accent hover:bg-background">
-              <span aria-hidden>{WORK_ICON.email}</span>Write the email to {firstName}
-            </button>
-          </div>
-        )}
         </div>
       </li>
       </Fragment>
     );
   };
-  // The current step, open in the list (Derek, 2026-10-14, mockup
-  // current-step-inline-mockup.html): its work right here, its page one link
-  // away. After Done, What's next opens in its place, as it does at the foot
-  // of a step's page; Start it opens the step it names here.
+  // The turn line as words, for the task view (Derek, 2026-10-17): "Carol's
+  // turn, need by Fri, Oct 16, reminded every 3 days". The pickers are on the
+  // step's page.
+  const readLineFor = (sub: Subtask): string => {
+    const t = stepTone(sub);
+    const d = sub.due ?? null;
+    const clientStep = isClientWait(sub);
+    const word = isDraft(sub) ? turnWord(sub.draftFor!, { meId: meId ?? null, clientFirst: firstName, nameOf: firstOf2 }) : clientStep ? `${firstName}'s turn` : t.word;
+    const date = !d ? null : clientStep ? `need by ${formatDayDate(d)}` : sub.assigneeId === CLAUDE_ID && !isDraft(sub) ? null : `due ${formatDue(d)}${sub.done ? "" : `, ${dueCountdown(d).replace(/^due /, "")}`}`;
+    const every = clientStep && canRemindClient ? (stepRemindersOn(sub, canRemindClient) ? (sub.remind && "every" in sub.remind && sub.remind.every === "once" ? "once" : (remindEvery(sub.remind) as 2 | 3 | 5 | null)) : null) : undefined;
+    return turnSentence(word, date, every !== undefined ? remindWord(every) : null);
+  };
+  // One quiet line about what the step holds and where it stands.
+  const quietFor = (sub: Subtask): string => {
+    const t = stepTone(sub);
+    const own = todoProgress(sub.todos);
+    const fromPortal = clientItemsOf(sub.id);
+    const lastEmail = sub.fromEmails?.[sub.fromEmails.length - 1];
+    const waits = waitingStep(sub);
+    const sent = waits ? waitedEmail(sub) : null;
+    const prev = asksWhatsNext(sub) ? sub.title.replace(/: what's next\?$/, "").trim() : null;
+    return stepQuietLine({
+      draftFor: isDraft(sub) ? (sub.draftFor === "client" ? firstName : firstOf2(sub.draftFor)) : null,
+      description: htmlToText(sub.notes ?? ""),
+      wrote: lastEmail && !sub.done ? { first: firstName, ago: timeAgo(lastEmail.at) } : null,
+      sentAgo: sub.emailedAt ? timeAgo(sub.emailedAt) : sent ? timeAgo(sent.at) : null,
+      noReply: waits && !sub.done,
+      todos: { done: own.done + fromPortal.filter((c) => c.done).length, total: own.total + fromPortal.length },
+      reason: t.say && t.say !== t.word && !["Your turn", "Claude's turn"].includes(t.say) ? t.say : null,
+      after: prev && prev !== "Step" ? prev : null,
+    });
+  };
+  // The step's thread, oldest first (stepThenNext stepThread).
+  const threadOf = (sub: Subtask) => stepThread(actions, stepWindow(task.subtasks, sub.id, task.createdAt), { meId: meId ?? null, nameOf: firstOf2 });
+  // Its latest message for the task view, or the question waiting for you.
+  const messageLineFor = (sub: Subtask): { text: string; questionFrom?: string } | null => {
+    const q = questionFor(sub, meId ?? null);
+    if (q) return { text: q.text, questionFrom: firstOf2(q.from) };
+    const line = latestStepLine(threadOf(sub), timeAgo);
+    return line ? { text: line } : null;
+  };
+  // The current step on the task view (Derek, 2026-10-17): it reads, it does
+  // nothing; a click anywhere on it opens its page, where the working is.
+  // What's next after Done opens on that page too.
   const STEP_BAR: Record<string, string> = {
     mine: "shadow-[inset_4px_0_0_#ef4444]",
     waiting: "shadow-[inset_4px_0_0_#f59e0b]",
@@ -2629,29 +2657,13 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   };
   const currentRow = (sub: Subtask, i: number, noDeskTop = false) => {
     const t = stepTone(sub);
+    const asks = asksWhatsNext(sub);
+    const lead = <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: STATUS_META[stepStage(sub, task.assigneeId)].dot }} />;
     return (
       <li key={sub.id} data-step={sub.id} aria-current="step" className={`px-4 py-4 transition-shadow duration-700 sm:px-5 ${i > 0 ? "border-t" : ""} ${noDeskTop ? "sm:border-t-0" : ""} ${isDraft(sub) ? "outline-dashed outline-2 -outline-offset-4 outline-muted/50" : STEP_BAR[t.state] ?? ""} ${flashId === sub.id ? "ring-2 ring-inset ring-accent" : ""}`}>
-        {nextInline() ? nextBody(true) : backFromOther(sub) ? whatsNextFor(sub) : (
-          <CurrentStep key={sub.id} sub={shownStep(sub)} number={stepNumberOf(sub.id)} showName={!sameStepName(sub.title, task.title)} firstName={firstName} tone={t} meId={meId ?? null}
-            messages={messages ?? []} onPatchSub={(patch) => onPatchSub(sub.id, patch)} onRename={(title) => onRenameSub(sub.id, title)}
-            clientItems={clientItemsOf(sub.id)} onToggleClientItem={onToggleSub} onTodoDone={todoDoneFor(sub)} onAskTodos={askTodosFor(sub)}
-            addOptions={addOptionsFor(sub)}
-            held={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "work") ?? undefined}
-            files={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "files") ?? undefined}
-            incoming={sub.onClient ? undefined : stepHeld(withSentHolds(sub), true, "came") ?? undefined}
-            sentence={stepControls(sub, true, false)} waiting={waitingStep(sub)} waitDates={waitDates(sub, true)}
-            outFor={sub.onClient && sentReviews(sub).length ? outFor(sub) : undefined}
-            doneActions={doneActionsFor(sub)} finish={finishFor(sub)} message={messageFor(sub)} banner={bannerFor(sub)} setup={setupOf(sub, setupFor[sub.id])}
-            onCopyForClaude={() => void copyForClaude()} face={turnFace(sub)}
-            suggestion={suggestionFor(sub)?.name ?? undefined} onAcceptSuggestion={() => acceptSuggestion(sub.id)}
-            picked={sub.asked && !sub.done ? { says: pickedSays(sub, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, sub.id); if (list) onPatch({ subtasks: list }); } } : undefined}
-            followBox={nudgeBoxFor(sub, true)} planBits={stepPlanBits(sub, true, true)}
-            onMarkDone={() => completeStep(sub.id)} onLastTick={() => finishFromTick(sub.id)} onSendHeldEmail={heldEmailSendFor(sub)}
-            describe={descriptionLabel(turnOf(sub, { meId: meId ?? null, ownerId: task.assigneeId ?? null }), firstName)} replyPending={replyPendingOn(sub)} replyOpen={inlineReplyOn(sub)}
-            onAddLink={(url) => { addLinkOn(url, "", sub.id); pushToast("Link added to this step"); }} onAttachFiles={() => { setAddOnStep(sub.id); fileRef.current?.click(); }}
-            transcript={pageStepId === sub.id ? undefined : transcriptFor(sub)}
-            onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
-        )}
+        <CurrentStep number={stepNumberOf(sub.id)} title={asks ? "What's next?" : sub.title} showName={asks || !sameStepName(sub.title, task.title)}
+          line={readLineFor(sub)} quiet={quietFor(sub)} message={messageLineFor(sub)} lead={lead} face={turnFace(sub)}
+          onOpenStep={() => setOpenStepPage({ taskId: task.id, id: sub.id, full: false })} />
       </li>
     );
   };
@@ -3440,10 +3452,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
     closeSentNext();
     if (stepPageOpen() && next && !asksWhatsNext(next)) { setOpenStepPage(null); flashStep(next.id); }
   };
-  // On the task page, What's next opens in place of the current step it
-  // names, as it does at the foot of a step's page (Derek, 2026-10-14).
-  const nextInline = () => !!sentStep && !stepPageOpen() && sentStep.id === activeStep?.id;
-  const sentNextPanel = () => !sentStep || stepPageOpen() || nextInline() || typeof document === "undefined" ? null : createPortal(
+  // The task view never works a step (Derek, 2026-10-17): What's next opens
+  // at the foot of the step's page, or as a box when no page is open.
+  const sentNextPanel = () => !sentStep || stepPageOpen() || typeof document === "undefined" ? null : createPortal(
     <div className="fixed inset-0 z-[105] flex items-end justify-center bg-black/30 p-4 sm:items-center" onClick={closeSentNext}>
       <div role="dialog" aria-modal="true" aria-label="What's next" onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => { if (e.key === "Enter" && !(e.target as HTMLElement).closest("select, button")) { e.preventDefault(); closeSentNext(); } }}
@@ -4215,11 +4226,6 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
   // step picked beside Link and Attach, the current step until one is picked.
   const [addOnStep, setAddOnStep] = useState<string | null | undefined>(undefined);
   const addStepId = addTargetStep(task.subtasks, addOnStep, pageStepId);
-  // What's next opening in the steps comes into view.
-  const nextInlineId = nextInline() ? sentStep!.id : null;
-  useEffect(() => {
-    if (nextInlineId) document.querySelector(`[data-step="${nextInlineId}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [nextInlineId]);
   // What "Add client work" offers on a step's page (Derek, 2026-10-11):
   // a document or review, made or moved here, and an email drafted on it.
   // Reply to the client's email on a step: the answer drafted on that step,
@@ -5130,7 +5136,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
           const go = (x?: Subtask) => x ? () => setOpenStepPage((o) => (o ? { ...o, id: x.id, checklist: false } : o)) : undefined;
           return (
             <StepPage task={task} sub={shownStep(ps)} key={ps.id} meId={meId} round={reviewRound(task.subtasks, ps)} startWithChecklist={!!openStepPage.checklist} startWithDirections={!!openStepPage.directions} startTalk={openStepPage.talk} tone={stepTone(ps)}
-              nextPanel={sentStep ? nextBody(true) : undefined}
+              nextPanel={sentStep ? nextBody(true) : backFromOther(ps) ? whatsNextFor(ps) : undefined}
               onFinishTask={() => { onPatch({ status: "done" }); setOpenStepPage(null); pushToast("Task done"); }}
               onGiveToClaude={ps.assigneeId === CLAUDE_ID ? undefined : () => {
                 setOpenStepPage(null);
@@ -5222,7 +5228,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
               onAddNote={(body) => postOnStep(ps, null, body)}
               clientItems={clientItemsOf(ps.id)} onToggleClientItem={onToggleSub}
               onTodoDone={todoDoneFor(ps)}
-              replyPending={replyPendingOn(ps)} replyOpen={inlineReplyOn(ps)} />
+              replyPending={replyPendingOn(ps)} replyOpen={inlineReplyOn(ps)}
+              thread={isPersonal ? undefined : threadOf(ps)}
+              picked={ps.asked && !ps.done ? { says: pickedSays(ps, meId, task.assigneeId, TODAY, (id) => userById(id)?.name.split(" ")[0] ?? "Someone"), onChange: () => { const list = reopenWhatsNext(taskRef.current.subtasks, ps.id); if (list) onPatch({ subtasks: list }); } } : undefined} />
           );
         })()}
         {sentNextPanel()}

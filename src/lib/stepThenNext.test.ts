@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addLeadItems, descriptionLabel, doneLandsWith, doneLine, finishButton, giveLabel, giverOf, isDraft, lastTickFinishes, lineExtras, messageTo, pickOnStep, questionAfter, questionFor, remindWord, stepMessageNotices, turnOf, turnWord, whatsNextButton, whatsNextSays, workingSections } from "./stepThenNext";
+import { addLeadItems, latestStepLine, stepQuietLine, stepThread, turnSentence, descriptionLabel, doneLandsWith, doneLine, finishButton, giveLabel, giverOf, isDraft, lastTickFinishes, lineExtras, messageTo, pickOnStep, questionAfter, questionFor, remindWord, stepMessageNotices, turnOf, turnWord, whatsNextButton, whatsNextSays, workingSections } from "./stepThenNext";
 import { CLAUDE_ID } from "./data";
 
 const o = { meId: "u_derek", clientFirst: "Brian", nameOf: (id: string) => ({ u_justin: "Justin", u_mich: "Michaella" } as Record<string, string>)[id] ?? "Someone" };
@@ -204,5 +204,51 @@ describe("back with the giver after her Done", () => {
     const { backToGiver } = await import("./stepThenNext");
     expect(backToGiver([done, { id: "b", title: "Check the send", done: false }], "a", "u_derek", "u_derek", mk, "now")).toBeNull();
     expect(backToGiver([done, { id: "q", title: "Hand off: what's next?", done: false, addedFor: "next:a" }], "a", "u_derek", "u_derek", mk, "now")).toBeNull();
+  });
+});
+
+describe("the task view reads, it does nothing (Derek, 2026-10-17)", () => {
+  it("says the turn line as words", () => {
+    expect(turnSentence("Carol's turn", "need by Fri, Oct 16", "reminded every 3 days")).toBe("Carol's turn, need by Fri, Oct 16, reminded every 3 days");
+    expect(turnSentence("Your turn", null, "")).toBe("Your turn");
+  });
+  it("one quiet line: a draft first", () => {
+    expect(stepQuietLine({ draftFor: "Michaella", description: "Make the headers." })).toBe("Draft · not given to Michaella yet · Make the headers.");
+  });
+  it("one quiet line: sent and waiting", () => {
+    expect(stepQuietLine({ description: "Your website changes are done. More words here.", sentAgo: "2d ago", noReply: true })).toBe("Your website changes are done. · sent 2d ago · no reply yet");
+  });
+  it("one quiet line: the client wrote, with the to dos", () => {
+    expect(stepQuietLine({ wrote: { first: "Chelsea", ago: "1h ago" }, description: "ignored", todos: { done: 1, total: 5 } })).toBe("Chelsea wrote 1h ago · 1 of 5 to do");
+  });
+  it("nothing to say is nothing", () => {
+    expect(stepQuietLine({})).toBe("");
+  });
+});
+
+describe("the step's thread and its latest line (Derek, 2026-10-17)", () => {
+  const w = { from: "2026-10-17T10:00:00Z", to: null };
+  const nameOf = (id: string) => (id === "u_mich" ? "Michaella" : "Justin");
+  const a = (id: string, authorId: string, toId: string | null, body: string, at: string, kind: "team" | "note" | "email" = "team") => ({ id, kind, authorId, toId, body, at });
+  it("is the team's messages in the step's window, oldest first", () => {
+    const t = stepThread([
+      a("2", "u_mich", "u_derek", "Yes, sent Friday", "2026-10-17T12:00:00Z"),
+      a("1", "u_derek", "u_mich", "Did this one get sent out?", "2026-10-17T11:00:00Z"),
+      a("0", "u_derek", "u_mich", "Before the step", "2026-10-16T11:00:00Z"),
+      a("3", "u_derek", null, "An email", "2026-10-17T13:00:00Z", "email"),
+    ], w, { meId: "u_derek", nameOf });
+    expect(t.map((x) => x.who)).toEqual(["You to Michaella", "Michaella"]);
+  });
+  it("the latest message reads as one line", () => {
+    const t = stepThread([a("1", "u_derek", "u_mich", "Did this one get sent out?\nThanks", "2026-10-17T11:00:00Z")], w, { meId: "u_derek", nameOf });
+    expect(latestStepLine(t, () => "just now")).toBe("You to Michaella: Did this one get sent out? · just now");
+  });
+  it("someone writing to you is just their name; a note is just yours", () => {
+    const t = stepThread([a("1", "u_mich", "u_derek", "Yes, sent Friday", "2026-10-17T11:00:00Z"), a("2", "u_derek", null, "Checked", "2026-10-17T12:00:00Z", "note")], w, { meId: "u_derek", nameOf });
+    expect(t.map((x) => x.who)).toEqual(["Michaella", "You"]);
+    expect(latestStepLine([t[0]], () => "2h ago")).toBe("Michaella: Yes, sent Friday · 2h ago");
+  });
+  it("none is null", () => {
+    expect(latestStepLine([], () => "now")).toBeNull();
   });
 });
