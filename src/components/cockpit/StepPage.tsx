@@ -81,8 +81,10 @@ export function NextChoices({ intro, choices, row, link, heading = true }: {
     </Fragment>
   );
   return (
-    <section aria-label="What's next" className="flex flex-col gap-2">
-      {heading && <h3 className="text-[18px] font-bold">What&apos;s next?</h3>}
+    // Only on a wait or a review out: it asks how it went, not what comes
+    // after (Derek, 2026-10-17: "it's really more what was the outcome?").
+    <section aria-label="What was the outcome" className="flex flex-col gap-2">
+      {heading && <h3 className="text-[18px] font-bold">What was the outcome?</h3>}
       {intro && <p className="text-[16px] text-muted">{intro}</p>}
       {row ? (
         // One row, light but for a primary one (the one dark button, Derek
