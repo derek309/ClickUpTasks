@@ -81,11 +81,13 @@ export function EmailPreview({ id, toName, toEmail, subject, body, attachments, 
 }
 
 /** Show or Hide, the small text link that opens an email in place. */
+// A small arrow, not a word: the whole box opens it (Derek, 2026-10-17: "one
+// has a button and the other a text link, do we need either?").
 export function ShowLink({ open, controls, onToggle }: { open: boolean; controls: string; onToggle: () => void }) {
   return (
     <button onClick={(e) => { e.stopPropagation(); onToggle(); }} onKeyDown={(e) => e.stopPropagation()} aria-expanded={open} aria-controls={controls}
-      title={open ? "Hide the email" : "Read the email here"}
-      className="shrink-0 font-semibold text-accent underline underline-offset-4 hover:opacity-80">{open ? "Hide" : "Show"}</button>
+      title={open ? "Hide the email" : "Read the email here"} aria-label={open ? "Hide the email" : "Read the email here"}
+      className="shrink-0 text-[20px] leading-none text-muted hover:text-foreground">{open ? "▴" : "▾"}</button>
   );
 }
 
@@ -100,9 +102,9 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
   toEmail?: string | null;
   onRemove?: () => void;
 }) {
-  // Open from the start, as the client's are (Derek, 2026-10-16: "default
-  // open emails"); it still folds.
-  const [open, setOpen] = useState(true);
+  // Closed until clicked (Derek, 2026-10-17: "toggle emails closed by
+  // default again"); opened, it shows in full.
+  const [open, setOpen] = useState(false);
   const previewId = useId();
   const reply = replyTo(message, messages);
   const tone = reviewTone(reply ? "approved" : "with_client");
@@ -112,14 +114,15 @@ export function SentEmailBox({ message, messages, firstName, toName, toEmail, on
   const peer = message.peerAddress?.includes("@") ? message.peerAddress : null;
   return (
     <div className="rounded-[5px] border" style={{ background: tone.chip, borderColor: tone.dot }}>
-      <div className="flex min-w-0 items-center gap-3 px-3 py-2">
-        <span aria-hidden className="text-[18px]">✉️</span>
+      {/* The whole bar opens it, not just Show (Derek, 2026-10-17). */}
+      <div className="flex min-w-0 cursor-pointer items-center gap-3 px-3 py-2"
+        onClick={(e) => { if ((e.target as HTMLElement).closest("button, a")) return; toggle(); }}>
+        {/* The same size box as a review's picture, so they line up (Derek, 2026-10-17). */}
+        <span aria-hidden className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[5px] bg-surface text-[26px] ring-1 ring-[var(--border)]">✉️</span>
         <span className="min-w-0 flex-1">
-          {/* Show sits beside the subject, so the line under it never wraps
-              a lone link onto a phone's next line (Derek, 2026-10-16). */}
           <span className="flex min-w-0 items-baseline gap-3">
             <span className="min-w-0 flex-1 truncate text-[16px] font-semibold">{message.subject?.trim() || "Email"}</span>
-            <ShowLink open={open} controls={previewId} onToggle={toggle} />
+            <span className="shrink-0 text-[16px] font-semibold text-muted">Email {open ? "▴" : "▾"}</span>
           </span>
           <span className="flex flex-wrap items-center gap-x-2 text-[16px] text-muted">
             <span>Sent {timeAgo(message.at)}</span>
@@ -158,9 +161,9 @@ export function ReceivedEmailBox({ email, answered, onReply, files, light = fals
    *  marks that version approved (Derek, 2026-10-14). */
   approve?: { label: string; onClick: () => void };
 }) {
-  // Open, answered or not, so what the client wrote reads without a click
-  // (Derek, 2026-10-14 and 10-16); it still folds.
-  const [open, setOpen] = useState(true);
+  // Closed until clicked, answered or not (Derek, 2026-10-17: "toggle
+  // emails closed by default again"); opened, it shows in full.
+  const [open, setOpen] = useState(false);
   const tone = reviewTone(answered ? "approved" : "with_client");
   const toggle = () => setOpen((o) => !o);
   return (

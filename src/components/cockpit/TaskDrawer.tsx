@@ -2413,7 +2413,8 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
         </div>
         <span className="flex shrink-0 items-center gap-2">
           {reviewDownload(k)}
-          <span aria-hidden className="h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold leading-9">Open</span>
+          {/* What it is, in a word: the whole box opens it (Derek, 2026-10-17). */}
+          <span aria-hidden className="shrink-0 text-[16px] font-semibold text-muted">{({ doc: "Doc", image: "Image", page: "Page", video: "Video" } as Record<string, string>)[k] ?? "Open"}</span>
         </span>
       </div>
     );
@@ -4664,7 +4665,7 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                         <span className="block truncate text-[16px] font-semibold">{KIND_LABEL[d]}</span>
                         <span className="text-[16px] text-muted">Not started yet</span>
                       </span>
-                      <span aria-hidden className="h-9 shrink-0 rounded-[5px] border bg-surface px-4 text-[16px] font-semibold leading-9">Open</span>
+                      <span aria-hidden className="shrink-0 text-[22px] leading-none text-muted">›</span>
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title="Take off this step" aria-label={`Take ${KIND_LABEL[d]} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
@@ -4693,7 +4694,9 @@ export function TaskDrawer({ task, clientById, projectById, contactById, full, o
                           {d === "email" && task.draftEmail && <ShowLink open={shown} controls={previewId} onToggle={() => toggleShown(showKey)} />}</span>
                       </span>
                       {(d === "image" || d === "page" || d === "video") && reviewDownload(d)}
-                      <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${toSend && !light ? "bg-accent text-white" : toSend ? "border bg-surface text-accent" : "border bg-surface"}`}>{toSend ? "Open and send" : "Open"}</span>
+                      {toSend
+                        ? <span aria-hidden className={`h-9 shrink-0 rounded-[5px] px-4 text-[16px] font-semibold leading-9 ${!light ? "bg-accent text-white" : "border bg-surface text-accent"}`}>Open and send</span>
+                        : <span aria-hidden className="shrink-0 text-[22px] leading-none text-muted">›</span>}
                       <button onClick={(e) => { e.stopPropagation(); releaseKey(d); }} title={homeStepFor(task.subtasks, d, sub.id) ? `Put back on "${homeStepFor(task.subtasks, d, sub.id)!.title}"` : "Take off this step (it stays on the task, under the steps)"} aria-label={`Take ${deliverableName(d)} off this step`}
                         className="shrink-0 rounded px-1 text-muted hover:text-danger">×</button>
                     </span>
