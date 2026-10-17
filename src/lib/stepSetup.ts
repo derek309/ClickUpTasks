@@ -5,7 +5,7 @@
 // from Quick step or an Add menu, and in What's next.
 //
 // Pure: the step, who is looking and today in, choices out.
-import { addBusinessDaysIso, CLAUDE_ID, type Subtask } from "./data";
+import { addBusinessDaysIso, CLAUDE_ID, nextMondayIso, type Subtask } from "./data";
 import { significantWords } from "./nextStepSuggest";
 import { isMassSend } from "./stepSuggest";
 
@@ -46,7 +46,7 @@ export function whenChoices(today: string): WhenChoice[] {
     { key: "today", label: "Today", date: today },
     { key: "tomorrow", label: "Tomorrow", date: addBusinessDaysIso(today, 1) },
     { key: "3days", label: "In 3 days", date: addBusinessDaysIso(today, 3) },
-    { key: "week", label: "Next week", date: addBusinessDaysIso(today, 5) },
+    { key: "week", label: "Next week", date: nextMondayIso(today) },
   ];
 }
 

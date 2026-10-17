@@ -102,9 +102,19 @@ export const DATE_QUICK_PICKS: { label: string; businessDays: number }[] = [
   { label: "In a month", businessDays: 20 },
 ];
 
-/** The quick picks resolved against a date, newest callers pass TODAY. */
+/** The Monday after `iso`'s week (a Monday gives the one 7 days on). */
+export function nextMondayIso(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + (((8 - dt.getUTCDay()) % 7) || 7));
+  return dt.toISOString().slice(0, 10);
+}
+
+/** The quick picks resolved against a date, newest callers pass TODAY.
+ *  Next week is that Monday (Derek, 2026-10-17: "when selected next week
+ *  make it due Monday"). */
 export function dateQuickPicks(from: string = TODAY): { label: string; date: string }[] {
-  return DATE_QUICK_PICKS.map((q) => ({ label: q.label, date: addBusinessDaysIso(from, q.businessDays) }));
+  return DATE_QUICK_PICKS.map((q) => ({ label: q.label, date: q.label === "Next week" ? nextMondayIso(from) : addBusinessDaysIso(from, q.businessDays) }));
 }
 
 /** When to check back, as named offsets rather than a date picker: picking

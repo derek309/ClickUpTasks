@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   AUTO_PRIORITY_ON,
   clientEmailText,
+  dateQuickPicks,
+  nextMondayIso,
   waitingFollowUp,
   isReplyTask,
   unansweredPreviewByTask,
@@ -1480,5 +1482,14 @@ describe("an email split by underscore rules", () => {
   it("still cuts Outlook's quoted header", () => {
     const quoted = "Thanks, see below.\n\n________________________________\nFrom: Derek Fox\nSent: Monday\nOld words";
     expect(splitQuotedEmail(quoted).visible).toBe("Thanks, see below.");
+  });
+});
+
+describe("Next week is Monday", () => {
+  it("lands on the next Monday", () => {
+    expect(nextMondayIso("2026-10-17")).toBe("2026-10-19");
+    expect(nextMondayIso("2026-10-14")).toBe("2026-10-19");
+    expect(nextMondayIso("2026-10-19")).toBe("2026-10-26");
+    expect(dateQuickPicks("2026-10-14").find((q) => q.label === "Next week")?.date).toBe("2026-10-19");
   });
 });

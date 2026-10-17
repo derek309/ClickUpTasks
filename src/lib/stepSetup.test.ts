@@ -49,7 +49,7 @@ describe("pre-selection", () => {
     expect(preselectWhen(step({ due: "2026-10-20" }), WED, CLAUDE_ID)).toBe(WED);
   });
   it("reads a date as one of the choices, or a picked date", () => {
-    expect(whenChoices(WED).map((c) => c.date)).toEqual([WED, "2026-10-15", "2026-10-19", "2026-10-21"]);
+    expect(whenChoices(WED).map((c) => c.date)).toEqual([WED, "2026-10-15", "2026-10-19", "2026-10-19"]);
     expect(whenKeyFor("2026-10-19", WED)).toBe("3days");
     expect(whenKeyFor("2026-11-02", WED)).toBe("pick");
     expect(whenKeyFor(null, WED)).toBe(null);
