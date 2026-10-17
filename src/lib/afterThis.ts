@@ -50,9 +50,11 @@ export function waitsOnClientByTitle(title: string | undefined, o: { assigneeId?
   return !o.first?.trim() || name.toLowerCase() === o.first.trim().toLowerCase();
 }
 
-/** A wait on the client: the client's turn. */
-export const isClientWait = (s: Pick<Subtask, "onClient" | "finishWhen" | "stage"> & Partial<Pick<Subtask, "title" | "assigneeId">>): boolean =>
-  !!s.onClient || s.finishWhen === "reply" || s.stage === "waiting" || waitsOnClientByTitle(s.title, { assigneeId: s.assigneeId });
+/** A wait on the client: the client's turn. A draft never is (Derek,
+ *  2026-10-17): until it is given it is its owner's own step, so it is no
+ *  open client request and no reminder runs on it, whatever its name says. */
+export const isClientWait = (s: Pick<Subtask, "onClient" | "finishWhen" | "stage"> & Partial<Pick<Subtask, "title" | "assigneeId" | "draftFor" | "done">>): boolean =>
+  !(s.draftFor && !s.done) && (!!s.onClient || s.finishWhen === "reply" || s.stage === "waiting" || waitsOnClientByTitle(s.title, { assigneeId: s.assigneeId }));
 
 /** Whose turn the next step is: "client", Claude, a person, or null (the task's owner). */
 export function afterThisWho(s: Pick<Subtask, "onClient" | "finishWhen" | "stage" | "assigneeId">, ownerId: string | null): string | null {

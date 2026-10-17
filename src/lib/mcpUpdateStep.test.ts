@@ -81,7 +81,7 @@ describe("update_step: whose turn", () => {
   it("a teammate on the current step: on their list today, the task Delegated with the handoff dates, the follow up watching it; one step written, never the list", async () => {
     fake({ actions: [{ id: "a_1", next_step_watch: null }] });
     const text = await call(await connect(), { step_id: "s_2", assignee: "u_justin" });
-    expect(stepWrites()).toEqual([{ method: "POST", url: expect.any(String), body: { task_id: "t_1", subtask_id: "s_2", patch: { assigneeId: "u_justin", followUpAt: today }, author: null } }]);
+    expect(stepWrites()).toEqual([{ method: "POST", url: expect.any(String), body: { task_id: "t_1", subtask_id: "s_2", patch: { assigneeId: "u_justin", followUpAt: today, givenBy: ME }, author: null } }]);
     expect(taskWrite()).toEqual({ status: "delegated", due: "2026-10-20", updated_by: null });
     expect(writes.some((w) => w.body && "subtasks" in w.body)).toBe(false);
     expect(writes.find((w) => w.url.includes("task_actions?id=eq.a_1"))?.body).toEqual({ next_step_watch: "handoff:s_2" });
@@ -93,7 +93,7 @@ describe("update_step: whose turn", () => {
   it("a later step handed to a teammate leaves the task alone", async () => {
     fake();
     await call(await connect(), { step_id: "Print", assignee: "u_justin", due: "2026-10-25" });
-    expect(stepWrites()[0].body.patch).toEqual({ assigneeId: "u_justin", followUpAt: today, due: "2026-10-25" });
+    expect(stepWrites()[0].body.patch).toEqual({ assigneeId: "u_justin", followUpAt: today, givenBy: ME, due: "2026-10-25" });
     expect(taskWrite()).toBeUndefined();
   });
 
@@ -235,5 +235,41 @@ describe("the step rules match the app's", () => {
         expect(mcpStage(s, "u_derek")).toBe(stepStage(s, "u_derek"));
         for (const cur of statuses) expect(mcpStatus(cur, mcpStage(s, "u_derek"))).toBe(statusForStep(cur, stepStage(s, "u_derek")));
       }
+  });
+});
+
+describe("update_step and the app's drafts (Derek, 2026-10-17)", () => {
+  it("setting whose turn on a draft gives it: the draft flag comes off", async () => {
+    fake({ task: baseTask({ subtasks: [{ id: "s_1", title: "Hand off", done: false, draftFor: "u_justin" }] }) });
+    await call(await connect(), { step_id: "s_1", assignee: "u_justin" });
+    expect(stepWrites()[0].body.patch).toMatchObject({ assigneeId: "u_justin", draftFor: null, givenBy: ME });
+    expect(step("s_1").draftFor).toBeUndefined();
+  });
+  it("get_task says a draft is not given yet", async () => {
+    fake({ task: baseTask({ subtasks: [{ id: "s_1", title: "Hand off", done: false, draftFor: "u_justin" }] }) });
+    const text = await call(await connect(), { step_id: "s_1", title: "Hand off the flyer" });
+    expect(text).toContain("draft, not given to Justin Lee yet");
+  });
+});
+
+describe("add_comment with step: Claude messages whoever gave it the step", () => {
+  const callComment = async (c: Client, args: Record<string, unknown>) => ((await c.callTool({ name: "add_comment", arguments: { id: "t_1", ...args } })) as any).content[0].text as string;
+  it("posts on the step, makes it a question for the giver, tells them once, and leaves the turn alone", async () => {
+    fake({ task: baseTask({ subtasks: [{ id: "s_1", title: "Write subject lines", done: false, assigneeId: "u_claude", givenBy: "u_justin" }] }) });
+    const text = await callComment(await connect({ memberId: "u_claude" }), { step: "s_1", text: "Which tone, warm or plain?\nI have both." });
+    expect(text).toContain("Justin Lee");
+    const action = writes.find((w) => w.url.endsWith("/rest/v1/task_actions"))?.body;
+    expect(action).toMatchObject({ kind: "team", author_id: "u_claude", to_id: "u_justin", body: "Which tone, warm or plain?\nI have both." });
+    expect(step("s_1").question).toMatchObject({ from: "u_claude", to: "u_justin", text: "Which tone, warm or plain?" });
+    expect(step("s_1").assigneeId).toBe("u_claude");
+    const bells = writes.filter((w) => w.url.endsWith("/rest/v1/notifications"));
+    expect(bells).toHaveLength(1);
+    expect(bells[0].body).toMatchObject({ recipient_id: "u_justin", kind: "message" });
+  });
+  it("only on Claude's own step", async () => {
+    fake();
+    const text = await callComment(await connect({ memberId: "u_claude" }), { step: "s_2", text: "Hi" });
+    expect(text).toContain("not your step");
+    expect(writes.some((w) => w.url.endsWith("/rest/v1/notifications"))).toBe(false);
   });
 });

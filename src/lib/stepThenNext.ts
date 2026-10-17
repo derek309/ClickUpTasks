@@ -4,7 +4,7 @@
 // + Add and one Done. What comes after it is asked only once it is done, in
 // What's next. The rules the card and What's next follow live here, so they
 // can be read and tested without drawing anything.
-import { CLAUDE_ID, type StepTodo, type Subtask } from "./data";
+import { CLAUDE_ID, stepAfter, type StepTodo, type Subtask } from "./data";
 import { isClientWait } from "./afterThis";
 
 /** Whose turn a step is, as the card reads it. */
@@ -93,13 +93,144 @@ export function doneLine(title: string, doneBy: string | null | undefined, o: { 
 }
 
 /** What the "…" at the end of the turn line offers, by whose turn it is
- *  (Derek, 2026-10-17). Claude's turn has none. */
-export type ExtraGroup = "priority" | "onList" | "checkBack" | "reminders";
+ *  (Derek, 2026-10-17). The client's reminders are a word in the sentence
+ *  itself, so their "…" holds Priority only. On a teammate's or Claude's live
+ *  step, "If you need to": Take it back and Mark it done (ifNeeded). */
+export type ExtraGroup = "priority" | "onList" | "checkBack" | "ifNeeded";
 export function lineExtras(turn: Turn): ExtraGroup[] {
-  if (turn === "teammate") return ["priority", "onList", "checkBack"];
-  if (turn === "client") return ["reminders", "priority"];
+  if (turn === "teammate") return ["priority", "onList", "checkBack", "ifNeeded"];
+  if (turn === "client") return ["priority"];
   if (turn === "me") return ["priority"];
-  return [];
+  return ["ifNeeded"];
+}
+
+/** The client's reminders, as the word in their turn line: "reminded every
+ *  3 days" or "no reminders" (business days, the step's own remind). */
+export function remindWord(every: 2 | 3 | 5 | "once" | null): string {
+  if (every === null) return "no reminders";
+  if (every === "once") return "reminded once";
+  return `reminded every ${every} days`;
+}
+
+// ── Give and ask (Derek, 2026-10-17, "Who sees what" and "When Michaella is
+// stuck"): a step for someone else is a draft until it is given; a teammate's
+// own step has one link, Message <the other person>; her Done comes back to
+// whoever gave it.
+
+/** A draft: set up for someone else and not given to them yet. Steps without
+ *  draftFor are live, so every step from before stays as it was. */
+export const isDraft = (s: Pick<Subtask, "done" | "draftFor">): boolean => !s.done && !!s.draftFor;
+
+/** Picking whose turn on a step that has not been handed off (the viewer's
+ *  own, or a draft) only sets whose turn it will be: someone else makes it a
+ *  draft for them, yourself makes it yours and live. A step already with
+ *  someone else changes hands straight away, as before. Returns the step's
+ *  new draftFor ("" to clear it), or null to delegate at once. */
+export function pickOnStep(s: Pick<Subtask, "done" | "draftFor"> & Partial<Pick<Subtask, "assigneeId">>, turn: Turn, picked: string, meId: string | null, ownerId: string | null = null): string | null {
+  if (s.done) return null;
+  // Given to someone already (her step, though she is the one looking): it
+  // changes hands at once, as before.
+  if (!isDraft(s) && (turn !== "me" || (!!s.assigneeId && s.assigneeId !== ownerId))) return null;
+  return picked === meId ? "" : picked;
+}
+
+/** Who gave the step: recorded when it was given, else the task's owner. */
+export const giverOf = (s: Pick<Subtask, "givenBy">, ownerId: string | null): string | null => s.givenBy ?? ownerId;
+
+/** The one button at the foot of a working step, for the person looking:
+ *  "give" on a draft (Give to Michaella), "done" when it is their own turn,
+ *  "answered" for the owner on the client's live step (Brian answered),
+ *  "none" for the giver on a teammate's or Claude's live step (it is theirs
+ *  to finish; Mark it done for her is in "…"). */
+export type FinishButton = "give" | "done" | "answered" | "none";
+export function finishButton(s: Pick<Subtask, "done" | "draftFor">, turn: Turn): FinishButton | null {
+  if (s.done) return null;
+  // Only whoever is setting it up gives it; anyone else looking has nothing to press.
+  if (isDraft(s)) return turn === "me" ? "give" : "none";
+  if (turn === "me") return "done";
+  if (turn === "client") return "answered";
+  return "none";
+}
+
+/** The draft's button: Give to Michaella, Give to Claude, Write Brian's email. */
+export function giveLabel(to: string, o: { clientFirst: string; nameOf: (id: string) => string }): string {
+  if (to === "client") return `Write ${o.clientFirst}'s email`;
+  if (to === CLAUDE_ID) return "Give to Claude";
+  return `Give to ${o.nameOf(to)}`;
+}
+
+/** Who the step's Message link writes to, or null for none: on a teammate's
+ *  live step she writes to whoever gave it to her (Message Derek), anyone
+ *  else writes to her (Message Michaella). The client's and Claude's steps
+ *  have their own channels, and a draft or a done step has none. */
+export function messageTo(s: Pick<Subtask, "done" | "draftFor" | "givenBy" | "assigneeId">, turn: Turn, o: { meId: string | null; ownerId: string | null }): string | null {
+  if (s.done || isDraft(s) || turn !== "teammate" && turn !== "me") return null;
+  const holder = s.assigneeId ?? o.ownerId;
+  if (!holder || holder === CLAUDE_ID) return null;
+  if (holder === o.meId) {
+    const giver = giverOf(s, o.ownerId);
+    return giver && giver !== o.meId && giver !== CLAUDE_ID ? giver : null;
+  }
+  return holder;
+}
+
+/** What a message on the step changes: from the person whose turn it is to
+ *  the giver (Message Derek), it is a question for the giver until they
+ *  reply; the giver's reply, by Message or on the thread, clears it. Anything else changes nothing (null). The turn never moves. */
+export function questionAfter(s: Pick<Subtask, "assigneeId" | "givenBy" | "question">, msg: { from: string; to: string | null; text: string; at: string }, ownerId: string | null): { question: Subtask["question"] } | null {
+  const holder = s.assigneeId ?? ownerId;
+  const giver = giverOf(s, ownerId);
+  if (holder && msg.from === holder && msg.from !== giver && giver && msg.to === giver) {
+    const first = msg.text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+    return { question: { from: msg.from, to: giver, text: first.slice(0, 200), at: msg.at } };
+  }
+  if (s.question && msg.from === s.question.to) return { question: undefined };
+  return null;
+}
+
+/** The question waiting on this person, or null. */
+export const questionFor = (s: Pick<Subtask, "done" | "question">, meId: string | null): Subtask["question"] | null =>
+  !s.done && s.question && meId && s.question.to === meId ? s.question : null;
+
+/** Who hears about a message on a step, once each: the person it is to,
+ *  anyone @mentioned, and, on a reply in the thread, the people already in
+ *  it. Never the sender, the client or Claude. */
+export function stepMessageNotices(o: { from: string; to: string | null; mentioned: string[]; inThread?: string[] }): string[] {
+  const out: string[] = [];
+  for (const id of [o.to, ...o.mentioned, ...(o.inThread ?? [])]) {
+    if (!id || id === o.from || id === CLAUDE_ID || id === "client" || out.includes(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+/** Where a Done lands. The giver, or the owner on their own step: What's next
+ *  opens for them as always ("next"). Someone else whose step it was (a
+ *  teammate, Claude): it comes back to the giver at What's next and they get
+ *  no What's next themselves ({ back: giver }). */
+export function doneLandsWith(s: Pick<Subtask, "assigneeId" | "givenBy">, doneBy: string | null, ownerId: string | null): "next" | { back: string } {
+  const giver = giverOf(s, ownerId);
+  const holder = s.assigneeId ?? ownerId;
+  if (!doneBy || !giver || doneBy === giver || holder !== doneBy) return "next";
+  return { back: giver };
+}
+
+/** Her Done, back with the giver (doneLandsWith back): the list with a
+ *  "what's next?" step for the giver right after the step she finished, so
+ *  the giver picks what comes next. Nothing like a "Check her work" step is
+ *  added. Null when the plan's next step is the giver's own already (it is
+ *  back with them as it is) or it was asked once. */
+export function backToGiver(list: Subtask[], doneId: string, giver: string, ownerId: string | null, makeId: () => string, now: string): Subtask[] | null {
+  const key = `next:${doneId}`;
+  if (list.some((x) => x.addedFor === key)) return null;
+  const at = list.findIndex((x) => x.id === doneId);
+  if (at < 0) return null;
+  const next = stepAfter(list, doneId);
+  if (next && !isDraft(next) && !next.onClient && next.finishWhen !== "reply" && next.stage !== "waiting" && (next.assigneeId ?? ownerId) === giver) return null;
+  const base = list[at].title.replace(/: what's next\?$/, "").trim() || "Step";
+  const out = [...list];
+  out.splice(at + 1, 0, { id: makeId(), title: `${base}: what's next?`, done: false, addedFor: key, startedAt: now, ...(giver !== ownerId ? { assigneeId: giver } : {}) });
+  return out;
 }
 
 /** The turn word: "Your turn", "Michaella's turn", "Claude's turn", "Brian's turn". */

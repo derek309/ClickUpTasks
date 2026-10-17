@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addLeadItems, descriptionLabel, doneLine, lastTickFinishes, lineExtras, turnOf, turnWord, whatsNextButton, whatsNextSays, workingSections } from "./stepThenNext";
+import { addLeadItems, descriptionLabel, doneLandsWith, doneLine, finishButton, giveLabel, giverOf, isDraft, lastTickFinishes, lineExtras, messageTo, pickOnStep, questionAfter, questionFor, remindWord, stepMessageNotices, turnOf, turnWord, whatsNextButton, whatsNextSays, workingSections } from "./stepThenNext";
 import { CLAUDE_ID } from "./data";
 
 const o = { meId: "u_derek", clientFirst: "Brian", nameOf: (id: string) => ({ u_justin: "Justin", u_mich: "Michaella" } as Record<string, string>)[id] ?? "Someone" };
@@ -46,10 +46,11 @@ describe("whose turn", () => {
     expect(turnWord("client", o)).toBe("Brian's turn");
   });
   it("the … offers by turn: a teammate's dates, the client's reminders, nothing for Claude", () => {
-    expect(lineExtras("teammate")).toEqual(["priority", "onList", "checkBack"]);
-    expect(lineExtras("client")).toEqual(["reminders", "priority"]);
+    expect(lineExtras("teammate")).toEqual(["priority", "onList", "checkBack", "ifNeeded"]);
+    // The client's reminders are a word in the sentence now: "…" is Priority only.
+    expect(lineExtras("client")).toEqual(["priority"]);
     expect(lineExtras("me")).toEqual(["priority"]);
-    expect(lineExtras("claude")).toEqual([]);
+    expect(lineExtras("claude")).toEqual(["ifNeeded"]);
   });
 });
 
@@ -85,5 +86,123 @@ describe("What's next's button follows whose turn", () => {
     expect(doneLine("Hand off", "u_mich", o)).toBe("✓ Hand off · done by Michaella");
     expect(doneLine("Hand off", "u_derek", o)).toBe("✓ Hand off · done by you");
     expect(doneLine("Hand off", null, o)).toBe("✓ Hand off · done");
+  });
+});
+
+describe("draft until given (Derek, 2026-10-17)", () => {
+  it("a step with draftFor is a draft until done; steps without it are live", () => {
+    expect(isDraft({ done: false, draftFor: "u_mich" })).toBe(true);
+    expect(isDraft({ done: false })).toBe(false);
+    expect(isDraft({ done: true, draftFor: "u_mich" })).toBe(false);
+  });
+  it("picking someone on your own step makes it a draft for them; a step already with someone changes hands at once", () => {
+    expect(pickOnStep({ done: false }, "me", "u_mich", "u_derek")).toBe("u_mich");
+    expect(pickOnStep({ done: false }, "me", CLAUDE_ID, "u_derek")).toBe(CLAUDE_ID);
+    expect(pickOnStep({ done: false }, "me", "client", "u_derek")).toBe("client");
+    expect(pickOnStep({ done: false, draftFor: "u_mich" }, "me", "u_justin", "u_derek")).toBe("u_justin");
+    // Yourself: never a draft.
+    expect(pickOnStep({ done: false, draftFor: "u_mich" }, "me", "u_derek", "u_derek")).toBe("");
+    expect(pickOnStep({ done: false }, "teammate", "u_justin", "u_derek")).toBeNull();
+    expect(pickOnStep({ done: false }, "claude", "u_mich", "u_derek")).toBeNull();
+    // Her step, given to her, though she is the one looking: changes hands at once.
+    expect(pickOnStep({ done: false, assigneeId: "u_mich" }, "me", "u_justin", "u_mich", "u_derek")).toBeNull();
+    // Your own step on your own task, assigned to you by name: still a draft.
+    expect(pickOnStep({ done: false, assigneeId: "u_derek" }, "me", "u_mich", "u_derek", "u_derek")).toBe("u_mich");
+  });
+  it("the button: Give to on a draft, Done on your turn, Brian answered on the client's, none on hers", () => {
+    expect(finishButton({ done: false, draftFor: "u_mich" }, "me")).toBe("give");
+    expect(finishButton({ done: false, draftFor: "u_mich" }, "teammate")).toBe("none");
+    expect(finishButton({ done: false }, "me")).toBe("done");
+    expect(finishButton({ done: false }, "teammate")).toBe("none");
+    expect(finishButton({ done: false }, "claude")).toBe("none");
+    expect(finishButton({ done: false }, "client")).toBe("answered");
+    expect(finishButton({ done: true }, "me")).toBeNull();
+  });
+  it("Give to names whose turn it will be", () => {
+    expect(giveLabel("u_mich", o)).toBe("Give to Michaella");
+    expect(giveLabel(CLAUDE_ID, o)).toBe("Give to Claude");
+    expect(giveLabel("client", o)).toBe("Write Brian's email");
+  });
+});
+
+describe("Message the other person on a teammate's step", () => {
+  const owner = "u_derek";
+  it("she writes to whoever gave it, falling back to the owner", () => {
+    expect(messageTo({ done: false, assigneeId: "u_mich", givenBy: "u_justin" }, "me", { meId: "u_mich", ownerId: owner })).toBe("u_justin");
+    expect(messageTo({ done: false, assigneeId: "u_mich" }, "me", { meId: "u_mich", ownerId: owner })).toBe(owner);
+    expect(giverOf({}, owner)).toBe(owner);
+  });
+  it("the giver writes to her", () => {
+    expect(messageTo({ done: false, assigneeId: "u_mich" }, "teammate", { meId: owner, ownerId: owner })).toBe("u_mich");
+  });
+  it("no link on the client's or Claude's step, a draft, a done step, or your own step nobody gave you", () => {
+    expect(messageTo({ done: false }, "client", { meId: owner, ownerId: owner })).toBeNull();
+    expect(messageTo({ done: false, assigneeId: CLAUDE_ID }, "claude", { meId: owner, ownerId: owner })).toBeNull();
+    expect(messageTo({ done: false, draftFor: "u_mich" }, "me", { meId: owner, ownerId: owner })).toBeNull();
+    expect(messageTo({ done: true, assigneeId: "u_mich" }, "teammate", { meId: owner, ownerId: owner })).toBeNull();
+    expect(messageTo({ done: false }, "me", { meId: owner, ownerId: owner })).toBeNull();
+  });
+  it("her message to the giver is a question for him until he replies; his message to her changes nothing", () => {
+    const step = { assigneeId: "u_mich" };
+    const q = questionAfter(step, { from: "u_mich", to: owner, text: "\nWhich list is stores opened?\nI see two.", at: "2026-10-17T10:00:00Z" }, owner);
+    expect(q).toEqual({ question: { from: "u_mich", to: owner, text: "Which list is stores opened?", at: "2026-10-17T10:00:00Z" } });
+    expect(questionFor({ done: false, question: q!.question }, owner)?.from).toBe("u_mich");
+    expect(questionFor({ done: false, question: q!.question }, "u_mich")).toBeNull();
+    expect(questionAfter({ ...step, question: q!.question }, { from: owner, to: "u_mich", text: "Use the 90 day one.", at: "2026-10-17T11:00:00Z" }, owner)).toEqual({ question: undefined });
+    expect(questionAfter(step, { from: owner, to: "u_mich", text: "FYI", at: "x" }, owner)).toBeNull();
+  });
+  it("notices: once per person, never the sender, the client or Claude", () => {
+    expect(stepMessageNotices({ from: "u_mich", to: owner, mentioned: [owner, "u_justin", "u_mich"] })).toEqual([owner, "u_justin"]);
+    expect(stepMessageNotices({ from: "u_justin", to: null, mentioned: [], inThread: ["u_mich", owner, "u_justin", "client", CLAUDE_ID] })).toEqual(["u_mich", owner]);
+    expect(stepMessageNotices({ from: owner, to: "u_mich", mentioned: ["u_mich"], inThread: ["u_mich"] })).toEqual(["u_mich"]);
+  });
+});
+
+describe("where a Done lands", () => {
+  const owner = "u_derek";
+  it("a teammate's Done comes back to whoever gave it", () => {
+    expect(doneLandsWith({ assigneeId: "u_mich" }, "u_mich", owner)).toEqual({ back: owner });
+    expect(doneLandsWith({ assigneeId: "u_mich", givenBy: "u_justin" }, "u_mich", owner)).toEqual({ back: "u_justin" });
+    expect(doneLandsWith({ assigneeId: CLAUDE_ID }, CLAUDE_ID, owner)).toEqual({ back: owner });
+  });
+  it("the owner's own Done, or the giver marking it done for her, opens What's next as now", () => {
+    expect(doneLandsWith({}, owner, owner)).toBe("next");
+    expect(doneLandsWith({ assigneeId: "u_mich" }, owner, owner)).toBe("next");
+  });
+});
+
+describe("the client's reminders word", () => {
+  it("reads in the sentence", () => {
+    expect(remindWord(3)).toBe("reminded every 3 days");
+    expect(remindWord(null)).toBe("no reminders");
+  });
+});
+
+describe("a plain note on her step's thread", () => {
+  it("is no question; the giver's note on the thread answers one", () => {
+    expect(questionAfter({ assigneeId: "u_mich" }, { from: "u_mich", to: null, text: "Started", at: "x" }, "u_derek")).toBeNull();
+    const question = { from: "u_mich", to: "u_derek", text: "Which?", at: "x" };
+    expect(questionAfter({ assigneeId: "u_mich", question }, { from: "u_derek", to: null, text: "This one", at: "y" }, "u_derek")).toEqual({ question: undefined });
+  });
+});
+
+describe("back with the giver after her Done", () => {
+  const mk = () => "s_new";
+  const done = { id: "a", title: "Hand off", done: true, assigneeId: "u_mich", doneBy: "u_mich" };
+  it("adds a what's next for the giver when nothing, or someone else's step, comes next", async () => {
+    const { backToGiver } = await import("./stepThenNext");
+    const one = backToGiver([done], "a", "u_derek", "u_derek", mk, "now")!;
+    expect(one.map((x) => x.title)).toEqual(["Hand off", "Hand off: what's next?"]);
+    expect(one[1]).toMatchObject({ addedFor: "next:a", done: false });
+    expect(one[1].assigneeId).toBeUndefined();
+    const toClient = backToGiver([done, { id: "b", title: "Brian approves", done: false, finishWhen: "reply" }], "a", "u_derek", "u_derek", mk, "now")!;
+    expect(toClient.map((x) => x.id)).toEqual(["a", "s_new", "b"]);
+    // A giver who is not the owner gets it on them.
+    expect(backToGiver([done], "a", "u_justin", "u_derek", mk, "now")![1].assigneeId).toBe("u_justin");
+  });
+  it("adds nothing when the giver's own step comes next, or it was asked already", async () => {
+    const { backToGiver } = await import("./stepThenNext");
+    expect(backToGiver([done, { id: "b", title: "Check the send", done: false }], "a", "u_derek", "u_derek", mk, "now")).toBeNull();
+    expect(backToGiver([done, { id: "q", title: "Hand off: what's next?", done: false, addedFor: "next:a" }], "a", "u_derek", "u_derek", mk, "now")).toBeNull();
   });
 });

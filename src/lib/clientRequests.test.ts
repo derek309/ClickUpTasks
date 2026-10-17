@@ -294,3 +294,16 @@ describe("a reminder whose step is no longer the client's turn", () => {
     expect(reminderStillWanted(id, undefined)).toBe(true);
   });
 });
+
+describe("a draft client step is never an open request (Derek, 2026-10-17)", () => {
+  const base = { id: "t_1", title: "Stores newsletter", clientId: "cl_1" };
+  it("a step being set up for Brian asks him nothing and reminds him of nothing", () => {
+    const draft = { id: "s_1", title: "Wait for Brian to approve", done: false, draftFor: "client", due: "2026-10-21" } as Subtask;
+    expect(requestFromTask({ ...base, subtasks: [draft] })).toBeNull();
+    expect(reminderStillWanted("smr_step_s_1_abc", { status: "in_progress", deleted_at: null, subtasks: [draft] })).toBe(false);
+  });
+  it("a live client step without the flag is a request, as before", () => {
+    const live = { id: "s_1", title: "Brian approves", done: false, finishWhen: "reply", stage: "waiting", due: "2026-10-21" } as Subtask;
+    expect(requestFromTask({ ...base, subtasks: [live] })?.stepId).toBe("s_1");
+  });
+});

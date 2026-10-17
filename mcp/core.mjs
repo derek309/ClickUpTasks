@@ -510,6 +510,9 @@ export function createServer(opts = {}) {
         turn,
         !s.done ? (s.due ? `due ${s.due}` : "no due date") : null,
         !s.done && s.finishWhen === "reply" ? "finishes when the client replies" : null,
+        // A draft: being set up, not given yet (the app's Give to). Work it as the owner's.
+        !s.done && s.draftFor ? `draft, not given to ${s.draftFor === "client" ? "the client" : who(s.draftFor)} yet` : null,
+        !s.done && s.question ? `${who(s.question.from)} asked ${who(s.question.to)}: "${s.question.text}" (not answered yet)` : null,
       ].filter(Boolean);
       const out = [`${i + 1}. ${mark} ${s.title} [${s.id}]${bits.length ? ` · ${bits.join(" · ")}` : ""}`];
       const dir = stripHtml(s.notes || s.note || "").trim();
@@ -993,10 +996,41 @@ export function createServer(opts = {}) {
       return reply(`Moved ${t.title} ${up ? "up" : "down"}: now ${queueSpot(fresh, task_id) ?? "in line"}.${told}\n\nThe line on ${projectNames[t.project_id] || t.project_id}:\n${queueLineText(fresh)}`);
     });
 
+  // A message on a step to whoever gave it (Derek, 2026-10-17, "Message
+  // Derek"): a team note on the step, in its window as the app's step page
+  // shows them, a question for the giver until they reply (stepThenNext
+  // questionAfter), and one notification. The turn never moves.
+  const messageGiver = async (taskId, stepRef, text) => {
+    const t = await loadTask(taskId);
+    if (!t) return noTask(taskId);
+    const body = String(text || "").trim();
+    if (!body) return { content: [{ type: "text", text: "Write the message." }] };
+    const plan = (t.subtasks || []).filter((x) => !x.fromClient);
+    const { out, missing, unclear } = matchItems(plan, [stepRef]);
+    if (!out.length) return { content: [{ type: "text", text: matchProblem(missing, unclear, "Nothing was sent.") }] };
+    const st = out[0];
+    if (st.done) return { content: [{ type: "text", text: `"${st.title}" is done.` }] };
+    const owner = t.assignee_id || null;
+    if ((st.assigneeId ?? owner) !== ME) return { content: [{ type: "text", text: `"${st.title}" is not your step, so there is nobody who gave it to you to message. Use add_comment without step.` }] };
+    const giver = st.givenBy || owner;
+    if (!giver || giver === ME) return { content: [{ type: "text", text: `Nobody gave you "${st.title}": it is your own step.` }] };
+    const at = nowIso();
+    await sb("task_actions", "POST", { id: rid("ta_"), task_id: taskId, kind: "team", author_id: ME, to_id: giver, parent_id: null, body, at, next_step: null, next_step_due: null, next_step_done_at: null });
+    const first = body.split("\n").map((l) => l.trim()).find(Boolean) || "";
+    await sb("rpc/patch_subtask", "POST", { task_id: taskId, subtask_id: st.id, patch: { question: { from: ME, to: giver, text: first.slice(0, 200), at } }, author: null });
+    await members();
+    const who = String(memberNames[ME] || "Claude").split(/\s+/)[0];
+    const nid = rid("n_");
+    await sb("notifications", "POST", { id: nid, recipient_id: giver, text: `${who} wrote on "${st.title}" (${t.title}): ${first.slice(0, 120)}`, task_id: taskId, actor_id: ME, client_id: t.client_id, project_id: t.project_id, at, read: false, kind: "message" });
+    if (opts.services?.pushNotification) await opts.services.pushNotification(nid).catch(() => 0);
+    return { content: [{ type: "text", text: `Sent to ${memberNames[giver] || giver} on "${st.title}". It shows as a question from you until they reply; it is still your step.` }] };
+  };
+
   server.tool("add_comment",
-    "Add a progress comment to a task. Use it when you start work on a task (\"Started: …\") and when you stop (\"Done: … Next: …\"), plus when you're blocked; see the server's working rules. Written as Claude.",
-    { id: z.string(), text: z.string() },
-    async ({ id, text }) => {
+    "Add a progress comment to a task. Use it when you start work on a task (\"Started: …\") and when you stop (\"Done: … Next: …\"), plus when you're blocked; see the server's working rules. Written as Claude. With step (a step you are working, its id or a piece of its title), it is instead a message on that step to whoever gave it to you: it shows in the step's messages, they get one notification, and they see it as a question from you until they reply. Whose turn it is never changes.",
+    { id: z.string(), text: z.string(), step: z.string().optional().describe("message the person who gave you this step, on the step itself") },
+    async ({ id, text, step }) => {
+      if (step) return messageGiver(id, step, text);
       if (!await loadTask(id, "id")) return noTask(id);
       // Atomic append, not a read then write of the whole list, which erased
       // any client comment or approval that landed in between. append_comment
@@ -1921,6 +1955,10 @@ export function createServer(opts = {}) {
         if (due !== undefined) patch.due = due;
         if (follow_up !== undefined) patch.followUpAt = follow_up;
       }
+      // A draft (the app's "not given yet") is given once its turn is set
+      // here; whoever set it gave it (stepThenNext giverOf).
+      if (who !== undefined && step.draftFor) patch.draftFor = null;
+      if (who !== undefined && who !== "client" && who !== owner && "assigneeId" in patch) patch.givenBy = ME === CLAUDE ? owner : ME;
       if (name !== step.title) patch.title = name;
       if (directions !== undefined) {
         patch.notes = stripHtml(directions) ? directionsHtml(directions) : null;

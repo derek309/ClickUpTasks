@@ -1024,6 +1024,20 @@ export interface Subtask {
    *  step first moved it, so each day's move counts from there and never
    *  piles up (lib/clientRequests expectedMove). */
   expectedFrom?: string;
+  /** A draft (Derek, 2026-10-17, "Draft until given"): whose turn this step
+   *  WILL be once it is given (a member id, Claude's id, or "client"). Until
+   *  then it stays its owner's own step in every list, notice, routine and
+   *  client request: assigneeId, onClient and the rest are not touched, so
+   *  nothing about it reaches that person until Give to is pressed. Steps
+   *  without it are live, as every step was before. */
+  draftFor?: string;
+  /** Who gave this step to the person whose turn it is, when the app knows
+   *  (set by Give to). Older steps read the task's owner (stepThenNext giverOf). */
+  givenBy?: string;
+  /** A message from the person whose turn it is to whoever gave them the step,
+   *  not answered yet (Derek, 2026-10-17): "Question from Michaella" for the
+   *  giver until they reply. The turn never moves. */
+  question?: { from: string; to: string; text: string; at: string };
 }
 
 /** See Subtask.remind. A client's step with a need by date reminds by
@@ -3507,8 +3521,14 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   const plan = planSteps(task.subtasks);
   const cur = currentStep(task.subtasks);
   if (!cur || !plan.length) return null;
+  // Her message to whoever gave her the step, not answered yet (Derek,
+  // 2026-10-17): the giver's, though the turn stays hers.
+  const q = cur.question;
+  if (q && q.to === meId && !(cur.seenAt && cur.seenAt >= q.at)) return `${userById(q.from)?.name.split(" ")[0] ?? (q.from === CLAUDE_ID ? "Claude" : "Someone")} wrote: ${q.text}`;
   if ((cur.assigneeId ?? task.assigneeId) !== meId) return null;
   if (cur.seenAt && cur.seenAt >= needsYouSince(task.subtasks, cur)) return null;
+  // A step being set up for someone else and not given yet (stepThenNext isDraft).
+  if (cur.draftFor) return `Finish setting up ${cur.title.trim() || "the step"}`;
   if (cur.onClient || cur.assigneeId === CLAUDE_ID || cur.finishWhen === "reply" || stepStage(cur, task.assigneeId) === "waiting") return null;
   if (cur.fromEmails?.length) return `${clientFirst} wrote. Reply`;
   const portal = task.subtasks.filter((x) => x.fromClient && !x.done && x.stepId === cur.id).length;
@@ -3525,6 +3545,9 @@ export function needsYou(task: Pick<Task, "status" | "subtasks" | "assigneeId">,
   // Claude finished only when Claude closed it: a person finishing Claude's
   // step is not news from Claude (Derek, 2026-10-14).
   if ((prev.doneBy ?? prev.assigneeId) === CLAUDE_ID) return "Claude finished. Your turn";
+  // A teammate finished the step given to her: it is back with you at What's
+  // next (Derek, 2026-10-17).
+  if (asksWhatsNext(cur) && prev.doneBy && prev.doneBy !== meId && userById(prev.doneBy)) return `${userById(prev.doneBy)!.name.split(" ")[0]} finished ${prev.title}. What's next?`;
   return null;
 }
 

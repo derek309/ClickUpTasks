@@ -574,3 +574,22 @@ describe("the review step wins: where unfinished work goes when a step is ticked
     expect(stepForWork([s("a", "Write it", { done: true })], "a", null)).toBeNull();
   });
 });
+
+describe("Needs you for giving and asking (Derek, 2026-10-17)", () => {
+  it("a draft is the owner's to finish setting up; a question waits on the giver; her Done is back with him", async () => {
+    const { needsYou, users } = await import("./data");
+    if (!users.some((u) => u.id === "u_mich")) users.push({ id: "u_mich", name: "Michaella Ruiz", initials: "MR", color: "#000", role: "va" });
+    const task = (subtasks: Subtask[]) => ({ status: "in_progress" as const, assigneeId: "u_derek", subtasks });
+    expect(needsYou(task([s("a", "Hand off", { draftFor: "u_mich" })]), "u_derek")).toBe("Finish setting up Hand off");
+    expect(needsYou(task([s("a", "Hand off", { draftFor: "u_mich" })]), "u_mich")).toBeNull();
+    const q = { from: "u_mich", to: "u_derek", text: "Which list?", at: "2026-10-17T10:00:00Z" };
+    expect(needsYou(task([s("a", "Hand off", { assigneeId: "u_mich", question: q })]), "u_derek")).toBe("Michaella wrote: Which list?");
+    expect(needsYou(task([s("a", "Hand off", { assigneeId: "u_mich", question: q })]), "u_mich")).toBeNull();
+    // Cleared with the × (seen after it was asked).
+    expect(needsYou(task([s("a", "Hand off", { assigneeId: "u_mich", question: q, seenAt: "2026-10-17T11:00:00Z" })]), "u_derek")).toBeNull();
+    const back = [s("a", "Hand off", { assigneeId: "u_mich", done: true, doneBy: "u_mich" }), s("b", "Hand off: what's next?", { addedFor: "next:a" })];
+    expect(needsYou(task(back), "u_derek")).toBe("Michaella finished Hand off. What's next?");
+    // Steps without the new fields read as they always did.
+    expect(needsYou(task([s("a", "Hand off", { assigneeId: "u_mich" })]), "u_derek")).toBeNull();
+  });
+});

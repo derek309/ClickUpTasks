@@ -6,6 +6,7 @@
 // (addedFor) that stops a second copy, so whichever side gets there first wins
 // and the other adds nothing. Nothing here ever sends anything to the client.
 import { supabaseAdmin } from "./supabaseAdmin";
+import { backToGiver, giverOf } from "./stepThenNext";
 import {
   addReviewApproval, addReplyStep, datesForCurrentStep, clientEmailText, isJustThanks, addBusinessDaysIso, addChangesRound, addClientReviewStep, addTellClientStep, addWhatsNextStep, asksWhatsNext, carryForward, changesStepFor, changesTelling, currentStep, holdOnStep, stepForNewWork,
   isHandoffStep, isLongTitle, ownNewSteps, planSteps, releaseFromSteps, statusForStep, stepAfter, stepForReview, stepForWork, stepHolding, stepStage,
@@ -434,6 +435,17 @@ export async function tickStep(taskId: string, stepId: string, done: boolean): P
     }
     let next = list.map((x) => (x.id === stepId ? { ...x, done: true, doneAt: now, outcome: "Done", doneBy: CLAUDE_ID } : x));
     claudeClosed = s.title;
+    // Claude's own step: back with whoever gave it, at What's next, unless
+    // the plan's next step is theirs already (Derek, 2026-10-17).
+    if (s.assigneeId === CLAUDE_ID) {
+      const giver = giverOf(s, row.assignee_id ?? null);
+      const back = giver && giver !== CLAUDE_ID ? backToGiver(next, stepId, giver, row.assignee_id ?? null, () => newId("s_"), now) : null;
+      if (back) {
+        status = statusForStep(row.status, "in_progress");
+        note = `"${s.title}" done. It is back with whoever gave it to you, to pick what's next; nothing else starts.`;
+        return back;
+      }
+    }
     const after = stepAfter(next, stepId);
     if (after) {
       // Client work still under way moves on with the plan, to the next

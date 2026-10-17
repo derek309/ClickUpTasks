@@ -187,6 +187,23 @@ describe("steps added on the server", () => {
     expect(await tickStep("t1", "b", false)).toContain("reopened");
   });
 
+  it("Claude finishing its own step: back with whoever gave it at What's next, nothing else starts (Derek, 2026-10-17)", async () => {
+    setup([
+      { id: "a", title: "Write subject lines", done: false, assigneeId: "u_claude", givenBy: "u_derek" },
+      { id: "b", title: "Brian approves", done: false, finishWhen: "reply", stage: "waiting" },
+    ]);
+    expect(await tickStep("t1", "a", true)).toContain("back with whoever gave it");
+    expect(steps().map((x) => x.id)).toEqual(["a", expect.any(String), "b"]);
+    expect(steps()[1]).toMatchObject({ title: "Write subject lines: what's next?", addedFor: "next:a", done: false });
+    expect(steps().find((x) => x.id === "b")!.startedAt).toBeUndefined();
+    // The giver's own step next: it simply starts, as before.
+    setup([
+      { id: "a", title: "Write subject lines", done: false, assigneeId: "u_claude" },
+      { id: "b", title: "Pick one", done: false },
+    ]);
+    expect(await tickStep("t1", "a", true)).toContain('Next step: "Pick one"');
+  });
+
   it("a tick carries unfinished work to the next review step; the next step still starts", async () => {
     setup([
       { id: "a", title: "Draft the blog post", done: false, holds: ["doc"] },
