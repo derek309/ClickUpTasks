@@ -265,6 +265,7 @@ const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ["6"], what: "All clients" },
   { keys: ["C"], what: "New task" },
   { keys: [modKey(), "K"], what: "Search everything" },
+  { keys: [modKey(), "B"], what: "Show or hide the sidebar" },
   { keys: ["J", "↓"], what: "Next task, with one open" },
   { keys: ["K", "↑"], what: "Previous task" },
   { keys: ["Esc"], what: "Close what is on top" },

@@ -981,6 +981,13 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdkOpen(true); return; }
+      // ⌘B shows and hides the sidebar (Derek, 2026-10-17). Not while typing,
+      // where it is bold.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+        e.preventDefault(); toggleSidebar(); return;
+      }
       // "?" lists the rest of them. Not while typing, where it is punctuation,
       // and not with a modifier held, which belongs to the browser.
       if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
