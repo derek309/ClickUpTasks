@@ -26,7 +26,7 @@ export const sameStepName = (a: string, b: string) =>
   a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 export function CurrentStep({ sub, number, showName, firstName, tone, meId, messages, onPatchSub, onRename, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos,
-  addOptions = [], held, outFor, doneActions, setup, followBox, planBits, onMarkDone, onLastTick, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, describe, replyPending = false, replyOpen = false, onAddLink, onAttachFiles, transcript }: {
+  addOptions = [], held, outFor, doneActions, finish, message, banner, setup, followBox, planBits, onMarkDone, onLastTick, onSendHeldEmail, onOpenStep, picked, suggestion, onAcceptSuggestion, files, face, sentence, incoming, waiting = false, waitDates, describe, replyPending = false, replyOpen = false, onAddLink, onAttachFiles, transcript }: {
   sub: Subtask;
   /** Its number in the steps, shown with its name. */
   number: number;
@@ -63,6 +63,13 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   outFor?: React.ReactNode;
   /** How a waiting, check in or "what's next?" step ends, in place of Done. */
   doneActions?: React.ReactNode;
+  /** The one button, when it is not Done (stepThenNext finishButton): Give
+   *  to Michaella on a draft, or "none" on someone else's live step. */
+  finish?: { label: string; onClick: () => void } | "none";
+  /** Message Derek / Message Michaella (StepMessage), beside the button. */
+  message?: React.ReactNode;
+  /** Draft · not given to Michaella yet, or Question from Michaella, above the name. */
+  banner?: React.ReactNode;
   /** Not set up yet (Start it, without answering): asked here. */
   setup?: StepSetupProps | null;
   followBox?: React.ReactNode;
@@ -156,6 +163,7 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
   }));
   return (
     <div onClick={openFromCard} className="flex min-w-0 cursor-pointer flex-col gap-3">
+      {banner}
       <div className="flex flex-col gap-1">
         {/* The name, whose turn as a face in the top right corner. */}
         <div className="flex min-w-0 items-start gap-3">
@@ -242,15 +250,23 @@ export function CurrentStep({ sub, number, showName, firstName, tone, meId, mess
       )}
       {/* How it ends: one Done; a waiting, check in or "what's next?" step
           has its own choices. The only dark button on the card. */}
-      {has.has("done") && doneActions ? <div className="border-t pt-3">{doneActions}</div>
+      {finish === "none" ? (message && !sub.done ? <div className="flex flex-col border-t pt-3 sm:flex-row sm:justify-end">{message}</div> : null)
+        : finish && !sub.done ? (
+        <div className="border-t pt-3">
+          <StepFinish onMarkDone={finish.onClick} label={finish.label}>
+            <span className="self-center text-[16px] text-muted sm:self-auto">Saved as you type</span>
+          </StepFinish>
+        </div>
+      ) : has.has("done") && doneActions ? <div className="border-t pt-3">{doneActions}</div>
         : has.has("done") ? (
         <div className="border-t pt-3">
           {sendReady && !replyOpen ? (
             <StepFinish onMarkDone={onSendHeldEmail} label={`Send the email to ${firstName}`}>
+              {message}
               <button onClick={onMarkDone} className="self-center text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground sm:self-auto">Done, without sending</button>
             </StepFinish>
           ) : (
-            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : "Done"} light={replyPending || replyOpen || !!transcript?.open} />
+            <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : "Done"} light={replyPending || replyOpen || !!transcript?.open}>{message}</StepFinish>
           )}
         </div>
       ) : null}

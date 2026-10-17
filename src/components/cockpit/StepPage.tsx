@@ -375,7 +375,7 @@ export function StepFinish({ onMarkDone, label = "Done", light = false, children
 }
 
 export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onLastTick, describe, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, replyPending = false, replyOpen = false, transcript, textFrom }: {
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, finish, message, banner, isDraft = false, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, replyPending = false, replyOpen = false, transcript, textFrom }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -439,6 +439,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   outFor?: React.ReactNode;
   /** In place of Mark done: how it ended, like "Derek approved" or "sent changes". */
   doneActions?: React.ReactNode;
+  /** The one button, when it is not Done (CurrentStep finish). */
+  finish?: { label: string; onClick: () => void } | "none";
+  /** Message Derek / Message Michaella, beside the button. */
+  message?: React.ReactNode;
+  /** Draft · not given yet, or Question from Michaella, above the name. */
+  banner?: React.ReactNode;
+  /** A draft: a dashed edge round the step. */
+  isDraft?: boolean;
   /** The links and files the step holds: their own row, apart from Actions. */
   files?: React.ReactNode;
   /** What came in: the client's emails on the step (open, with their files),
@@ -795,7 +803,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className={`mx-auto w-full max-w-[1280px] px-4 py-5 sm:px-8 ${full ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] md:gap-10" : ""}`}>
-            <div className="flex min-w-0 flex-col gap-5">
+            <div className={`flex min-w-0 flex-col gap-5 ${isDraft ? "rounded-[5px] p-3 outline-dashed outline-2 outline-offset-0 outline-muted/50" : ""}`}>
+              {banner}
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-3">
                   {/* No tick beside the title: the step is finished with the button at
@@ -922,6 +931,13 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
+              ) : finish === "none" ? (message && !sub.done ? <div className="flex flex-col border-t pt-4 sm:flex-row sm:justify-end">{message}</div> : null)
+              : finish && !sub.done ? (
+                <div className="border-t pt-4">
+                  <StepFinish onMarkDone={finish.onClick} label={finish.label}>
+                    <span className="self-center text-[16px] text-muted sm:self-auto">Saved as you type</span>
+                  </StepFinish>
+                </div>
               ) : !sub.done && doneActions ? (
                 // A waiting step's answer (approved, sent changes) and a
                 // "what's next?" step's choices sit here too, where a step is
@@ -935,11 +951,12 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                       asked after it (Derek, 2026-10-17). */}
                   {sendReady && !replyOpen ? (
                     <StepFinish onMarkDone={onSendHeldEmail} label={`Send the email to ${first}`}>
+                      {message}
                       {/* Finishing without sending stays one click away. */}
                       <button onClick={onMarkDone} className="self-center text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground sm:self-auto">Done, without sending</button>
                     </StepFinish>
                   ) : (
-                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : "Done"} light={replyPending || replyOpen || !!transcript?.open} />
+                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : "Done"} light={replyPending || replyOpen || !!transcript?.open}>{message}</StepFinish>
                   )}
                 </div>
               ) : null}

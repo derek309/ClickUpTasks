@@ -3790,6 +3790,9 @@ export default function Cockpit({ me, onSignOut }: { me: Me; onSignOut: () => vo
             if (url) navigator.clipboard?.writeText(url).then(() => pushToast("Client portal link copied, opens on this task"), () => pushToast(`Share this link: ${url}`));
           }} onDeleteComment={(cid) => deleteComment(openTask.id, cid)} pushToast={pushToast} meId={me.id}
           onSendDm={(userId, body) => sendDmMessage(userId, body)}
+          // A message on a step, a mention there, or a Done back with its giver
+          // (Derek, 2026-10-17): the bell, and push when set up.
+          onNotify={(to, text) => notify(to, text, openTask.id, { kind: "message", clientId: openTask.clientId, projectId: openTask.projectId, skipEmail: true })}
           onDelegate={(spec) => delegateTask(openTask.id, spec)}
           clientPortalUrl={getClientShareUrl(openTask.clientId, { taskId: openTask.id })}
           clientLinks={openTaskClientLinks}
