@@ -14,11 +14,12 @@ import {
   type Message, type StepTodo, type Subtask, type Task, type TaskAction, type TaskStatus,
 } from "@/lib/data";
 import { I, Avatar, CollapsibleText, LinkedText, newId } from "./ui";
-import { ActionMenu, type ActionMenuItem } from "./ActionMenu";
+import { ActionMenu } from "./ActionMenu";
 import { CHANNEL_TONE } from "./channelTone";
 import { useEscapeToClose } from "./useEscapeToClose";
 import { RichTextEditor } from "./RichTextEditor";
 import { dedupeSuggestions, suggestStepActions, STEP_SUGGESTIONS_ON, type StepSuggestKind } from "@/lib/stepSuggest";
+import { lastTickFinishes } from "@/lib/stepThenNext";
 import { ADD_SHORT, StepSetup, addRowsOf, type SetupAnswer, type SetupWho } from "./StepSetup";
 import { OnThisStep } from "./OnThisStep";
 import type { HistoryStep } from "@/lib/stepSetup";
@@ -126,7 +127,7 @@ export function NextChoices({ intro, choices, row, link, heading = true }: {
 /** The step's directions read as the task's description does: muted, four
  *  lines, then Read more, which opens the rest in place. A click on the text
  *  edits it. On the task page (six) they keep their lines and show six. */
-function ClampedDirections({ text, onEdit, six = false }: { text: string; onEdit: () => void; six?: boolean }) {
+function ClampedDirections({ text, onEdit, six = false, ink = false }: { text: string; onEdit: () => void; six?: boolean; ink?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
   const [cut, setCut] = useState(false);
@@ -143,7 +144,7 @@ function ClampedDirections({ text, onEdit, six = false }: { text: string; onEdit
     <div className="flex flex-col items-start">
       {/* A div, not a button: a button won't clamp to four lines. */}
       <div ref={ref} role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }} title="Click to edit"
-        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed text-muted [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${six ? "whitespace-pre-line" : ""} ${more ? "" : six ? "line-clamp-6" : "line-clamp-4"}`}><LinkedText text={text} /></div>
+        className={`-mx-1 w-full cursor-text rounded-[5px] px-1 text-left text-[16px] leading-relaxed ${ink ? "text-foreground" : "text-muted"} [overflow-wrap:anywhere] hover:bg-background hover:text-foreground ${six ? "whitespace-pre-line" : ""} ${more ? "" : six ? "line-clamp-6" : "line-clamp-4"}`}><LinkedText text={text} /></div>
       {(cut || more) && (
         <button onClick={() => setMore(!more)} aria-expanded={more} className="text-[16px] font-semibold text-accent hover:underline">{more ? "Show less" : "Read more"}</button>
       )}
@@ -156,11 +157,17 @@ function ClampedDirections({ text, onEdit, six = false }: { text: string; onEdit
  *  click edits them in the rich editor, they save as you type, Done closes,
  *  the bin deletes them with an Undo. `inline` (the task page): shown only
  *  once written or asked for, six lines, their lines kept. */
-export function useStepDirections({ sub, onPatchSub, startEditing = false, inline = false }: {
+export function useStepDirections({ sub, onPatchSub, startEditing = false, inline = false, label = "Description", tone = null }: {
   sub: Subtask;
   onPatchSub: (patch: Partial<Subtask>) => void;
   startEditing?: boolean;
   inline?: boolean;
+  /** Its heading: "Description", or on a client's or Claude's turn their
+   *  words, "What we need from Brian", "What Claude should do" (Derek,
+   *  2026-10-17: called Description in the app, it stays notes in the data). */
+  label?: string;
+  /** A client's turn reads in an orange box, Claude's in a purple one. */
+  tone?: "client" | "claude" | null;
 }) {
   const hasText = !!sub.notes && htmlToText(sub.notes).trim() !== "";
   const [dirOpen, setDirOpen] = useState(startEditing || hasText);
@@ -189,10 +196,11 @@ export function useStepDirections({ sub, onPatchSub, startEditing = false, inlin
   const node = (
     <>
       {!open && dirRemoved !== null && (
-        <p className="text-[16px] text-muted">Directions deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
+        <p className="text-[16px] text-muted">Description deleted. <button onClick={() => { if (dirRemoved) onPatchSub({ notes: dirRemoved }); setDirRemoved(null); setDirOpen(true); setDirEditing(true); }} className="font-semibold text-accent underline underline-offset-4">Undo</button></p>
       )}
       {open && (
-        <section aria-label="Directions" className={`${inline ? "" : "mt-1 "}flex flex-col gap-2`}>
+        <section aria-label={label} className={`${inline ? "" : "mt-1 "}flex flex-col gap-1.5 ${tone === "client" ? "rounded-[5px] border border-orange-300 bg-orange-50 px-3 py-2.5 dark:border-orange-500/40 dark:bg-orange-500/10" : tone === "claude" ? "rounded-[5px] border border-violet-300 bg-violet-50 px-3 py-2.5 dark:border-violet-500/40 dark:bg-violet-500/10" : ""}`}>
+          <h3 className={`text-[16px] font-semibold ${tone === "client" ? "text-orange-800 dark:text-orange-300" : tone === "claude" ? "text-violet-700 dark:text-violet-300" : "text-foreground"}`}>{label}</h3>
           {dirEditing ? (<>
             <RichTextEditor key={`step-dir-${sub.id}`} value={sub.notes ?? ""} autoFocus
               onChange={(html) => {
@@ -207,12 +215,12 @@ export function useStepDirections({ sub, onPatchSub, startEditing = false, inlin
               <button onClick={() => { if (dirTimer.current) { clearTimeout(dirTimer.current); dirTimer.current = null; dirSave.current?.(); } setDirEditing(false); }}
                 className={inline ? "h-9 rounded-[5px] border bg-surface px-3 text-[16px] font-semibold text-accent hover:bg-background" : "h-9 rounded-[5px] bg-accent px-3 text-[16px] font-semibold text-white hover:opacity-90"}>Done</button>
               <span className="text-[16px] text-muted">Saves as you type.</span>
-              <button onClick={removeDirections} title="Delete the directions" aria-label="Delete the directions" className="ml-auto rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
+              <button onClick={removeDirections} title="Delete the description" aria-label="Delete the description" className="ml-auto rounded-lg p-2 text-muted hover:bg-background hover:text-danger"><I.trash className="h-4 w-4" /></button>
             </div>
           </>) : dirText ? (
-            <ClampedDirections text={dirText} six={inline} onEdit={() => setDirEditing(true)} />
+            <ClampedDirections text={dirText} six={inline} ink={!!tone} onEdit={() => setDirEditing(true)} />
           ) : (
-            <button onClick={() => setDirEditing(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add directions</button>
+            <button onClick={() => setDirEditing(true)} className="-mx-1 self-start rounded-[5px] px-1 text-left text-[16px] text-accent underline decoration-dotted underline-offset-4 hover:bg-background">Add a description</button>
           )}
         </section>
       )}
@@ -228,7 +236,7 @@ export function useStepDirections({ sub, onPatchSub, startEditing = false, inlin
  *  their portal ticks off the same way. `inline` (the task page): no heading.
  *  No "+ Add a to do" line until the step has to dos or Checklist is picked
  *  (start): Checklist is the one way to begin one (Derek, 2026-10-16). */
-export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos, startOpen = false, inline = false }: {
+export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [], onToggleClientItem, onTodoDone, onAskTodos, onLastTick, startOpen = false, inline = false }: {
   sub: Subtask;
   onPatchSub: (patch: Partial<Subtask>) => void;
   messages: Message[];
@@ -237,6 +245,9 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
   onToggleClientItem?: (id: string) => void;
   onTodoDone?: (todo: StepTodo) => void;
   onAskTodos?: (todoIds: string[]) => void;
+  /** The last open to do ticked: the step is done, as Done does (Derek,
+   *  2026-10-17). Called once for the tick, never for an untick. */
+  onLastTick?: () => void;
   startOpen?: boolean;
   inline?: boolean;
 }) {
@@ -263,13 +274,15 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
     setTodoDraft("");
   };
   const toggleTodo = (t: StepTodo) => {
+    const finishes = !sub.done && lastTickFinishes(todos, t.id, clientItems);
     setTodos(todos.map((x) => (x.id === t.id ? { ...x, done: !x.done } : x)));
     if (!t.done && t.commentId) onTodoDone?.(t);
+    if (finishes) onLastTick?.();
   };
   const show = todos.length > 0 || clientItems.length > 0 || showTodos || !!todoDraft;
   const node = !show ? null : (
-    <section aria-labelledby={inline ? undefined : headId} aria-label={inline ? "To do" : undefined} className={`flex flex-col ${inline ? "gap-1" : "gap-2"}`}>
-      {!inline && <h3 id={headId} className="text-[17px] font-bold">To do{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>}
+    <section aria-labelledby={inline ? undefined : headId} aria-label={inline ? "Checklist" : undefined} className={`flex flex-col ${inline ? "gap-1" : "gap-2"}`}>
+      {inline ? <h3 className="text-[16px] font-semibold">Checklist</h3> : <h3 id={headId} className="text-[17px] font-bold">Checklist{progress.total > 0 && <span className="font-normal text-muted"> · {progress.done} of {progress.total}</span>}{waitingOn > 0 && <span className="font-semibold text-sky-700 dark:text-sky-300"> · {waitingOn} waiting on {first}</span>}</h3>}
       {/* The questions picked so far, asked in one email. */}
       {asking.length > 0 && onAskTodos && (
         <div className="flex flex-wrap items-center gap-2 rounded-[5px] bg-sky-50 px-3 py-2 text-[16px] dark:bg-sky-500/10">
@@ -282,7 +295,11 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
         <ul className="flex flex-col gap-1.5">
           {clientItems.map((c) => (
             <li key={c.id} className="flex items-start gap-2.5">
-              <button onClick={() => onToggleClientItem?.(c.id)} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
+              <button onClick={() => {
+                const finishes = !sub.done && !c.done && todos.every((x) => x.done) && clientItems.every((x) => x.id === c.id || x.done);
+                onToggleClientItem?.(c.id);
+                if (finishes) onLastTick?.();
+              }} aria-pressed={c.done} aria-label={c.done ? `Reopen ${c.title}` : `Mark ${c.title} done`}
                 className={`mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border-2 ${c.done ? "border-accent bg-accent text-white" : "border-border hover:border-accent"}`}>{c.done && <I.check className="h-3.5 w-3.5" />}</button>
               <span className={`min-w-0 flex-1 text-[16px] [overflow-wrap:anywhere] ${c.done ? "text-muted line-through" : ""}`}>
                 <LinkedText text={c.title} /><span className="ml-2 font-semibold text-sky-700 no-underline dark:text-sky-300">from {first}&apos;s portal</span>
@@ -336,45 +353,29 @@ export function useStepTodos({ sub, onPatchSub, messages, first, clientItems = [
   return { todos, show, showTodos, setShowTodos, start, ref, node, typing: todoDraft };
 }
 
-/** How a step ends, the same on its page and on the task page: Done (its
- *  words say what happens next) and Delegate ▾, Claude first (Derek,
- *  2026-10-15: Give to Claude moved into Delegate). light: another button is
- *  the dark one (Reply, or the reply box's Send). */
-export function StepFinish({ onMarkDone, label, light = false, onGiveClaude, delegate = [], leaveWith, children }: {
-  /** Missing where the step ends another way (a wait's own choices): Delegate only. */
+/** How a step ends, the same on its page and on the task page: one Done
+ *  (Derek, 2026-10-17: "the step has to be about what it is and what needs to
+ *  get done"). What comes next is asked after it, in What's next; handing it
+ *  on is whose turn in the turn line. Full width on a phone. light: another
+ *  button is the dark one (Reply, or the reply box's Send). */
+export function StepFinish({ onMarkDone, label = "Done", light = false, children }: {
   onMarkDone?: () => void;
-  /** Someone else's turn (Claude or a teammate): the button you naturally
-   *  press leaves it with them instead of finishing their step (Derek,
-   *  2026-10-15); Done stays as a quiet link. */
-  leaveWith?: { name: string; onLeave: () => void } | null;
   label?: string;
   light?: boolean;
-  onGiveClaude?: () => void;
-  delegate?: ActionMenuItem[];
+  /** A quiet link beside it ("Done, without sending"). */
   children?: React.ReactNode;
 }) {
-  const items: ActionMenuItem[] = [...(onGiveClaude ? [{ label: "⚡ Claude, due today", onClick: onGiveClaude }] : []), ...delegate];
-  const text = label ?? "Done · what's next?";
-  if (leaveWith) return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
-      <button onClick={leaveWith.onLeave} className={`h-10 rounded-[5px] px-4 text-[16px] font-semibold ${light ? "bg-surface ring-1 ring-inset ring-border hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>Leave it with {leaveWith.name}</button>
-      {onMarkDone && <button onClick={onMarkDone} className="font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Mark it done anyway</button>}
-      {items.length > 0 && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={items} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
-      {children}
-    </div>
-  );
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[16px]">
-      {onMarkDone && <button onClick={onMarkDone} aria-label={label ? text : "Done with this step, choose what's next"}
-        className={`min-h-10 rounded-[5px] px-4 py-1.5 text-left text-[16px] font-semibold leading-snug ${light ? "bg-surface ring-1 ring-inset ring-border hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>{text}</button>}
-      {items.length > 0 && <ActionMenu sheet label="Delegate ▾" title="Give this step to someone else" items={items} triggerClassName="text-[16px] font-semibold text-accent underline-offset-4 hover:underline" />}
+    <div className="flex flex-col-reverse items-stretch gap-x-4 gap-y-2 text-[16px] sm:flex-row sm:items-center sm:justify-end">
       {children}
+      {onMarkDone && <button onClick={onMarkDone}
+        className={`min-h-11 w-full rounded-[5px] px-5 py-1.5 text-center text-[16px] font-semibold leading-snug sm:w-auto ${light ? "bg-surface ring-1 ring-inset ring-border hover:bg-background" : "bg-accent text-white hover:opacity-90"}`}>{label}</button>}
     </div>
   );
 }
 
-export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onGiveClaude, delegate, leaveWith, onReopen, onDelete, onToTask,
-  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, afterThis, doneLabel, replyPending = false, replyOpen = false, transcript, textFrom }: {
+export function StepPage({ task, sub, client, firstName, full, onToggleFull, onClose, onRename, onPatchSub, onMarkDone, onLastTick, describe, onReopen, onDelete, onToTask,
+  controls, setup, stepNo, onPrev, onNext, onCopyForClaude, meId, round, startWithChecklist = false, startWithDirections = false, startTalk, tone, nextPanel, outFor, doneActions, onSendHeldEmail, addOptions = [], onSendText, onSendEmail, onFullEmail, followBox, planBits, held, onCopyLink, onCopyPortalLink, onAskTodos, savedLinks = [], onAttachLinks, messages, actions, onSendChat, onAddNote, onTodoDone, clientItems = [], onToggleClientItem, files, onAddLink, onAttachFiles, incoming, waiting = false, face, waitDates, asked, replyPending = false, replyOpen = false, transcript, textFrom }: {
   task: Task;
   sub: Subtask;
   client: { name: string; color: string };
@@ -391,12 +392,10 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   onRename: (title: string) => void;
   onPatchSub: (patch: Partial<Subtask>) => void;
   onMarkDone: () => void;
-  /** Someone else's turn: leave it with them (StepFinish). */
-  leaveWith?: { name: string; onLeave: () => void } | null;
-  /** Hand the step on while working it (Derek, 2026-10-14): Give to Claude
-   *  in plain sight beside Done, everyone else under Delegate. */
-  onGiveClaude?: () => void;
-  delegate?: ActionMenuItem[];
+  /** The last to do ticked: the same as Done (Derek, 2026-10-17). */
+  onLastTick?: () => void;
+  /** The description's heading and tint by whose turn (lib/stepThenNext descriptionLabel). */
+  describe?: { label: string; tone: "client" | "claude" | null };
   onReopen: () => void;
   /** Deletes the step; at the very bottom of its page (Derek, 2026-10-11). */
   onDelete?: () => void;
@@ -501,10 +500,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   /** What the client sent from their portal for this step: they see each one ticked off there. */
   clientItems?: Subtask[];
   onToggleClientItem?: (id: string) => void;
-  /** After this (AfterThis): the next step, set up while working this one. */
-  afterThis?: React.ReactNode;
-  /** Done's words when After this is filled: "Done · Pamela's turn next". */
-  doneLabel?: string;
   /** The client's email waits for its Reply: Reply is the dark button, Done light. */
   replyPending?: boolean;
   /** The reply box is open under the email: its Send is the dark button. */
@@ -536,8 +531,8 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // A Personal to do is yours alone: its note is your own, not the team's.
   const own = task.clientId === PERSONAL_CLIENT_ID;
   const whatsNext = !sub.done && /: what's next\?$/.test(sub.title);
-  const dir = useStepDirections({ sub, onPatchSub, startEditing: startWithDirections });
-  const todo = useStepTodos({ sub, onPatchSub, messages, first, clientItems, onToggleClientItem, onTodoDone, onAskTodos, startOpen: startWithChecklist });
+  const dir = useStepDirections({ sub, onPatchSub, startEditing: startWithDirections, label: describe?.label, tone: describe?.tone ?? null });
+  const todo = useStepTodos({ sub, onPatchSub, messages, first, clientItems, onToggleClientItem, onTodoDone, onAskTodos, onLastTick, startOpen: startWithChecklist });
   // No box until a tab is picked (Derek, 2026-10-13: the conversation box was
   // what pulled the eye, away from the work). A tab again folds it.
   type Talk = "client" | "email" | "text" | "team";
@@ -558,7 +553,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
   // reviews and an email (from the task page), and a text.
   const options = [
     // Not offered once the step has them (Derek, 2026-10-14: "directions is already taken").
-    ...(dir.open ? [] : [{ key: "directions", label: "Directions", onPick: dir.start }]),
+    ...(dir.open ? [] : [{ key: "directions", label: "Description", onPick: dir.start }]),
     // The client's saved short links, picked from a list (Derek, 2026-10-12).
     ...(savedLinks.length && onAttachLinks ? [{ key: "links", label: "Files and links", note: `${savedLinks.length}`, onPick: () => { setLinkPick(savedLinks.filter((l) => l.on).map((l) => l.id)); } }] : []),
     { key: "checklist", label: "Checklist", onPick: () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); } },
@@ -851,21 +846,14 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 {directions}
                 {asked}
               </div>
-              {/* What came in (Derek, 2026-10-14): the client's email, open,
-                  with its files, or the review out with them and the email that
-                  took it; then the links and files on the step. */}
+              {/* Top to bottom (Derek, 2026-10-17): the Description above,
+                  then the Checklist, then what the step uses (what came in, the
+                  review out with the client, its links and files), + Add, Done. */}
+              {todo.node}
               {outFor !== undefined ? outFor : incoming}
-              {/* On this step (Derek, 2026-10-15): one quiet line, Directions ·
-                  Checklist · Link · Attach · ＋ Add ▾, then what the step holds.
-                  Links and files still come in by paste or drop (2026-10-11). */}
               {!setup && outFor === undefined && !sub.onClient && (
-                <section aria-label="On this step" className="flex flex-col gap-2">
-                  <OnThisStep first={first} options={options}
-                    lead={sub.done ? [] : suggestions.map((x) => ({ key: x.kind, label: x.label, onPick: x.onPick }))}
-                    onDirections={dir.open ? undefined : dir.start}
-                    onChecklist={() => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); }}
-                    onLink={onAddLink || (savedLinks.length && onAttachLinks) ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
-                    onAttach={onAttachFiles} />
+                <section aria-label="Using" className="flex flex-col gap-2">
+                  {(held || files) && <h3 className="text-[16px] font-semibold">Using</h3>}
                   {transcript?.node}
                   {linkDraft !== null && (
                     <div className="flex flex-wrap items-center gap-2">
@@ -883,6 +871,15 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   {followBox}
                   {planBits}
                   {held}
+                  {/* + Add with what the step uses (Derek, 2026-10-17). */}
+                  {!sub.done && (
+                    <OnThisStep first={first} options={options}
+                      lead={suggestions.map((x) => ({ key: x.kind, label: x.label, onPick: x.onPick }))}
+                      onDescription={dir.open ? undefined : dir.start}
+                      onChecklist={todo.show ? undefined : () => { todo.setShowTodos(true); setFocusNext((f) => ({ box: "todo", n: (f?.n ?? 0) + 1 })); }}
+                      onLink={onAddLink || (savedLinks.length && onAttachLinks) ? () => setLinkDraft((d) => (d === null ? "" : null)) : undefined}
+                      onAttach={onAttachFiles} />
+                  )}
                 </section>
               )}
               {/* Saved files and links: tick the ones this step needs. */}
@@ -922,7 +919,6 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                   })()}
                 </section>
               )}
-              {todo.node}
               {/* Finish here, then What's next opens in its place (2026-10-13). */}
               {nextPanel ? (
                 <section ref={nextRef} aria-label="What's next" className="rounded-[5px] border-2 border-accent/30 bg-surface p-4 shadow-soft">{nextPanel}</section>
@@ -932,22 +928,18 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
                 // finished, not up top (Derek, 2026-10-13).
                 <div className="border-t pt-4">{doneActions}</div>
               ) : !sub.done && !doneActions && !sub.onClient ? (
-                <div className="flex flex-col gap-4 border-t pt-4">
-                  {/* After this: the next step, set up while you work (Derek,
-                      2026-10-15). Filled, Done starts it with no What's next. */}
-                  {afterThis}
+                <div className="border-t pt-4">
                   {/* One dark button (Derek, 2026-10-14): Done, unless the
                       client's email waits for its Reply or the reply box is
-                      open, when Reply or Send is the one. */}
+                      open, when Reply or Send is the one. What comes next is
+                      asked after it (Derek, 2026-10-17). */}
                   {sendReady && !replyOpen ? (
-                    <div className="flex flex-col items-start gap-2">
-                      <button onClick={onSendHeldEmail} className="h-10 rounded-[5px] bg-accent px-4 text-[16px] font-semibold text-white hover:opacity-90">Send the email to {first}</button>
+                    <StepFinish onMarkDone={onSendHeldEmail} label={`Send the email to ${first}`}>
                       {/* Finishing without sending stays one click away. */}
-                      <button onClick={onMarkDone} className="text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground">Done, without sending</button>
-                    </div>
+                      <button onClick={onMarkDone} className="self-center text-[16px] font-medium text-muted underline decoration-dotted underline-offset-4 hover:text-foreground sm:self-auto">Done, without sending</button>
+                    </StepFinish>
                   ) : (
-                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : doneLabel} light={replyPending || replyOpen || !!transcript?.open}
-                      onGiveClaude={onGiveClaude} delegate={delegate} leaveWith={leaveWith} />
+                    <StepFinish onMarkDone={onMarkDone} label={replyOpen ? "Done, without sending" : "Done"} light={replyPending || replyOpen || !!transcript?.open} />
                   )}
                 </div>
               ) : null}
@@ -956,7 +948,7 @@ export function StepPage({ task, sub, client, firstName, full, onToggleFull, onC
           </div>
           {(onDelete || onToTask) && (
             <div className="mx-auto mt-10 flex w-full max-w-[1280px] flex-wrap justify-end gap-2 border-t px-4 pb-8 pt-4 sm:px-8">
-              {onToTask && <button onClick={onToTask} title="Moves this step, its directions and to dos into a new task for the same client" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Make it its own task</button>}
+              {onToTask && <button onClick={onToTask} title="Moves this step, its description and to dos into a new task for the same client" className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-background hover:text-foreground">Make it its own task</button>}
               {onDelete && <button onClick={onDelete} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-[16px] font-medium text-muted hover:bg-danger-soft hover:text-danger"><I.trash className="h-4 w-4" /> Delete step</button>}
             </div>
           )}
